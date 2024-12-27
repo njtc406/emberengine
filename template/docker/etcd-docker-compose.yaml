@@ -1,0 +1,34 @@
+services:
+  etcd:
+    image: bitnami/etcd:latest
+    container_name: etcd
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=no  # 禁止匿名访问
+      - ETCD_ENABLE_V2=false
+      - ETCD_NAME=etcd #成员的可读性的名字
+      - ETCD_DATA_DIR=/etcd-data #到数据目录的路径
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379 #用于监听客户端通讯的URL列表
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380 #用于监听伙伴通讯的URL列表
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd:2380 #列出这个成员的伙伴 URL 以便通告给集群的其他成员
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379 #列出这个成员的客户端URL，通告给集群中的其他成员
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster #在启动期间用于 etcd 集群的初始化集群记号
+      - ETCD_INITIAL_CLUSTER=etcd=http://etcd:2380 #为启动初始化集群配置
+      - ETCD_INITIAL_CLUSTER_STATE=new #初始化集群状态(“new” or “existing”)。在初始化静态(initial static)或者 DNS 启动 (DNS bootstrapping) 期间为所有成员设置为 new 。如果这个选项被设置为 existing , etcd 将试图加入已有的集群
+      - ETCD_ROOT_PASSWORD=123456 #密码
+    ports:
+      - 172.26.28.98:2379:2379
+      - 172.26.28.98:2380:2380
+    volumes:
+      - ./data:/etcd-data
+    networks:
+      ember_net:
+        ipv4_address: 172.20.2.211
+networks:
+  ember_net:
+    driver: bridge
+    name: match_net
+    external: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+

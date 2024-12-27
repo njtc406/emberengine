@@ -1,0 +1,81 @@
+## 系统基础配置
+
+NodeConf:
+  NodeId: 1
+  # 系统状态(debug/release)
+  SystemStatus: debug
+  # 系统数据目录(持久化)
+  PVCPath: ./example/data
+  # 系统缓存目录
+  PVPath: ./example/cache
+  # 性能监控(0表示不开启监控)
+  ProfilerInterval: 10s
+  # 线程池大小
+  AntsPoolSize: 10000
+
+ClusterConf:
+  OpenRemote: false
+  ETCDConf:
+    # etcd地址
+    EndPoints:
+      - 192.168.145.188:2379
+    DialTimeout: 3s
+    # etcd用户名
+    UserName: root
+    # etcd密码
+    Password: 123456
+  RPCServers:
+    # 监听地址
+    - Addr: 0.0.0.0:6620
+      # 协议
+      Protoc: "tcp"
+      # rpc类型
+      Type: "rpcx"
+    - Addr: 0.0.0.0:6621
+      Protoc: "tcp"
+      Type: "grpc"
+  RemoteType: rpcx
+  DiscoveryType: etcd
+  RemoteConfPath: ""
+  # 服务发现监听路径
+  DiscoveryConf:
+    Path: /server/rpc
+
+ServiceConf:
+  OpenRemote: false
+  RemoteConfPath: ""
+  StartServices:
+      # 服务ID
+    - ServiceId: 1
+      # 服务名称
+      ServiceName: Service3
+      # 服务类型
+      Type: test
+      # 服务器ID
+      ServerId: 1
+      # 定时器大小
+      TimerSize: 100
+      # 消息队列大小
+      MailBoxSize: 1000
+      # 协程数量
+      GoroutineNum: 1
+      RpcType: "rpcx"
+
+# 日志配置
+SystemLogger:
+  Path: ./example/data/logs
+  # 日志文件名
+  Name: "system"
+  # 日志级别
+  Level: debug
+  # 是否打印调用文件信息
+  Caller: true
+  # 是否打印完整调用文件信息
+  FullCaller: false
+  # 是否显示日志颜色
+  Color: true
+  # 日志最大保存时间(默认15天)
+  MaxAge: 720h
+  # 日志切分周期(默认24h)
+  RotationTime: 24h
+

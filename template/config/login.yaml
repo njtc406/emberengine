@@ -1,0 +1,6 @@
+
+# 登录服务配置(服务注册时注册的配置信息)
+LoginServerConf:
+  Addr: 0.0.0.0:90
+  ReadHeaderTimeout: 10s
+  IdleTimeout: 30s

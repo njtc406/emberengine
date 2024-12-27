@@ -1,0 +1,21 @@
+
+# 数据库配置
+MysqlConf:
+  UserName: root
+  Passwd: 123456
+  Net: tcp
+  Addr: 192.168.145.188:3306
+  DBNamePrefix: login
+  TimeZone: Local
+  Timeout: 10s
+  ReadTimeout: 10s
+  WriteTimeout: 10s
+
+# redis数据库配置
+RedisConf:
+  Addr: 192.168.145.188:6379
+  DB: 0
+  PoolSize: 100
+  MinIdleConns: 10
+  MaxConnAge: 1h
+  IdleTimeout: 1h
