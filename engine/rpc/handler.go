@@ -19,12 +19,17 @@ import (
 	"unicode/utf8"
 )
 
-var apiPreFix = []string{
-	"Api", "API",
-}
-var rpcPreFix = []string{
-	"Rpc", "RPC",
-}
+var (
+	apiPreFix = []string{
+		"Api", "API",
+	}
+
+	rpcPreFix = []string{
+		"Rpc", "RPC",
+	}
+
+	emptyError = reflect.TypeOf((*error)(nil))
+)
 
 type MethodInfo struct {
 	Method   reflect.Method
@@ -121,7 +126,7 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 		if kd == reflect.Ptr || kd == reflect.Interface ||
 			kd == reflect.Func || kd == reflect.Map ||
 			kd == reflect.Slice || kd == reflect.Chan {
-			if t.Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+			if t.Implements(emptyError.Elem()) {
 				continue
 			} else {
 				multiOut++
@@ -139,7 +144,7 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 	}
 
 	name := method.Name
-	methodInfo.In = in // 这里实际上不需要,如果每次调用都用反射检查输入参数,那么性能会降低
+	methodInfo.In = in
 	methodInfo.Method = method
 	methodInfo.Out = outs
 	h.methodMap[name] = &methodInfo
