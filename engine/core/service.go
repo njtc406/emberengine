@@ -176,64 +176,73 @@ func (s *Service) run() {
 				concurrent.Close()
 			}
 		case cb := <-concurrentCBChannel:
-			if s.profiler != nil {
-				analyzer = s.profiler.Push(fmt.Sprintf("[Concurrent]%s", reflect.TypeOf(cb).String()))
-			}
-			concurrent.DoCallback(cb) // 异步执行
-			if analyzer != nil {
-				analyzer.Pop()
-				analyzer = nil
-			}
+			s.safeExec(func() {
+				if s.profiler != nil {
+					analyzer = s.profiler.Push(fmt.Sprintf("[Concurrent]%s", reflect.TypeOf(cb).String()))
+				}
+				concurrent.DoCallback(cb) // 异步执行
+				if analyzer != nil {
+					analyzer.Pop()
+					analyzer = nil
+				}
+			})
 		case ev := <-s.mailBox:
 			// 事件处理
 			switch ev.GetType() {
 			case event.SysEventRpc:
-				// rpc调用
-				cEvent, ok := ev.(*event.Event)
-				if !ok {
-					log.SysLogger.Error("event type error")
-					break
-				}
-				c := cEvent.Data.(inf.IEnvelope)
-				if c.IsReply() {
-					if s.profiler != nil {
-						analyzer = s.profiler.Push(fmt.Sprintf("[RPCResponse]%s", c.GetMethod()))
-					}
-					// 回复
-					s.rpcHandler.HandleResponse(c)
-				} else {
-					if s.profiler != nil {
-						analyzer = s.profiler.Push(fmt.Sprintf("[RPCRequest]%s", c.GetMethod()))
-					}
+				s.safeExec(func() {
 					// rpc调用
-					s.rpcHandler.HandleRequest(c)
-				}
+					cEvent, ok := ev.(*event.Event)
+					if !ok {
+						log.SysLogger.Error("event type error")
+						return
+					}
+					c := cEvent.Data.(inf.IEnvelope)
+					if c.IsReply() {
+						if s.profiler != nil {
+							analyzer = s.profiler.Push(fmt.Sprintf("[RPCResponse]%s", c.GetMethod()))
+						}
+						// 回复
+						s.rpcHandler.HandleResponse(c)
+					} else {
+						if s.profiler != nil {
+							analyzer = s.profiler.Push(fmt.Sprintf("[RPCRequest]%s", c.GetMethod()))
+						}
+						// rpc调用
+						s.rpcHandler.HandleRequest(c)
+					}
 
-				event.ReleaseEvent(cEvent)
-				if analyzer != nil {
-					analyzer.Pop()
-					analyzer = nil
-				}
+					event.ReleaseEvent(cEvent)
+
+					if analyzer != nil {
+						analyzer.Pop()
+						analyzer = nil
+					}
+				})
 			default:
-				if s.profiler != nil {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SvcEvent][%d]", ev.GetType()))
-				}
-				s.eventProcessor.EventHandler(ev)
-				if analyzer != nil {
-					analyzer.Pop()
-					analyzer = nil
-				}
+				s.safeExec(func() {
+					if s.profiler != nil {
+						analyzer = s.profiler.Push(fmt.Sprintf("[SvcEvent][%d]", ev.GetType()))
+					}
+					s.eventProcessor.EventHandler(ev)
+					if analyzer != nil {
+						analyzer.Pop()
+						analyzer = nil
+					}
+				})
 			}
 		case t := <-s.timerDispatcher.ChanTimer:
-			// 定时器处理
-			if s.profiler != nil {
-				analyzer = s.profiler.Push("[timer]" + s.GetName() + "." + t.GetName())
-			}
-			t.Do() // Tips:所有定时器的执行时如果有时间判断请注意,定时器的触发受到前置逻辑的影响可能在执行的那一刻已经超过时间,所以尽量不要用==去判断时间
-			if analyzer != nil {
-				analyzer.Pop()
-				analyzer = nil
-			}
+			s.safeExec(func() {
+				// 定时器处理
+				if s.profiler != nil {
+					analyzer = s.profiler.Push("[timer]" + s.GetName() + "." + t.GetName())
+				}
+				t.Do() // Tips:所有定时器的执行时如果有时间判断请注意,定时器的触发受到前置逻辑的影响可能在执行的那一刻已经超过时间,所以尽量不要用==去判断时间
+				if analyzer != nil {
+					analyzer.Pop()
+					analyzer = nil
+				}
+			})
 		}
 
 		if bStop {
@@ -391,4 +400,13 @@ func (s *Service) closeProfiler() {
 
 func (s *Service) GetServiceCfg() interface{} {
 	return s.cfg
+}
+
+func (s *Service) safeExec(f func()) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.SysLogger.Errorf("service [%s] exec error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
+		}
+	}()
+	f()
 }

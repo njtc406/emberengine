@@ -97,6 +97,7 @@ func Start(v string, confPath string) {
 		}
 	}
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
+	timer.StopTimer() // 停止timer
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()

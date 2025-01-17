@@ -22,7 +22,7 @@ func init() {
 	serviceMap = make(map[string]func() inf.IService)
 }
 
-// SetService 注册服务
+// SetService 注册主服务
 func SetService(name string, creator func() inf.IService) {
 	lock.Lock()
 	serviceMap[name] = creator

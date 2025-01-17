@@ -19,6 +19,8 @@ type TimingWheel struct {
 	buckets     []*bucket
 	queue       *delayqueue.DelayQueue
 
+	timerIdSeed uint64
+
 	// The higher-level overflow wheel.
 	//
 	// NOTE: This field may be updated and read concurrently, through Add().
@@ -35,7 +37,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64) *TimingWheel {
 		panic(errors.New("tick must be greater than or equal to 1ms"))
 	}
 
-	startMs := timeToMs(time.Now().UTC())
+	startMs := timeToMs(time.Now())
 
 	return newTimingWheel(
 		tickMs,
@@ -108,14 +110,51 @@ func (tw *TimingWheel) add(t *Timer) bool {
 
 // addOrRun inserts the timer t into the current timing wheel, or run the
 // timer's task if it has already expired.
-func (tw *TimingWheel) addOrRun(t *Timer) {
+func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 	if !tw.add(t) {
-		// Already expired
+		if isNew {
+			// 新增,执行onTimerAdd
+			if t.onTimerAdd != nil {
+				t.onTimerAdd(t)
+			}
+		}
 
-		// Like the standard time.AfterFunc (https://golang.org/pkg/time/#AfterFunc),
-		// always execute the timer's task in its own goroutine.
-		go t.task()
+		// 执行任务
+		select {
+		case t.c <- t:
+		default:
+			// 队列已满,本次不执行
+			//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+		}
+
+		if t.loop != nil {
+			// 是循环任务,执行loop
+			t.loop()
+		} else {
+			// 如果有关联了任务调度器,则移除调度器上的记录
+			if t.scheduler != nil {
+				_ = t.scheduler.remove(t.timerId)
+			}
+
+			// 执行任务删除逻辑
+			if t.onTimerDel != nil {
+				t.onTimerDel(t)
+			}
+
+			// 释放任务
+			timerPool.Put(t)
+		}
 	}
+	if isNew {
+		// 新增,执行onTimerAdd
+		if t.onTimerAdd != nil {
+			t.onTimerAdd(t)
+		}
+	}
+}
+
+func (tw *TimingWheel) getTimerId() uint64 {
+	return atomic.AddUint64(&tw.timerIdSeed, 1)
 }
 
 func (tw *TimingWheel) advanceClock(expiration int64) {
@@ -136,7 +175,7 @@ func (tw *TimingWheel) advanceClock(expiration int64) {
 func (tw *TimingWheel) Start() {
 	tw.waitGroup.Wrap(func() {
 		tw.queue.Poll(tw.exitC, func() int64 {
-			return timeToMs(time.Now().UTC())
+			return timeToMs(time.Now())
 		})
 	})
 
@@ -166,12 +205,15 @@ func (tw *TimingWheel) Stop() {
 
 // AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
 // It returns a Timer that can be used to cancel the call using its Stop method.
-func (tw *TimingWheel) AfterFunc(d time.Duration, f func()) *Timer {
-	t := &Timer{
-		expiration: timeToMs(time.Now().UTC().Add(d)),
-		task:       f,
+func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
+	t := timerPool.Get().(*Timer)
+	t.timerId = tw.getTimerId()
+	t.expiration = timeToMs(time.Now().Add(d))
+	for _, opt := range options {
+		opt(t)
 	}
-	tw.addOrRun(t)
+
+	tw.addOrRun(t, true)
 	return t
 }
 
@@ -199,28 +241,29 @@ type Scheduler interface {
 // Afterwards, it will ask the next execution time each time f is about to
 // be executed, and f will be called at the next execution time if the time
 // is non-zero.
-func (tw *TimingWheel) ScheduleFunc(s Scheduler, f func()) (t *Timer) {
-	expiration := s.Next(time.Now().UTC())
+func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
+	t = timerPool.Get().(*Timer)
+	t.timerId = tw.getTimerId()
+	t.loop = func() {
+		expiration := t.Next(msToTime(t.expiration))
+		if !expiration.IsZero() {
+			t.expiration = timeToMs(expiration)
+			tw.addOrRun(t, false)
+		}
+	}
+	for _, opt := range options {
+		opt(t)
+	}
+
+	expiration := t.Next(time.Now())
 	if expiration.IsZero() {
 		// No time is scheduled, return nil.
 		return
 	}
 
-	t = &Timer{
-		expiration: timeToMs(expiration),
-		task: func() {
-			// Schedule the task to execute at the next time if possible.
-			expiration := s.Next(msToTime(t.expiration))
-			if !expiration.IsZero() {
-				t.expiration = timeToMs(expiration)
-				tw.addOrRun(t)
-			}
+	t.expiration = timeToMs(expiration)
 
-			// Actually execute the task.
-			f()
-		},
-	}
-	tw.addOrRun(t)
+	tw.addOrRun(t, true)
 
 	return
 }

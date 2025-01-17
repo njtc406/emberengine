@@ -12,7 +12,7 @@ func TestBucket_Flush(t *testing.T) {
 		t.Fatalf("Got (%+v) != Want (%+v)", l1, 2)
 	}
 
-	b.Flush(func(*Timer) {})
+	b.Flush(func(*Timer, bool) {})
 	l2 := b.timers.Len()
 	if l2 != 0 {
 		t.Fatalf("Got (%+v) != Want (%+v)", l2, 0)

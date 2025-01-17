@@ -33,8 +33,6 @@ type Timer struct {
 	cronExpr       *CronExpr
 	AdditionData   interface{} //定时器附加数据
 	rOpen          bool        //是否重新打开
-
-	ref bool
 }
 
 // Ticker 定时器

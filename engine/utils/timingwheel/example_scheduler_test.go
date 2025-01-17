@@ -3,6 +3,7 @@ package timingwheel_test
 import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/utils/timingwheel"
+	"os"
 	"time"
 )
 
@@ -14,25 +15,41 @@ func (s *EveryScheduler) Next(prev time.Time) time.Time {
 	return prev.Add(s.Interval)
 }
 
+var signCh = make(chan os.Signal, 1)
+
+func printTask(taskId uint64, args ...interface{}) {
+	fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+}
+
 func Example_scheduleTimer() {
-	tw := timingwheel.NewTimingWheel(time.Millisecond, 20)
-	tw.Start()
-	defer tw.Stop()
+	timingwheel.Start(time.Millisecond, 100)
+	defer timingwheel.Stop()
+	var beginTime time.Time
+	go func() {
+		beginTime = time.Now()
+		//tId, err := dp.AfterFunc(time.Second*5, printTask, nil, nil, "hello")
+		//tId, err := dp.TickerFunc(time.Hour*3, printTask, nil, nil, "hello")
+		tId, err := dp.CronFuncWithStorage("0 */1 * * * *", printTask, nil, nil, "hello")
+		if err != nil {
+			fmt.Println("err:", err)
+			dp.Cancel(tId)
+		} else {
+			fmt.Println("tId:", tId)
+		}
+	}()
 
-	exitC := make(chan time.Time)
-	t := tw.ScheduleFunc(&EveryScheduler{time.Second}, func() {
-		fmt.Println("The timer fires")
-		exitC <- time.Now().UTC()
-	})
-
-	<-exitC
-	<-exitC
-
-	// We need to stop the timer since it will be restarted again and again.
-	for !t.Stop() {
-	}
-
-	// Output:
-	// The timer fires
-	// The timer fires
+	go func() {
+		for {
+			select {
+			case job := <-dp.C:
+				fmt.Println("job:", job)
+				job.Do()
+				fmt.Println("sub time:", time.Now().Sub(beginTime))
+				fmt.Println("now:", time.Now())
+				//return
+			}
+		}
+	}()
+	<-signCh
+	fmt.Println("main exit")
 }
