@@ -23,10 +23,10 @@ import (
 )
 
 var (
-	exitCh = make(chan os.Signal)
-	ID     int32
-	Type   string
-	hooks  []func()
+	exitCh        = make(chan os.Signal)
+	ID            int32
+	Type          string
+	nodeInitHooks []func() // 启动时需要执行的钩子
 )
 
 func init() {
@@ -35,7 +35,7 @@ func init() {
 }
 
 func SetStartHook(f ...func()) {
-	hooks = append(hooks, f...)
+	nodeInitHooks = append(nodeInitHooks, f...)
 }
 
 func Start(v string, confPath string) {
@@ -70,7 +70,7 @@ func Start(v string, confPath string) {
 	cluster.GetCluster().Start()
 
 	// 执行钩子
-	for _, f := range hooks {
+	for _, f := range nodeInitHooks {
 		f()
 	}
 
