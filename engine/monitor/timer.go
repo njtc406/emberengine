@@ -1,3 +1,5 @@
+// Package monitor
+// Deprecated: use timingwheel
 package monitor
 
 import (

@@ -41,7 +41,7 @@ func SetStartHook(f ...func()) {
 func Start(v string, confPath string) {
 	// 打印版本信息
 	version.EchoVersion(v)
-	// TODO: 这里后面如果加入集群,那么需要从集群中获取节点配置
+
 	// 初始化节点配置
 	config.Init(confPath)
 

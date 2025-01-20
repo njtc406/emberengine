@@ -113,6 +113,7 @@ func (tw *TimingWheel) add(t *Timer) bool {
 // timer's task if it has already expired.
 func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 	if !tw.add(t) {
+		// 任务到期,立即执行
 		if isNew {
 			// 新增,执行onTimerAdd
 			if t.onTimerAdd != nil {
@@ -125,6 +126,8 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 		}
 
 		if t.task != nil {
+			// TODO 这里之后优化一下,和service的mailbox一起优化,使用mpse来接收消息,防止消费者太慢导致阻塞
+			// 当然,这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
 			// 执行任务
 			select {
 			case t.c <- t:
@@ -161,7 +164,7 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 	}
 }
 
-func (tw *TimingWheel) getTimerId() uint64 {
+func (tw *TimingWheel) genTimerId() uint64 {
 	return atomic.AddUint64(&tw.timerIdSeed, 1)
 }
 
@@ -215,10 +218,13 @@ func (tw *TimingWheel) Stop() {
 // It returns a Timer that can be used to cancel the call using its Stop method.
 func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
 	t := timerPool.Get().(*Timer)
-	t.timerId = tw.getTimerId()
 	t.expiration = timeToMs(timelib.Now().Add(d))
 	for _, opt := range options {
 		opt(t)
+	}
+
+	if t.timerId <= 0 {
+		t.timerId = tw.genTimerId()
 	}
 
 	tw.addOrRun(t, true)
@@ -251,7 +257,20 @@ type Scheduler interface {
 // is non-zero.
 func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 	t = timerPool.Get().(*Timer)
-	t.timerId = tw.getTimerId()
+	for _, opt := range options {
+		opt(t)
+	}
+	expiration := t.Next(timelib.Now())
+	if expiration.IsZero() {
+		// No time is scheduled, return nil.
+		timerPool.Put(t)
+		return
+	}
+
+	if t.timerId <= 0 {
+		t.timerId = tw.genTimerId()
+	}
+	t.expiration = timeToMs(expiration)
 	t.loop = func() {
 		if !t.isActive() {
 			return
@@ -262,17 +281,6 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 			tw.addOrRun(t, false)
 		}
 	}
-	for _, opt := range options {
-		opt(t)
-	}
-
-	expiration := t.Next(timelib.Now())
-	if expiration.IsZero() {
-		// No time is scheduled, return nil.
-		return
-	}
-
-	t.expiration = timeToMs(expiration)
 
 	tw.addOrRun(t, true)
 

@@ -76,7 +76,8 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 	rm.locker.Lock()
 	defer rm.locker.Unlock()
 
-	tm := rm.sd.AfterFunc(envelope.GetTimeout(), func(timerId uint64, args ...interface{}) {
+	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetTimeout(), func(timerId uint64, args ...interface{}) {
+		envelope := args[0].(inf.IEnvelope)
 		rm.locker.Lock()
 		// 直接删除
 		delete(rm.waitMap, timerId)
@@ -92,37 +93,41 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 		// 调用超时,执行超时回调
 		rm.callTimeout(envelope)
 
-	}, nil, nil)
-
-	rm.waitMap[tm.GetTimerId()] = envelope
+	}, nil, nil, envelope)
+	if err != nil {
+		log.SysLogger.Errorf("add monitor failed,error:%s", err)
+		return
+	}
+	envelope.SetTimerId(timerId)
+	rm.waitMap[envelope.GetReqId()] = envelope
 }
 
-func (rm *RpcMonitor) remove(id uint64) inf.IEnvelope {
-	f, ok := rm.waitMap[id]
+func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
+	envelope, ok := rm.waitMap[seqId]
 	if !ok {
 		return nil
 	}
 
-	rm.sd.Cancel(id)
-	delete(rm.waitMap, id)
-	return f
+	rm.sd.Cancel(envelope.GetTimerId())
+	delete(rm.waitMap, seqId)
+	return envelope
 }
 
-func (rm *RpcMonitor) Remove(id uint64) inf.IEnvelope {
-	if id == 0 {
+func (rm *RpcMonitor) Remove(seqId uint64) inf.IEnvelope {
+	if seqId == 0 {
 		return nil
 	}
 	rm.locker.Lock()
-	f := rm.remove(id)
+	f := rm.remove(seqId)
 	rm.locker.Unlock()
 	return f
 }
 
-func (rm *RpcMonitor) Get(id uint64) inf.IEnvelope {
+func (rm *RpcMonitor) Get(seqId uint64) inf.IEnvelope {
 	rm.locker.RLock()
 	defer rm.locker.RUnlock()
 
-	return rm.waitMap[id]
+	return rm.waitMap[seqId]
 }
 
 func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
@@ -146,8 +151,8 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	}
 }
 
-func (rm *RpcMonitor) NewCancel(id uint64) dto.CancelRpc {
+func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {
 	return func() {
-		rm.Remove(id)
+		rm.Remove(seqId)
 	}
 }

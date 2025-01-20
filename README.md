@@ -6,10 +6,6 @@
 - 服务默认单线程运行，支持多线程扩展。
 - 结构灵活、模块化，便于开发和维护。
 
-> 感谢 [github.com/duanhf2012/origin](https://github.com/duanhf2012/origin) 大佬提供的开源项目。本框架参考了其设计理念,做了一些适合自己项目的优化。
-
----
-
 ## 框架结构
 
 本框架由以下三部分组成：
@@ -70,3 +66,8 @@ TODO
 5. 增加服务热更新的功能
 6. 日志的异步模式,包括输出扩展(自定义输出器,目前实际是有的,只是没有暴露出来,也没有办法动态更新)
 ````
+
+> 感谢 [github.com/duanhf2012/origin](https://github.com/duanhf2012/origin) 大佬提供的开源项目。本框架参考了其设计理念,做了一些适合自己项目的优化。
+>
+> 感谢 [https://github.com/RussellLuo/timingwheel](https://github.com/RussellLuo/timingwheel) 多层时间轮。
+---

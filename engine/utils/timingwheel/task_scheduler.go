@@ -138,6 +138,7 @@ func (scheduler *TaskScheduler) AfterFunc(d time.Duration, f func(uint64, ...int
 	})
 }
 
+// AfterAsyncFun 异步执行任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) AfterAsyncFun(d time.Duration, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.AfterFunc(d, func(t *Timer) {
@@ -161,6 +162,9 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, f func(ui
 		t.c = scheduler.C
 		t.scheduler = scheduler
 	})
+	if tm == nil {
+		return 0, fmt.Errorf("ticker task create failed")
+	}
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("ticker task add failed")
@@ -182,6 +186,7 @@ func (scheduler *TaskScheduler) TickerFunc(d time.Duration, f func(uint64, ...in
 	})
 }
 
+// TickerAsyncFunc 异步循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
@@ -210,6 +215,9 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, f func(uint64, 
 		t.c = scheduler.C
 		t.scheduler = scheduler
 	})
+	if tm == nil {
+		return 0, fmt.Errorf("cron task create failed")
+	}
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("cron task add failed")
@@ -230,6 +238,7 @@ func (scheduler *TaskScheduler) CronFunc(spec string, f func(uint64, ...interfac
 	})
 }
 
+// CronAsyncFunc 异步循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) CronAsyncFunc(spec string, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
@@ -243,6 +252,9 @@ func (scheduler *TaskScheduler) CronAsyncFunc(spec string, f func(...interface{}
 }
 
 func (scheduler *TaskScheduler) Cancel(taskId uint64) bool {
+	if taskId == 0 {
+		return true
+	}
 	task := scheduler.remove(taskId)
 	if task == nil {
 		return true

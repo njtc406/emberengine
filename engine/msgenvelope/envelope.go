@@ -22,20 +22,24 @@ type MsgEnvelope struct {
 	// 可能会在多线程环境下面被操作,所以需要锁!
 	locker *sync.RWMutex
 
-	senderPid   *actor.PID           // 发送者
-	receiverPid *actor.PID           // 接收者
-	sender      inf.IRpcSender       // 发送者客户端(用于回调)
-	method      string               // 调用方法
-	reqID       uint64               // 请求ID(防止重复,目前还未做防重复逻辑)
-	reply       bool                 // 是否是回复
-	header      dto.Header           // 消息头
-	timeout     time.Duration        // 请求超时时间
-	request     interface{}          // 请求参数
-	response    interface{}          // 回复数据
-	needResp    bool                 // 是否需要回复
-	err         error                // 错误
-	callbacks   []dto.CompletionFunc // 完成回调
-	done        chan struct{}        // 完成信号
+	// 数据包
+	senderPid   *actor.PID  // 发送者
+	receiverPid *actor.PID  // 接收者
+	method      string      // 调用方法
+	reqID       uint64      // 请求ID(防止重复,目前还未做防重复逻辑)
+	reply       bool        // 是否是回复
+	header      dto.Header  // 消息头
+	request     interface{} // 请求参数
+	response    interface{} // 回复数据
+	needResp    bool        // 是否需要回复
+	err         error       // 错误
+
+	// 缓存信息
+	timeout   time.Duration        // 请求超时时间
+	sender    inf.IRpcSender       // 发送者客户端(用于回调)
+	callbacks []dto.CompletionFunc // 完成回调
+	done      chan struct{}        // 完成信号
+	timerId   uint64               // 定时器ID
 }
 
 func (e *MsgEnvelope) Reset() {
@@ -162,6 +166,12 @@ func (e *MsgEnvelope) SetCallback(cbs []dto.CompletionFunc) {
 	e.callbacks = append(e.callbacks, cbs...)
 }
 
+func (e *MsgEnvelope) SetTimerId(timerId uint64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.timerId = timerId
+}
+
 func (e *MsgEnvelope) GetHeader(key string) string {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
@@ -235,6 +245,12 @@ func (e *MsgEnvelope) GetTimeout() time.Duration {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.timeout
+}
+
+func (e *MsgEnvelope) GetTimerId() uint64 {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.timerId
 }
 
 func (e *MsgEnvelope) NeedCallback() bool {
