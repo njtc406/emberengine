@@ -2,6 +2,7 @@ package network
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/utils/timelib"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -38,7 +39,7 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser, writeD
 				break
 			}
 
-			conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+			conn.SetWriteDeadline(timelib.Now().Add(writeDeadline))
 			_, err := conn.Write(b)
 			tcpConn.msgParser.ReleaseBytes(b)
 
@@ -152,9 +153,9 @@ func (tcpConn *TCPConn) IsConnected() bool {
 }
 
 func (tcpConn *TCPConn) SetReadDeadline(d time.Duration) {
-	tcpConn.conn.SetReadDeadline(time.Now().Add(d))
+	tcpConn.conn.SetReadDeadline(timelib.Now().Add(d))
 }
 
 func (tcpConn *TCPConn) SetWriteDeadline(d time.Duration) {
-	tcpConn.conn.SetWriteDeadline(time.Now().Add(d))
+	tcpConn.conn.SetWriteDeadline(timelib.Now().Add(d))
 }

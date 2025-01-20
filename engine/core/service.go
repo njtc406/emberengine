@@ -19,7 +19,7 @@ import (
 	"github.com/njtc406/emberengine/engine/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/utils/log"
-	"github.com/njtc406/emberengine/engine/utils/timer"
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"reflect"
 	"runtime/debug"
 	"sync"
@@ -103,7 +103,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.closeSignal = make(chan struct{})
 	}
 	if s.timerDispatcher == nil {
-		s.timerDispatcher = timer.NewDispatcher(serviceInitConf.TimerSize)
+		s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerSize, serviceInitConf.TimerSharedSize)
 	}
 	if s.mailBox == nil {
 		s.mailBox = make(chan inf.IEvent, serviceInitConf.MailBoxSize)
@@ -174,6 +174,7 @@ func (s *Service) run() {
 			if !bStop {
 				bStop = true // 关闭信号
 				concurrent.Close()
+				s.timerDispatcher.Stop()
 			}
 		case cb := <-concurrentCBChannel:
 			s.safeExec(func() {
@@ -231,7 +232,7 @@ func (s *Service) run() {
 					}
 				})
 			}
-		case t := <-s.timerDispatcher.ChanTimer:
+		case t := <-s.timerDispatcher.C:
 			s.safeExec(func() {
 				// 定时器处理
 				if s.profiler != nil {
@@ -246,8 +247,8 @@ func (s *Service) run() {
 		}
 
 		if bStop {
-			// 等待所有channel处理完成后关闭
-			if len(s.mailBox) > 0 || len(s.timerDispatcher.ChanTimer) > 0 {
+			// 等待所有channel处理完成后关闭, timerDispatcher中可能有些timer是没有保存的,所以这里可能会有点点小问题,可能需要再加个超时,防止一直有timer回调
+			if len(s.mailBox) > 0 || len(s.timerDispatcher.C) > 0 {
 				continue
 			}
 
@@ -342,7 +343,7 @@ func (s *Service) GetServiceEventChannelNum() int {
 }
 
 func (s *Service) GetServiceTimerChannelNum() int {
-	return len(s.timerDispatcher.ChanTimer)
+	return len(s.timerDispatcher.C)
 }
 
 func (s *Service) OnInit() error {

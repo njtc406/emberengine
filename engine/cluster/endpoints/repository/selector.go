@@ -24,7 +24,7 @@ func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcSender {
 		tmpV, ok := r.tmpMapPid.Load(serviceUid)
 		if ok {
 			tmp := tmpV.(*tmpInfo)
-			tmp.latest = timelib.GetTime()
+			tmp.latest = timelib.Now()
 			sender := tmp.sender
 			if sender != nil {
 				r.tmpMapPid.Store(serviceUid, tmp)

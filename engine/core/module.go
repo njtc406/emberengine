@@ -11,10 +11,9 @@ import (
 	"github.com/njtc406/emberengine/engine/inf"
 	"github.com/njtc406/emberengine/engine/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/utils/log"
-	"github.com/njtc406/emberengine/engine/utils/timer"
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"reflect"
 	"sync/atomic"
-	"time"
 )
 
 type Module struct {
@@ -33,9 +32,7 @@ type Module struct {
 
 	eventHandler inf.IEventHandler // 事件处理器
 
-	timerDispatcher  *timer.Dispatcher         // 定时器调度器
-	mapActiveTimer   map[timer.ITimer]struct{} // 活跃定时器
-	mapActiveIDTimer map[uint64]timer.ITimer   // 活跃定时器id
+	timerDispatcher *timingwheel.TaskScheduler // 定时器调度器
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -153,12 +150,10 @@ func (m *Module) reset() {
 	m.self = nil
 	m.parent = nil
 	m.children = nil
-	m.mapActiveTimer = nil
 	m.timerDispatcher = nil
 	m.root = nil
 	m.rootContains = nil
 	m.IRpcHandler = nil
-	m.mapActiveIDTimer = nil
 	m.eventHandler = nil
 	m.IConcurrent = nil
 }
@@ -180,12 +175,7 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 	pModule.self.OnRelease()
 	pModule.GetEventHandler().Destroy()
 	//log.SysLogger.Debugf("Release module %s", pModule.GetModuleName())
-	for pTimer := range pModule.mapActiveTimer {
-		pTimer.Cancel()
-	}
-	for _, t := range pModule.mapActiveIDTimer {
-		t.Cancel()
-	}
+	pModule.timerDispatcher.Stop()
 	delete(m.children, moduleId)
 	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
 
@@ -195,125 +185,4 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 
 func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
-}
-
-func (m *Module) OnCloseTimer(t timer.ITimer) {
-	delete(m.mapActiveIDTimer, t.GetId())
-	delete(m.mapActiveTimer, t)
-}
-
-func (m *Module) OnAddTimer(t timer.ITimer) {
-	if t != nil {
-		if m.mapActiveTimer == nil {
-			m.mapActiveTimer = map[timer.ITimer]struct{}{}
-		}
-
-		m.mapActiveTimer[t] = struct{}{}
-	}
-}
-
-func (m *Module) AfterFunc(d time.Duration, cb func(timer.ITimer)) timer.ITimer {
-	if m.mapActiveTimer == nil {
-		m.mapActiveTimer = map[timer.ITimer]struct{}{}
-	}
-
-	return m.timerDispatcher.AfterFunc(d, nil, cb, m.OnCloseTimer, m.OnAddTimer)
-}
-
-func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func(timer.ITimer)) timer.ITimer {
-	if m.mapActiveTimer == nil {
-		m.mapActiveTimer = map[timer.ITimer]struct{}{}
-	}
-
-	return m.timerDispatcher.CronFunc(cronExpr, nil, cb, m.OnCloseTimer, m.OnAddTimer)
-}
-
-func (m *Module) NewTicker(d time.Duration, cb func(timer.ITimer)) timer.ITimer {
-	if m.mapActiveTimer == nil {
-		m.mapActiveTimer = map[timer.ITimer]struct{}{}
-	}
-
-	return m.timerDispatcher.TickerFunc(d, nil, cb, m.OnCloseTimer, m.OnAddTimer)
-}
-
-func (m *Module) cb(*timer.Timer) {
-
-}
-
-var timerSeedId uint32
-
-func (m *Module) GenTimerId() uint64 {
-	for {
-		newTimerId := (uint64(m.GetModuleID()) << 32) | uint64(atomic.AddUint32(&timerSeedId, 1))
-		if _, ok := m.mapActiveIDTimer[newTimerId]; ok == true {
-			continue
-		}
-
-		return newTimerId
-	}
-}
-
-func (m *Module) SafeAfterFunc(timerId *uint64, d time.Duration, AdditionData interface{}, cb func(uint64, interface{})) {
-	if timerId == nil {
-		return
-	}
-	if m.mapActiveIDTimer == nil {
-		m.mapActiveIDTimer = map[uint64]timer.ITimer{}
-	}
-
-	if *timerId != 0 {
-		m.CancelTimerId(timerId)
-	}
-
-	*timerId = m.GenTimerId()
-	t := m.timerDispatcher.AfterFunc(d, cb, nil, m.OnCloseTimer, m.OnAddTimer)
-	t.AdditionData = AdditionData
-	t.Id = *timerId
-	m.mapActiveIDTimer[*timerId] = t
-}
-
-func (m *Module) SafeCronFunc(cronId *uint64, cronExpr *timer.CronExpr, AdditionData interface{}, cb func(uint64, interface{})) {
-	if m.mapActiveIDTimer == nil {
-		m.mapActiveIDTimer = map[uint64]timer.ITimer{}
-	}
-
-	*cronId = m.GenTimerId()
-	c := m.timerDispatcher.CronFunc(cronExpr, cb, nil, m.OnCloseTimer, m.OnAddTimer)
-	c.AdditionData = AdditionData
-	c.Id = *cronId
-	m.mapActiveIDTimer[*cronId] = c
-}
-
-func (m *Module) SafeNewTicker(tickerId *uint64, d time.Duration, AdditionData interface{}, cb func(uint64, interface{})) {
-	if m.mapActiveIDTimer == nil {
-		m.mapActiveIDTimer = map[uint64]timer.ITimer{}
-	}
-
-	*tickerId = m.GenTimerId()
-	t := m.timerDispatcher.TickerFunc(d, cb, nil, m.OnCloseTimer, m.OnAddTimer)
-	t.AdditionData = AdditionData
-	t.Id = *tickerId
-	m.mapActiveIDTimer[*tickerId] = t
-}
-
-func (m *Module) CancelTimerId(timerId *uint64) bool {
-	if timerId == nil || *timerId == 0 {
-		log.SysLogger.Warn("timerId is invalid")
-		return false
-	}
-
-	if m.mapActiveIDTimer == nil {
-		log.SysLogger.Error("mapActiveIdTimer is nil")
-		return false
-	}
-
-	t, ok := m.mapActiveIDTimer[*timerId]
-	if ok == false {
-		//log.SysLogger.Debugf(fmt.Sprintf("cannot find timer id %d", *timerId))
-		return false
-	}
-
-	t.Cancel()
-	*timerId = 0
-	return true
 }

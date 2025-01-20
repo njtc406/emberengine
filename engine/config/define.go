@@ -59,14 +59,15 @@ type RPCServer struct {
 }
 
 type ServiceInitConf struct {
-	ServiceId    string `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
-	ServiceName  string `binding:"required"` // 服务名称
-	Type         string `binding:"required"` // 服务类型
-	ServerId     int32  `binding:"required"` // 服务ID
-	TimerSize    int    `binding:""`         // 定时器数量
-	MailBoxSize  int    `binding:""`         // 事件队列数量
-	GoroutineNum int32  `binding:""`         // 协程数量
-	RpcType      string `binding:""`         // 远程调用方式(默认使用rpcx)
+	ServiceId       string `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
+	ServiceName     string `binding:"required"` // 服务名称
+	Type            string `binding:"required"` // 服务类型
+	ServerId        int32  `binding:"required"` // 服务ID
+	TimerSize       int    `binding:""`         // 定时器数量
+	TimerSharedSize int    `binding:""`         // 定时器调度器存储桶数量(减少锁的冲突,增加并发)
+	MailBoxSize     int    `binding:""`         // 事件队列数量
+	GoroutineNum    int32  `binding:""`         // 协程数量
+	RpcType         string `binding:""`         // 远程调用方式(默认使用rpcx)
 }
 
 type ServiceConfig struct {

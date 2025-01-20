@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/inf"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,12 +48,19 @@ func (shard *TimerShard) remove(timerId uint64) *Timer {
 }
 
 type TaskScheduler struct {
+	closed int32
 	shards []*TimerShard
 
 	C chan inf.ITimer
 }
 
 func NewTaskScheduler(chanSize, shardCount int) *TaskScheduler {
+	if chanSize <= 0 {
+		chanSize = 100000
+	}
+	if shardCount <= 0 {
+		shardCount = 10
+	}
 	shards := make([]*TimerShard, shardCount)
 	for i := range shards {
 		shards[i] = &TimerShard{
@@ -130,6 +138,17 @@ func (scheduler *TaskScheduler) AfterFunc(d time.Duration, f func(uint64, ...int
 	})
 }
 
+func (scheduler *TaskScheduler) AfterAsyncFun(d time.Duration, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+	// 创建task
+	return tw.AfterFunc(d, func(t *Timer) {
+		t.asyncTask = f
+		t.taskArgs = args
+		t.onTimerAdd = onAddTask
+		t.onTimerDel = onDelTask
+		t.c = scheduler.C
+	})
+}
+
 // TickerFuncWithStorage 循环任务(任务会被保存下来)
 func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
 	// 创建task
@@ -163,6 +182,18 @@ func (scheduler *TaskScheduler) TickerFunc(d time.Duration, f func(uint64, ...in
 	})
 }
 
+func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+	// 创建task
+	return tw.ScheduleFunc(func(t *Timer) {
+		t.interval = d
+		t.asyncTask = f
+		t.taskArgs = args
+		t.onTimerAdd = onAddTask
+		t.onTimerDel = onDelTask
+		t.c = scheduler.C
+	})
+}
+
 // CronFuncWithStorage 循环任务(任务会被保存下来),请注意,这个函数的精度只到秒
 //
 // spec: cron表达式 秒 分 时 日 月 周(可选) | @every 5s
@@ -189,13 +220,24 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, f func(uint64, 
 
 func (scheduler *TaskScheduler) CronFunc(spec string, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
-	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.spec = spec
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
 		t.task = f
 		t.taskArgs = args
+		t.c = scheduler.C
+	})
+}
+
+func (scheduler *TaskScheduler) CronAsyncFunc(spec string, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+	// 创建task
+	return tw.ScheduleFunc(func(t *Timer) {
+		t.spec = spec
+		t.asyncTask = f
+		t.taskArgs = args
+		t.onTimerAdd = onAddTask
+		t.onTimerDel = onDelTask
 		t.c = scheduler.C
 	})
 }
@@ -207,4 +249,16 @@ func (scheduler *TaskScheduler) Cancel(taskId uint64) bool {
 	}
 
 	return task.Stop()
+}
+
+func (scheduler *TaskScheduler) Stop() {
+	atomic.StoreInt32(&scheduler.closed, 1)
+	for _, shard := range scheduler.shards {
+		shard.Lock()
+		for timerId, task := range shard.tasks {
+			task.Stop()
+			delete(shard.tasks, timerId)
+		}
+		shard.Unlock()
+	}
 }

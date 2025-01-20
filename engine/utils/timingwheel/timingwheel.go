@@ -2,6 +2,7 @@ package timingwheel
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/utils/timelib"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -37,7 +38,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64) *TimingWheel {
 		panic(errors.New("tick must be greater than or equal to 1ms"))
 	}
 
-	startMs := timeToMs(time.Now())
+	startMs := timeToMs(timelib.Now())
 
 	return newTimingWheel(
 		tickMs,
@@ -119,12 +120,18 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 			}
 		}
 
-		// 执行任务
-		select {
-		case t.c <- t:
-		default:
-			// 队列已满,本次不执行
-			//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+		if t.asyncTask != nil {
+			go t.asyncTask(t.taskArgs...)
+		}
+
+		if t.task != nil {
+			// 执行任务
+			select {
+			case t.c <- t:
+			default:
+				// 队列已满,本次不执行
+				//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+			}
 		}
 
 		if t.loop != nil {
@@ -144,6 +151,7 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 			// 释放任务
 			timerPool.Put(t)
 		}
+		return
 	}
 	if isNew {
 		// 新增,执行onTimerAdd
@@ -175,7 +183,7 @@ func (tw *TimingWheel) advanceClock(expiration int64) {
 func (tw *TimingWheel) Start() {
 	tw.waitGroup.Wrap(func() {
 		tw.queue.Poll(tw.exitC, func() int64 {
-			return timeToMs(time.Now())
+			return timeToMs(timelib.Now())
 		})
 	})
 
@@ -208,7 +216,7 @@ func (tw *TimingWheel) Stop() {
 func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
 	t := timerPool.Get().(*Timer)
 	t.timerId = tw.getTimerId()
-	t.expiration = timeToMs(time.Now().Add(d))
+	t.expiration = timeToMs(timelib.Now().Add(d))
 	for _, opt := range options {
 		opt(t)
 	}
@@ -245,6 +253,9 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 	t = timerPool.Get().(*Timer)
 	t.timerId = tw.getTimerId()
 	t.loop = func() {
+		if !t.isActive() {
+			return
+		}
 		expiration := t.Next(msToTime(t.expiration))
 		if !expiration.IsZero() {
 			t.expiration = timeToMs(expiration)
@@ -255,7 +266,7 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 		opt(t)
 	}
 
-	expiration := t.Next(time.Now())
+	expiration := t.Next(timelib.Now())
 	if expiration.IsZero() {
 		// No time is scheduled, return nil.
 		return

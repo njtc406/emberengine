@@ -7,4 +7,6 @@ package inf
 
 type ITimer interface {
 	Do()
+	GetName() string
+	GetTimerId() uint64
 }

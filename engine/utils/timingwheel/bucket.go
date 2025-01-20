@@ -5,6 +5,9 @@ import (
 	"github.com/njtc406/emberengine/engine/dto"
 	"github.com/njtc406/emberengine/engine/inf"
 	"github.com/njtc406/emberengine/engine/utils/pool"
+	"github.com/njtc406/emberengine/engine/utils/timelib"
+	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,6 +65,18 @@ func (t *Timer) Reset() {
 	t.element = nil
 }
 
+func (t *Timer) GetName() string {
+	if t.task != nil {
+		return runtime.FuncForPC(reflect.ValueOf(t.task).Pointer()).Name()
+	}
+
+	return ""
+}
+
+func (t *Timer) GetTimerId() uint64 {
+	return t.timerId
+}
+
 func (t *Timer) getBucket() *bucket {
 	return (*bucket)(atomic.LoadPointer(&t.b))
 }
@@ -116,7 +131,7 @@ func (t *Timer) Do() {
 
 func (t *Timer) Next(tm time.Time) time.Time {
 	if t.interval > 0 {
-		return time.Now().Add(t.interval)
+		return timelib.Now().Add(t.interval)
 	}
 
 	if t.spec != "" {

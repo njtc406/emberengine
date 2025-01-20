@@ -1,5 +1,10 @@
 package timingwheel_test
 
+import (
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
+	"time"
+)
+
 func Example_startTimer() {
 	//tw := timingwheel.NewTimingWheel(time.Millisecond, 20)
 	//tw.Start()
@@ -18,18 +23,18 @@ func Example_startTimer() {
 }
 
 func Example_stopTimer() {
-	//tw := timingwheel.NewTimingWheel(time.Millisecond, 20)
-	//tw.Start()
-	//defer tw.Stop()
-	//
-	//t := tw.AfterFunc(time.Second, func() {
-	//	fmt.Println("The timer fires")
-	//})
-	//
-	//<-time.After(900 * time.Millisecond)
-	//// Stop the timer before it fires
-	//t.Stop()
+	tw := timingwheel.NewTimingWheel(time.Millisecond, 20)
+	tw.Start()
+	defer tw.Stop()
 
-	// Output:
-	//
+	tm := tw.AfterFunc(time.Second, func(t *timingwheel.Timer) {
+
+	})
+
+	<-time.After(900 * time.Millisecond)
+	// Stop the timer before it fires
+	tm.Stop()
+
+	//Output:
+
 }

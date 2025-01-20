@@ -14,7 +14,7 @@ import (
 	"github.com/njtc406/emberengine/engine/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/utils/log"
 	"github.com/njtc406/emberengine/engine/utils/pid"
-	"github.com/njtc406/emberengine/engine/utils/timer"
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/utils/version"
 	"os"
 	"os/signal"
@@ -51,6 +51,13 @@ func Start(v string, confPath string) {
 	// 启动线程池
 	asynclib.InitAntsPool(config.Conf.NodeConf.AntsPoolSize)
 
+	// 启动timer(默认使用时间轮)
+	timingwheel.Start(time.Millisecond*10, 100)
+
+	// 记录pid
+	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
+	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
+
 	// 初始化等待队列,并启动监听
 	monitor.GetRpcMonitor().Init().Start()
 
@@ -61,13 +68,6 @@ func Start(v string, confPath string) {
 	cluster.GetCluster().Init()
 	// 启动集群管理器
 	cluster.GetCluster().Start()
-
-	// 记录pid
-	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
-	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
-
-	// 启动timer
-	timer.StartTimer(10*time.Millisecond, 1000000)
 
 	// 执行钩子
 	for _, f := range hooks {
@@ -97,7 +97,7 @@ func Start(v string, confPath string) {
 		}
 	}
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
-	timer.StopTimer() // 停止timer
+	timingwheel.Stop()
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()
