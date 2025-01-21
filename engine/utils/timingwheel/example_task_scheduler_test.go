@@ -17,8 +17,8 @@ func (s *EveryScheduler) Next(prev time.Time) time.Time {
 
 var signCh = make(chan os.Signal, 1)
 
-func printTask(taskId uint64, args ...interface{}) {
-	fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+func printTask(t *timingwheel.Timer, args ...interface{}) {
+	fmt.Println(">>>>>>>>>>>>>task:", t.GetName())
 }
 
 func Example_scheduleTimer() {
@@ -29,7 +29,7 @@ func Example_scheduleTimer() {
 		beginTime = time.Now()
 		//tId, err := dp.AfterFunc(time.Second*5, printTask, nil, nil, "hello")
 		//tId, err := dp.TickerFunc(time.Hour*3, printTask, nil, nil, "hello")
-		tId, err := dp.CronFuncWithStorage("0 */1 * * * *", printTask, nil, nil, "hello")
+		tId, err := dp.CronFuncWithStorage("0 */1 * * * *", "", printTask, nil, nil, "hello")
 		if err != nil {
 			fmt.Println("err:", err)
 			dp.Cancel(tId)

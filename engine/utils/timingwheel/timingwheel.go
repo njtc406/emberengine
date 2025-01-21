@@ -115,44 +115,47 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 	if !tw.add(t) {
 		// 任务到期,立即执行
 		if isNew {
-			// 新增,执行onTimerAdd
+			// 新增,执行onTimerAdd(放这里是为了防止新增的任务本来就是过期的,导致任务被先调用了才去调用addFunc)
 			if t.onTimerAdd != nil {
 				t.onTimerAdd(t)
 			}
 		}
 
 		if t.asyncTask != nil {
-			go t.asyncTask(t.taskArgs...)
-		}
+			go func() {
+				defer func() {
+					if err := recover(); err != nil {
+						//log.SysLogger.Errorf("task panic, taskId:%d, err:%v", t.timerId, err)
+					}
+				}()
+				t.asyncTask(t.taskArgs...)
+				if t.loop == nil {
+					// 执行任务删除逻辑
+					if t.onTimerDel != nil {
+						t.onTimerDel(t)
+					}
 
-		if t.task != nil {
-			// TODO 这里之后优化一下,和service的mailbox一起优化,使用mpse来接收消息,防止消费者太慢导致阻塞
-			// 当然,这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
-			// 执行任务
-			select {
-			case t.c <- t:
-			default:
-				// 队列已满,本次不执行
-				//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+					// 释放任务
+					releaseTimer(t)
+				}
+			}()
+		} else {
+			if t.task != nil {
+				// TODO 这里之后优化一下,和service的mailbox一起优化,使用mpse来接收消息,防止消费者太慢导致阻塞
+				// 当然,这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
+				// 执行任务
+				select {
+				case t.c <- t:
+				default:
+					// 队列已满,本次不执行
+					//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+				}
 			}
 		}
 
 		if t.loop != nil {
-			// 是循环任务,执行loop
+			// 循环任务,再次加入
 			t.loop()
-		} else {
-			// 如果有关联了任务调度器,则移除调度器上的记录
-			if t.scheduler != nil {
-				_ = t.scheduler.remove(t.timerId)
-			}
-
-			// 执行任务删除逻辑
-			if t.onTimerDel != nil {
-				t.onTimerDel(t)
-			}
-
-			// 释放任务
-			timerPool.Put(t)
 		}
 		return
 	}
@@ -217,7 +220,7 @@ func (tw *TimingWheel) Stop() {
 // AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
 // It returns a Timer that can be used to cancel the call using its Stop method.
 func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
-	t := timerPool.Get().(*Timer)
+	t := createTimer()
 	t.expiration = timeToMs(timelib.Now().Add(d))
 	for _, opt := range options {
 		opt(t)
@@ -256,14 +259,14 @@ type Scheduler interface {
 // be executed, and f will be called at the next execution time if the time
 // is non-zero.
 func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
-	t = timerPool.Get().(*Timer)
+	t = createTimer()
 	for _, opt := range options {
 		opt(t)
 	}
 	expiration := t.Next(timelib.Now())
 	if expiration.IsZero() {
 		// No time is scheduled, return nil.
-		timerPool.Put(t)
+		releaseTimer(t)
 		return
 	}
 

@@ -60,7 +60,7 @@ func (rm *RpcMonitor) listen() {
 			if t == nil {
 				continue
 			}
-			log.SysLogger.Debugf("RPC monitor starts executing timeout callback:%s", t.GetName())
+			//log.SysLogger.Debugf("RPC monitor starts executing timeout callback:%s", t.GetName())
 			t.Do()
 		case <-rm.closed:
 			return
@@ -76,16 +76,16 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 	rm.locker.Lock()
 	defer rm.locker.Unlock()
 
-	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetTimeout(), func(timerId uint64, args ...interface{}) {
+	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) {
 		envelope := args[0].(inf.IEnvelope)
 		rm.locker.Lock()
 		// 直接删除
-		delete(rm.waitMap, timerId)
+		delete(rm.waitMap, tm.GetTimerId())
 		rm.locker.Unlock()
 
 		if envelope == nil || !envelope.IsRef() {
 			rm.locker.Unlock()
-			log.SysLogger.Errorf("call seq is not find,seq:%d", timerId)
+			log.SysLogger.Errorf("call seq is not find,seq:%d", tm.GetTimerId())
 			return
 		}
 

@@ -17,8 +17,6 @@ var (
 	defaultSeed uint64 = 10000
 )
 
-type TimerOptFun func(job *Timer)
-
 type TimerShard struct {
 	sync.Mutex
 	tasks map[uint64]*Timer
@@ -108,9 +106,10 @@ func (scheduler *TaskScheduler) remove(taskId uint64) *Timer {
 }
 
 // AfterFuncWithStorage 延时任务(任务会被保存下来)
-func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
+func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
 	// 创建task
 	tm := tw.AfterFunc(d, func(t *Timer) {
+		t.name = name
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
 		t.task = f
@@ -127,9 +126,10 @@ func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, f func(uin
 }
 
 // AfterFunc 添加任务(任务不会被保存下来)
-func (scheduler *TaskScheduler) AfterFunc(d time.Duration, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+func (scheduler *TaskScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.AfterFunc(d, func(t *Timer) {
+		t.name = name
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
 		t.task = f
@@ -138,10 +138,11 @@ func (scheduler *TaskScheduler) AfterFunc(d time.Duration, f func(uint64, ...int
 	})
 }
 
-// AfterAsyncFun 异步执行任务(任务不会被保存下来)
-func (scheduler *TaskScheduler) AfterAsyncFun(d time.Duration, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+// AfterAsyncFunc 异步执行任务(任务不会被保存下来)
+func (scheduler *TaskScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.AfterFunc(d, func(t *Timer) {
+		t.name = name
 		t.asyncTask = f
 		t.taskArgs = args
 		t.onTimerAdd = onAddTask
@@ -151,9 +152,10 @@ func (scheduler *TaskScheduler) AfterAsyncFun(d time.Duration, f func(...interfa
 }
 
 // TickerFuncWithStorage 循环任务(任务会被保存下来)
-func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
+func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name string, f TimerCallback, onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
 	// 创建task
 	tm := tw.ScheduleFunc(func(t *Timer) {
+		t.name = name
 		t.interval = d
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
@@ -174,9 +176,10 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, f func(ui
 }
 
 // TickerFunc 循环任务(任务不会被保存下来)
-func (scheduler *TaskScheduler) TickerFunc(d time.Duration, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+func (scheduler *TaskScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
+		t.name = name
 		t.interval = d
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
@@ -187,9 +190,10 @@ func (scheduler *TaskScheduler) TickerFunc(d time.Duration, f func(uint64, ...in
 }
 
 // TickerAsyncFunc 异步循环任务(任务不会被保存下来)
-func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
+		t.name = name
 		t.interval = d
 		t.asyncTask = f
 		t.taskArgs = args
@@ -204,9 +208,10 @@ func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, f func(...inter
 // spec: cron表达式 秒 分 时 日 月 周(可选) | @every 5s
 // 示例: 0 */1 * * * 每分钟执行一次
 // 示例: @every 5s 每5秒执行一次
-func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
+func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f TimerCallback, onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) (uint64, error) {
 	// 创建task
 	tm := tw.ScheduleFunc(func(t *Timer) {
+		t.name = name
 		t.spec = spec
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
@@ -226,9 +231,10 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, f func(uint64, 
 	return tm.timerId, nil
 }
 
-func (scheduler *TaskScheduler) CronFunc(spec string, f func(uint64, ...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+func (scheduler *TaskScheduler) CronFunc(spec string, name string, f TimerCallback, onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
+		t.name = name
 		t.spec = spec
 		t.onTimerAdd = onAddTask
 		t.onTimerDel = onDelTask
@@ -239,9 +245,10 @@ func (scheduler *TaskScheduler) CronFunc(spec string, f func(uint64, ...interfac
 }
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
-func (scheduler *TaskScheduler) CronAsyncFunc(spec string, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
+func (scheduler *TaskScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), onAddTask TimerOption, onDelTask TimerOption, args ...interface{}) *Timer {
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
+		t.name = name
 		t.spec = spec
 		t.asyncTask = f
 		t.taskArgs = args
@@ -259,8 +266,11 @@ func (scheduler *TaskScheduler) Cancel(taskId uint64) bool {
 	if task == nil {
 		return true
 	}
-
-	return task.Stop()
+	ok := task.Stop()
+	if task.IsRef() {
+		releaseTimer(task)
+	}
+	return ok
 }
 
 func (scheduler *TaskScheduler) Stop() {

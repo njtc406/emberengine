@@ -339,18 +339,20 @@ var msgEnvelopePool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() po
 })
 
 // 测试资源释放
-var count int
+//var count int
 
 func NewMsgEnvelope() *MsgEnvelope {
-	count++
+	//count++
 	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
 	return msgEnvelopePool.Get().(*MsgEnvelope)
 }
 
 func ReleaseMsgEnvelope(envelope inf.IEnvelope) {
 	if envelope != nil {
-		count--
+		//count--
 		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
-		msgEnvelopePool.Put(envelope.(*MsgEnvelope))
+		if envelope.IsRef() {
+			msgEnvelopePool.Put(envelope.(*MsgEnvelope))
+		}
 	}
 }

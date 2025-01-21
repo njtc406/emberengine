@@ -238,6 +238,7 @@ func (s *Service) run() {
 				if s.profiler != nil {
 					analyzer = s.profiler.Push("[timer]" + s.GetName() + "." + t.GetName())
 				}
+				log.SysLogger.Debugf("service[%s] timer[%s]", s.GetName(), t.GetName())
 				t.Do() // Tips:所有定时器的执行时如果有时间判断请注意,定时器的触发受到前置逻辑的影响可能在执行的那一刻已经超过时间,所以尽量不要用==去判断时间
 				if analyzer != nil {
 					analyzer.Pop()

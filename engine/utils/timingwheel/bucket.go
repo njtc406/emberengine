@@ -18,26 +18,36 @@ var timerPool = pool.NewPoolEx(make(chan pool.IPoolData, 100000), func() pool.IP
 	return &Timer{}
 })
 
+func createTimer() *Timer {
+	return timerPool.Get().(*Timer)
+}
+
+func releaseTimer(t *Timer) {
+	timerPool.Put(t)
+}
+
 type TimerOption func(t *Timer)
+type TimerCallback func(timer *Timer, args ...interface{})
 
 // Timer represents a single event. When the Timer expires, the given
 // task will be executed.
 type Timer struct {
 	dto.DataRef
 	Scheduler
-	timerId    uint64                       // 任务唯一id
-	expiration int64                        // in milliseconds 任务到期时间
-	interval   time.Duration                // 间隔时间 > 0 表示循环执行
-	spec       string                       // cron表达式
-	cancel     int32                        // 0未取消 1取消
-	task       func(uint64, ...interface{}) // 任务
-	taskArgs   []interface{}                // 任务参数
-	onTimerAdd func(*Timer)                 // 定时器添加回调
-	onTimerDel func(*Timer)                 // 定时器删除回调
-	c          chan inf.ITimer              // service直接触发通道
-	loop       func()                       // 循环执行
-	asyncTask  func(...interface{})         // 异步任务
-	scheduler  *TaskScheduler               // 任务调度器
+	timerId    uint64               // 任务唯一id
+	name       string               // 任务名称
+	expiration int64                // in milliseconds 任务到期时间
+	interval   time.Duration        // 间隔时间 > 0 表示循环执行
+	spec       string               // cron表达式
+	cancel     int32                // 0未取消 1取消
+	task       TimerCallback        // 任务
+	taskArgs   []interface{}        // 任务参数
+	onTimerAdd func(*Timer)         // 定时器添加回调
+	onTimerDel func(*Timer)         // 定时器删除回调
+	c          chan inf.ITimer      // service直接触发通道
+	loop       func()               // 循环执行
+	asyncTask  func(...interface{}) // 异步任务
+	scheduler  *TaskScheduler       // 任务调度器
 
 	// The bucket that holds the list to which this timer's element belongs.
 	//
@@ -66,8 +76,14 @@ func (t *Timer) Reset() {
 }
 
 func (t *Timer) GetName() string {
+	if t.name != "" {
+		return t.name
+	}
 	if t.task != nil {
 		return runtime.FuncForPC(reflect.ValueOf(t.task).Pointer()).Name()
+	}
+	if t.asyncTask != nil {
+		return runtime.FuncForPC(reflect.ValueOf(t.asyncTask).Pointer()).Name()
 	}
 
 	return ""
@@ -116,16 +132,29 @@ func (t *Timer) isActive() bool {
 func (t *Timer) Do() {
 	if t.isActive() {
 		if t.task != nil {
-			t.task(t.timerId, t.taskArgs...)
+			t.task(t, t.taskArgs...)
+		}
+
+		if t.loop == nil {
+			// 不是循环任务,释放任务
+			// 如果有关联了任务调度器,则移除调度器上的记录
+			if t.scheduler != nil {
+				_ = t.scheduler.remove(t.timerId)
+			}
+
+			// 执行任务删除逻辑
+			if t.onTimerDel != nil {
+				t.onTimerDel(t)
+			}
+
+			// 释放任务
+			releaseTimer(t)
 		}
 		return
 	}
-	if t.loop == nil {
-		if t.onTimerDel != nil {
-			t.onTimerDel(t)
-		}
-		// release
-		timerPool.Put(t)
+
+	if t.IsRef() {
+		releaseTimer(t)
 	}
 }
 
@@ -144,6 +173,50 @@ func (t *Timer) Next(tm time.Time) time.Time {
 	}
 
 	return time.Time{}
+}
+
+func (t *Timer) SetTimerId(id uint64) {
+	t.timerId = id
+}
+
+func (t *Timer) SetExpiration(expiration int64) {
+	atomic.StoreInt64(&t.expiration, expiration)
+}
+
+func (t *Timer) SetInterval(interval time.Duration) {
+	t.interval = interval
+}
+
+func (t *Timer) SetSpec(spec string) {
+	t.spec = spec
+}
+
+func (t *Timer) SetTask(task TimerCallback) {
+	t.task = task
+}
+
+func (t *Timer) SetTaskArgs(args ...interface{}) {
+	t.taskArgs = args
+}
+
+func (t *Timer) SetOnTimerAdd(f func(*Timer)) {
+	t.onTimerAdd = f
+}
+
+func (t *Timer) SetOnTimerDel(f func(*Timer)) {
+	t.onTimerDel = f
+}
+
+func (t *Timer) SetC(c chan inf.ITimer) {
+	t.c = c
+}
+
+func (t *Timer) SetAsyncTask(f func(...interface{})) {
+	t.asyncTask = f
+}
+
+func (t *Timer) SetScheduler(scheduler *TaskScheduler) {
+	t.scheduler = scheduler
 }
 
 type bucket struct {

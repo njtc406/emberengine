@@ -13,7 +13,7 @@ func genD(i int) time.Duration {
 
 var dp = timingwheel.NewTaskScheduler(10000000, 1)
 
-func printTask1(taskId uint64, args ...interface{}) {
+func printTask1(t *timingwheel.Timer, args ...interface{}) {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
 }
 
@@ -33,12 +33,12 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			base := make([]*timingwheel.Timer, c.N)
 			for i := 0; i < len(base); i++ {
-				base[i] = dp.AfterFunc(genD(i), printTask1, nil, nil)
+				base[i] = dp.AfterFunc(genD(i), "", printTask1, nil, nil)
 			}
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				dp.AfterFunc(time.Second, printTask1, nil, nil).Stop()
+				dp.AfterFunc(time.Second, "", printTask1, nil, nil).Stop()
 			}
 
 			b.StopTimer()

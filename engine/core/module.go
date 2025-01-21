@@ -14,6 +14,7 @@ import (
 	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"reflect"
 	"sync/atomic"
+	"time"
 )
 
 type Module struct {
@@ -185,4 +186,40 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 
 func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
+}
+
+func (m *Module) AfterFunc(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
+	return m.timerDispatcher.AfterFunc(d, name, f, nil, nil, args...)
+}
+
+func (m *Module) AfterFuncWithStorage(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
+	return m.timerDispatcher.AfterFuncWithStorage(d, name, f, nil, nil, args...)
+}
+
+func (m *Module) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
+	return m.timerDispatcher.AfterAsyncFunc(d, name, f, nil, nil, args...)
+}
+
+func (m *Module) TickerFunc(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
+	return m.timerDispatcher.TickerFunc(d, name, f, nil, nil, args...)
+}
+
+func (m *Module) TickerFuncWithStorage(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
+	return m.timerDispatcher.TickerFuncWithStorage(d, name, f, nil, nil, args...)
+}
+
+func (m *Module) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
+	return m.timerDispatcher.TickerAsyncFunc(d, name, f, nil, nil, args...)
+}
+
+func (m *Module) CronFunc(spec string, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
+	return m.timerDispatcher.CronFunc(spec, name, f, nil, nil, args...)
+}
+
+func (m *Module) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
+	return m.timerDispatcher.CronAsyncFunc(spec, name, f, nil, nil, args...)
+}
+
+func (m *Module) CronFuncWithStorage(spec string, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
+	return m.timerDispatcher.CronFuncWithStorage(spec, name, f, nil, nil, args...)
 }
