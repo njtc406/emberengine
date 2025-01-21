@@ -32,9 +32,8 @@ type NodeConf struct {
 type ClusterConf struct {
 	ETCDConf       *ETCDConf          `binding:"required"` // etcd配置
 	RPCServers     []*RPCServer       `binding:""`         // rpc服务配置
-	RemoteType     string             `binding:""`         // 远程服务类型(默认rpcx)
 	DiscoveryType  string             `binding:""`         // 服务发现类型(默认etcd)
-	RemoteConfPath string             `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)
+	RemoteConfPath string             `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)(暂未使用)
 	DiscoveryConf  *EtcdDiscoveryConf `binding:""`         // 服务发现配置(目前先直接配置,后续会支持多种服务发现方式)
 }
 
@@ -64,7 +63,7 @@ type ServiceInitConf struct {
 	Type            string `binding:"required"` // 服务类型
 	ServerId        int32  `binding:"required"` // 服务ID
 	TimerSize       int    `binding:""`         // 定时器数量
-	TimerSharedSize int    `binding:""`         // 定时器调度器存储桶数量(减少锁的冲突,增加并发)
+	TimerBucketSize int    `binding:""`         // 定时器调度器存储桶数量(减少锁的冲突,增加并发)
 	MailBoxSize     int    `binding:""`         // 事件队列数量
 	GoroutineNum    int32  `binding:""`         // 协程数量
 	RpcType         string `binding:""`         // 远程调用方式(默认使用rpcx)
@@ -82,6 +81,6 @@ type ServiceConfig struct {
 }
 
 type EtcdDiscoveryConf struct {
-	Path string
-	TTL  int64
+	Path string // rpc注册路径
+	TTL  int64  // 证书有效期(默认3秒)
 }

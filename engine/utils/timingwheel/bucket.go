@@ -42,8 +42,6 @@ type Timer struct {
 	cancel     int32                // 0未取消 1取消
 	task       TimerCallback        // 任务
 	taskArgs   []interface{}        // 任务参数
-	onTimerAdd func(*Timer)         // 定时器添加回调
-	onTimerDel func(*Timer)         // 定时器删除回调
 	c          chan inf.ITimer      // service直接触发通道
 	loop       func()               // 循环执行
 	asyncTask  func(...interface{}) // 异步任务
@@ -60,6 +58,7 @@ type Timer struct {
 }
 
 func (t *Timer) Reset() {
+	t.name = ""
 	t.timerId = 0
 	t.expiration = 0
 	t.interval = 0
@@ -67,7 +66,6 @@ func (t *Timer) Reset() {
 	t.cancel = 0
 	t.task = nil
 	t.taskArgs = nil
-	t.onTimerDel = nil
 	t.c = nil
 	t.loop = nil
 	t.asyncTask = nil
@@ -142,11 +140,6 @@ func (t *Timer) Do() {
 				_ = t.scheduler.remove(t.timerId)
 			}
 
-			// 执行任务删除逻辑
-			if t.onTimerDel != nil {
-				t.onTimerDel(t)
-			}
-
 			// 释放任务
 			releaseTimer(t)
 		}
@@ -197,14 +190,6 @@ func (t *Timer) SetTask(task TimerCallback) {
 
 func (t *Timer) SetTaskArgs(args ...interface{}) {
 	t.taskArgs = args
-}
-
-func (t *Timer) SetOnTimerAdd(f func(*Timer)) {
-	t.onTimerAdd = f
-}
-
-func (t *Timer) SetOnTimerDel(f func(*Timer)) {
-	t.onTimerDel = f
 }
 
 func (t *Timer) SetC(c chan inf.ITimer) {
@@ -278,7 +263,7 @@ func (b *bucket) Remove(t *Timer) bool {
 	return b.remove(t)
 }
 
-func (b *bucket) Flush(reinsert func(*Timer, bool)) {
+func (b *bucket) Flush(reinsert func(*Timer)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -292,7 +277,7 @@ func (b *bucket) Flush(reinsert func(*Timer, bool)) {
 		//
 		// In either case, no further lock operation will happen to b.mu.
 		if reinsert != nil {
-			reinsert(t, false)
+			reinsert(t)
 		}
 
 		e = next

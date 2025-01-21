@@ -189,37 +189,37 @@ func (m *Module) NotifyEvent(e inf.IEvent) {
 }
 
 func (m *Module) AfterFunc(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.AfterFunc(d, name, f, nil, nil, args...)
+	return m.timerDispatcher.AfterFunc(d, name, f, args...)
 }
 
 func (m *Module) AfterFuncWithStorage(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
-	return m.timerDispatcher.AfterFuncWithStorage(d, name, f, nil, nil, args...)
+	return m.timerDispatcher.AfterFuncWithStorage(d, name, f, args...)
 }
 
 func (m *Module) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.AfterAsyncFunc(d, name, f, nil, nil, args...)
+	return m.timerDispatcher.AfterAsyncFunc(d, name, f, args...)
 }
 
 func (m *Module) TickerFunc(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.TickerFunc(d, name, f, nil, nil, args...)
+	return m.timerDispatcher.TickerFunc(d, name, f, args...)
 }
 
 func (m *Module) TickerFuncWithStorage(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
-	return m.timerDispatcher.TickerFuncWithStorage(d, name, f, nil, nil, args...)
+	return m.timerDispatcher.TickerFuncWithStorage(d, name, f, args...)
 }
 
 func (m *Module) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.TickerAsyncFunc(d, name, f, nil, nil, args...)
+	return m.timerDispatcher.TickerAsyncFunc(d, name, f, args...)
 }
 
 func (m *Module) CronFunc(spec string, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.CronFunc(spec, name, f, nil, nil, args...)
+	return m.timerDispatcher.CronFunc(spec, name, f, args...)
 }
 
 func (m *Module) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.CronAsyncFunc(spec, name, f, nil, nil, args...)
+	return m.timerDispatcher.CronAsyncFunc(spec, name, f, args...)
 }
 
 func (m *Module) CronFuncWithStorage(spec string, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
-	return m.timerDispatcher.CronFuncWithStorage(spec, name, f, nil, nil, args...)
+	return m.timerDispatcher.CronFuncWithStorage(spec, name, f, args...)
 }

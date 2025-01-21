@@ -33,12 +33,12 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			base := make([]*timingwheel.Timer, c.N)
 			for i := 0; i < len(base); i++ {
-				base[i] = dp.AfterFunc(genD(i), "", printTask1, nil, nil)
+				base[i] = dp.AfterFunc(genD(i), "", printTask1)
 			}
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				dp.AfterFunc(time.Second, "", printTask1, nil, nil).Stop()
+				dp.AfterFunc(time.Second, "", printTask1).Stop()
 			}
 
 			b.StopTimer()

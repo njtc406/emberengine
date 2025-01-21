@@ -5,7 +5,7 @@ MysqlConf:
   Passwd: 123456
   Net: tcp
   Addr: 192.168.145.188:3306
-  DBNamePrefix: login
+  DBNamePrefix: example
   TimeZone: Local
   Timeout: 10s
   ReadTimeout: 10s

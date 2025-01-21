@@ -93,7 +93,7 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 		// 调用超时,执行超时回调
 		rm.callTimeout(envelope)
 
-	}, nil, nil, envelope)
+	}, envelope)
 	if err != nil {
 		log.SysLogger.Errorf("add monitor failed,error:%s", err)
 		return

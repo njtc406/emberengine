@@ -103,7 +103,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.closeSignal = make(chan struct{})
 	}
 	if s.timerDispatcher == nil {
-		s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerSize, serviceInitConf.TimerSharedSize)
+		s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerSize, serviceInitConf.TimerBucketSize)
 	}
 	if s.mailBox == nil {
 		s.mailBox = make(chan inf.IEvent, serviceInitConf.MailBoxSize)
@@ -125,6 +125,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.eventHandler.Init(s.eventProcessor)
 	s.IConcurrent = concurrent.NewConcurrent()
 	s.pid = endpoints.GetEndpointManager().CreatePid(s.serverId, s.id, s.serviceType, s.name, s.version, s.rpcType)
+	if s.pid == nil {
+		log.SysLogger.Panicf("service[%s] create pid error", s.GetName())
+		return
+	}
 
 	if err := s.src.OnInit(); err != nil {
 		log.SysLogger.Panicf("service[%s] onInit error: %s", s.GetName(), err)

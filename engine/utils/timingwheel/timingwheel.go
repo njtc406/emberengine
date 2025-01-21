@@ -111,16 +111,8 @@ func (tw *TimingWheel) add(t *Timer) bool {
 
 // addOrRun inserts the timer t into the current timing wheel, or run the
 // timer's task if it has already expired.
-func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
+func (tw *TimingWheel) addOrRun(t *Timer) {
 	if !tw.add(t) {
-		// 任务到期,立即执行
-		if isNew {
-			// 新增,执行onTimerAdd(放这里是为了防止新增的任务本来就是过期的,导致任务被先调用了才去调用addFunc)
-			if t.onTimerAdd != nil {
-				t.onTimerAdd(t)
-			}
-		}
-
 		if t.asyncTask != nil {
 			go func() {
 				defer func() {
@@ -130,11 +122,6 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 				}()
 				t.asyncTask(t.taskArgs...)
 				if t.loop == nil {
-					// 执行任务删除逻辑
-					if t.onTimerDel != nil {
-						t.onTimerDel(t)
-					}
-
 					// 释放任务
 					releaseTimer(t)
 				}
@@ -158,12 +145,6 @@ func (tw *TimingWheel) addOrRun(t *Timer, isNew bool) {
 			t.loop()
 		}
 		return
-	}
-	if isNew {
-		// 新增,执行onTimerAdd
-		if t.onTimerAdd != nil {
-			t.onTimerAdd(t)
-		}
 	}
 }
 
@@ -230,7 +211,7 @@ func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer
 		t.timerId = tw.genTimerId()
 	}
 
-	tw.addOrRun(t, true)
+	tw.addOrRun(t)
 	return t
 }
 
@@ -281,11 +262,11 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 		expiration := t.Next(msToTime(t.expiration))
 		if !expiration.IsZero() {
 			t.expiration = timeToMs(expiration)
-			tw.addOrRun(t, false)
+			tw.addOrRun(t)
 		}
 	}
 
-	tw.addOrRun(t, true)
+	tw.addOrRun(t)
 
 	return
 }
