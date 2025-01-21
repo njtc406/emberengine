@@ -95,7 +95,7 @@ func (slf *Profiler) Push(tag string) *Analyzer {
 	slf.stackLocker.Lock()
 	defer slf.stackLocker.Unlock()
 
-	pElem := slf.stack.PushBack(&Element{tagName: tag, pushTime: time.Now()})
+	pElem := slf.stack.PushBack(&Element{tagName: tag, pushTime: time.Now()}) // 整个项目只有这个文件直接使用time.Now
 
 	return &Analyzer{elem: pElem, profiler: slf}
 }

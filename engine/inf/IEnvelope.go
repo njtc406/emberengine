@@ -30,6 +30,7 @@ type IEnvelope interface {
 	SetErrStr(err string)
 	SetNeedResponse(need bool)
 	SetCallback(cbs []dto.CompletionFunc)
+	SetTimerId(id uint64)
 
 	// Get
 
@@ -45,6 +46,7 @@ type IEnvelope interface {
 	GetError() error
 	GetErrStr() string
 	GetTimeout() time.Duration
+	GetTimerId() uint64
 
 	// Check
 

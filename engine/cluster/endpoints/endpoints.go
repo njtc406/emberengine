@@ -141,8 +141,8 @@ func (em *EndpointManager) RemoveService(pid *actor.PID) {
 func (em *EndpointManager) GetSender(pid *actor.PID) inf.IRpcSender {
 	cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
 	if cli == nil {
-		// 只有一种情况下可能是空的,就是调用者是私有服务,那么此时就单独创建一个,放入临时仓库
-		return em.repository.AddTmp(client.NewTmpSender(def.RpcTypeRpcx, pid, nil))
+		// 有一种情况下可能是空的,就是调用者是私有服务,那么此时就单独创建一个,放入临时仓库
+		return em.repository.AddTmp(client.NewTmpSender(pid.GetRpcType(), pid, nil))
 	}
 	return cli
 }

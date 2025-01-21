@@ -239,7 +239,7 @@ func (d *EtcdDiscovery) startKeepalive(watcher *watcherInfo) {
 }
 
 func (d *EtcdDiscovery) keepaliveForever(watcher *watcherInfo) {
-	log.SysLogger.Info("watcher keepalive start")
+	log.SysLogger.Info("discovery watcher keepalive start")
 	defer func() {
 		if err := recover(); err != nil {
 			log.SysLogger.Errorf("etcd keepalive error: %v", err)

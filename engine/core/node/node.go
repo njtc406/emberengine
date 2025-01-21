@@ -14,7 +14,7 @@ import (
 	"github.com/njtc406/emberengine/engine/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/utils/log"
 	"github.com/njtc406/emberengine/engine/utils/pid"
-	"github.com/njtc406/emberengine/engine/utils/timer"
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/utils/version"
 	"os"
 	"os/signal"
@@ -23,10 +23,10 @@ import (
 )
 
 var (
-	exitCh = make(chan os.Signal)
-	ID     int32
-	Type   string
-	hooks  []func()
+	exitCh        = make(chan os.Signal)
+	ID            int32
+	Type          string
+	nodeInitHooks []func() // 启动时需要执行的钩子
 )
 
 func init() {
@@ -35,13 +35,13 @@ func init() {
 }
 
 func SetStartHook(f ...func()) {
-	hooks = append(hooks, f...)
+	nodeInitHooks = append(nodeInitHooks, f...)
 }
 
 func Start(v string, confPath string) {
 	// 打印版本信息
 	version.EchoVersion(v)
-	// TODO: 这里后面如果加入集群,那么需要从集群中获取节点配置
+
 	// 初始化节点配置
 	config.Init(confPath)
 
@@ -50,6 +50,13 @@ func Start(v string, confPath string) {
 
 	// 启动线程池
 	asynclib.InitAntsPool(config.Conf.NodeConf.AntsPoolSize)
+
+	// 启动timer(默认使用时间轮)
+	timingwheel.Start(time.Millisecond*10, 100)
+
+	// 记录pid
+	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
+	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
 
 	// 初始化等待队列,并启动监听
 	monitor.GetRpcMonitor().Init().Start()
@@ -62,15 +69,8 @@ func Start(v string, confPath string) {
 	// 启动集群管理器
 	cluster.GetCluster().Start()
 
-	// 记录pid
-	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
-	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
-
-	// 启动timer
-	timer.StartTimer(10*time.Millisecond, 1000000)
-
 	// 执行钩子
-	for _, f := range hooks {
+	for _, f := range nodeInitHooks {
 		f()
 	}
 
@@ -97,6 +97,7 @@ func Start(v string, confPath string) {
 		}
 	}
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
+	timingwheel.Stop()
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()

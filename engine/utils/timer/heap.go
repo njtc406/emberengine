@@ -116,5 +116,5 @@ func tick() {
 }
 
 func Now() time.Time {
-	return timelib.GetTime()
+	return timelib.Now()
 }

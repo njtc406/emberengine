@@ -1,3 +1,5 @@
+// Package monitor
+// Deprecated: use timingwheel
 package monitor
 
 import (
@@ -89,5 +91,5 @@ func (h *CallTimerHeap) PopFirst() uint64 {
 }
 
 func Now() time.Time {
-	return timelib.GetTime()
+	return timelib.Now()
 }

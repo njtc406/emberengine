@@ -19,7 +19,7 @@ import (
 	"github.com/njtc406/emberengine/engine/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/utils/log"
-	"github.com/njtc406/emberengine/engine/utils/timer"
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"reflect"
 	"runtime/debug"
 	"sync"
@@ -103,7 +103,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.closeSignal = make(chan struct{})
 	}
 	if s.timerDispatcher == nil {
-		s.timerDispatcher = timer.NewDispatcher(serviceInitConf.TimerSize)
+		s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerSize, serviceInitConf.TimerBucketSize)
 	}
 	if s.mailBox == nil {
 		s.mailBox = make(chan inf.IEvent, serviceInitConf.MailBoxSize)
@@ -125,6 +125,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.eventHandler.Init(s.eventProcessor)
 	s.IConcurrent = concurrent.NewConcurrent()
 	s.pid = endpoints.GetEndpointManager().CreatePid(s.serverId, s.id, s.serviceType, s.name, s.version, s.rpcType)
+	if s.pid == nil {
+		log.SysLogger.Panicf("service[%s] create pid error", s.GetName())
+		return
+	}
 
 	if err := s.src.OnInit(); err != nil {
 		log.SysLogger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
@@ -174,71 +178,82 @@ func (s *Service) run() {
 			if !bStop {
 				bStop = true // 关闭信号
 				concurrent.Close()
+				s.timerDispatcher.Stop()
 			}
 		case cb := <-concurrentCBChannel:
-			if s.profiler != nil {
-				analyzer = s.profiler.Push(fmt.Sprintf("[Concurrent]%s", reflect.TypeOf(cb).String()))
-			}
-			concurrent.DoCallback(cb) // 异步执行
-			if analyzer != nil {
-				analyzer.Pop()
-				analyzer = nil
-			}
+			s.safeExec(func() {
+				if s.profiler != nil {
+					analyzer = s.profiler.Push(fmt.Sprintf("[Concurrent]%s", reflect.TypeOf(cb).String()))
+				}
+				concurrent.DoCallback(cb) // 异步执行
+				if analyzer != nil {
+					analyzer.Pop()
+					analyzer = nil
+				}
+			})
 		case ev := <-s.mailBox:
 			// 事件处理
 			switch ev.GetType() {
 			case event.SysEventRpc:
-				// rpc调用
-				cEvent, ok := ev.(*event.Event)
-				if !ok {
-					log.SysLogger.Error("event type error")
-					break
-				}
-				c := cEvent.Data.(inf.IEnvelope)
-				if c.IsReply() {
-					if s.profiler != nil {
-						analyzer = s.profiler.Push(fmt.Sprintf("[RPCResponse]%s", c.GetMethod()))
-					}
-					// 回复
-					s.rpcHandler.HandleResponse(c)
-				} else {
-					if s.profiler != nil {
-						analyzer = s.profiler.Push(fmt.Sprintf("[RPCRequest]%s", c.GetMethod()))
-					}
+				s.safeExec(func() {
 					// rpc调用
-					s.rpcHandler.HandleRequest(c)
-				}
+					cEvent, ok := ev.(*event.Event)
+					if !ok {
+						log.SysLogger.Error("event type error")
+						return
+					}
+					c := cEvent.Data.(inf.IEnvelope)
+					if c.IsReply() {
+						if s.profiler != nil {
+							analyzer = s.profiler.Push(fmt.Sprintf("[RPCResponse]%s", c.GetMethod()))
+						}
+						// 回复
+						s.rpcHandler.HandleResponse(c)
+					} else {
+						if s.profiler != nil {
+							analyzer = s.profiler.Push(fmt.Sprintf("[RPCRequest]%s", c.GetMethod()))
+						}
+						// rpc调用
+						s.rpcHandler.HandleRequest(c)
+					}
 
-				event.ReleaseEvent(cEvent)
-				if analyzer != nil {
-					analyzer.Pop()
-					analyzer = nil
-				}
+					event.ReleaseEvent(cEvent)
+
+					if analyzer != nil {
+						analyzer.Pop()
+						analyzer = nil
+					}
+				})
 			default:
+				s.safeExec(func() {
+					if s.profiler != nil {
+						analyzer = s.profiler.Push(fmt.Sprintf("[SvcEvent][%d]", ev.GetType()))
+					}
+					s.eventProcessor.EventHandler(ev)
+					if analyzer != nil {
+						analyzer.Pop()
+						analyzer = nil
+					}
+				})
+			}
+		case t := <-s.timerDispatcher.C:
+			s.safeExec(func() {
+				// 定时器处理
 				if s.profiler != nil {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SvcEvent][%d]", ev.GetType()))
+					analyzer = s.profiler.Push("[timer]" + s.GetName() + "." + t.GetName())
 				}
-				s.eventProcessor.EventHandler(ev)
+				log.SysLogger.Debugf("service[%s] timer[%s]", s.GetName(), t.GetName())
+				t.Do() // Tips:所有定时器的执行时如果有时间判断请注意,定时器的触发受到前置逻辑的影响可能在执行的那一刻已经超过时间,所以尽量不要用==去判断时间
 				if analyzer != nil {
 					analyzer.Pop()
 					analyzer = nil
 				}
-			}
-		case t := <-s.timerDispatcher.ChanTimer:
-			// 定时器处理
-			if s.profiler != nil {
-				analyzer = s.profiler.Push("[timer]" + s.GetName() + "." + t.GetName())
-			}
-			t.Do() // Tips:所有定时器的执行时如果有时间判断请注意,定时器的触发受到前置逻辑的影响可能在执行的那一刻已经超过时间,所以尽量不要用==去判断时间
-			if analyzer != nil {
-				analyzer.Pop()
-				analyzer = nil
-			}
+			})
 		}
 
 		if bStop {
-			// 等待所有channel处理完成后关闭
-			if len(s.mailBox) > 0 || len(s.timerDispatcher.ChanTimer) > 0 {
+			// 等待所有channel处理完成后关闭, timerDispatcher中可能有些timer是没有保存的,所以这里可能会有点点小问题,可能需要再加个超时,防止一直有timer回调
+			if len(s.mailBox) > 0 || len(s.timerDispatcher.C) > 0 {
 				continue
 			}
 
@@ -333,7 +348,7 @@ func (s *Service) GetServiceEventChannelNum() int {
 }
 
 func (s *Service) GetServiceTimerChannelNum() int {
-	return len(s.timerDispatcher.ChanTimer)
+	return len(s.timerDispatcher.C)
 }
 
 func (s *Service) OnInit() error {
@@ -391,4 +406,13 @@ func (s *Service) closeProfiler() {
 
 func (s *Service) GetServiceCfg() interface{} {
 	return s.cfg
+}
+
+func (s *Service) safeExec(f func()) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.SysLogger.Errorf("service [%s] exec error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
+		}
+	}()
+	f()
 }

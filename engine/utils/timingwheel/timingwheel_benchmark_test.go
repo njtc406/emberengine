@@ -1,19 +1,25 @@
 package timingwheel_test
 
 import (
-	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"testing"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 )
 
 func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
+var dp = timingwheel.NewTaskScheduler(10000000, 1)
+
+func printTask1(t *timingwheel.Timer, args ...interface{}) {
+	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+}
+
 func BenchmarkTimingWheel_StartStop(b *testing.B) {
-	tw := timingwheel.NewTimingWheel(time.Millisecond, 20)
-	tw.Start()
-	defer tw.Stop()
+	timingwheel.Start(time.Millisecond, 20)
+	defer timingwheel.Stop()
 
 	cases := []struct {
 		name string
@@ -27,12 +33,12 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			base := make([]*timingwheel.Timer, c.N)
 			for i := 0; i < len(base); i++ {
-				base[i] = tw.AfterFunc(genD(i), func() {})
+				base[i] = dp.AfterFunc(genD(i), "", printTask1)
 			}
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				tw.AfterFunc(time.Second, func() {}).Stop()
+				dp.AfterFunc(time.Second, "", printTask1).Stop()
 			}
 
 			b.StopTimer()

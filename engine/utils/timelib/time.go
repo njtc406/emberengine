@@ -4,9 +4,9 @@ import "time"
 
 var timeOffset int64 = 0 // 服务器时间偏移量
 
-// GetTime 获取服务器时间
-func GetTime() time.Time {
-	return time.Now().Add(time.Duration(timeOffset) * time.Second)
+// Now 获取服务器当前时间
+func Now() time.Time {
+	return time.Now().Add(time.Duration(timeOffset))
 }
 
 // GetTimeUnix 获取服务器时间戳
@@ -28,17 +28,17 @@ func SetTimeOffset(offset int64) {
 }
 
 func Since(t time.Time) time.Duration {
-	return GetTime().Sub(t)
+	return Now().Sub(t)
 }
 
 func SinceFromUnix(t int64) time.Duration {
-	return GetTime().Sub(time.Unix(t, 0))
+	return Now().Sub(time.Unix(t, 0))
 }
 
 // GetDayStartTime 获取给定时间的当天0点时间
 func GetDayStartTime(t time.Time) time.Time {
 	if t.IsZero() {
-		t = GetTime()
+		t = Now()
 	}
 	year, month, day := t.Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
@@ -52,7 +52,7 @@ func GetDayStartTimeUnix(t time.Time) int64 {
 // GetWeekStartTime 获取给定时间的周一0点时间戳
 func GetWeekStartTime(t time.Time) time.Time {
 	if t.IsZero() {
-		t = GetTime()
+		t = Now()
 	}
 	weekDay := int(t.Weekday())
 	daysSinceMody := (weekDay + 6) % 7
@@ -64,7 +64,7 @@ func GetWeekStartTime(t time.Time) time.Time {
 // GetWeekDurationTime 获取给定时间的周一0点-周日23:59:59时间戳
 func GetWeekDurationTime(t time.Time) (time.Time, time.Time) {
 	if t.IsZero() {
-		t = GetTime()
+		t = Now()
 	}
 	weekDay := int(t.Weekday())
 	daysSinceMody := (weekDay + 6) % 7
@@ -100,7 +100,7 @@ func SameDay(timestamp1, timestamp2 int64) bool {
 // GetMonthStartEndTime 获取给定时间的本月的开时间和结束时间
 func GetMonthStartEndTime(t time.Time) (int64, int64) {
 	if t.IsZero() {
-		t = GetTime()
+		t = Now()
 	}
 	year, month, _ := t.Date()
 	startOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, t.Location())

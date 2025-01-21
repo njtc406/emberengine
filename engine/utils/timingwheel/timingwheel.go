@@ -2,6 +2,7 @@ package timingwheel
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/utils/timelib"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -19,6 +20,8 @@ type TimingWheel struct {
 	buckets     []*bucket
 	queue       *delayqueue.DelayQueue
 
+	timerIdSeed uint64
+
 	// The higher-level overflow wheel.
 	//
 	// NOTE: This field may be updated and read concurrently, through Add().
@@ -35,7 +38,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64) *TimingWheel {
 		panic(errors.New("tick must be greater than or equal to 1ms"))
 	}
 
-	startMs := timeToMs(time.Now().UTC())
+	startMs := timeToMs(timelib.Now())
 
 	return newTimingWheel(
 		tickMs,
@@ -110,12 +113,43 @@ func (tw *TimingWheel) add(t *Timer) bool {
 // timer's task if it has already expired.
 func (tw *TimingWheel) addOrRun(t *Timer) {
 	if !tw.add(t) {
-		// Already expired
+		if t.asyncTask != nil {
+			go func() {
+				defer func() {
+					if err := recover(); err != nil {
+						//log.SysLogger.Errorf("task panic, taskId:%d, err:%v", t.timerId, err)
+					}
+				}()
+				t.asyncTask(t.taskArgs...)
+				if t.loop == nil {
+					// 释放任务
+					releaseTimer(t)
+				}
+			}()
+		} else {
+			if t.task != nil {
+				// TODO 这里之后优化一下,和service的mailbox一起优化,使用mpse来接收消息,防止消费者太慢导致阻塞
+				// 当然,这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
+				// 执行任务
+				select {
+				case t.c <- t:
+				default:
+					// 队列已满,本次不执行
+					//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+				}
+			}
+		}
 
-		// Like the standard time.AfterFunc (https://golang.org/pkg/time/#AfterFunc),
-		// always execute the timer's task in its own goroutine.
-		go t.task()
+		if t.loop != nil {
+			// 循环任务,再次加入
+			t.loop()
+		}
+		return
 	}
+}
+
+func (tw *TimingWheel) genTimerId() uint64 {
+	return atomic.AddUint64(&tw.timerIdSeed, 1)
 }
 
 func (tw *TimingWheel) advanceClock(expiration int64) {
@@ -136,7 +170,7 @@ func (tw *TimingWheel) advanceClock(expiration int64) {
 func (tw *TimingWheel) Start() {
 	tw.waitGroup.Wrap(func() {
 		tw.queue.Poll(tw.exitC, func() int64 {
-			return timeToMs(time.Now().UTC())
+			return timeToMs(timelib.Now())
 		})
 	})
 
@@ -166,11 +200,17 @@ func (tw *TimingWheel) Stop() {
 
 // AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
 // It returns a Timer that can be used to cancel the call using its Stop method.
-func (tw *TimingWheel) AfterFunc(d time.Duration, f func()) *Timer {
-	t := &Timer{
-		expiration: timeToMs(time.Now().UTC().Add(d)),
-		task:       f,
+func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
+	t := createTimer()
+	t.expiration = timeToMs(timelib.Now().Add(d))
+	for _, opt := range options {
+		opt(t)
 	}
+
+	if t.timerId <= 0 {
+		t.timerId = tw.genTimerId()
+	}
+
 	tw.addOrRun(t)
 	return t
 }
@@ -199,27 +239,33 @@ type Scheduler interface {
 // Afterwards, it will ask the next execution time each time f is about to
 // be executed, and f will be called at the next execution time if the time
 // is non-zero.
-func (tw *TimingWheel) ScheduleFunc(s Scheduler, f func()) (t *Timer) {
-	expiration := s.Next(time.Now().UTC())
+func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
+	t = createTimer()
+	for _, opt := range options {
+		opt(t)
+	}
+	expiration := t.Next(timelib.Now())
 	if expiration.IsZero() {
 		// No time is scheduled, return nil.
+		releaseTimer(t)
 		return
 	}
 
-	t = &Timer{
-		expiration: timeToMs(expiration),
-		task: func() {
-			// Schedule the task to execute at the next time if possible.
-			expiration := s.Next(msToTime(t.expiration))
-			if !expiration.IsZero() {
-				t.expiration = timeToMs(expiration)
-				tw.addOrRun(t)
-			}
-
-			// Actually execute the task.
-			f()
-		},
+	if t.timerId <= 0 {
+		t.timerId = tw.genTimerId()
 	}
+	t.expiration = timeToMs(expiration)
+	t.loop = func() {
+		if !t.isActive() {
+			return
+		}
+		expiration := t.Next(msToTime(t.expiration))
+		if !expiration.IsZero() {
+			t.expiration = timeToMs(expiration)
+			tw.addOrRun(t)
+		}
+	}
+
 	tw.addOrRun(t)
 
 	return

@@ -11,9 +11,9 @@ import (
 	"github.com/njtc406/emberengine/engine/inf"
 	"github.com/njtc406/emberengine/engine/msgenvelope"
 	"github.com/njtc406/emberengine/engine/utils/log"
+	"github.com/njtc406/emberengine/engine/utils/timingwheel"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 var rpcMonitor *RpcMonitor
@@ -23,8 +23,8 @@ type RpcMonitor struct {
 	locker  sync.RWMutex
 	seed    uint64
 	waitMap map[uint64]inf.IEnvelope
-	th      CallTimerHeap // 由于请求很频繁,所以这里使用单独的timer来处理
-	ticker  *time.Ticker
+	sd      *timingwheel.TaskScheduler
+	wg      sync.WaitGroup
 }
 
 func GetRpcMonitor() *RpcMonitor {
@@ -37,56 +37,34 @@ func GetRpcMonitor() *RpcMonitor {
 func (rm *RpcMonitor) Init() inf.IMonitor {
 	rm.closed = make(chan struct{})
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.th.Init()
-	rm.ticker = time.NewTicker(time.Millisecond * 100)
+	rm.sd = timingwheel.NewTaskScheduler(10000, 20)
 	return rm
 }
 
 func (rm *RpcMonitor) Start() {
+	rm.wg.Add(1)
 	go rm.listen()
 }
 
 func (rm *RpcMonitor) Stop() {
 	close(rm.closed)
-	rm.ticker.Stop()
+	rm.sd.Stop()
+	rm.wg.Wait()
 }
 
 func (rm *RpcMonitor) listen() {
+	defer rm.wg.Done()
 	for {
 		select {
-		case <-rm.ticker.C:
-			rm.tick()
+		case t := <-rm.sd.C:
+			if t == nil {
+				continue
+			}
+			//log.SysLogger.Debugf("RPC monitor starts executing timeout callback:%s", t.GetName())
+			t.Do()
 		case <-rm.closed:
 			return
 		}
-	}
-}
-
-func (rm *RpcMonitor) tick() {
-	for i := 0; i < 1000; i++ { // 每个tick 最多处理1000个超时的rpc
-		rm.locker.Lock()
-		id := rm.th.PopTimeout()
-		if id == 0 {
-			rm.locker.Unlock()
-			break
-		}
-
-		envelope := rm.waitMap[id]
-
-		// 直接删除
-		delete(rm.waitMap, id)
-
-		if envelope == nil || !envelope.IsRef() {
-			rm.locker.Unlock()
-			log.SysLogger.Errorf("call seq is not find,seq:%d", id)
-			continue
-		}
-
-		//log.SysLogger.Debugf("RPC call takes more than %d seconds,method is %s", int64(envelope.GetTimeout().Seconds()), envelope.GetMethod())
-		// 调用超时,执行超时回调
-		rm.callTimeout(envelope)
-		rm.locker.Unlock()
-		continue
 	}
 }
 
@@ -95,42 +73,61 @@ func (rm *RpcMonitor) GenSeq() uint64 {
 }
 
 func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
-	id := envelope.GetReqId()
-	if id == 0 {
-		return
-	}
 	rm.locker.Lock()
 	defer rm.locker.Unlock()
-	rm.waitMap[id] = envelope
-	rm.th.AddTimer(id, envelope.GetTimeout())
+
+	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) {
+		envelope := args[0].(inf.IEnvelope)
+		rm.locker.Lock()
+		// 直接删除
+		delete(rm.waitMap, tm.GetTimerId())
+		rm.locker.Unlock()
+
+		if envelope == nil || !envelope.IsRef() {
+			rm.locker.Unlock()
+			log.SysLogger.Errorf("call seq is not find,seq:%d", tm.GetTimerId())
+			return
+		}
+
+		log.SysLogger.Debugf("RPC call takes more than %d seconds,method is %s", int64(envelope.GetTimeout().Seconds()), envelope.GetMethod())
+		// 调用超时,执行超时回调
+		rm.callTimeout(envelope)
+
+	}, envelope)
+	if err != nil {
+		log.SysLogger.Errorf("add monitor failed,error:%s", err)
+		return
+	}
+	envelope.SetTimerId(timerId)
+	rm.waitMap[envelope.GetReqId()] = envelope
 }
 
-func (rm *RpcMonitor) remove(id uint64) inf.IEnvelope {
-	f, ok := rm.waitMap[id]
+func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
+	envelope, ok := rm.waitMap[seqId]
 	if !ok {
 		return nil
 	}
 
-	rm.th.Cancel(id)
-	delete(rm.waitMap, id)
-	return f
+	rm.sd.Cancel(envelope.GetTimerId())
+	delete(rm.waitMap, seqId)
+	return envelope
 }
 
-func (rm *RpcMonitor) Remove(id uint64) inf.IEnvelope {
-	if id == 0 {
+func (rm *RpcMonitor) Remove(seqId uint64) inf.IEnvelope {
+	if seqId == 0 {
 		return nil
 	}
 	rm.locker.Lock()
-	f := rm.remove(id)
+	f := rm.remove(seqId)
 	rm.locker.Unlock()
 	return f
 }
 
-func (rm *RpcMonitor) Get(id uint64) inf.IEnvelope {
+func (rm *RpcMonitor) Get(seqId uint64) inf.IEnvelope {
 	rm.locker.RLock()
 	defer rm.locker.RUnlock()
 
-	return rm.waitMap[id]
+	return rm.waitMap[seqId]
 }
 
 func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
@@ -154,8 +151,8 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	}
 }
 
-func (rm *RpcMonitor) NewCancel(id uint64) dto.CancelRpc {
+func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {
 	return func() {
-		rm.Remove(id)
+		rm.Remove(seqId)
 	}
 }

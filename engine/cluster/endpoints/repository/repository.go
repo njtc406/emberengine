@@ -60,7 +60,7 @@ func (r *Repository) tick() {
 					if tmp, ok := value.(*tmpInfo); ok {
 						// 5分钟未更新则删除
 						// TODO 后续根据需要调整
-						if timelib.GetTime().Sub(tmp.latest) > time.Minute*5 {
+						if timelib.Now().Sub(tmp.latest) > time.Minute*5 {
 							r.tmpMapPid.Delete(key)
 						}
 					}
@@ -74,7 +74,7 @@ func (r *Repository) tick() {
 func (r *Repository) AddTmp(sender inf.IRpcSender) inf.IRpcSender {
 	tmp := &tmpInfo{
 		sender: sender,
-		latest: timelib.GetTime(),
+		latest: timelib.Now(),
 	}
 	r.tmpMapPid.Store(sender.GetPid().GetServiceUid(), tmp)
 	//log.SysLogger.Infof("add tmp service: %s", sender.GetPid().GetServiceUid())
