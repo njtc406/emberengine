@@ -75,7 +75,7 @@ type ServiceConfig struct {
 	ConfPath      string             // 配置文件路径
 	ConfType      string             // 配置文件类型
 	CfgCreator    func() interface{} // 配置获取器(获取真实的配置格式)
-	Cfg           interface{}        // 配置结构体
+	Cfg           interface{}        // 配置结构体(解析后的配置)
 	DefaultSetFun func(*viper.Viper) // 默认配置函数
 	OnChangeFun   func()             // 配置变化处理函数
 }
