@@ -45,15 +45,15 @@ func (q *Queue[T]) Push(x T) {
 // Pop removes the item from the front of the queue or nil if the queue is empty
 //
 // Pop must be called from a single, consumer goroutine
-func (q *Queue[T]) Pop() T {
+func (q *Queue[T]) Pop() (T, bool) {
 	tail := q.tail
 	next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next)))) // acquire
 	if next != nil {
 		q.tail = next
 		v := next.val
-		return v
+		return v, true
 	}
-	return q._nil
+	return q._nil, false
 }
 
 // Empty returns true if the queue is empty

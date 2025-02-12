@@ -58,6 +58,7 @@ func (rc *rpcxSender) Close() {
 	if err := rc.rpcClient.Close(); err != nil {
 		log.SysLogger.Errorf("close remote client is error : %s", err)
 	}
+	//log.SysLogger.Debugf("############################close remote rpcx client success : %s", rc.IRpcSender.GetPid().String())
 	rc.rpcClient = nil
 }
 
@@ -100,4 +101,8 @@ func (rc *rpcxSender) SendRequestAndRelease(envelope inf.IEnvelope) error {
 func (rc *rpcxSender) SendResponse(envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
 	return rc.send(envelope)
+}
+
+func (rc *rpcxSender) IsClosed() bool {
+	return rc.rpcClient == nil
 }

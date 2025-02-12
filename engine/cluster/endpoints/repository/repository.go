@@ -6,7 +6,6 @@
 package repository
 
 import (
-	"github.com/njtc406/emberengine/engine/actor"
 	"github.com/njtc406/emberengine/engine/inf"
 	"github.com/njtc406/emberengine/engine/utils/timelib"
 	"sync"
@@ -46,10 +45,26 @@ func (r *Repository) Start() {
 
 func (r *Repository) Stop() {
 	r.ticker.Stop()
+	// 关闭所有连接
+	r.mapPID.Range(func(key, value any) bool {
+		if client, ok := value.(inf.IRpcSender); ok {
+			client.Close()
+		}
+		return true
+	})
 }
 
 func (r *Repository) tick() {
 	go func() {
+		defer func() {
+			// 退出时关闭所有临时连接
+			r.tmpMapPid.Range(func(key, value any) bool {
+				if client, ok := value.(inf.IRpcSender); ok {
+					client.Close()
+				}
+				return true
+			})
+		}()
 		for {
 			select {
 			case _, ok := <-r.ticker.C:
@@ -82,10 +97,11 @@ func (r *Repository) AddTmp(sender inf.IRpcSender) inf.IRpcSender {
 }
 
 func (r *Repository) Add(client inf.IRpcSender) {
-	_, ok := r.mapPID.LoadOrStore(client.GetPid().GetServiceUid(), client)
+	oldClient, ok := r.mapPID.LoadOrStore(client.GetPid().GetServiceUid(), client)
 	if ok {
 		//log.SysLogger.Debugf("service already exists: %s", client.GetPid().GetServiceUid())
-		r.mapPID.Store(client.GetPid().GetServiceUid(), client) // 已经有了,只需要更新
+		oldClient.(inf.IRpcSender).Close()                      // 旧的关闭
+		r.mapPID.Store(client.GetPid().GetServiceUid(), client) // 更新
 		return
 	}
 
@@ -126,13 +142,14 @@ func (r *Repository) Add(client inf.IRpcSender) {
 	}
 }
 
-func (r *Repository) Remove(pid *actor.PID) {
-	client, ok := r.mapPID.LoadAndDelete(pid.GetServiceUid())
+func (r *Repository) Remove(key string) {
+	ret, ok := r.mapPID.LoadAndDelete(key)
 	if !ok {
 		return
 	}
-
-	client.(inf.IRpcSender).Close()
+	client := ret.(inf.IRpcSender)
+	pid := client.GetPid()
+	client.Close()
 
 	r.mapNodeLock.Lock()
 	defer r.mapNodeLock.Unlock()

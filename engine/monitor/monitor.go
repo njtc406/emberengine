@@ -37,7 +37,8 @@ func GetRpcMonitor() *RpcMonitor {
 func (rm *RpcMonitor) Init() inf.IMonitor {
 	rm.closed = make(chan struct{})
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.sd = timingwheel.NewTaskScheduler(10000, 20)
+	// TODO 将大小和桶数量做成配置
+	rm.sd = timingwheel.NewTaskScheduler(10000, 20) // 这个调度器可能需要根据需要调整
 	return rm
 }
 
@@ -142,7 +143,7 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	if envelope.NeedCallback() {
 		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收
 		// 如果是远程调用,那么在远程client将消息发送完成后自动回收)
-		if err := envelope.GetSender().PushRequest(envelope); err != nil {
+		if err := envelope.GetSender().PostUserMessage(envelope); err != nil {
 			msgenvelope.ReleaseMsgEnvelope(envelope)
 			log.SysLogger.Errorf("send call timeout response error:%s", err.Error())
 		}

@@ -34,19 +34,15 @@ type ILifecycle interface {
 }
 
 type IServiceHandler interface {
-	SetGoRoutineNum(num int32)
 	GetServiceCfg() interface{}
-	GetServiceEventChannelNum() int
-	GetServiceTimerChannelNum() int
-	GetRpcHandler() IRpcHandler
+	GetMailbox() IMailbox
+	IsPrivate() bool
 }
 
 type IIdentifiable interface {
 	OnSetup(svc IService)
 	SetName(string)
 	GetName() string
-	SetServiceId(id string)
-	GetServiceId() string
 	GetPid() *actor.PID
 	GetServerId() int32
 	IsClosed() bool // 服务是否已经关闭

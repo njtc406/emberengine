@@ -35,7 +35,7 @@ func (p *protoSerializer) Deserialize(typeName string, bytes []byte) (interface{
 	return pm, err
 }
 
-func (protoSerializer) GetTypeName(msg interface{}) (string, error) {
+func (p *protoSerializer) GetTypeName(msg interface{}) (string, error) {
 	if message, ok := msg.(proto.Message); ok {
 		typeName := proto.MessageName(message)
 

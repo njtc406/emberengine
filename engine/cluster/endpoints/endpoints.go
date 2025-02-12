@@ -74,6 +74,7 @@ func (em *EndpointManager) Stop() {
 		rt.Close()
 	}
 	em.repository.Stop()
+	log.SysLogger.Debugf("endpoints manager stopped")
 }
 
 // updateServiceInfo 更新远程服务信息事件
@@ -93,33 +94,39 @@ func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
 			// 本地服务,忽略
 			return
 		}
-
+		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr add remote service: %s", pid.String())
 		em.repository.Add(client.NewSender(pid.GetRpcType(), &pid, nil))
 	}
 }
 
+type delKey struct {
+	Key string
+}
+
 // removeServiceInfo 删除远程服务信息事件
 func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
+	log.SysLogger.Debugf("endpoints receive remove service event: %+v", e)
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
-	if kv.Value != nil {
-		var pid actor.PID
-		if err := protojson.Unmarshal(kv.Value, &pid); err != nil {
-			log.SysLogger.Errorf("unmarshal pid error: %v", err)
-			return
-		}
-
-		em.repository.Remove(&pid)
+	if kv.Key != nil {
+		em.repository.Remove(string(kv.Key))
+	} else {
+		log.SysLogger.Errorf("remove service error: key is nil")
 	}
 }
 
 // AddService 添加本地服务到服务发现中
-func (em *EndpointManager) AddService(pid *actor.PID, rpcHandler inf.IRpcHandler) {
-	//log.SysLogger.Debugf("add local service: %s, pid: %v", pid.String(), rpcHandler)
-	em.repository.Add(client.NewSender(def.RpcTypeLocal, pid, rpcHandler))
+func (em *EndpointManager) AddService(svc inf.IService) {
+	//log.SysLogger.Debugf("add local service: %s, pid: %v", pid.String(), mailbox)
+	pid := svc.GetPid()
+	if pid == nil {
+		log.SysLogger.Errorf("add service error: pid is nil")
+		return
+	}
+	em.repository.Add(client.NewSender(def.RpcTypeLocal, pid, svc.GetMailbox()))
 
 	// 私有服务不发布
-	if rpcHandler.IsPrivate() {
+	if svc.IsPrivate() {
 		return
 	}
 
@@ -134,8 +141,38 @@ func (em *EndpointManager) AddService(pid *actor.PID, rpcHandler inf.IRpcHandler
 	return
 }
 
-func (em *EndpointManager) RemoveService(pid *actor.PID) {
-	em.repository.Remove(pid)
+func (em *EndpointManager) RemoveService(svc inf.IService) {
+	pid := svc.GetPid()
+	em.repository.Remove(pid.GetServiceUid())
+
+	if svc.IsPrivate() {
+		return
+	}
+
+	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
+
+	// 将服务信息发布到集群
+	ev := event.NewEvent()
+	ev.Type = event.SysEventServiceDis
+	ev.Data = pid
+	em.IEventProcessor.EventHandler(ev)
+}
+
+// UpdateService 更新服务信息(服务信息发生变化后调用,比如version发生变化等待)
+func (em *EndpointManager) UpdateService(svc inf.IService) {
+	pid := svc.GetPid()
+	em.repository.Add(client.NewSender(def.RpcTypeLocal, pid, svc.GetMailbox()))
+	if svc.IsPrivate() {
+		return
+	}
+
+	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
+
+	// 将服务信息发布到集群
+	ev := event.NewEvent()
+	ev.Type = event.SysEventServiceUpdate
+	ev.Data = pid
+	em.IEventProcessor.EventHandler(ev)
 }
 
 func (em *EndpointManager) GetSender(pid *actor.PID) inf.IRpcSender {

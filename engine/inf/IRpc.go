@@ -10,17 +10,11 @@ import (
 )
 
 type IRpcHandler interface {
-	IRpcChannel
-	IHttpChannel
 	IRpcSelector
-
-	GetName() string
-	GetPid() *actor.PID           // 获取服务id
-	GetRpcHandler() IRpcHandler   // 获取rpc服务
 	HandleRequest(msg IEnvelope)  // 处理请求
 	HandleResponse(msg IEnvelope) // 处理回复
-	IsPrivate() bool              // 是否私有服务
-	IsClosed() bool               // 服务是否已经关闭
+
+	GetMethods() []string // 获取所有对外接口名称
 }
 
 type IRpcSelector interface {

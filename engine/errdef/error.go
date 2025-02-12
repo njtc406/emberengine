@@ -10,6 +10,7 @@ var (
 	ModuleNotInitialized    = errors.New("module not initialized")                    // 模块未初始化
 	ModuleHadRegistered     = errors.New("module had registered")                     // 已经注册过该模块
 	EventChannelIsFull      = errors.New("event channel is full")                     // 事件通道已满
+	MailboxNotRunning       = errors.New("mailbox not running")                       // 邮箱未运行
 	RPCCallTimeout          = errors.New("rpc call timeout")                          // RPC 调用超时
 	ServiceNotFound         = errors.New("service not found")                         // 服务未找到
 	ServiceIsRunning        = errors.New("service is running")                        // 服务正在运行

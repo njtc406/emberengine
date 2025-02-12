@@ -43,7 +43,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			//log.SysLogger.Debugf("call back envelope: %+v", envelope)
 
 			if envelope.NeedCallback() {
-				return sender.PushRequest(envelope)
+				return sender.PostUserMessage(envelope)
 			} else {
 				// 同步回调,回复结果
 				envelope.Done()

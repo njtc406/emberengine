@@ -7,23 +7,31 @@ package event
 
 const (
 
-	// 基础事件 -1000以上 系统事件 -1 到 -999  用户事件 1 - 99
+	// 基础事件 -1000以上 系统事件 -1 到 -999  用户事件 1 - 999
 	SysEventWebsocket = -5
 
-	SysEventRpc               = -1001 // 远程调用事件
-	SysEventReply             = -1002 // 远程调用回复事件
-	SysEventHttpMsg           = -1003 // 客户端消息事件
-	SysEventETCDPut           = -1004 // etcd 存储事件
-	SysEventETCDDel           = -1005 // etcd 删除事件
-	SysEventServiceReg        = -1006 // 服务注册事件
-	SysEventServiceDis        = -1007 // 服务注销事件
-	SysEventServiceUp         = -1008 // 服务上线事件
-	SysEventServiceDown       = -1009 // 服务下线事件
-	SysEventServiceConfChange = -1010 // 服务配置变更事件
-	SysEventServiceReload     = -1011 // 服务重载事件
+	SysEventETCDPut       = -11 // etcd 存储事件
+	SysEventETCDDel       = -12 // etcd 删除事件
+	SysEventServiceReg    = -13 // 服务注册事件
+	SysEventServiceDis    = -14 // 服务注销事件
+	SysEventServiceUpdate = -15 // 服务更新事件
 
-	SysEventNodeConn = -1010 // 节点连接事件
-	SysEventNatsConn = -1011 // nats 连接事件
+	SysEventServiceUp         = -30 // 服务上线事件
+	SysEventServiceDown       = -31 // 服务下线事件
+	SysEventServiceConfChange = -32 // 服务配置变更事件
+	SysEventServiceReload     = -33 // 服务重载事件
 
-	MaxType = -1000
+	SysEventNodeConn = -50 // 节点连接事件
+	SysEventNatsConn = -51 // nats 连接事件
+
+	ServiceSuspended          = -1001 // 服务挂起消息事件
+	ServiceResumed            = -1002 // 服务恢复消息事件
+	SysEventServiceClose      = -1003 // 服务关闭事件
+	ServiceConcurrentCallback = -2001 // 并发回调事件
+	ServiceTimerCallback      = -2002 // 定时器回调事件
+
+	RpcMsg  = -3001 // rpc 消息事件
+	UserMsg = -3002 // 用户消息事件
+
+	MaxType = -1 // 预定义的最大只到-1
 )

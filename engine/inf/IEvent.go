@@ -8,10 +8,9 @@ package inf
 // EventCallBack 事件接受器
 type EventCallBack func(event IEvent)
 
-type EventType int32
-
 type IEvent interface {
-	GetType() EventType
+	GetType() int32
+	GetKey() string
 }
 
 type IEventChannel interface {
@@ -23,14 +22,14 @@ type IEventProcessor interface {
 
 	Init(eventChannel IEventChannel)
 	EventHandler(ev IEvent)
-	RegEventReceiverFunc(eventType EventType, receiver IEventHandler, callback EventCallBack)
-	UnRegEventReceiverFun(eventType EventType, receiver IEventHandler)
+	RegEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
+	UnRegEventReceiverFun(eventType int32, receiver IEventHandler)
 
 	CastEvent(event IEvent) //广播事件
-	AddBindEvent(eventType EventType, receiver IEventHandler, callback EventCallBack)
-	AddListen(eventType EventType, receiver IEventHandler)
-	RemoveBindEvent(eventType EventType, receiver IEventHandler)
-	RemoveListen(eventType EventType, receiver IEventHandler)
+	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)
+	AddListen(eventType int32, receiver IEventHandler)
+	RemoveBindEvent(eventType int32, receiver IEventHandler)
+	RemoveListen(eventType int32, receiver IEventHandler)
 }
 
 type IEventHandler interface {
@@ -39,6 +38,6 @@ type IEventHandler interface {
 	NotifyEvent(IEvent)
 	Destroy()
 	//注册了事件
-	AddRegInfo(eventType EventType, eventProcessor IEventProcessor)
-	RemoveRegInfo(eventType EventType, eventProcessor IEventProcessor)
+	AddRegInfo(eventType int32, eventProcessor IEventProcessor)
+	RemoveRegInfo(eventType int32, eventProcessor IEventProcessor)
 }

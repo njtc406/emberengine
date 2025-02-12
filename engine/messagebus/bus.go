@@ -52,17 +52,18 @@ func ReleaseMessageBus(mb *MessageBus) {
 	busPool.Put(mb)
 }
 
-func (mb *MessageBus) call(method string, timeout time.Duration, in, out interface{}) error {
+func (mb *MessageBus) call(method string, headers map[string]string, timeout time.Duration, in, out interface{}) error {
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return mb.err
+	}
 	if mb.sender == nil {
 		return fmt.Errorf("sender is nil")
 	}
 	if mb.receiver == nil {
 		return fmt.Errorf("receiver is nil")
 	}
-	if mb.err != nil {
-		// 这里可能是从MultiBus中产生的
-		return mb.err
-	}
+
 	if out != nil {
 		switch out.(type) {
 		case []interface{}:
@@ -90,6 +91,7 @@ func (mb *MessageBus) call(method string, timeout time.Duration, in, out interfa
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
+	envelope.SetHeaders(headers)
 	envelope.SetMethod(method)
 	envelope.SetSenderPid(mb.sender.GetPid())
 	envelope.SetReceiverPid(mb.receiver.GetPid())
@@ -110,7 +112,7 @@ func (mb *MessageBus) call(method string, timeout time.Duration, in, out interfa
 		// 发送失败,释放资源
 		mt.Remove(envelope.GetReqId())
 		msgenvelope.ReleaseMsgEnvelope(envelope)
-		log.SysLogger.Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetName(), envelope.GetMethod(), err)
+		log.SysLogger.Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), envelope.GetMethod(), err)
 		return errdef.RPCCallFailed
 	}
 
@@ -188,18 +190,22 @@ func (mb *MessageBus) call(method string, timeout time.Duration, in, out interfa
 }
 
 // Call 同步调用服务
-func (mb *MessageBus) Call(method string, in, out interface{}) error {
+func (mb *MessageBus) Call(method string, headers map[string]string, in, out interface{}) error {
 	defer ReleaseMessageBus(mb)
-	return mb.call(method, def.DefaultRpcTimeout, in, out)
+	return mb.call(method, headers, def.DefaultRpcTimeout, in, out)
 }
-func (mb *MessageBus) CallWithTimeout(method string, timeout time.Duration, in, out interface{}) error {
+func (mb *MessageBus) CallWithTimeout(method string, headers map[string]string, timeout time.Duration, in, out interface{}) error {
 	defer ReleaseMessageBus(mb)
-	return mb.call(method, timeout, in, out)
+	return mb.call(method, headers, timeout, in, out)
 }
 
 // AsyncCall 异步调用服务
-func (mb *MessageBus) AsyncCall(method string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return nil, mb.err
+	}
 	if mb.sender == nil || mb.receiver == nil {
 		return nil, fmt.Errorf("sender or receiver is nil")
 	}
@@ -216,6 +222,7 @@ func (mb *MessageBus) AsyncCall(method string, timeout time.Duration, in interfa
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
+	envelope.SetHeaders(headers)
 	envelope.SetMethod(method)
 	envelope.SetSenderPid(mb.sender.GetPid())
 	envelope.SetReceiverPid(mb.receiver.GetPid())
@@ -235,7 +242,7 @@ func (mb *MessageBus) AsyncCall(method string, timeout time.Duration, in interfa
 		// 发送失败,释放资源
 		mt.Remove(envelope.GetReqId())
 		msgenvelope.ReleaseMsgEnvelope(envelope)
-		log.SysLogger.Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetName(), envelope.GetMethod(), err)
+		log.SysLogger.Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), envelope.GetMethod(), err)
 		return nil, errdef.RPCCallFailed
 	}
 
@@ -243,8 +250,12 @@ func (mb *MessageBus) AsyncCall(method string, timeout time.Duration, in interfa
 }
 
 // Send 无返回调用
-func (mb *MessageBus) Send(method string, in interface{}) error {
+func (mb *MessageBus) Send(method string, headers map[string]string, in interface{}) error {
 	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return mb.err
+	}
 	if mb.receiver == nil {
 		return fmt.Errorf("sender or receiver is nil")
 	}
@@ -256,6 +267,7 @@ func (mb *MessageBus) Send(method string, in interface{}) error {
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
 	envelope.SetMethod(method)
+	envelope.SetHeaders(headers)
 	envelope.SetReceiverPid(mb.receiver.GetPid())
 	envelope.SetSender(mb.sender)
 	envelope.SetRequest(in)
@@ -267,9 +279,9 @@ func (mb *MessageBus) Send(method string, in interface{}) error {
 	return mb.receiver.SendRequestAndRelease(envelope)
 }
 
-func (mb *MessageBus) Cast(serviceMethod string, in interface{}) {
-	if err := mb.Send(serviceMethod, in); err != nil {
-		log.SysLogger.Errorf("cast service[%s] failed, error: %v", serviceMethod, err)
+func (mb *MessageBus) Cast(method string, headers map[string]string, in interface{}) {
+	if err := mb.Send(method, headers, in); err != nil {
+		log.SysLogger.Errorf("cast service[%s] failed, error: %v", method, err)
 	}
 }
 
@@ -278,9 +290,9 @@ func (mb *MessageBus) Cast(serviceMethod string, in interface{}) {
 // MultiBus 多节点调用
 type MultiBus []inf.IBus
 
-func (m MultiBus) Call(serviceMethod string, in, out interface{}) error {
+func (m MultiBus) Call(method string, headers map[string]string, in, out interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.Errorf("===========select empty service to call %s", serviceMethod)
+		log.SysLogger.Errorf("===========select empty service to call %s", method)
 		return errdef.ServiceIsUnavailable
 	}
 
@@ -293,12 +305,12 @@ func (m MultiBus) Call(serviceMethod string, in, out interface{}) error {
 	}
 
 	// call只允许调用一个节点
-	return m[0].Call(serviceMethod, in, out)
+	return m[0].Call(method, headers, in, out)
 }
 
-func (m MultiBus) CallWithTimeout(serviceMethod string, timeout time.Duration, in, out interface{}) error {
+func (m MultiBus) CallWithTimeout(method string, headers map[string]string, timeout time.Duration, in, out interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.Errorf("===========select empty service to call timeout %s", serviceMethod)
+		log.SysLogger.Errorf("===========select empty service to call timeout %s", method)
 		return errdef.ServiceIsUnavailable
 	}
 
@@ -311,12 +323,12 @@ func (m MultiBus) CallWithTimeout(serviceMethod string, timeout time.Duration, i
 	}
 
 	// call只允许调用一个节点
-	return m[0].CallWithTimeout(serviceMethod, timeout, in, out)
+	return m[0].CallWithTimeout(method, headers, timeout, in, out)
 }
 
-func (m MultiBus) AsyncCall(serviceMethod string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+func (m MultiBus) AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
-		log.SysLogger.Errorf("===========select empty service to async call %s", serviceMethod)
+		log.SysLogger.Errorf("===========select empty service to async call %s", method)
 		return nil, errdef.ServiceIsUnavailable
 	}
 	if len(m) > 1 {
@@ -327,17 +339,17 @@ func (m MultiBus) AsyncCall(serviceMethod string, timeout time.Duration, in inte
 		return dto.EmptyCancelRpc, fmt.Errorf("only one node can be called at a time, now got %v", len(m))
 	}
 	// call只允许调用一个节点
-	return m[0].AsyncCall(serviceMethod, timeout, in, callbacks...)
+	return m[0].AsyncCall(method, headers, timeout, in, callbacks...)
 }
 
-func (m MultiBus) Send(serviceMethod string, in interface{}) error {
+func (m MultiBus) Send(method string, headers map[string]string, in interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.Errorf("===========select empty service to send %s", serviceMethod)
+		log.SysLogger.Errorf("===========select empty service to send %s", method)
 		return errdef.ServiceIsUnavailable
 	}
 	var errs []error
 	for _, bus := range m {
-		if err := bus.Send(serviceMethod, in); err != nil {
+		if err := bus.Send(method, headers, in); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -345,15 +357,15 @@ func (m MultiBus) Send(serviceMethod string, in interface{}) error {
 	return errorlib.CombineErr(errs...)
 }
 
-func (m MultiBus) Cast(serviceMethod string, in interface{}) {
+func (m MultiBus) Cast(method string, headers map[string]string, in interface{}) {
 	if len(m) == 0 {
-		log.SysLogger.Errorf("===========select empty service to send %s", serviceMethod)
+		log.SysLogger.Errorf("===========select empty service to send %s", method)
 		return
 	}
 
 	asynclib.Go(func() {
 		for _, bus := range m {
-			bus.Cast(serviceMethod, in)
+			bus.Cast(method, headers, in)
 		}
 	})
 

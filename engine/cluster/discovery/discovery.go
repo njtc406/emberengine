@@ -7,12 +7,6 @@ package discovery
 
 import (
 	"context"
-	"path"
-	"sync"
-	"sync/atomic"
-	"time"
-	"unsafe"
-
 	"github.com/njtc406/emberengine/engine/actor"
 	"github.com/njtc406/emberengine/engine/config"
 	"github.com/njtc406/emberengine/engine/dto"
@@ -24,6 +18,10 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
+	"path"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const minWatchTTL = 3
@@ -56,7 +54,7 @@ type EtcdDiscovery struct {
 	watching   int32
 	client     *clientv3.Client
 	mapWatcher *sync.Map
-	t          *time.Timer
+	//t          *time.Timer
 }
 
 func NewDiscovery() *EtcdDiscovery {
@@ -115,9 +113,12 @@ func (d *EtcdDiscovery) Start() {
 		return
 	}
 	d.IEventProcessor.RegEventReceiverFunc(event.SysEventServiceReg, d.IEventHandler, d.addService)
+	d.IEventProcessor.RegEventReceiverFunc(event.SysEventServiceDis, d.IEventHandler, d.removeService)
 	asynclib.Go(d.watcher)
-	tp := time.AfterFunc(time.Second, d.getAll)
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&d.t)), unsafe.Pointer(&tp))
+	d.getAll()
+	//tp := time.AfterFunc(time.Second, d.getAll)
+	//_ = time.AfterFunc(time.Second, d.getAll)
+	//atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&d.t)), unsafe.Pointer(&tp))
 }
 
 func (d *EtcdDiscovery) Close() {
@@ -144,6 +145,7 @@ func (d *EtcdDiscovery) closeWatchers() {
 				releaseWatcherInfo(watcher) // 回收
 				return true
 			}
+
 			_, err := d.client.Revoke(context.Background(), watcher.getLeaseID())
 			if err != nil {
 				log.SysLogger.Errorf("etcd revoke lease error: %v", err)
@@ -161,6 +163,7 @@ func (d *EtcdDiscovery) getAll() {
 	if d.client == nil {
 		return
 	}
+
 	// 获取当前所有服务
 	resp, err := d.client.Get(context.Background(), config.Conf.ClusterConf.DiscoveryConf.Path, clientv3.WithPrefix())
 	if err != nil {
@@ -203,15 +206,19 @@ func (d *EtcdDiscovery) watch() {
 				var ent *event.Event
 				switch ev.Type {
 				case clientv3.EventTypePut:
+					//log.SysLogger.Debugf("-----------------------etcd put service: %v", string(ev.Kv.Key))
 					// 注册或者修改服务
 					ent = event.NewEvent()
 					ent.Type = event.SysEventETCDPut
-					ent.Data = ev.Kv
+					data := *ev.Kv
+					ent.Data = &data
 				case clientv3.EventTypeDelete:
+					//log.SysLogger.Debugf("-----------------------etcd delete service: %v", string(ev.Kv.Key))
 					// 注销服务
 					ent = event.NewEvent()
 					ent.Type = event.SysEventETCDDel
-					ent.Data = ev.Kv
+					data := *ev.Kv
+					ent.Data = &data
 				default:
 					continue
 				}
@@ -233,6 +240,13 @@ func (d *EtcdDiscovery) startKeepalive(watcher *watcherInfo) {
 				return
 			default:
 				d.keepaliveForever(watcher) // 会阻塞
+				// 如果租约失效,则申请一个新的租约
+				leaseID, err := d.newLeaseID()
+				if err != nil {
+					log.SysLogger.Errorf("etcd new lease error: %v", err)
+					continue
+				}
+				watcher.setLeaseID(leaseID)
 			}
 		}
 	})

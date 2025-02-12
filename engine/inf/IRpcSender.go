@@ -8,10 +8,12 @@ package inf
 import "github.com/njtc406/emberengine/engine/actor"
 
 type IRpcSender interface {
-	IRpcHandler
+	IMailbox
 	IRpcSenderHandler
 
 	GetPid() *actor.PID
+	SetPid(pid *actor.PID)
+	IsClosed() bool
 }
 
 type IRpcSenderHandler interface {
@@ -20,6 +22,7 @@ type IRpcSenderHandler interface {
 	SendRequest(envelope IEnvelope) error
 	SendRequestAndRelease(envelope IEnvelope) error
 	SendResponse(envelope IEnvelope) error
+	IsClosed() bool
 }
 
 type IRpcSenderFactory interface {

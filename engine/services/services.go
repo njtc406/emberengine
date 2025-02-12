@@ -58,6 +58,7 @@ func Start() {
 			log.SysLogger.Errorf("Start Service: %s failed, err: %s", svc.GetName(), err)
 		}
 	}
+	log.SysLogger.Infof("=============服务启动完成===================")
 }
 
 func StopAll() {

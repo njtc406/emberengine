@@ -265,4 +265,5 @@ func (scheduler *TaskScheduler) Stop() {
 		}
 		shard.Unlock()
 	}
+	close(scheduler.C)
 }

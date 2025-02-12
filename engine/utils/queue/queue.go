@@ -17,7 +17,7 @@ type Queue struct {
 	head, tail, count int
 }
 
-// New constructs and returns a new Queue.
+// NewQueue constructs and returns a new Queue.
 func NewQueue() *Queue {
 	return &Queue{
 		buf: make([]interface{}, minQueueLen),

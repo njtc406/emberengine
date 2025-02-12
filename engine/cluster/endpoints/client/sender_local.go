@@ -9,11 +9,13 @@ import (
 	"github.com/njtc406/emberengine/engine/errdef"
 	"github.com/njtc406/emberengine/engine/inf"
 	"github.com/njtc406/emberengine/engine/monitor"
+	"sync/atomic"
 )
 
 // localSender 本地服务的Client
 type localSender struct {
 	inf.IRpcSender
+	closed int32
 }
 
 func newLClient(sender inf.IRpcSender) inf.IRpcSenderHandler {
@@ -22,14 +24,16 @@ func newLClient(sender inf.IRpcSender) inf.IRpcSenderHandler {
 	}
 }
 
-func (lc *localSender) Close() {}
+func (lc *localSender) Close() {
+	atomic.StoreInt32(&lc.closed, 1)
+}
 
 func (lc *localSender) SendRequest(envelope inf.IEnvelope) error {
 	if lc.IsClosed() {
 		return errdef.ServiceNotFound
 	}
 
-	return lc.PushRequest(envelope)
+	return lc.PostUserMessage(envelope)
 }
 
 func (lc *localSender) SendResponse(envelope inf.IEnvelope) error {
@@ -42,7 +46,7 @@ func (lc *localSender) SendResponse(envelope inf.IEnvelope) error {
 
 	if envelope.NeedCallback() {
 		// 本地调用的回复消息,直接发送到对应service的邮箱处理
-		return lc.PushRequest(envelope)
+		return lc.PostUserMessage(envelope)
 	} else {
 		// 同步调用,直接设置调用结束
 		envelope.Done()
@@ -53,4 +57,8 @@ func (lc *localSender) SendResponse(envelope inf.IEnvelope) error {
 func (lc *localSender) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	// 本地调用envelope在接收者处理后释放
 	return lc.SendRequest(envelope)
+}
+
+func (lc *localSender) IsClosed() bool {
+	return atomic.LoadInt32(&lc.closed) == 1
 }

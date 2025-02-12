@@ -7,7 +7,6 @@ package services
 
 import (
 	"github.com/njtc406/emberengine/engine/core"
-	"github.com/njtc406/emberengine/engine/event"
 	"github.com/njtc406/emberengine/engine/inf"
 )
 
@@ -23,9 +22,9 @@ type daemon struct {
 func (d *daemon) OnInit() error {
 	// TODO 注册服务事件
 
-	d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
-	d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)
-	d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceReload, d.GetEventHandler(), d.serviceReload)
+	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
+	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)
+	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceReload, d.GetEventHandler(), d.serviceReload)
 	return nil
 }
 

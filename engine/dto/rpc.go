@@ -15,7 +15,10 @@ type CompletionFunc func(data interface{}, err error) // 异步回调函数
 type Header map[string]string
 
 func (header Header) Get(key string) string {
-	return header[key]
+	if v, ok := header[key]; ok {
+		return v
+	}
+	return ""
 }
 
 func (header Header) Set(key string, value string) {

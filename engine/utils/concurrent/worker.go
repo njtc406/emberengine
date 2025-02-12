@@ -61,8 +61,8 @@ func (w *worker) exec(t *task) {
 	w.endCallFun(t.fn(), t)
 }
 
-func (w *worker) endCallFun(isDocallBack bool, t *task) {
-	if isDocallBack {
+func (w *worker) endCallFun(isDoCallBack bool, t *task) {
+	if isDoCallBack {
 		w.pushAsyncDoCallbackEvent(t.cb)
 	}
 

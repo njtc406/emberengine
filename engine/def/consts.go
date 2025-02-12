@@ -25,9 +25,13 @@ const (
 )
 
 const (
-	DefaultTimerSize          = 1024 // 默认定时器数量
-	DefaultMailBoxSize        = 1024 // 默认事件队列数量
-	DefaultGoroutineNum int32 = 1    // 默认协程数量
+	DefaultTimerSize         = 1024 // 默认定时器数量
+	DefaultTimerBucketSize   = 1024 // 默认bucket数量
+	DefaultUserMailboxSize   = 1024 // 默认事件队列数量
+	DefaultSysMailboxSize    = 16   // 默认系统事件队列数量
+	DefaultWorkerNum         = 1    // 默认协程数量
+	DefaultGoroutinePoolSize = 10   // 默认协程池大小
+	DefaultVirtualWorkerRate = 10   // 虚拟worker比率
 )
 
 const (
@@ -54,7 +58,7 @@ const (
 	DefaultPVPath           = "./cache"
 	DefaultPVCPath          = "./data"
 	DefaultLogPath          = "logs"
-	DefaultAntsPoolSize     = 10000
+	DefaultAntsPoolSize     = 100
 	DefaultProfilerInterval = 10 * time.Second
 )
 

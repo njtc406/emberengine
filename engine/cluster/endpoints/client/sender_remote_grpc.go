@@ -39,8 +39,9 @@ func newGrpcClient(sender inf.IRpcSender) inf.IRpcSenderHandler {
 }
 
 func (rc *grpcSender) Close() {
-	rc.conn.Close()
+	_ = rc.conn.Close()
 	rc.rpcClient = nil
+	//log.SysLogger.Debugf("close remote grpc client success : %s", rc.IRpcSender.GetPid().String())
 }
 
 func (rc *grpcSender) send(envelope inf.IEnvelope) error {
@@ -82,4 +83,8 @@ func (rc *grpcSender) SendRequestAndRelease(envelope inf.IEnvelope) error {
 func (rc *grpcSender) SendResponse(envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
 	return rc.send(envelope)
+}
+
+func (rc *grpcSender) IsClosed() bool {
+	return rc.rpcClient == nil
 }

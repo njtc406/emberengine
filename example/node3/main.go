@@ -13,7 +13,6 @@ import (
 	"github.com/njtc406/emberengine/engine/services"
 	"github.com/njtc406/emberengine/engine/utils/log"
 	"github.com/njtc406/emberengine/example/msg"
-	"time"
 )
 
 type Service3 struct {
@@ -38,7 +37,7 @@ func (s *Service3) RPCTest2() {
 }
 
 func (s *Service3) RPCSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
-	time.Sleep(time.Second * 2)
+	//time.Sleep(time.Second * 2)
 	return &msg.Msg_Test_Resp{
 		Ret: req.A + req.B,
 	}

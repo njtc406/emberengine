@@ -6,6 +6,8 @@
 package inf
 
 import (
+	"github.com/njtc406/emberengine/engine/actor"
+	"github.com/njtc406/emberengine/engine/def"
 	"github.com/njtc406/emberengine/engine/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/utils/timer"
 	"time"
@@ -29,6 +31,7 @@ type IModuleIdentity interface {
 	GetModuleID() uint32     // 获取模块ID
 	GetModuleName() string   // 获取模块名称
 	NewModuleID() uint32     // 生成模块ID
+	GetPid() *actor.PID
 }
 
 type IModuleHierarchy interface {
@@ -39,6 +42,7 @@ type IModuleHierarchy interface {
 	GetRoot() IModule                  // 获取根模块
 	GetBaseModule() IModule            // 获取基础模块
 	GetParent() IModule                // 获取父模块
+	GetMethodMgr() IMethodMgr          // 获取方法管理器
 }
 
 type IModuleServiceEvent interface {
@@ -52,4 +56,11 @@ type IModuleTimer interface {
 	AfterFunc(d time.Duration, cb func(iTimer timer.ITimer)) timer.ITimer
 	CronFunc(cronExpr *timer.CronExpr, cb func(timer.ITimer)) timer.ITimer
 	NewTicker(d time.Duration, cb func(timer.ITimer)) timer.ITimer
+}
+
+type IMethodMgr interface {
+	AddMethod(name string, info *def.MethodInfo)
+	GetMethod(name string) (*def.MethodInfo, bool)
+	RemoveMethods(names []string)
+	IsPrivate() bool
 }

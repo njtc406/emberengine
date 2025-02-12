@@ -84,7 +84,7 @@ func (c *Cluster) run() {
 				switch ev.GetType() {
 				case event.SysEventETCDPut, event.SysEventETCDDel:
 					e := ev.(*event.Event)
-					c.eventProcessor.EventHandler(e)
+					c.eventProcessor.EventHandler(ev)
 					event.ReleaseEvent(e)
 				}
 			}

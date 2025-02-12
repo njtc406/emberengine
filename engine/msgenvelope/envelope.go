@@ -9,13 +9,38 @@ import (
 	"errors"
 	"github.com/njtc406/emberengine/engine/actor"
 	"github.com/njtc406/emberengine/engine/dto"
+	"github.com/njtc406/emberengine/engine/event"
 	"github.com/njtc406/emberengine/engine/inf"
 	"github.com/njtc406/emberengine/engine/utils/log"
 	"github.com/njtc406/emberengine/engine/utils/pool"
 	"github.com/njtc406/emberengine/engine/utils/serializer"
+	"strconv"
 	"sync"
 	"time"
 )
+
+var msgEnvelopePool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+	return &MsgEnvelope{}
+})
+
+// 测试资源释放
+//var count int
+
+func NewMsgEnvelope() *MsgEnvelope {
+	//count++
+	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
+	return msgEnvelopePool.Get().(*MsgEnvelope)
+}
+
+func ReleaseMsgEnvelope(envelope inf.IEnvelope) {
+	if envelope != nil {
+		//count--
+		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
+		if envelope.IsRef() {
+			msgEnvelopePool.Put(envelope.(*MsgEnvelope))
+		}
+	}
+}
 
 type MsgEnvelope struct {
 	dto.DataRef
@@ -71,7 +96,12 @@ func (e *MsgEnvelope) Reset() {
 	e.callbacks = e.callbacks[:0]
 }
 
+//-------------------------------------set-----------------------------------------
+
 func (e *MsgEnvelope) SetHeaders(header dto.Header) {
+	if header == nil {
+		return
+	}
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	for k, v := range header {
@@ -172,6 +202,26 @@ func (e *MsgEnvelope) SetTimerId(timerId uint64) {
 	e.timerId = timerId
 }
 
+//--------------------------------get------------------------------------
+
+func (e *MsgEnvelope) GetType() int32 {
+	tp := e.GetHeader("Type")
+	if tp == "" {
+		return event.RpcMsg
+	} else {
+		tpInt, err := strconv.Atoi(tp)
+		if err != nil {
+			return event.RpcMsg
+		} else {
+			return int32(tpInt)
+		}
+	}
+}
+
+func (e *MsgEnvelope) GetKey() string {
+	return e.GetHeader("DispatchKey")
+}
+
 func (e *MsgEnvelope) GetHeader(key string) string {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
@@ -253,6 +303,8 @@ func (e *MsgEnvelope) GetTimerId() uint64 {
 	return e.timerId
 }
 
+//------------------------------------Check----------------------------------------
+
 func (e *MsgEnvelope) NeedCallback() bool {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
@@ -270,6 +322,8 @@ func (e *MsgEnvelope) NeedResponse() bool {
 	defer e.locker.RUnlock()
 	return e.needResp
 }
+
+//-----------------------------Option-----------------------------------
 
 func (e *MsgEnvelope) Done() {
 	if e.done != nil {
@@ -318,7 +372,8 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 			return nil
 		}
 		msg.Request = byteData
-	} else if e.response != nil {
+	}
+	if e.response != nil {
 		byteData, typeName, err = serializer.Serialize(e.response, msg.TypeId)
 		if err != nil {
 			log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
@@ -330,29 +385,4 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	msg.TypeName = typeName
 
 	return msg
-}
-
-//======================================================
-
-var msgEnvelopePool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
-	return &MsgEnvelope{}
-})
-
-// 测试资源释放
-//var count int
-
-func NewMsgEnvelope() *MsgEnvelope {
-	//count++
-	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
-	return msgEnvelopePool.Get().(*MsgEnvelope)
-}
-
-func ReleaseMsgEnvelope(envelope inf.IEnvelope) {
-	if envelope != nil {
-		//count--
-		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
-		if envelope.IsRef() {
-			msgEnvelopePool.Put(envelope.(*MsgEnvelope))
-		}
-	}
 }

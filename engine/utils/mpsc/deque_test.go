@@ -36,8 +36,8 @@ func TestQueue_PushPopOneProducer(t *testing.T) {
 	go func() {
 		i := 0
 		for {
-			r := q.Pop()
-			if r == nil {
+			_, ok := q.Pop()
+			if !ok {
 				runtime.Gosched()
 				continue
 			}
@@ -69,8 +69,8 @@ func TestMpscQueueConsistency(t *testing.T) {
 		i := 0
 		seen := make(map[string]string)
 		for {
-			r := q.Pop()
-			if r == nil {
+			r, ok := q.Pop()
+			if !ok {
 				runtime.Gosched()
 
 				continue
@@ -104,8 +104,8 @@ func TestMpscQueueConsistency(t *testing.T) {
 	//time.Sleep(500 * time.Millisecond)
 	// queue should be empty
 	for i := 0; i < 100; i++ {
-		r := q.Pop()
-		if r != nil {
+		r, ok := q.Pop()
+		if !ok {
 			log.Printf("unexpected result %+v", r)
 			t.FailNow()
 		}
@@ -119,8 +119,8 @@ func benchmarkPushPop(count, c int) {
 	go func() {
 		i := 0
 		for {
-			r := q.Pop()
-			if r == nil {
+			_, ok := q.Pop()
+			if !ok {
 				time.Sleep(1)
 				continue
 			}
@@ -262,7 +262,7 @@ func benchmarkPushPopActor(count, c int) {
 			select {
 			case <-g_MailChan:
 				atomic.StoreInt64(&g_bMailIn[0], 0)
-				for data := q.Pop(); data != nil; data = q.Pop() {
+				for _, ok := q.Pop(); ok; _, ok = q.Pop() {
 					i++
 					if i == count {
 						wg.Done()

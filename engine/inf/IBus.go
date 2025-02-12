@@ -14,12 +14,12 @@ import (
 
 type IBus interface {
 	// Call 同步调用服务
-	Call(method string, in, out interface{}) error
-	CallWithTimeout(method string, timeout time.Duration, in, out interface{}) error
+	Call(method string, headers map[string]string, in, out interface{}) error
+	CallWithTimeout(method string, headers map[string]string, timeout time.Duration, in, out interface{}) error
 	// AsyncCall 异步调用服务
-	AsyncCall(method string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
+	AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
 	// Send 无返回调用
-	Send(method string, in interface{}) error
+	Send(method string, headers map[string]string, in interface{}) error
 	// Cast 广播
-	Cast(method string, in interface{})
+	Cast(method string, headers map[string]string, in interface{})
 }
