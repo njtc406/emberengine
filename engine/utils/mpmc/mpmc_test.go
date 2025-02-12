@@ -12,7 +12,7 @@ import (
 )
 
 func BenchmarkMPMCQueue(b *testing.B) {
-	capacity := uint64(4096)
+	capacity := int64(4096)
 	q := NewQueue[int](capacity)
 	var backoff1 = 1
 	var maxBackoff1 = 1
