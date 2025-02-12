@@ -58,7 +58,7 @@ ServiceConf:
 SystemLogger:
   Path: ./example/data/logs
   # 日志文件名
-  Name: "system"
+  Name: "system-3"
   # 日志级别
   Level: debug
   # 是否打印调用文件信息
