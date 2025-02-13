@@ -6,6 +6,7 @@
 package monitor
 
 import (
+	"github.com/njtc406/emberengine/engine/config"
 	"github.com/njtc406/emberengine/engine/dto"
 	"github.com/njtc406/emberengine/engine/errdef"
 	"github.com/njtc406/emberengine/engine/inf"
@@ -37,8 +38,7 @@ func GetRpcMonitor() *RpcMonitor {
 func (rm *RpcMonitor) Init() inf.IMonitor {
 	rm.closed = make(chan struct{})
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	// TODO 将大小和桶数量做成配置
-	rm.sd = timingwheel.NewTaskScheduler(10000, 20) // 这个调度器可能需要根据需要调整
+	rm.sd = timingwheel.NewTaskScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize)
 	return rm
 }
 

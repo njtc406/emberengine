@@ -105,7 +105,6 @@ type delKey struct {
 
 // removeServiceInfo 删除远程服务信息事件
 func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
-	log.SysLogger.Debugf("endpoints receive remove service event: %+v", e)
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
 	if kv.Key != nil {

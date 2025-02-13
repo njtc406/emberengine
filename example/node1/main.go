@@ -115,9 +115,8 @@ func (s *Service1) OnInit() error {
 			log.SysLogger.Errorf("AsyncCall Service3.RPCSum failed, err:%v", err)
 		}
 
-		// 测试调用对象返回,但是不接收
+		// 测试调用对象返回错误
 		if err := s.SelectSameServer("2", "Service3").Call("RPCTestWithError", nil, &msg.Msg_Test_Req{A: 1, B: 2}, nil); err != nil {
-			// 这里必定进入,因为调用函数直接返回了错误
 			log.SysLogger.Errorf("call Service3.RPCTestWithError failed, err:%v", err)
 		}
 
@@ -130,7 +129,12 @@ func (s *Service1) OnInit() error {
 	//cast test
 	s.AfterFunc(time.Second*2, "cast test", func(timer *timingwheel.Timer, args ...interface{}) {
 		log.SysLogger.Debugf("================================>>>")
-		s.SelectSameServerByServiceType("test", "Service3").Cast("RPCTest2", nil, nil)
+		// 1. 让node2开启多线程,然后调用10次cast
+		for i := 0; i < 10; i++ {
+			s.SelectSameServerByServiceType("test", "Service3").Cast("RPCTest2", nil, nil)
+		}
+		// 2. 让node2开启单线程,然后调用1次cast
+		//s.SelectSameServerByServiceType("test", "Service3").Cast("RPCTest2", nil, nil)
 	})
 
 	// other test

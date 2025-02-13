@@ -21,12 +21,14 @@ type conf struct {
 }
 
 type NodeConf struct {
-	NodeId           string        `binding:""`         // 节点ID(目前这个没用,节点id是节点启动的时候自动生成的)
-	SystemStatus     string        `binding:"required"` // 系统状态(debug/release)
-	PVCPath          string        `binding:"required"` // 数据持久化目录(默认./data)
-	PVPath           string        `binding:"required"` // 缓存目录(默认./run)
-	ProfilerInterval time.Duration `binding:""`         // 性能分析间隔(默认0,不开启)
-	AntsPoolSize     int           `binding:"required"` // 线程池大小
+	NodeId            string        `binding:""`         // 节点ID(目前这个没用,节点id是节点启动的时候自动生成的)
+	SystemStatus      string        `binding:"required"` // 系统状态(debug/release)
+	PVCPath           string        `binding:"required"` // 数据持久化目录(默认./data)
+	PVPath            string        `binding:"required"` // 缓存目录(默认./run)
+	ProfilerInterval  time.Duration `binding:""`         // 性能分析间隔(默认0,不开启)
+	AntsPoolSize      int           `binding:"required"` // 线程池大小
+	MonitorTimerSize  int           `binding:""`         // 定时器数量(用于监控rpc调用的timer)(默认10000)
+	MonitorBucketSize int           `binding:""`         // 定时器桶数量(默认20)
 }
 
 type ClusterConf struct {

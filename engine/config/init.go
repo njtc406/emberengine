@@ -107,11 +107,13 @@ func createDirIfNotExists(dir string) {
 func setDefaultValues() {
 	// 默认基础配置
 	runtimeViper.SetDefault("NodeConf", &NodeConf{
-		SystemStatus:     Debug,
-		PVCPath:          def.DefaultPVCPath,
-		PVPath:           def.DefaultPVPath,
-		ProfilerInterval: 0, // 默认不开启
-		AntsPoolSize:     def.DefaultAntsPoolSize,
+		SystemStatus:      Debug,
+		PVCPath:           def.DefaultPVCPath,
+		PVPath:            def.DefaultPVPath,
+		ProfilerInterval:  0, // 默认不开启
+		AntsPoolSize:      def.DefaultAntsPoolSize,
+		MonitorTimerSize:  def.DefaultMonitorTimerSize,
+		MonitorBucketSize: def.DefaultMonitorBucketSize,
 	})
 
 	// 日志默认配置

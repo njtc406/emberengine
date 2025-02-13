@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-// TODO 支持grpc调用
 type grpcSender struct {
 	inf.IRpcSender
 	conn      *grpc.ClientConn

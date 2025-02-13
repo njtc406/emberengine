@@ -55,11 +55,13 @@ const (
 )
 
 const (
-	DefaultPVPath           = "./cache"
-	DefaultPVCPath          = "./data"
-	DefaultLogPath          = "logs"
-	DefaultAntsPoolSize     = 100
-	DefaultProfilerInterval = 10 * time.Second
+	DefaultPVPath            = "./cache"
+	DefaultPVCPath           = "./data"
+	DefaultLogPath           = "logs"
+	DefaultAntsPoolSize      = 100
+	DefaultProfilerInterval  = 10 * time.Second
+	DefaultMonitorTimerSize  = 10000
+	DefaultMonitorBucketSize = 20
 )
 
 const (

@@ -48,7 +48,9 @@ func (c *Sender) SetPid(pid *actor.PID) {
 }
 
 func (c *Sender) Close() {
-	c.IRpcSenderHandler.Close()
+	if c.IRpcSenderHandler != nil {
+		c.IRpcSenderHandler.Close()
+	}
 }
 
 func (c *Sender) SendRequest(envelope inf.IEnvelope) error {

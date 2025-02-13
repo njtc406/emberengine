@@ -43,9 +43,6 @@ func CreateDiscovery(name string) inf.IDiscovery {
 	return discoveryMap[name]
 }
 
-// TODO 现在这里有个问题,本地服务注册的时候会触发一次SysEventETCDPut事件,然后保持心跳的时候又会触发一次,导致endpointmgr收到两次
-// TODO 另一个问题就是当有一个服务更新的时候,由于监听的是所有服务,所有服务都会被更新一次
-
 type EtcdDiscovery struct {
 	inf.IEventProcessor
 	inf.IEventHandler
