@@ -5,13 +5,13 @@ NodeConf:
   # 系统状态(debug/release)
   SystemStatus: debug
   # 系统数据目录(持久化)
-  PVCPath: ./data
+  PVCPath: ./example/data
   # 系统缓存目录
-  PVPath: ./cache
+  PVPath: ./example/cache
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
   # 线程池大小
-  AntsPoolSize: 10000
+  AntsPoolSize: 100
 
 ClusterConf:
   OpenRemote: false
@@ -24,51 +24,76 @@ ClusterConf:
     UserName: root
     # etcd密码
     Password: 123456
-  RPCServer:
+  RPCServers:
     # 监听地址
-    Addr: 0.0.0.0:6688
-    # 协议
-    Protoc: "tcp"
+    - Addr: 0.0.0.0:6610
+      # 协议
+      Protoc: "tcp"
+      # rpc类型
+      Type: "rpcx"
+    - Addr: 0.0.0.0:6611
+      Protoc: "tcp"
+      Type: "grpc"
   RemoteType: rpcx
   DiscoveryType: etcd
   RemoteConfPath: ""
   DiscoveryConf:
-    Path: /server/service/register
-    # 服务租约有效期(单位秒)
-    TTL: 3
+    Path: /server/rpc
 
 ServiceConf:
   OpenRemote: false
   RemoteConfPath: ""
-  # 如果配置的远程,那么这里获取的文件就是 /server/service/1/config/services
   StartServices:
-      # 服务ID(如果是相同serverId下只有一个的可以为空)
-    - ServiceId:
-      # 服务名称
-      ServiceName: DBService
+    # 服务名称
+    - ServiceName: Service1
       # 服务类型
-      Type: db
+      Type: test
       # 服务器ID
       ServerId: 1
-      # 定时器大小
-      TimerSize: 100
-      # 消息队列大小
-      MailBoxSize: 1000
-      # 协程数量
-      GoroutineNum: 1
-    - ServiceName:  LoginService
-      Type: login
+      # 服务版本
+      Version: 1
+      # rpc方式
+      RpcType: "grpc"
+      # 系统级线程池大小
+      GoroutinePoolSize: 1000
+      # 定时器配置
+      TimerConf:
+        # 定时器队列长度
+        TimerSize: 1000
+        # 定时器桶大小
+        TimerBucketSize: 100
+      # 工作线程配置
+      WorkerConf:
+        # 用户消息队列大小
+        UserMailboxSize: 1024
+        # 系统消息队列大小
+        SystemMailboxSize: 16
+        # 工作线程数量
+        WorkerNum: 1
+        # 是否开启动态线程数调整
+        DynamicWorkerScaling: false
+        # 虚拟线程比例
+        VirtualWorkerRate: 10
+    - ServiceName: Service2
+      Type: test
       ServerId: 1
-      TimerSize: 100
-      MailBoxSize: 1000
-      GoroutineNum: 1
-  # 这里不管是远程还是本地,都不需要配置,服务的配置是读取的服务注册时单独定义的文件！如果配置的远程,那么这里获取的文件就是 /server/service/1/config/不带后缀的文件名
-  # ServicesConfMap:
+      TimerConf:
+        # 定时器队列长度
+        TimerSize: 1000
+        # 定时器桶大小
+        TimerBucketSize: 100
+      WorkerConf:
+        # 用户消息队列大小
+        UserMailboxSize: 1024
+        # 系统消息队列大小
+        SystemMailboxSize: 16
+        # 工作线程数量
+        WorkerNum: 1
 
 
 # 日志配置
 SystemLogger:
-  Path: ./data/logs
+  Path: ./example/data/logs
   # 日志文件名
   Name: "system"
   # 日志级别
