@@ -19,32 +19,29 @@ import (
 )
 
 type grpcSender struct {
-	inf.IRpcSender
 	conn      *grpc.ClientConn
 	rpcClient actor.GrpcListenerClient
 }
 
-func newGrpcClient(sender inf.IRpcSender) inf.IRpcSenderHandler {
-	pid := sender.GetPid()
-	conn, err := grpc.NewClient(pid.GetAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+func newGrpcClient(addr string) inf.IRpcSenderHandler {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.SysLogger.Panicf("grpcxSender newGrpcClient error: %v", err)
 	}
 	cli := actor.NewGrpcListenerClient(conn)
 	return &grpcSender{
-		conn:       conn,
-		IRpcSender: sender,
-		rpcClient:  cli,
+		conn: conn,
+		//IRpcSender: sender,
+		rpcClient: cli,
 	}
 }
 
 func (rc *grpcSender) Close() {
 	_ = rc.conn.Close()
 	rc.rpcClient = nil
-	//log.SysLogger.Debugf("close remote grpc client success : %s", rc.IRpcSender.GetPid().String())
 }
 
-func (rc *grpcSender) send(envelope inf.IEnvelope) error {
+func (rc *grpcSender) send(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	if rc.rpcClient == nil {
 		return def.RPCHadClosed
 	}
@@ -63,26 +60,26 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	}
 
 	if _, err := rc.rpcClient.RPCCall(ctx, msg); err != nil {
-		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, rc.IRpcSender.GetPid().GetServiceUid(), err)
+		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, sender.GetPid().GetServiceUid(), err)
 		return def.RPCCallFailed
 	}
 
 	return nil
 }
 
-func (rc *grpcSender) SendRequest(envelope inf.IEnvelope) error {
+func (rc *grpcSender) SendRequest(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	// 这里不能释放envelope,因为调用方需要使用
-	return rc.send(envelope)
+	return rc.send(sender, envelope)
 }
 
-func (rc *grpcSender) SendRequestAndRelease(envelope inf.IEnvelope) error {
+func (rc *grpcSender) SendRequestAndRelease(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
-	return rc.send(envelope)
+	return rc.send(sender, envelope)
 }
 
-func (rc *grpcSender) SendResponse(envelope inf.IEnvelope) error {
+func (rc *grpcSender) SendResponse(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
-	return rc.send(envelope)
+	return rc.send(sender, envelope)
 }
 
 func (rc *grpcSender) IsClosed() bool {

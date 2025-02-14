@@ -74,6 +74,7 @@ func (em *EndpointManager) Stop() {
 		rt.Close()
 	}
 	em.repository.Stop()
+	client.Close() // 关闭所有连接
 	log.SysLogger.Debugf("endpoints manager stopped")
 }
 

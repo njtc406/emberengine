@@ -43,7 +43,6 @@ engine/
 │   ├── core/                    # 核心基础设施（模块、service、mailbox、node、rpc）
 │   ├── def/                     # 常量、配置定义及辅助方法
 │   ├── dto/                     # 数据传输对象
-│   ├── errdef/                  # 错误定义
 │   ├── event/                   # 事件系统（事件、事件类型、处理器等）
 │   ├── interfaces/              # 接口定义（IBus、IDataDef、IDiscovery、…）
 │   ├── plugins/                 # 插件机制
@@ -75,9 +74,8 @@ engine/
 │         ├── validate/          # 数据校验工具
 │         └── version/           # 版本管理
 ├── internal/                    # 框架内部实现，不对外公开
-│   ├── messagebus/              # 消息总线实现（内部消息调度）
-│   ├── monitor/                 # 监控实现（状态监测、定时任务等）
-│   └── msgenvelope/             # 消息封装（内部消息包装工具）
+│   ├── message/                 # 消息总线实现（内部消息调度）
+│   └──  monitor/                 # 监控实现（状态监测、定时任务等）
 ├── config/                      # 非代码配置文件（示例或默认配置）
 ├── docs/                        # 设计文档、架构图、接口说明等
 ├── example/                     # 使用示例（展示如何基于 engine 构建服务）

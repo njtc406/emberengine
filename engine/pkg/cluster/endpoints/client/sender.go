@@ -1,6 +1,6 @@
 // Package client
-// @Title  title
-// @Description  desc
+// @Title  消息发送器
+// @Description  用来向对应的服务发送消息
 // @Author  yr  2024/11/7
 // @Update  yr  2024/11/7
 package client
@@ -9,16 +9,10 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"sync"
 )
 
-// TODO sender的可能优化?目前是每个service都会创建一个自己的sender,但是实际上都是连接的node的监听接口,
-// 所以可以考虑优化为给不同的node只有一个sender,给这个node发送都使用相同的sender,可以减少连接数量,集群能兼容更多的node
-// 这里需要考虑的还有一个就是私有服务的回调,由于私有服务的node是不会注册的,所以集群中可能没有node信息,那么pid中还是需要带上addr
-// 根据节点id找到该节点的sender,如果找不到,那么就创建一个临时的sender,临时sender的关闭还是和现在一样,采用idle机制,长时间未使用就关闭
-// 这里需要注意的是如果修改为共有sender之后,那么sender必须实现pool,且线程安全,目前使用的rpcx和grpc都是线程安全的,所以不需要考虑线程安全
-// 改动可能比较大,可能需要修改很多模块的东西,仔细考虑一下再来改
-
-type HandlerCreator func(sender inf.IRpcSender) inf.IRpcSenderHandler
+type HandlerCreator func(addr string) inf.IRpcSenderHandler
 
 var handlerMap = map[string]HandlerCreator{
 	def.RpcTypeLocal: newLClient,
@@ -30,12 +24,59 @@ func Register(tp string, creator HandlerCreator) {
 	handlerMap[tp] = creator
 }
 
+var lock sync.RWMutex
+
+// TODO 可以给这个池子建立一个淘汰机制?比如某些很久才使用一次的连接,可以不用一直维护
+var senderHandlerMap map[string]map[string]inf.IRpcSenderHandler
+
+func init() {
+	senderHandlerMap = make(map[string]map[string]inf.IRpcSenderHandler)
+}
+
+func getSenderHandler(addr string, tp string) inf.IRpcSenderHandler {
+	lock.RLock()
+	if tps, ok := senderHandlerMap[addr]; ok {
+		if handler, ok := tps[tp]; ok {
+			lock.RUnlock()
+			return handler
+		}
+		// 不存在该类型的连接,则创建一个
+		lock.RUnlock()
+		return addSenderHandler(addr, tp)
+	}
+	lock.RUnlock()
+
+	return addSenderHandler(addr, tp)
+}
+
+func addSenderHandler(addr, tp string) inf.IRpcSenderHandler {
+	handler := handlerMap[tp](addr)
+
+	lock.Lock()
+	defer lock.Unlock()
+	if tps, ok := senderHandlerMap[addr]; ok {
+		tps[tp] = handler
+	} else {
+		senderHandlerMap[addr] = make(map[string]inf.IRpcSenderHandler)
+		senderHandlerMap[addr][tp] = handler
+	}
+	return handler
+}
+
+func Close() {
+	for _, tps := range senderHandlerMap {
+		for _, handler := range tps {
+			handler.Close()
+		}
+	}
+}
+
 type Sender struct {
 	tmp        bool // 是否是临时客户端
 	pid        *actor.PID
 	senderType string
-	inf.IMailbox
-	inf.IRpcSenderHandler
+	inf.IMailboxChannel
+	localHandler inf.IRpcSenderHandler
 }
 
 func (c *Sender) GetPid() *actor.PID {
@@ -47,64 +88,74 @@ func (c *Sender) SetPid(pid *actor.PID) {
 }
 
 func (c *Sender) Close() {
-	if c.IRpcSenderHandler != nil {
-		c.IRpcSenderHandler.Close()
-	}
+	c.pid = nil
+}
+
+func (c *Sender) IsClosed() bool {
+	return c.pid == nil
 }
 
 func (c *Sender) SendRequest(envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ServiceNotFound
 	}
-	if c.IRpcSenderHandler == nil {
-		c.IRpcSenderHandler = handlerMap[c.senderType](c)
+
+	if c.IMailboxChannel != nil {
+		// 本地节点的sender
+		if c.localHandler == nil {
+			c.localHandler = handlerMap[def.RpcTypeLocal](c.pid.GetAddress())
+		}
+
+		return c.localHandler.SendRequest(c, envelope)
 	}
 
-	return c.IRpcSenderHandler.SendRequest(envelope)
+	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).SendRequest(c, envelope)
 }
 
 func (c *Sender) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ServiceNotFound
 	}
-	if c.IRpcSenderHandler == nil {
-		c.IRpcSenderHandler = handlerMap[c.senderType](c)
-	}
 
-	return c.IRpcSenderHandler.SendRequestAndRelease(envelope)
+	if c.IMailboxChannel != nil {
+		// 本地节点的sender
+		if c.localHandler == nil {
+			c.localHandler = handlerMap[def.RpcTypeLocal](c.pid.GetAddress())
+		}
+
+		return c.localHandler.SendRequestAndRelease(c, envelope)
+	}
+	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).SendRequestAndRelease(c, envelope)
 }
 
 func (c *Sender) SendResponse(envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ServiceNotFound
 	}
-	if c.IRpcSenderHandler == nil {
-		c.IRpcSenderHandler = handlerMap[c.senderType](c)
-	}
+	if c.IMailboxChannel != nil {
+		// 本地节点的sender
+		if c.localHandler == nil {
+			c.localHandler = handlerMap[def.RpcTypeLocal](c.pid.GetAddress())
+		}
 
-	return c.IRpcSenderHandler.SendResponse(envelope)
+		return c.localHandler.SendResponse(c, envelope)
+	}
+	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).SendResponse(c, envelope)
 }
 
-func (c *Sender) IsClosed() bool {
-	if c.IRpcSenderHandler == nil {
-		return true
-	}
-	return c.IRpcSenderHandler.IsClosed()
-}
-
-func NewSender(senderType string, pid *actor.PID, mailbox inf.IMailbox) inf.IRpcSender {
+func NewSender(senderType string, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcSender {
 	return &Sender{
-		pid:        pid,
-		IMailbox:   mailbox,
-		senderType: senderType,
+		pid:             pid,
+		IMailboxChannel: mailbox,
+		senderType:      senderType,
 	}
 }
 
-func NewTmpSender(senderType string, pid *actor.PID, mailbox inf.IMailbox) inf.IRpcSender {
+func NewTmpSender(senderType string, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcSender {
 	return &Sender{
-		tmp:        true,
-		pid:        pid,
-		IMailbox:   mailbox,
-		senderType: senderType,
+		tmp:             true,
+		pid:             pid,
+		IMailboxChannel: mailbox,
+		senderType:      senderType,
 	}
 }

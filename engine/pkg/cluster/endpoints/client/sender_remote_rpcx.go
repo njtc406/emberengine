@@ -21,13 +21,11 @@ import (
 // 使用rpcx框架点对点直接调用, 这个相对于nats有一个优势, 就是可以知道消息是否被对方接收
 
 type rpcxSender struct {
-	inf.IRpcSender
 	rpcClient client.XClient
 }
 
-func newRpcxClient(sender inf.IRpcSender) inf.IRpcSenderHandler {
-	pid := sender.GetPid()
-	d, _ := client.NewPeer2PeerDiscovery("tcp@"+pid.GetAddress(), "")
+func newRpcxClient(addr string) inf.IRpcSenderHandler {
+	d, _ := client.NewPeer2PeerDiscovery("tcp@"+addr, "")
 	// 如果调用失败,会自动重试3次
 	rpcClient := client.NewXClient("RpcxListener", client.Failtry, client.RandomSelect, d, client.Option{
 		Retries:             3, // 重试3次
@@ -43,11 +41,10 @@ func newRpcxClient(sender inf.IRpcSender) inf.IRpcSenderHandler {
 	})
 
 	remoteClient := &rpcxSender{
-		IRpcSender: sender,
-		rpcClient:  rpcClient,
+		rpcClient: rpcClient,
 	}
 
-	log.SysLogger.Infof("create remote client success : %s", pid.String())
+	log.SysLogger.Infof("create remote client success : %s", addr)
 	return remoteClient
 }
 
@@ -62,7 +59,7 @@ func (rc *rpcxSender) Close() {
 	rc.rpcClient = nil
 }
 
-func (rc *rpcxSender) send(envelope inf.IEnvelope) error {
+func (rc *rpcxSender) send(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	if rc.rpcClient == nil {
 		return def.RPCHadClosed
 	}
@@ -81,26 +78,26 @@ func (rc *rpcxSender) send(envelope inf.IEnvelope) error {
 	}
 
 	if _, err := rc.rpcClient.Go(ctx, "RPCCall", msg, nil, nil); err != nil {
-		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, rc.IRpcSender.GetPid().GetServiceUid(), err)
+		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, sender.GetPid().GetServiceUid(), err)
 		return def.RPCCallFailed
 	}
 
 	return nil
 }
 
-func (rc *rpcxSender) SendRequest(envelope inf.IEnvelope) error {
+func (rc *rpcxSender) SendRequest(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	// 这里不能释放envelope,因为调用方需要使用
-	return rc.send(envelope)
+	return rc.send(sender, envelope)
 }
 
-func (rc *rpcxSender) SendRequestAndRelease(envelope inf.IEnvelope) error {
+func (rc *rpcxSender) SendRequestAndRelease(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
-	return rc.send(envelope)
+	return rc.send(sender, envelope)
 }
 
-func (rc *rpcxSender) SendResponse(envelope inf.IEnvelope) error {
+func (rc *rpcxSender) SendResponse(sender inf.IRpcSender, envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
-	return rc.send(envelope)
+	return rc.send(sender, envelope)
 }
 
 func (rc *rpcxSender) IsClosed() bool {
