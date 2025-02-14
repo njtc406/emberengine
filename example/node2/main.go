@@ -6,11 +6,11 @@
 package main
 
 import (
-	"github.com/njtc406/emberengine/engine/core"
-	"github.com/njtc406/emberengine/engine/core/node"
-	"github.com/njtc406/emberengine/engine/inf"
-	"github.com/njtc406/emberengine/engine/services"
-	"github.com/njtc406/emberengine/engine/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/core"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/node"
+	"github.com/njtc406/emberengine/engine/pkg/services"
+	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/example/msg"
 )
 

@@ -21,6 +21,71 @@
 
 ---
 
+### 目录结构
+````
+1. 整个项目结构
+emberengine/
+├── engine/              # 核心框架库
+├── example/             # 使用示例，展示如何基于 engine 构建 service
+├── template/            # 配置或其他模板，供开发者参考
+├── go.mod
+├── go.sum
+├── LICENSE
+└── README.md
+
+
+2. engine结构
+engine/
+├── pkg/                         # 对外公开的 API 和工具库
+│   ├── actor/                   # Actor 模型（proto 及实现）
+│   ├── cluster/                 # 分布式/集群支持（包括 discovery、endpoints、repository 等）
+│   ├── config/                  # 框架配置管理
+│   ├── core/                    # 核心基础设施（模块、service、mailbox、node、rpc）
+│   ├── def/                     # 常量、配置定义及辅助方法
+│   ├── dto/                     # 数据传输对象
+│   ├── errdef/                  # 错误定义
+│   ├── event/                   # 事件系统（事件、事件类型、处理器等）
+│   ├── interfaces/              # 接口定义（IBus、IDataDef、IDiscovery、…）
+│   ├── plugins/                 # 插件机制
+│   ├── profiler/                # 性能分析器
+│   ├── services/                # 内置服务（守护进程、服务管理）
+│   ├── sysModule/               # 系统模块（httpmodule、mysqlmodule、redismodule、wsmodule）
+│   ├── sysMsg/                  # 系统消息
+│   ├── sysService/              # 系统服务（dbservice、pprofservice）
+│   └── utils/                   # 通用工具库
+│         ├── network/           # 网络通信库（底层连接与协议处理）
+│         ├── asynclib/          # 异步调用库
+│         ├── bytespool/         # 字节池
+│         ├── concurrent/        # 并发工具（调度、工作器等）
+│         ├── errorlib/          # 错误处理工具
+│         ├── httplib/           # HTTP 请求工具
+│         ├── log/               # 日志系统
+│         ├── maps/              # Map 工具
+│         ├── mpmc/              # 多生产者多消费者队列
+│         ├── mpsc/              # 多生产者单消费者队列
+│         ├── pid/               # 进程/唯一标识管理
+│         ├── pool/              # 对象/内存池
+│         ├── queue/             # 队列实现（同步/异步队列）
+│         ├── ring/              # 环形队列
+│         ├── serializer/        # 序列化工具（JSON、Proto 等）
+│         ├── timelib/           # 时间工具库
+│         ├── timer/             # 定时器
+│         ├── timingwheel/       # Timing Wheel 实现
+│         │   └── delayqueue/    # 延时队列
+│         ├── validate/          # 数据校验工具
+│         └── version/           # 版本管理
+├── internal/                    # 框架内部实现，不对外公开
+│   ├── messagebus/              # 消息总线实现（内部消息调度）
+│   ├── monitor/                 # 监控实现（状态监测、定时任务等）
+│   └── msgenvelope/             # 消息封装（内部消息包装工具）
+├── config/                      # 非代码配置文件（示例或默认配置）
+├── docs/                        # 设计文档、架构图、接口说明等
+├── example/                     # 使用示例（展示如何基于 engine 构建服务）
+└── template/                    # 配置及其他模板（快速入门指南）
+
+
+````
+
 ## 集群功能
 
 1. **集群管理**  
