@@ -1,12 +1,12 @@
 package pool
 
 import (
-	sysSync "sync"
+	"sync"
 )
 
 type Pool struct {
 	C        chan interface{} //最大缓存的数量
-	syncPool sysSync.Pool
+	syncPool sync.Pool
 }
 
 type IPoolData interface {
@@ -18,7 +18,7 @@ type IPoolData interface {
 
 type PoolEx struct {
 	C        chan IPoolData //最大缓存的数量
-	syncPool sysSync.Pool
+	syncPool sync.Pool
 }
 
 func (pool *Pool) Get() interface{} {

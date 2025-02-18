@@ -7,7 +7,6 @@ package timingwheel
 
 import (
 	"fmt"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,7 +48,7 @@ type TaskScheduler struct {
 	closed int32
 	shards []*TimerBucket
 
-	C chan inf.ITimer
+	C chan ITimer
 }
 
 func NewTaskScheduler(chanSize, bucketSize int) *TaskScheduler {
@@ -67,7 +66,7 @@ func NewTaskScheduler(chanSize, bucketSize int) *TaskScheduler {
 	}
 	return &TaskScheduler{
 		shards: shards,
-		C:      make(chan inf.ITimer, chanSize),
+		C:      make(chan ITimer, chanSize),
 	}
 }
 

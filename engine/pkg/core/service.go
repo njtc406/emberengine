@@ -21,11 +21,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/panjf2000/ants/v2"
 )
 
 type Service struct {
@@ -39,9 +37,7 @@ type Service struct {
 	cfg    interface{}  // 服务配置
 	status int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 
-	mailbox inf.IMailbox // 邮箱
-	//workerPool     *WorkerPool         // 工作线程池
-	goroutinePool  *ants.Pool          // 线程池
+	mailbox        inf.IMailbox        // 邮箱
 	eventProcessor inf.IEventProcessor // 事件管理器
 	//profiler       *profiler.Profiler  // 性能分析
 }
@@ -64,7 +60,6 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 				DynamicWorkerScaling: false,
 				VirtualWorkerRate:    def.DefaultVirtualWorkerRate,
 			},
-			GoroutinePoolSize: def.DefaultGoroutinePoolSize,
 		}
 		return serviceInitConf
 	}
@@ -74,9 +69,6 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 	}
 	if serviceInitConf.RpcType == "" {
 		serviceInitConf.RpcType = def.RpcTypeRpcx
-	}
-	if serviceInitConf.GoroutinePoolSize == 0 {
-		serviceInitConf.GoroutinePoolSize = def.DefaultGoroutinePoolSize
 	}
 
 	if serviceInitConf.TimerConf == nil {
@@ -132,8 +124,6 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
 
-	// 创建线程池
-	s.goroutinePool = asynclib.NewAntsPool(serviceInitConf.GoroutinePoolSize)
 	// 创建定时器调度器
 	s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
 	// 创建邮箱
@@ -153,7 +143,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.eventHandler = event.NewHandler()
 	s.eventHandler.Init(s.eventProcessor)
 
-	s.IConcurrent = concurrent.NewConcurrent()
+	s.IConcurrent = concurrent.NewTaskScheduler()
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
 		log.SysLogger.Panicf("service[%s] create pid error", s.GetName())
@@ -197,6 +187,13 @@ func (s *Service) startListenCallback() {
 	// TODO 这里之后还应该会加入并发回调的接收
 	for {
 		select {
+		case t, ok := <-s.IConcurrent.GetChannel():
+			if !ok {
+				return
+			}
+			if err := s.pushConcurrentCallback(t); err != nil {
+				log.SysLogger.Errorf("service [%s] submit concurrent callback error: %v", s.GetName(), err)
+			}
 		case t, ok := <-s.timerDispatcher.C:
 			if !ok {
 				return
@@ -223,6 +220,9 @@ func (s *Service) Stop() {
 	s.mailbox.Stop()
 	//log.SysLogger.Debugf("service[%s] stop mailbox", s.GetName())
 
+	// 关闭并发
+	s.IConcurrent.Close()
+
 	// 释放资源
 	s.release()
 	//log.SysLogger.Debugf("service[%s] stop service", s.GetName())
@@ -233,7 +233,7 @@ func (s *Service) Stop() {
 func (s *Service) release() {
 	defer func() {
 		if err := recover(); err != nil {
-			log.SysLogger.Errorf("service [%s] release error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
+			log.SysLogger.Errorf("service [%s] release error: %v", s.GetName(), err)
 		}
 	}()
 
@@ -256,17 +256,14 @@ func (s *Service) PushRequest(c inf.IEnvelope) error {
 }
 
 // TODO 这个还需要修改,传过来的数据应该直接就是ConcurrentTaskCallback类型的
-func (s *Service) pushConcurrentCallback(callback func(err error, args ...interface{}), args ...interface{}) error {
+func (s *Service) pushConcurrentCallback(evt concurrent.IConcurrentCallback) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceConcurrentCallback
-	ev.Data = &def.ConcurrentTaskCallback{
-		Callback: callback,
-		Args:     args,
-	}
+	ev.Data = evt
 	return s.mailbox.PostMessage(ev)
 }
 
-func (s *Service) pushTimerCallback(t inf.ITimer) error {
+func (s *Service) pushTimerCallback(t timingwheel.ITimer) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceTimerCallback
 	ev.Key = t.GetName() // 保证相同的回调在同一个worker处理
@@ -421,8 +418,12 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 
 	case event.ServiceTimerCallback:
 		evt := ev.(*event.Event)
-		t := evt.Data.(inf.ITimer)
+		t := evt.Data.(timingwheel.ITimer)
 		t.Do()
+	case event.ServiceConcurrentCallback:
+		evt := ev.(*event.Event)
+		t := evt.Data.(concurrent.IConcurrentCallback)
+		t.DoCallback()
 	default:
 		s.safeExec(func() {
 			s.eventProcessor.EventHandler(ev)

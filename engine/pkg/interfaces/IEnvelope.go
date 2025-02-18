@@ -13,9 +13,9 @@ import (
 
 type IEnvelope interface {
 	IDataDef
+
 	// Set
 
-	// TODO 在envelope里面加个tp字段,默认就是rpc调用,gateway收到玩家消息就设置未userMsg
 	SetHeaders(header dto.Header)
 	SetHeader(key string, value string)
 	SetSenderPid(sender *actor.PID)

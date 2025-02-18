@@ -102,6 +102,7 @@ func Start(v string, confPath string) {
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()
+	asynclib.Release()
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
 }

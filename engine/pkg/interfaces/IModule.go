@@ -6,11 +6,11 @@
 package interfaces
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timer"
 )
 

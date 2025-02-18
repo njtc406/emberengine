@@ -38,3 +38,7 @@ func Go(f func()) (err error) {
 
 	return antsPool.Submit(f)
 }
+
+func Release() {
+	antsPool.Release()
+}
