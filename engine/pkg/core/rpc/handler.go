@@ -377,7 +377,7 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 		envelope.SetRequest(nil) // 清除请求数据
 
 		// 发送回复信息
-		if err := envelope.GetSender().SendResponse(envelope); err != nil {
+		if err := envelope.GetDispatcher().SendResponse(envelope); err != nil {
 			log.SysLogger.Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
 	} else {

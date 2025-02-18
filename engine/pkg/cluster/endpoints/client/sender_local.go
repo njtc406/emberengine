@@ -17,7 +17,7 @@ type localSender struct {
 	closed int32
 }
 
-func newLClient(_ string) inf.IRpcSenderHandler {
+func newLClient(_ string) inf.IRpcSender {
 	return &localSender{}
 }
 
@@ -25,15 +25,15 @@ func (lc *localSender) Close() {
 	atomic.StoreInt32(&lc.closed, 1)
 }
 
-func (lc *localSender) SendRequest(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (lc *localSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if lc.IsClosed() {
 		return def.ServiceNotFound
 	}
 
-	return sender.PostMessage(envelope)
+	return dispatcher.PostMessage(envelope)
 }
 
-func (lc *localSender) SendResponse(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	monitor.GetRpcMonitor().Remove(envelope.GetReqId()) // 回复时先移除监控,防止超时
 	if lc.IsClosed() {
 		envelope.SetError(def.ServiceNotFound)
@@ -43,7 +43,7 @@ func (lc *localSender) SendResponse(sender inf.IRpcSender, envelope inf.IEnvelop
 
 	if envelope.NeedCallback() {
 		// 本地调用的回复消息,直接发送到对应service的邮箱处理
-		return sender.PostMessage(envelope)
+		return dispatcher.PostMessage(envelope)
 	} else {
 		// 同步调用,直接设置调用结束
 		envelope.Done()
@@ -51,9 +51,9 @@ func (lc *localSender) SendResponse(sender inf.IRpcSender, envelope inf.IEnvelop
 	return nil
 }
 
-func (lc *localSender) SendRequestAndRelease(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (lc *localSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	// 本地调用envelope在接收者处理后释放
-	return lc.SendRequest(sender, envelope)
+	return lc.SendRequest(dispatcher, envelope)
 }
 
 func (lc *localSender) IsClosed() bool {

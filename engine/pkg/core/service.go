@@ -1,4 +1,4 @@
-// Package msgbus
+// Package core
 // @Title  title
 // @Description  desc
 // @Author  pc  2024/11/5
@@ -32,10 +32,8 @@ type Service struct {
 	Module
 	inf.IMessageInvoker
 
-	pid      *actor.PID // 服务基础信息
-	id       string     // 服务唯一id(针对本地节点的相同服务名称中唯一)
-	name     string     // 服务名称
-	serverId int32      // 服务id
+	pid  *actor.PID // 服务基础信息
+	name string     // 服务名称
 
 	src    inf.IService // 服务源
 	cfg    interface{}  // 服务配置
@@ -131,8 +129,6 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	serviceInitConf = s.fixConf(serviceInitConf)
 	//log.SysLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
 	// 初始化服务数据
-	s.id = serviceInitConf.ServiceId
-	s.serverId = serviceInitConf.ServerId
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
 
@@ -158,7 +154,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.eventHandler.Init(s.eventProcessor)
 
 	s.IConcurrent = concurrent.NewConcurrent()
-	s.pid = endpoints.GetEndpointManager().CreatePid(s.serverId, s.id, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
+	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
 		log.SysLogger.Panicf("service[%s] create pid error", s.GetName())
 		return
@@ -287,7 +283,7 @@ func (s *Service) GetName() string {
 }
 
 func (s *Service) GetServerId() int32 {
-	return s.serverId
+	return s.pid.GetServerId()
 }
 
 func (s *Service) GetPid() *actor.PID {
@@ -319,11 +315,7 @@ func (s *Service) IsClosed() bool {
 }
 
 func (s *Service) getUniqueKey() string {
-	var name = s.GetName()
-	if s.id != "" {
-		name = fmt.Sprintf("%s-%s", name, s.id)
-	}
-	return name
+	return fmt.Sprintf("%s-%s", s.pid.GetName(), s.pid.GetServiceUid())
 }
 
 // TODO 这里需要修改,Profiler被移动到workerPool中了

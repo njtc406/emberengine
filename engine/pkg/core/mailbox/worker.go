@@ -251,7 +251,7 @@ func (w *Worker) run() {
 	}()
 
 	var backoff = 1
-	var maxBackoff = 8
+	var maxBackoff = 4
 	for !w.closed {
 		// 优先处理系统消息
 		if e, ok = w.systemMailbox.Pop(); ok {

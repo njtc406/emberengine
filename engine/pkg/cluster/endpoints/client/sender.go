@@ -12,28 +12,30 @@ import (
 	"sync"
 )
 
-type HandlerCreator func(addr string) inf.IRpcSenderHandler
+type SenderCreator func(addr string) inf.IRpcSender
 
-var handlerMap = map[string]HandlerCreator{
+var senderMap = map[string]SenderCreator{
 	def.RpcTypeLocal: newLClient,
 	def.RpcTypeRpcx:  newRpcxClient,
 	def.RpcTypeGrpc:  newGrpcClient,
 }
 
-func Register(tp string, creator HandlerCreator) {
-	handlerMap[tp] = creator
+// Register 注册消息发送器(目前由于都是在启动阶段注册,没有动态注册,所以就没有给锁,后面有需求再改)
+func Register(tp string, creator SenderCreator) {
+	senderMap[tp] = creator
 }
 
 var lock sync.RWMutex
 
 // TODO 可以给这个池子建立一个淘汰机制?比如某些很久才使用一次的连接,可以不用一直维护
-var senderHandlerMap map[string]map[string]inf.IRpcSenderHandler
+// map[addr][tp]inf.IRpcSender
+var senderHandlerMap map[string]map[string]inf.IRpcSender
 
 func init() {
-	senderHandlerMap = make(map[string]map[string]inf.IRpcSenderHandler)
+	senderHandlerMap = make(map[string]map[string]inf.IRpcSender)
 }
 
-func getSenderHandler(addr string, tp string) inf.IRpcSenderHandler {
+func getSenderHandler(addr string, tp string) inf.IRpcSender {
 	lock.RLock()
 	if tps, ok := senderHandlerMap[addr]; ok {
 		if handler, ok := tps[tp]; ok {
@@ -49,15 +51,15 @@ func getSenderHandler(addr string, tp string) inf.IRpcSenderHandler {
 	return addSenderHandler(addr, tp)
 }
 
-func addSenderHandler(addr, tp string) inf.IRpcSenderHandler {
-	handler := handlerMap[tp](addr)
+func addSenderHandler(addr, tp string) inf.IRpcSender {
+	handler := senderMap[tp](addr)
 
 	lock.Lock()
 	defer lock.Unlock()
 	if tps, ok := senderHandlerMap[addr]; ok {
 		tps[tp] = handler
 	} else {
-		senderHandlerMap[addr] = make(map[string]inf.IRpcSenderHandler)
+		senderHandlerMap[addr] = make(map[string]inf.IRpcSender)
 		senderHandlerMap[addr][tp] = handler
 	}
 	return handler
@@ -71,31 +73,31 @@ func Close() {
 	}
 }
 
-type Sender struct {
-	tmp        bool // 是否是临时客户端
-	pid        *actor.PID
-	senderType string
+type Dispatcher struct {
+	tmp bool // 是否是临时客户端
+	pid *actor.PID
+
 	inf.IMailboxChannel
-	localHandler inf.IRpcSenderHandler
+	localHandler inf.IRpcSender
 }
 
-func (c *Sender) GetPid() *actor.PID {
+func (c *Dispatcher) GetPid() *actor.PID {
 	return c.pid
 }
 
-func (c *Sender) SetPid(pid *actor.PID) {
+func (c *Dispatcher) SetPid(pid *actor.PID) {
 	c.pid = pid
 }
 
-func (c *Sender) Close() {
+func (c *Dispatcher) Close() {
 	c.pid = nil
 }
 
-func (c *Sender) IsClosed() bool {
+func (c *Dispatcher) IsClosed() bool {
 	return c.pid == nil
 }
 
-func (c *Sender) SendRequest(envelope inf.IEnvelope) error {
+func (c *Dispatcher) SendRequest(envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ServiceNotFound
 	}
@@ -103,7 +105,7 @@ func (c *Sender) SendRequest(envelope inf.IEnvelope) error {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = handlerMap[def.RpcTypeLocal](c.pid.GetAddress())
+			c.localHandler = senderMap[def.RpcTypeLocal](c.pid.GetAddress())
 		}
 
 		return c.localHandler.SendRequest(c, envelope)
@@ -112,7 +114,7 @@ func (c *Sender) SendRequest(envelope inf.IEnvelope) error {
 	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).SendRequest(c, envelope)
 }
 
-func (c *Sender) SendRequestAndRelease(envelope inf.IEnvelope) error {
+func (c *Dispatcher) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ServiceNotFound
 	}
@@ -120,7 +122,7 @@ func (c *Sender) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = handlerMap[def.RpcTypeLocal](c.pid.GetAddress())
+			c.localHandler = senderMap[def.RpcTypeLocal](c.pid.GetAddress())
 		}
 
 		return c.localHandler.SendRequestAndRelease(c, envelope)
@@ -128,14 +130,14 @@ func (c *Sender) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).SendRequestAndRelease(c, envelope)
 }
 
-func (c *Sender) SendResponse(envelope inf.IEnvelope) error {
+func (c *Dispatcher) SendResponse(envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ServiceNotFound
 	}
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = handlerMap[def.RpcTypeLocal](c.pid.GetAddress())
+			c.localHandler = senderMap[def.RpcTypeLocal](c.pid.GetAddress())
 		}
 
 		return c.localHandler.SendResponse(c, envelope)
@@ -143,19 +145,17 @@ func (c *Sender) SendResponse(envelope inf.IEnvelope) error {
 	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).SendResponse(c, envelope)
 }
 
-func NewSender(senderType string, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcSender {
-	return &Sender{
+func NewDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
+	return &Dispatcher{
 		pid:             pid,
 		IMailboxChannel: mailbox,
-		senderType:      senderType,
 	}
 }
 
-func NewTmpSender(senderType string, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcSender {
-	return &Sender{
+func NewTmpDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
+	return &Dispatcher{
 		tmp:             true,
 		pid:             pid,
 		IMailboxChannel: mailbox,
-		senderType:      senderType,
 	}
 }

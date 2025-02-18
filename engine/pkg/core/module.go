@@ -1,4 +1,4 @@
-// Package msgbus
+// Package core
 // @Title  title
 // @Description  desc
 // @Author  pc  2024/11/5
@@ -187,7 +187,6 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 	pModule.self.OnRelease()
 	pModule.GetEventHandler().Destroy()
 	//log.SysLogger.Debugf("Release module %s", pModule.GetModuleName())
-	pModule.timerDispatcher.Stop()
 	delete(m.children, moduleId)
 	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
 	// 从methodmgr中移除模块api(service那层的api是不会移除的)

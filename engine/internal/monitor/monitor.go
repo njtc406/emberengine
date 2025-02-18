@@ -144,7 +144,7 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	if envelope.NeedCallback() {
 		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收
 		// 如果是远程调用,那么在远程client将消息发送完成后自动回收)
-		if err := envelope.GetSender().PostMessage(envelope); err != nil {
+		if err := envelope.GetDispatcher().PostMessage(envelope); err != nil {
 			msgenvelope.ReleaseMsgEnvelope(envelope)
 			log.SysLogger.Errorf("send call timeout response error:%s", err.Error())
 		}

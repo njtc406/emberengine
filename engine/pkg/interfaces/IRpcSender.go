@@ -9,7 +9,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 )
 
-type IRpcSender interface {
+type IRpcDispatcher interface {
 	IMailboxChannel
 
 	SendRequest(envelope IEnvelope) error
@@ -22,21 +22,14 @@ type IRpcSender interface {
 	IsClosed() bool
 }
 
-type IRpcSenderHandler interface {
-	SendRequest(sender IRpcSender, envelope IEnvelope) error
-	SendRequestAndRelease(sender IRpcSender, envelope IEnvelope) error
-	SendResponse(sender IRpcSender, envelope IEnvelope) error
+type IRpcSender interface {
+	SendRequest(dispatcher IRpcDispatcher, envelope IEnvelope) error
+	SendRequestAndRelease(dispatcher IRpcDispatcher, envelope IEnvelope) error
+	SendResponse(dispatcher IRpcDispatcher, envelope IEnvelope) error
 	Close()
 	IsClosed() bool
 }
 
-type IRpcSenderDispatcher interface {
-	// SendRequest 发送请求消息
-	SendRequest(sender IRpcSender, envelope IEnvelope) error
-	SendRequestAndRelease(sender IRpcSender, envelope IEnvelope) error
-	SendResponse(sender IRpcSender, envelope IEnvelope) error
-}
-
 type IRpcSenderFactory interface {
-	GetSender(pid *actor.PID) IRpcSender
+	GetDispatcher(pid *actor.PID) IRpcDispatcher
 }

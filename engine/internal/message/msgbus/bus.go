@@ -26,8 +26,8 @@ import (
 
 type MessageBus struct {
 	dto.DataRef
-	sender   inf.IRpcSender
-	receiver inf.IRpcSender
+	sender   inf.IRpcDispatcher
+	receiver inf.IRpcDispatcher
 	err      error
 }
 
@@ -40,7 +40,7 @@ var busPool = pool.NewPoolEx(make(chan pool.IPoolData, 2048), func() pool.IPoolD
 	return &MessageBus{}
 })
 
-func NewMessageBus(sender inf.IRpcSender, receiver inf.IRpcSender, err error) *MessageBus {
+func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
 	mb := busPool.Get().(*MessageBus)
 	mb.sender = sender
 	mb.receiver = receiver
@@ -95,7 +95,7 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 	envelope.SetMethod(method)
 	envelope.SetSenderPid(mb.sender.GetPid())
 	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetSender(mb.sender)
+	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
 	envelope.SetReqId(mt.GenSeq())
@@ -226,7 +226,7 @@ func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeou
 	envelope.SetMethod(method)
 	envelope.SetSenderPid(mb.sender.GetPid())
 	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetSender(mb.sender)
+	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
 	envelope.SetReqId(mt.GenSeq())
@@ -269,7 +269,7 @@ func (mb *MessageBus) Send(method string, headers map[string]string, in interfac
 	envelope.SetMethod(method)
 	envelope.SetHeaders(headers)
 	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetSender(mb.sender)
+	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
 	envelope.SetReqId(mt.GenSeq())
@@ -363,9 +363,11 @@ func (m MultiBus) Cast(method string, headers map[string]string, in interface{})
 		return
 	}
 
-	asynclib.Go(func() {
+	_ = asynclib.Go(func() {
 		for _, bus := range m {
-			bus.Cast(method, headers, in)
+			if err := bus.Send(method, headers, in); err != nil {
+				log.SysLogger.Errorf("cast service[%s] failed, error: %v", method, err)
+			}
 		}
 	})
 
