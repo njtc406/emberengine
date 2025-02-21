@@ -12,5 +12,6 @@ type MethodInfo struct {
 	Method   reflect.Method
 	In       []reflect.Type
 	Out      []reflect.Type
+	CallFunc func(req interface{}) (interface{}, error)
 	MultiOut bool // 是否是多参数返回(排除error以外,还有两个及以上的返回值)
 }

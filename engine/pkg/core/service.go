@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
-	"strconv"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -184,7 +183,6 @@ func (s *Service) Start() error {
 }
 
 func (s *Service) startListenCallback() {
-	// TODO 这里之后还应该会加入并发回调的接收
 	for {
 		select {
 		case t, ok := <-s.IConcurrent.GetChannel():
@@ -255,7 +253,6 @@ func (s *Service) PushRequest(c inf.IEnvelope) error {
 	return s.mailbox.PostMessage(c)
 }
 
-// TODO 这个还需要修改,传过来的数据应该直接就是ConcurrentTaskCallback类型的
 func (s *Service) pushConcurrentCallback(evt concurrent.IConcurrentCallback) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceConcurrentCallback
@@ -396,26 +393,6 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 				s.HandleRequest(c)
 			}
 		})
-	case event.UserMsg:
-		// TODO 直接调用消息接口
-		s.safeExec(func() {
-			log.SysLogger.Debugf("service[%s] receive user msg[%d]", s.GetName(), tp)
-			c := ev.(inf.IEnvelope)
-			idStr := c.GetHeader("Id")
-			if idStr == "" {
-				log.SysLogger.Errorf("service[%s] receive user msg[%d] error, id is empty", s.GetName(), tp)
-				return
-			}
-
-			id, err := strconv.ParseUint(idStr, 10, 32)
-			if err != nil {
-				log.SysLogger.Errorf("service[%s] receive user msg[%d] error, id is invalid", s.GetName(), tp)
-				return
-			}
-
-			log.SysLogger.Debugf("service[%s] receive user msg[%d] id[%d]", s.GetName(), tp, id)
-		})
-
 	case event.ServiceTimerCallback:
 		evt := ev.(*event.Event)
 		t := evt.Data.(timingwheel.ITimer)

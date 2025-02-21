@@ -8,16 +8,15 @@ package rpc
 import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"reflect"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 var (
@@ -239,13 +238,10 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 		}
 		// 可变参方法的处理
 		if req == nil {
-			// 没有传入参数时，固定参数（如果有）使用零值，variadic参数打包成空 slice
+			// 没有传入参数时，固定参数（如果有）使用零值填充,防止后面参数数量不一致
 			for i := 1; i <= fixedCount; i++ {
 				params = append(params, reflect.Zero(methodInfo.In[i]))
 			}
-			variadicType := methodInfo.In[len(methodInfo.In)-1].Elem()
-			emptySlice := reflect.MakeSlice(reflect.SliceOf(variadicType), 0, 0)
-			params = append(params, emptySlice)
 		} else {
 			// 请求参数可以是 []interface{} 或其他单个值
 			if reqSlice, ok := req.([]interface{}); ok {
@@ -256,17 +252,10 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 					envelope.SetError(def.InputParamNotMatch)
 					return
 				}
-				// 添加固定参数
-				for i := 0; i < fixedCount; i++ {
+
+				for i := 0; i < len(reqSlice); i++ {
 					params = append(params, reflect.ValueOf(reqSlice[i]))
 				}
-				// 剩下的全部归为 variadic 参数
-				variadicType := methodInfo.In[len(methodInfo.In)-1].Elem()
-				sliceVal := reflect.MakeSlice(reflect.SliceOf(variadicType), 0, len(reqSlice)-fixedCount)
-				for i := fixedCount; i < len(reqSlice); i++ {
-					sliceVal = reflect.Append(sliceVal, reflect.ValueOf(reqSlice[i]))
-				}
-				params = append(params, sliceVal)
 			} else {
 				// 如果 req 不是 slice，则认为只有 variadic参数，并打包成单元素 slice
 				if fixedCount > 0 {
@@ -275,10 +264,7 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 					envelope.SetError(def.InputParamNotMatch)
 					return
 				}
-				variadicType := methodInfo.In[len(methodInfo.In)-1].Elem()
-				sliceVal := reflect.MakeSlice(reflect.SliceOf(variadicType), 0, 1)
-				sliceVal = reflect.Append(sliceVal, reflect.ValueOf(req))
-				params = append(params, sliceVal)
+				params = append(params, reflect.ValueOf(req))
 			}
 		}
 	} else {
@@ -403,3 +389,305 @@ func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
 func (h *Handler) GetMethods() []string {
 	return h.methods
 }
+
+//var (
+//	apiPreFix  = []string{"Api", "API"}
+//	rpcPreFix  = []string{"Rpc", "RPC"}
+//	emptyError = reflect.TypeOf((*error)(nil))
+//)
+//
+//// MethodMgr 管理所有注册的方法
+//type MethodMgr struct {
+//	mu        sync.RWMutex
+//	rpcCnt    int // rpc 接口数量
+//	methodMap map[string]*def.MethodInfo
+//}
+//
+//func NewMethodMgr() inf.IMethodMgr {
+//	return &MethodMgr{
+//		methodMap: make(map[string]*def.MethodInfo),
+//	}
+//}
+//
+//func (m *MethodMgr) IsPrivate() bool {
+//	m.mu.RLock()
+//	defer m.mu.RUnlock()
+//	return m.rpcCnt == 0
+//}
+//
+//func (m *MethodMgr) AddMethod(name string, info *def.MethodInfo) {
+//	if name == "" {
+//		log.SysLogger.Debugf("method[%s] register failed", name)
+//		return
+//	}
+//	m.mu.Lock()
+//	defer m.mu.Unlock()
+//	if hasPrefix(name, rpcPreFix) {
+//		m.rpcCnt++
+//	}
+//	m.methodMap[name] = info
+//}
+//
+//func (m *MethodMgr) GetMethod(name string) (*def.MethodInfo, bool) {
+//	m.mu.RLock()
+//	defer m.mu.RUnlock()
+//	info, ok := m.methodMap[name]
+//	return info, ok
+//}
+//
+//func (m *MethodMgr) RemoveMethods(names []string) {
+//	m.mu.Lock()
+//	defer m.mu.Unlock()
+//	for _, name := range names {
+//		delete(m.methodMap, name)
+//		if hasPrefix(name, rpcPreFix) {
+//			m.rpcCnt--
+//		}
+//		if m.rpcCnt < 0 {
+//			m.rpcCnt = 0
+//		}
+//	}
+//}
+//
+//// Handler 用于处理 RPC 调用
+//type Handler struct {
+//	inf.IModule
+//	mgr     inf.IMethodMgr
+//	methods []string
+//}
+//
+//func NewHandler(owner inf.IModule) *Handler {
+//	return &Handler{
+//		IModule: owner,
+//	}
+//}
+//
+//func (h *Handler) Init(hd inf.IMethodMgr) inf.IRpcHandler {
+//	h.mgr = hd
+//	h.registerMethod()
+//	return h
+//}
+//
+//func (h *Handler) registerMethod() {
+//	typ := reflect.TypeOf(h.IModule)
+//	for m := 0; m < typ.NumMethod(); m++ {
+//		err := h.suitableMethods(typ.Method(m))
+//		if err != nil {
+//			log.SysLogger.Panic(err)
+//		}
+//	}
+//}
+//
+//func isExported(name string) bool {
+//	r, _ := utf8.DecodeRuneInString(name)
+//	return unicode.IsUpper(r)
+//}
+//
+//func hasPrefix(str string, ls []string) bool {
+//	for _, s := range ls {
+//		if strings.HasPrefix(str, s) {
+//			return true
+//		}
+//	}
+//	return false
+//}
+//
+//func (h *Handler) isExportedOrBuiltinType(t reflect.Type) bool {
+//	for t.Kind() == reflect.Ptr {
+//		t = t.Elem()
+//	}
+//	// 当类型名称为空时（例如内置类型），PkgPath 也为空
+//	return isExported(t.Name()) || t.PkgPath() == ""
+//}
+//
+//func (h *Handler) suitableMethods(method reflect.Method) error {
+//	// 只注册以 Api 或 Rpc 开头的方法
+//	if !hasPrefix(method.Name, apiPreFix) && !hasPrefix(method.Name, rpcPreFix) {
+//		return nil
+//	}
+//
+//	var methodInfo def.MethodInfo
+//	var in []reflect.Type
+//	for i := 0; i < method.Type.NumIn(); i++ {
+//		if !h.isExportedOrBuiltinType(method.Type.In(i)) {
+//			return fmt.Errorf("%s Unsupported parameter types", method.Name)
+//		}
+//		in = append(in, method.Type.In(i))
+//	}
+//
+//	var outs []reflect.Type
+//	var multiOut int
+//	for i := 0; i < method.Type.NumOut(); i++ {
+//		t := method.Type.Out(i)
+//		outs = append(outs, t)
+//		kd := t.Kind()
+//		if kd == reflect.Ptr || kd == reflect.Interface || kd == reflect.Func ||
+//			kd == reflect.Map || kd == reflect.Slice || kd == reflect.Chan {
+//			if t.Implements(emptyError.Elem()) {
+//				continue
+//			} else {
+//				multiOut++
+//			}
+//		} else if t.Kind() == reflect.Struct {
+//			return def.InputParamCantUseStruct
+//		} else {
+//			multiOut++
+//		}
+//	}
+//	if multiOut > 1 {
+//		methodInfo.MultiOut = true
+//	}
+//	methodInfo.In = in
+//	methodInfo.Method = method
+//	methodInfo.Out = outs
+//	methodInfo.Handler = reflect.ValueOf(h.IModule)
+//	// 预编译调用闭包，避免每次调用都走反射的全流程
+//	methodInfo.CallFunc = compileCallFunc(&methodInfo)
+//	name := method.Name
+//	h.mgr.AddMethod(name, &methodInfo)
+//	h.methods = append(h.methods, name)
+//	log.SysLogger.Debugf("service[%s] method[%s] register success", h.GetModuleName(), name)
+//	return nil
+//}
+//
+//// compileCallFunc 预编译调用闭包，假定 def.MethodInfo 已增加字段 CallFunc
+//func compileCallFunc(methodInfo *def.MethodInfo) func(req interface{}) (interface{}, error) {
+//	return func(req interface{}) (interface{}, error) {
+//		var (
+//			params  []reflect.Value
+//			results []reflect.Value
+//		)
+//
+//		params = append(params, methodInfo.Handler)
+//
+//		// 判断是否有可变参
+//		isVariadic := methodInfo.Method.Type.IsVariadic()
+//		if isVariadic {
+//			var fixedCount int
+//			if len(methodInfo.In) > 1 {
+//				fixedCount = len(methodInfo.In) - 2 // 排除接收者和可变参
+//			} else {
+//				fixedCount = 0
+//			}
+//			// 可变参方法的处理
+//			if req == nil {
+//				// 没有传入参数时，固定参数（如果有）使用零值填充,防止后面参数数量不一致
+//				for i := 1; i <= fixedCount; i++ {
+//					params = append(params, reflect.Zero(methodInfo.In[i]))
+//				}
+//			} else {
+//				// 请求参数可以是 []interface{} 或其他单个值
+//				if reqSlice, ok := req.([]interface{}); ok {
+//					// 如果固定参数不为零，则取前 fixedCount 个作为固定参数
+//					if len(reqSlice) < fixedCount {
+//						log.SysLogger.Errorf("method[%s] param count not match, need at least: %d  got: %d",
+//							methodInfo.Method.Name, fixedCount, len(reqSlice))
+//						return nil, def.InputParamNotMatch
+//					}
+//
+//					for i := 0; i < len(reqSlice); i++ {
+//						params = append(params, reflect.ValueOf(reqSlice[i]))
+//					}
+//				} else {
+//					// 如果 req 不是 slice，则认为只有 variadic参数，并打包成单元素 slice
+//					if fixedCount > 0 {
+//						// 如果方法定义有固定参数而 req 不是 slice，就报错
+//						log.SysLogger.Errorf("method[%s] param count not match", methodInfo.Method.Name)
+//						return nil, def.InputParamNotMatch
+//					}
+//					params = append(params, reflect.ValueOf(req))
+//				}
+//			}
+//		} else {
+//			// 非 variadic 方法处理
+//			if req == nil {
+//				for i := 1; i < len(methodInfo.In); i++ {
+//					params = append(params, reflect.Zero(methodInfo.In[i]))
+//				}
+//			} else {
+//				switch req.(type) {
+//				case []interface{}:
+//					for _, param := range req.([]interface{}) {
+//						params = append(params, reflect.ValueOf(param))
+//					}
+//				default:
+//					params = append(params, reflect.ValueOf(req))
+//				}
+//			}
+//		}
+//		results = methodInfo.Method.Func.Call(params)
+//		var err error
+//		var output []interface{}
+//		for i, r := range results {
+//			// 如果返回值实现了 error 接口且非 nil，则直接返回错误
+//			if methodInfo.Out[i].Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+//				if r.Interface() != nil {
+//					err = r.Interface().(error)
+//					return nil, err
+//				}
+//			} else {
+//				output = append(output, r.Interface())
+//			}
+//		}
+//		if methodInfo.MultiOut {
+//			return output, nil
+//		}
+//		if len(output) > 0 {
+//			return output[0], nil
+//		}
+//		return nil, nil
+//	}
+//}
+//
+//func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
+//	defer func() {
+//		if r := recover(); r != nil {
+//			log.SysLogger.Errorf("service[%s] handle message from caller: %s panic: %v\n trace:%s",
+//				h.GetModuleName(), envelope.GetSenderPid().String(), r, debug.Stack())
+//			envelope.SetResponse(nil)
+//			envelope.SetError(def.HandleMessagePanic)
+//		}
+//		h.doResponse(envelope)
+//	}()
+//	methodInfo, ok := h.mgr.GetMethod(envelope.GetMethod())
+//	if !ok {
+//		envelope.SetError(def.MethodNotFound)
+//		return
+//	}
+//	resp, err := methodInfo.CallFunc(envelope.GetRequest())
+//	if err != nil {
+//		envelope.SetError(err)
+//		return
+//	}
+//	envelope.SetResponse(resp)
+//}
+//
+//func (h *Handler) doResponse(envelope inf.IEnvelope) {
+//	if !envelope.IsRef() {
+//		return
+//	}
+//	if envelope.NeedResponse() {
+//		envelope.SetReply()
+//		envelope.SetRequest(nil)
+//		if err := envelope.GetDispatcher().SendResponse(envelope); err != nil {
+//			log.SysLogger.Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
+//		}
+//	} else {
+//		msgenvelope.ReleaseMsgEnvelope(envelope)
+//	}
+//}
+//
+//func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
+//	defer func() {
+//		if r := recover(); r != nil {
+//			log.SysLogger.Errorf("service[%s] handle message panic: %v\n trace:%s",
+//				h.GetModuleName(), r, debug.Stack())
+//		}
+//	}()
+//	envelope.RunCompletions()
+//	msgenvelope.ReleaseMsgEnvelope(envelope)
+//}
+//
+//func (h *Handler) GetMethods() []string {
+//	return h.methods
+//}

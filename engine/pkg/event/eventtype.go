@@ -30,8 +30,7 @@ const (
 	ServiceConcurrentCallback = -2001 // 并发回调事件
 	ServiceTimerCallback      = -2002 // 定时器回调事件
 
-	RpcMsg  = -3001 // rpc 消息事件
-	UserMsg = -3002 // 用户消息事件
+	RpcMsg = -3001 // rpc 消息事件
 
 	MaxType = -1 // 预定义的最大只到-1
 )

@@ -105,14 +105,20 @@ func (e *MsgEnvelope) SetHeaders(header dto.Header) {
 	}
 	e.locker.Lock()
 	defer e.locker.Unlock()
+	if e.header == nil {
+		e.header = make(dto.Header)
+	}
 	for k, v := range header {
-		e.SetHeader(k, v)
+		e.header.Set(k, v)
 	}
 }
 
 func (e *MsgEnvelope) SetHeader(key string, value string) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
+	if e.header == nil {
+		e.header = make(dto.Header)
+	}
 	e.header.Set(key, value)
 }
 
