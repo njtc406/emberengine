@@ -723,9 +723,11 @@ func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
 			log.SysLogger.Errorf("service[%s] handle message panic: %v\n trace:%s",
 				h.GetModuleName(), r, debug.Stack())
 		}
+
+		msgenvelope.ReleaseMsgEnvelope(envelope)
 	}()
+
 	envelope.RunCompletions()
-	msgenvelope.ReleaseMsgEnvelope(envelope)
 }
 
 func (h *Handler) GetMethods() []string {
