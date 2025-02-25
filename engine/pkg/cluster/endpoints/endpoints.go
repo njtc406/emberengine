@@ -157,6 +157,13 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 	em.IEventProcessor.EventHandler(ev)
 }
 
+func (em *EndpointManager) ToPrivateService(svc inf.IService) {
+	ev := event.NewEvent()
+	ev.Type = event.SysEventServiceDis
+	ev.Data = svc.GetPid()
+	em.IEventProcessor.EventHandler(ev)
+}
+
 // UpdateService 更新服务信息(服务信息发生变化后调用,比如version发生变化等待)
 func (em *EndpointManager) UpdateService(svc inf.IService) {
 	pid := svc.GetPid()

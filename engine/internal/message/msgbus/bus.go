@@ -136,35 +136,39 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 		return nil
 	}
 
-	switch out.(type) {
+	// 有返回值
+	// 先判断是否时多返回值
+	switch resp.(type) {
 	case []interface{}:
-		outList := out.([]interface{})
-		respList, ok := resp.([]interface{})
-		if !ok {
-			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(out), reflect.TypeOf(respList))
-		}
-		for idx, v := range outList {
-			respType := reflect.TypeOf(respList[idx])
-			respKd := respType.Kind()
-			if respKd == reflect.Ptr {
-				respType = respType.Elem()
-			}
-			outType := reflect.TypeOf(v)
-			outKd := outType.Kind()
-			if outKd == reflect.Ptr {
-				outType = outType.Elem()
-			}
-			if outType != respType {
-				return fmt.Errorf("call: type not match, expected %v but got %v", outType, respType)
-			}
-			respVal := reflect.ValueOf(respList[idx])
-			if respVal.Kind() == reflect.Ptr {
-				respVal = respVal.Elem()
-			}
+		respList := resp.([]interface{})
+		// 多返回值,那么接收者也必须时多返回值
+		if outs, ok := out.([]interface{}); !ok {
+			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(resp), reflect.TypeOf(out))
+		} else {
+			for idx, v := range outs {
+				respType := reflect.TypeOf(respList[idx])
+				respKd := respType.Kind()
+				if respKd == reflect.Ptr {
+					respType = respType.Elem()
+				}
+				outType := reflect.TypeOf(v)
+				outKd := outType.Kind()
+				if outKd == reflect.Ptr {
+					outType = outType.Elem()
+				}
+				if outType != respType {
+					return fmt.Errorf("call: type not match2, expected %v but got %v", respType, outType)
+				}
+				respVal := reflect.ValueOf(respList[idx])
+				if respVal.Kind() == reflect.Ptr {
+					respVal = respVal.Elem()
+				}
 
-			reflect.ValueOf(v).Elem().Set(respVal)
+				reflect.ValueOf(v).Elem().Set(respVal)
+			}
 		}
 	default:
+		// 单返回值,那么接收者也必须是单返回值
 		respType := reflect.TypeOf(resp)
 		respKd := respType.Kind()
 		if respKd == reflect.Ptr {
@@ -176,7 +180,7 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 			outType = outType.Elem()
 		}
 		if outType != respType {
-			return fmt.Errorf("call: type not match, expected %v but got %v", outType, respType)
+			return fmt.Errorf("call: type not match3, expected %v but got %v", respType, outType)
 		}
 		respVal := reflect.ValueOf(resp)
 		if respVal.Kind() == reflect.Ptr {

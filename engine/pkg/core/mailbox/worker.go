@@ -56,6 +56,14 @@ type HashRing struct {
 	mu       sync.RWMutex // 保护 nodes 和 ring
 }
 
+func (h *HashRing) Clear() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.nodes = nil
+	h.ring = nil
+	h.replicas = 0
+}
+
 type WorkerPool struct {
 	conf        config.WorkerConf
 	mu          sync.RWMutex
@@ -100,10 +108,15 @@ func (p *WorkerPool) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	for id, worker := range p.workers {
-		worker.stop()
-		p.ring.Remove(id)
+	if p.workers == nil {
+		return
 	}
+
+	for _, worker := range p.workers {
+		worker.stop()
+	}
+	p.ring.Clear()
+	p.workers = nil
 }
 
 func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {

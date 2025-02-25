@@ -25,7 +25,7 @@ type RpcMonitor struct {
 	locker  sync.RWMutex
 	seed    uint64
 	waitMap map[uint64]inf.IEnvelope
-	sd      *timingwheel.TaskScheduler
+	sd      timingwheel.ITimerScheduler
 	wg      sync.WaitGroup
 }
 
@@ -58,7 +58,7 @@ func (rm *RpcMonitor) listen() {
 	defer rm.wg.Done()
 	for {
 		select {
-		case t := <-rm.sd.C:
+		case t := <-rm.sd.GetTimerCbChannel():
 			if t == nil {
 				continue
 			}

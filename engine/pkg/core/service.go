@@ -124,7 +124,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.cfg = cfg
 
 	// 创建定时器调度器
-	s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
+	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
 	// 创建邮箱
 	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s)
 
@@ -192,7 +192,7 @@ func (s *Service) startListenCallback() {
 			if err := s.pushConcurrentCallback(t); err != nil {
 				log.SysLogger.Errorf("service [%s] submit concurrent callback error: %v", s.GetName(), err)
 			}
-		case t, ok := <-s.timerDispatcher.C:
+		case t, ok := <-s.ITimerScheduler.GetTimerCbChannel():
 			if !ok {
 				return
 			}
@@ -212,18 +212,16 @@ func (s *Service) Stop() {
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
 
 	// 关闭定时器
-	s.timerDispatcher.Stop()
-	//log.SysLogger.Debugf("service[%s] stop timer", s.GetName())
-	// 先关闭邮箱
-	s.mailbox.Stop()
-	//log.SysLogger.Debugf("service[%s] stop mailbox", s.GetName())
+	s.ITimerScheduler.Stop()
 
 	// 关闭并发
 	s.IConcurrent.Close()
 
-	// 释放资源
+	// 释放资源(这里面可能还会有call类型的调用,所以先执行)
 	s.release()
-	//log.SysLogger.Debugf("service[%s] stop service", s.GetName())
+
+	// 关闭邮箱(完全关闭所有的工作线程,不再接收新的消息)
+	s.mailbox.Stop()
 
 	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
@@ -237,6 +235,8 @@ func (s *Service) release() {
 
 	s.self.OnRelease()
 	s.closeProfiler()
+
+	// TODO 这里有点问题,流程问题,onRelease里面会注销所有的模块,模块注销时,会删除rpc注册,导致removeService的时候检查到全是私有服务
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
 	endpoints.GetEndpointManager().RemoveService(s)

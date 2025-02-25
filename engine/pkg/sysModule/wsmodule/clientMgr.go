@@ -78,11 +78,11 @@ func (m *ClientMgr) GetClient(key string) *Client {
 
 func (m *ClientMgr) CastMsgToClient(msg interface{}) {
 	// 广播使用并发执行
-	m.GetService().AsyncDo(func() bool {
+	m.GetService().AsyncDo(func() error {
 		m.clients.Range(func(key, value any) bool {
 			value.(*Client).SendMsg(msg)
 			return true
 		})
-		return true
+		return nil
 	}, nil)
 }

@@ -6,18 +6,17 @@
 package core
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
-	"reflect"
-	"sync/atomic"
-	"time"
-
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"reflect"
+	"sync/atomic"
 )
 
 type Module struct {
@@ -34,10 +33,10 @@ type Module struct {
 	root         inf.IModule            // 根模块
 	rootContains map[uint32]inf.IModule // 根模块下所有模块(包括所有的子模块)
 
-	eventHandler    inf.IEventHandler          // 事件处理器
-	timerDispatcher *timingwheel.TaskScheduler // 定时器调度器
-	inf.IRpcHandler                            // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
-	methodMgr       inf.IMethodMgr             // 接口信息管理器
+	eventHandler inf.IEventHandler // 事件处理器
+	timingwheel.ITimerScheduler
+	inf.IRpcHandler                // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
+	methodMgr       inf.IMethodMgr // 接口信息管理器
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -61,7 +60,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 
 	pModule.self = module
 	pModule.parent = m.self
-	pModule.timerDispatcher = m.GetRoot().GetBaseModule().(*Module).timerDispatcher
+	pModule.ITimerScheduler = m.GetRoot().GetBaseModule().(*Module).ITimerScheduler
 	pModule.root = m.root
 	pModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pModule.eventHandler = event.NewHandler()
@@ -77,6 +76,35 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	//log.SysLogger.Debugf("add module [%s] completed", pModule.GetModuleName())
 
 	return pModule.moduleId, nil
+}
+
+func (m *Module) ReleaseModule(moduleId uint32) {
+	pModule := m.GetModule(moduleId).GetBaseModule().(*Module)
+	if pModule == nil {
+		log.SysLogger.Errorf("module %d not found", moduleId)
+		return
+	}
+
+	//log.SysLogger.Debugf("release module %s ,id: %d name:%s", m.GetModuleName(), moduleId, pModule.GetModuleName())
+
+	//释放子孙
+	for id := range pModule.children {
+		m.ReleaseModule(id)
+	}
+
+	pModule.self.OnRelease()
+	pModule.GetEventHandler().Destroy()
+	//log.SysLogger.Debugf("Release module %s", pModule.GetModuleName())
+	delete(m.children, moduleId)
+	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
+	// 从methodmgr中移除模块api(service那层的api是不会移除的)
+	if m.root.GetMethodMgr().RemoveMethods(m.GetMethods()) {
+		// 表示所有的rpc接口都已经注销,服务变为一个节点的私有服务了,通知cluster从远程监听中移除
+		endpoints.GetEndpointManager().ToPrivateService(m.GetService())
+	}
+
+	//清理被删除的Module
+	pModule.reset()
 }
 
 func (m *Module) OnInit() error {
@@ -163,75 +191,15 @@ func (m *Module) reset() {
 	m.self = nil
 	m.parent = nil
 	m.children = nil
-	m.timerDispatcher = nil
+	m.ITimerScheduler = nil
 	m.root = nil
 	m.rootContains = nil
 	m.eventHandler = nil
 	m.IConcurrent = nil
-}
-
-func (m *Module) ReleaseModule(moduleId uint32) {
-	pModule := m.GetModule(moduleId).GetBaseModule().(*Module)
-	if pModule == nil {
-		log.SysLogger.Errorf("module %d not found", moduleId)
-		return
-	}
-
-	//log.SysLogger.Debugf("release module %s ,id: %d name:%s", m.GetModuleName(), moduleId, pModule.GetModuleName())
-
-	//释放子孙
-	for id := range pModule.children {
-		m.ReleaseModule(id)
-	}
-
-	pModule.self.OnRelease()
-	pModule.GetEventHandler().Destroy()
-	//log.SysLogger.Debugf("Release module %s", pModule.GetModuleName())
-	delete(m.children, moduleId)
-	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
-	// 从methodmgr中移除模块api(service那层的api是不会移除的)
-	m.root.GetMethodMgr().RemoveMethods(m.GetMethods())
-
-	//清理被删除的Module
-	pModule.reset()
+	m.IRpcHandler = nil
+	m.methodMgr = nil
 }
 
 func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
-}
-
-func (m *Module) AfterFunc(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.AfterFunc(d, name, f, args...)
-}
-
-func (m *Module) AfterFuncWithStorage(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
-	return m.timerDispatcher.AfterFuncWithStorage(d, name, f, args...)
-}
-
-func (m *Module) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.AfterAsyncFunc(d, name, f, args...)
-}
-
-func (m *Module) TickerFunc(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.TickerFunc(d, name, f, args...)
-}
-
-func (m *Module) TickerFuncWithStorage(d time.Duration, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
-	return m.timerDispatcher.TickerFuncWithStorage(d, name, f, args...)
-}
-
-func (m *Module) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.TickerAsyncFunc(d, name, f, args...)
-}
-
-func (m *Module) CronFunc(spec string, name string, f timingwheel.TimerCallback, args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.CronFunc(spec, name, f, args...)
-}
-
-func (m *Module) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *timingwheel.Timer {
-	return m.timerDispatcher.CronAsyncFunc(spec, name, f, args...)
-}
-
-func (m *Module) CronFuncWithStorage(spec string, name string, f timingwheel.TimerCallback, args ...interface{}) (uint64, error) {
-	return m.timerDispatcher.CronFuncWithStorage(spec, name, f, args...)
 }
