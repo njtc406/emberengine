@@ -563,8 +563,8 @@ func TestRemove(t *testing.T) {
 		t.Error("expected E from position 4")
 	}
 
-	if q.Remove(2) != 'C' { // ABDFG
-		t.Error("expected C at position 2")
+	if q.Remove(2) != 'c' { // ABDFG
+		t.Error("expected c at position 2")
 	}
 	if q.Back() != 'G' {
 		t.Error("expected G at back")

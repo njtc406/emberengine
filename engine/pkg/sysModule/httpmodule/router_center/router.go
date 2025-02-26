@@ -14,7 +14,7 @@ type Handler func(engine *gin.RouterGroup)
 type StaticHandler func(engine *gin.Engine, group string)
 
 const (
-	DefaultGroup = `/method/v1`
+	DefaultGroup = `/api/v1`
 )
 
 type GroupHandlerPool struct {

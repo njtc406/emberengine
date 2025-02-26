@@ -13,10 +13,10 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
-func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcSender {
+func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 	v, ok := r.mapPID.Load(serviceUid)
 	if ok {
-		sender := v.(inf.IRpcSender)
+		sender := v.(inf.IRpcDispatcher)
 		if sender != nil && !actor.IsRetired(sender.GetPid()) {
 			return sender
 		}
@@ -25,7 +25,7 @@ func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcSender {
 		if ok {
 			tmp := tmpV.(*tmpInfo)
 			tmp.latest = timelib.Now()
-			sender := tmp.sender
+			sender := tmp.dispatcher
 			if sender != nil {
 				r.tmpMapPid.Store(serviceUid, tmp)
 				return sender
@@ -60,8 +60,8 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var returnList msgbus.MultiBus
 	r.mapPID.Range(func(key, value any) bool {
-		if rule(value.(inf.IRpcSender).GetPid()) {
-			returnList = append(returnList, msgbus.NewMessageBus(s, value.(inf.IRpcSender), nil))
+		if rule(value.(inf.IRpcDispatcher).GetPid()) {
+			returnList = append(returnList, msgbus.NewMessageBus(s, value.(inf.IRpcDispatcher), nil))
 		}
 		return true
 	})
@@ -134,8 +134,8 @@ func (r *Repository) SelectByFilterAndChoice(sender *actor.PID, filter func(pid 
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var tmpList []*actor.PID
 	r.mapPID.Range(func(key, value any) bool {
-		if filter(value.(inf.IRpcSender).GetPid()) {
-			tmpList = append(tmpList, value.(inf.IRpcSender).GetPid())
+		if filter(value.(inf.IRpcDispatcher).GetPid()) {
+			tmpList = append(tmpList, value.(inf.IRpcDispatcher).GetPid())
 		}
 		return true
 	})

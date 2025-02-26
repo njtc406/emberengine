@@ -12,7 +12,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -96,7 +95,7 @@ func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
 			return
 		}
 		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr add remote service: %s", pid.String())
-		em.repository.Add(client.NewSender(pid.GetRpcType(), &pid, nil))
+		em.repository.Add(client.NewDispatcher(&pid, nil))
 	}
 }
 
@@ -123,7 +122,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 		log.SysLogger.Errorf("add service error: pid is nil")
 		return
 	}
-	em.repository.Add(client.NewSender(def.RpcTypeLocal, pid, svc.GetMailbox()))
+	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
 
 	// 私有服务不发布
 	if svc.IsPrivate() {
@@ -158,10 +157,17 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 	em.IEventProcessor.EventHandler(ev)
 }
 
+func (em *EndpointManager) ToPrivateService(svc inf.IService) {
+	ev := event.NewEvent()
+	ev.Type = event.SysEventServiceDis
+	ev.Data = svc.GetPid()
+	em.IEventProcessor.EventHandler(ev)
+}
+
 // UpdateService 更新服务信息(服务信息发生变化后调用,比如version发生变化等待)
 func (em *EndpointManager) UpdateService(svc inf.IService) {
 	pid := svc.GetPid()
-	em.repository.Add(client.NewSender(def.RpcTypeLocal, pid, svc.GetMailbox()))
+	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
 	if svc.IsPrivate() {
 		return
 	}
@@ -175,11 +181,11 @@ func (em *EndpointManager) UpdateService(svc inf.IService) {
 	em.IEventProcessor.EventHandler(ev)
 }
 
-func (em *EndpointManager) GetSender(pid *actor.PID) inf.IRpcSender {
+func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
 	cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
 	if cli == nil {
 		// 有一种情况下可能是空的,就是调用者是私有服务,那么此时就单独创建一个,放入临时仓库
-		return em.repository.AddTmp(client.NewTmpSender(pid.GetRpcType(), pid, nil))
+		return em.repository.AddTmp(client.NewTmpDispatcher(pid, nil))
 	}
 	return cli
 }

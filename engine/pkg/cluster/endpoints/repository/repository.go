@@ -14,12 +14,12 @@ import (
 )
 
 type tmpInfo struct {
-	sender inf.IRpcSender
-	latest time.Time
+	dispatcher inf.IRpcDispatcher
+	latest     time.Time
 }
 
 type Repository struct {
-	mapPID    *sync.Map // 服务 [serviceUid]interfaces.IRpcSender
+	mapPID    *sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
 	tmpMapPid *sync.Map // 临时服务 [serviceUid]tmpInfo
 
 	ticker *time.Ticker
@@ -48,7 +48,7 @@ func (r *Repository) Stop() {
 	r.ticker.Stop()
 	// 关闭所有连接
 	r.mapPID.Range(func(key, value any) bool {
-		if client, ok := value.(inf.IRpcSender); ok {
+		if client, ok := value.(inf.IRpcDispatcher); ok {
 			client.Close()
 		}
 		return true
@@ -60,7 +60,7 @@ func (r *Repository) tick() {
 		defer func() {
 			// 退出时关闭所有临时连接
 			r.tmpMapPid.Range(func(key, value any) bool {
-				if client, ok := value.(inf.IRpcSender); ok {
+				if client, ok := value.(inf.IRpcDispatcher); ok {
 					client.Close()
 				}
 				return true
@@ -87,29 +87,29 @@ func (r *Repository) tick() {
 	}()
 }
 
-func (r *Repository) AddTmp(sender inf.IRpcSender) inf.IRpcSender {
+func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 	tmp := &tmpInfo{
-		sender: sender,
-		latest: timelib.Now(),
+		dispatcher: dispatcher,
+		latest:     timelib.Now(),
 	}
-	r.tmpMapPid.Store(sender.GetPid().GetServiceUid(), tmp)
-	//log.SysLogger.Infof("add tmp service: %s", sender.GetPid().GetServiceUid())
-	return sender
+	r.tmpMapPid.Store(dispatcher.GetPid().GetServiceUid(), tmp)
+	//log.SysLogger.Infof("add tmp service: %s", dispatcher.GetPid().GetServiceUid())
+	return dispatcher
 }
 
-func (r *Repository) Add(client inf.IRpcSender) {
-	oldClient, ok := r.mapPID.LoadOrStore(client.GetPid().GetServiceUid(), client)
+func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
+	oldClient, ok := r.mapPID.LoadOrStore(dispatcher.GetPid().GetServiceUid(), dispatcher)
 	if ok {
-		//log.SysLogger.Debugf("service already exists: %s", client.GetPid().GetServiceUid())
-		oldClient.(inf.IRpcSender).Close()                      // 旧的关闭
-		r.mapPID.Store(client.GetPid().GetServiceUid(), client) // 更新
+		//log.SysLogger.Debugf("service already exists: %s", dispatcher.GetPid().GetServiceUid())
+		oldClient.(inf.IRpcDispatcher).Close()                          // 旧的关闭
+		r.mapPID.Store(dispatcher.GetPid().GetServiceUid(), dispatcher) // 更新
 		return
 	}
 
 	r.mapNodeLock.Lock()
 	defer r.mapNodeLock.Unlock()
 
-	pid := client.GetPid()
+	pid := dispatcher.GetPid()
 	serviceType := pid.GetServiceType()
 	serviceName := pid.GetName()
 	serviceUid := pid.GetServiceUid()
@@ -148,7 +148,7 @@ func (r *Repository) Remove(key string) {
 	if !ok {
 		return
 	}
-	client := ret.(inf.IRpcSender)
+	client := ret.(inf.IRpcDispatcher)
 	pid := client.GetPid()
 	client.Close()
 

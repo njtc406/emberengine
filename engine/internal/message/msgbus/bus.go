@@ -26,8 +26,8 @@ import (
 
 type MessageBus struct {
 	dto.DataRef
-	sender   inf.IRpcSender
-	receiver inf.IRpcSender
+	sender   inf.IRpcDispatcher
+	receiver inf.IRpcDispatcher
 	err      error
 }
 
@@ -40,7 +40,7 @@ var busPool = pool.NewPoolEx(make(chan pool.IPoolData, 2048), func() pool.IPoolD
 	return &MessageBus{}
 })
 
-func NewMessageBus(sender inf.IRpcSender, receiver inf.IRpcSender, err error) *MessageBus {
+func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
 	mb := busPool.Get().(*MessageBus)
 	mb.sender = sender
 	mb.receiver = receiver
@@ -95,7 +95,7 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 	envelope.SetMethod(method)
 	envelope.SetSenderPid(mb.sender.GetPid())
 	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetSender(mb.sender)
+	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
 	envelope.SetReqId(mt.GenSeq())
@@ -136,35 +136,39 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 		return nil
 	}
 
-	switch out.(type) {
+	// 有返回值
+	// 先判断是否时多返回值
+	switch resp.(type) {
 	case []interface{}:
-		outList := out.([]interface{})
-		respList, ok := resp.([]interface{})
-		if !ok {
-			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(out), reflect.TypeOf(respList))
-		}
-		for idx, v := range outList {
-			respType := reflect.TypeOf(respList[idx])
-			respKd := respType.Kind()
-			if respKd == reflect.Ptr {
-				respType = respType.Elem()
-			}
-			outType := reflect.TypeOf(v)
-			outKd := outType.Kind()
-			if outKd == reflect.Ptr {
-				outType = outType.Elem()
-			}
-			if outType != respType {
-				return fmt.Errorf("call: type not match, expected %v but got %v", outType, respType)
-			}
-			respVal := reflect.ValueOf(respList[idx])
-			if respVal.Kind() == reflect.Ptr {
-				respVal = respVal.Elem()
-			}
+		respList := resp.([]interface{})
+		// 多返回值,那么接收者也必须时多返回值
+		if outs, ok := out.([]interface{}); !ok {
+			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(resp), reflect.TypeOf(out))
+		} else {
+			for idx, v := range outs {
+				respType := reflect.TypeOf(respList[idx])
+				respKd := respType.Kind()
+				if respKd == reflect.Ptr {
+					respType = respType.Elem()
+				}
+				outType := reflect.TypeOf(v)
+				outKd := outType.Kind()
+				if outKd == reflect.Ptr {
+					outType = outType.Elem()
+				}
+				if outType != respType {
+					return fmt.Errorf("call: type not match2, expected %v but got %v", respType, outType)
+				}
+				respVal := reflect.ValueOf(respList[idx])
+				if respVal.Kind() == reflect.Ptr {
+					respVal = respVal.Elem()
+				}
 
-			reflect.ValueOf(v).Elem().Set(respVal)
+				reflect.ValueOf(v).Elem().Set(respVal)
+			}
 		}
 	default:
+		// 单返回值,那么接收者也必须是单返回值
 		respType := reflect.TypeOf(resp)
 		respKd := respType.Kind()
 		if respKd == reflect.Ptr {
@@ -176,7 +180,7 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 			outType = outType.Elem()
 		}
 		if outType != respType {
-			return fmt.Errorf("call: type not match, expected %v but got %v", outType, respType)
+			return fmt.Errorf("call: type not match3, expected %v but got %v", respType, outType)
 		}
 		respVal := reflect.ValueOf(resp)
 		if respVal.Kind() == reflect.Ptr {
@@ -226,7 +230,7 @@ func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeou
 	envelope.SetMethod(method)
 	envelope.SetSenderPid(mb.sender.GetPid())
 	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetSender(mb.sender)
+	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
 	envelope.SetReqId(mt.GenSeq())
@@ -269,7 +273,7 @@ func (mb *MessageBus) Send(method string, headers map[string]string, in interfac
 	envelope.SetMethod(method)
 	envelope.SetHeaders(headers)
 	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetSender(mb.sender)
+	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
 	envelope.SetReqId(mt.GenSeq())
@@ -363,9 +367,11 @@ func (m MultiBus) Cast(method string, headers map[string]string, in interface{})
 		return
 	}
 
-	asynclib.Go(func() {
+	_ = asynclib.Go(func() {
 		for _, bus := range m {
-			bus.Cast(method, headers, in)
+			if err := bus.Send(method, headers, in); err != nil {
+				log.SysLogger.Errorf("cast service[%s] failed, error: %v", method, err)
+			}
 		}
 	})
 

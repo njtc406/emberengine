@@ -1,4 +1,4 @@
-// Package msgbus
+// Package core
 // @Title  title
 // @Description  desc
 // @Author  pc  2024/11/5
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
-	"strconv"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -21,29 +20,23 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/panjf2000/ants/v2"
 )
 
 type Service struct {
 	Module
 	inf.IMessageInvoker
 
-	pid      *actor.PID // 服务基础信息
-	id       string     // 服务唯一id(针对本地节点的相同服务名称中唯一)
-	name     string     // 服务名称
-	serverId int32      // 服务id
+	pid  *actor.PID // 服务基础信息
+	name string     // 服务名称
 
 	src    inf.IService // 服务源
 	cfg    interface{}  // 服务配置
 	status int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 
-	mailbox inf.IMailbox // 邮箱
-	//workerPool     *WorkerPool         // 工作线程池
-	goroutinePool  *ants.Pool          // 线程池
+	mailbox        inf.IMailbox        // 邮箱
 	eventProcessor inf.IEventProcessor // 事件管理器
 	//profiler       *profiler.Profiler  // 性能分析
 }
@@ -66,7 +59,6 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 				DynamicWorkerScaling: false,
 				VirtualWorkerRate:    def.DefaultVirtualWorkerRate,
 			},
-			GoroutinePoolSize: def.DefaultGoroutinePoolSize,
 		}
 		return serviceInitConf
 	}
@@ -76,9 +68,6 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 	}
 	if serviceInitConf.RpcType == "" {
 		serviceInitConf.RpcType = def.RpcTypeRpcx
-	}
-	if serviceInitConf.GoroutinePoolSize == 0 {
-		serviceInitConf.GoroutinePoolSize = def.DefaultGoroutinePoolSize
 	}
 
 	if serviceInitConf.TimerConf == nil {
@@ -131,15 +120,11 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	serviceInitConf = s.fixConf(serviceInitConf)
 	//log.SysLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
 	// 初始化服务数据
-	s.id = serviceInitConf.ServiceId
-	s.serverId = serviceInitConf.ServerId
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
 
-	// 创建线程池
-	s.goroutinePool = asynclib.NewAntsPool(serviceInitConf.GoroutinePoolSize)
 	// 创建定时器调度器
-	s.timerDispatcher = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
+	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
 	// 创建邮箱
 	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s)
 
@@ -157,8 +142,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.eventHandler = event.NewHandler()
 	s.eventHandler.Init(s.eventProcessor)
 
-	s.IConcurrent = concurrent.NewConcurrent()
-	s.pid = endpoints.GetEndpointManager().CreatePid(s.serverId, s.id, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
+	s.IConcurrent = concurrent.NewTaskScheduler()
+	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
 		log.SysLogger.Panicf("service[%s] create pid error", s.GetName())
 		return
@@ -198,10 +183,16 @@ func (s *Service) Start() error {
 }
 
 func (s *Service) startListenCallback() {
-	// TODO 这里之后还应该会加入并发回调的接收
 	for {
 		select {
-		case t, ok := <-s.timerDispatcher.C:
+		case t, ok := <-s.IConcurrent.GetChannel():
+			if !ok {
+				return
+			}
+			if err := s.pushConcurrentCallback(t); err != nil {
+				log.SysLogger.Errorf("service [%s] submit concurrent callback error: %v", s.GetName(), err)
+			}
+		case t, ok := <-s.ITimerScheduler.GetTimerCbChannel():
 			if !ok {
 				return
 			}
@@ -221,15 +212,16 @@ func (s *Service) Stop() {
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
 
 	// 关闭定时器
-	s.timerDispatcher.Stop()
-	//log.SysLogger.Debugf("service[%s] stop timer", s.GetName())
-	// 先关闭邮箱
-	s.mailbox.Stop()
-	//log.SysLogger.Debugf("service[%s] stop mailbox", s.GetName())
+	s.ITimerScheduler.Stop()
 
-	// 释放资源
+	// 关闭并发
+	s.IConcurrent.Close()
+
+	// 释放资源(这里面可能还会有call类型的调用,所以先执行)
 	s.release()
-	//log.SysLogger.Debugf("service[%s] stop service", s.GetName())
+
+	// 关闭邮箱(完全关闭所有的工作线程,不再接收新的消息)
+	s.mailbox.Stop()
 
 	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
@@ -237,12 +229,14 @@ func (s *Service) Stop() {
 func (s *Service) release() {
 	defer func() {
 		if err := recover(); err != nil {
-			log.SysLogger.Errorf("service [%s] release error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
+			log.SysLogger.Errorf("service [%s] release error: %v", s.GetName(), err)
 		}
 	}()
 
 	s.self.OnRelease()
 	s.closeProfiler()
+
+	// TODO 这里有点问题,流程问题,onRelease里面会注销所有的模块,模块注销时,会删除rpc注册,导致removeService的时候检查到全是私有服务
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
 	endpoints.GetEndpointManager().RemoveService(s)
@@ -259,18 +253,14 @@ func (s *Service) PushRequest(c inf.IEnvelope) error {
 	return s.mailbox.PostMessage(c)
 }
 
-// TODO 这个还需要修改,传过来的数据应该直接就是ConcurrentTaskCallback类型的
-func (s *Service) pushConcurrentCallback(callback func(err error, args ...interface{}), args ...interface{}) error {
+func (s *Service) pushConcurrentCallback(evt concurrent.IConcurrentCallback) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceConcurrentCallback
-	ev.Data = &def.ConcurrentTaskCallback{
-		Callback: callback,
-		Args:     args,
-	}
+	ev.Data = evt
 	return s.mailbox.PostMessage(ev)
 }
 
-func (s *Service) pushTimerCallback(t inf.ITimer) error {
+func (s *Service) pushTimerCallback(t timingwheel.ITimer) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceTimerCallback
 	ev.Key = t.GetName() // 保证相同的回调在同一个worker处理
@@ -287,7 +277,7 @@ func (s *Service) GetName() string {
 }
 
 func (s *Service) GetServerId() int32 {
-	return s.serverId
+	return s.pid.GetServerId()
 }
 
 func (s *Service) GetPid() *actor.PID {
@@ -319,11 +309,7 @@ func (s *Service) IsClosed() bool {
 }
 
 func (s *Service) getUniqueKey() string {
-	var name = s.GetName()
-	if s.id != "" {
-		name = fmt.Sprintf("%s-%s", name, s.id)
-	}
-	return name
+	return fmt.Sprintf("%s-%s", s.pid.GetName(), s.pid.GetServiceUid())
 }
 
 // TODO 这里需要修改,Profiler被移动到workerPool中了
@@ -407,30 +393,14 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 				s.HandleRequest(c)
 			}
 		})
-	case event.UserMsg:
-		// TODO 直接调用消息接口
-		s.safeExec(func() {
-			log.SysLogger.Debugf("service[%s] receive user msg[%d]", s.GetName(), tp)
-			c := ev.(inf.IEnvelope)
-			idStr := c.GetHeader("Id")
-			if idStr == "" {
-				log.SysLogger.Errorf("service[%s] receive user msg[%d] error, id is empty", s.GetName(), tp)
-				return
-			}
-
-			id, err := strconv.ParseUint(idStr, 10, 32)
-			if err != nil {
-				log.SysLogger.Errorf("service[%s] receive user msg[%d] error, id is invalid", s.GetName(), tp)
-				return
-			}
-
-			log.SysLogger.Debugf("service[%s] receive user msg[%d] id[%d]", s.GetName(), tp, id)
-		})
-
 	case event.ServiceTimerCallback:
 		evt := ev.(*event.Event)
-		t := evt.Data.(inf.ITimer)
+		t := evt.Data.(timingwheel.ITimer)
 		t.Do()
+	case event.ServiceConcurrentCallback:
+		evt := ev.(*event.Event)
+		t := evt.Data.(concurrent.IConcurrentCallback)
+		t.DoCallback()
 	default:
 		s.safeExec(func() {
 			s.eventProcessor.EventHandler(ev)

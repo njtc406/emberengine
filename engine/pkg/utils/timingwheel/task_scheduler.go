@@ -7,11 +7,29 @@ package timingwheel
 
 import (
 	"fmt"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+type ITimerScheduler interface {
+	AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
+	AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer
+	AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer
+
+	TickerFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
+	TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer
+	TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer
+
+	CronFuncWithStorage(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
+	CronFunc(spec string, name string, f TimerCallback, args ...interface{}) *Timer
+	CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *Timer
+
+	Cancel(taskId uint64) bool
+	Stop()
+
+	GetTimerCbChannel() chan ITimer
+}
 
 var (
 	defaultSeed uint64 = 10000
@@ -49,10 +67,10 @@ type TaskScheduler struct {
 	closed int32
 	shards []*TimerBucket
 
-	C chan inf.ITimer
+	c chan ITimer
 }
 
-func NewTaskScheduler(chanSize, bucketSize int) *TaskScheduler {
+func NewTaskScheduler(chanSize, bucketSize int) ITimerScheduler {
 	if chanSize <= 0 {
 		chanSize = 100000
 	}
@@ -67,7 +85,7 @@ func NewTaskScheduler(chanSize, bucketSize int) *TaskScheduler {
 	}
 	return &TaskScheduler{
 		shards: shards,
-		C:      make(chan inf.ITimer, chanSize),
+		c:      make(chan ITimer, chanSize),
 	}
 }
 
@@ -105,6 +123,10 @@ func (scheduler *TaskScheduler) remove(taskId uint64) *Timer {
 	return shard.remove(taskId)
 }
 
+func (scheduler *TaskScheduler) GetTimerCbChannel() chan ITimer {
+	return scheduler.c
+}
+
 // AfterFuncWithStorage 延时任务(任务会被保存下来)
 func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
@@ -112,7 +134,7 @@ func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name strin
 		t.name = name
 		t.task = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 		t.scheduler = scheduler
 	})
 	// 加入任务
@@ -130,7 +152,7 @@ func (scheduler *TaskScheduler) AfterFunc(d time.Duration, name string, f TimerC
 		t.name = name
 		t.task = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 	})
 }
 
@@ -141,7 +163,7 @@ func (scheduler *TaskScheduler) AfterAsyncFunc(d time.Duration, name string, f f
 		t.name = name
 		t.asyncTask = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 	})
 }
 
@@ -153,7 +175,7 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name stri
 		t.interval = d
 		t.task = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 		t.scheduler = scheduler
 	})
 	if tm == nil {
@@ -175,7 +197,7 @@ func (scheduler *TaskScheduler) TickerFunc(d time.Duration, name string, f Timer
 		t.interval = d
 		t.task = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 	})
 }
 
@@ -187,7 +209,7 @@ func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, name string, f 
 		t.interval = d
 		t.asyncTask = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 	})
 }
 
@@ -203,7 +225,7 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f 
 		t.spec = spec
 		t.task = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 		t.scheduler = scheduler
 	})
 	if tm == nil {
@@ -224,7 +246,7 @@ func (scheduler *TaskScheduler) CronFunc(spec string, name string, f TimerCallba
 		t.spec = spec
 		t.task = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 	})
 }
 
@@ -236,7 +258,7 @@ func (scheduler *TaskScheduler) CronAsyncFunc(spec string, name string, f func(.
 		t.spec = spec
 		t.asyncTask = f
 		t.taskArgs = args
-		t.c = scheduler.C
+		t.c = scheduler.c
 	})
 }
 
@@ -265,5 +287,5 @@ func (scheduler *TaskScheduler) Stop() {
 		}
 		shard.Unlock()
 	}
-	close(scheduler.C)
+	close(scheduler.c)
 }

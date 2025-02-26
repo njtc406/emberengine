@@ -62,7 +62,7 @@ type MsgEnvelope struct {
 
 	// 缓存信息
 	timeout   time.Duration        // 请求超时时间
-	sender    inf.IRpcSender       // 发送者客户端(用于回调)
+	sender    inf.IRpcDispatcher   // 发送者客户端(用于回调)
 	callbacks []dto.CompletionFunc // 完成回调
 	done      chan struct{}        // 完成信号
 	timerId   uint64               // 定时器ID
@@ -105,14 +105,20 @@ func (e *MsgEnvelope) SetHeaders(header dto.Header) {
 	}
 	e.locker.Lock()
 	defer e.locker.Unlock()
+	if e.header == nil {
+		e.header = make(dto.Header)
+	}
 	for k, v := range header {
-		e.SetHeader(k, v)
+		e.header.Set(k, v)
 	}
 }
 
 func (e *MsgEnvelope) SetHeader(key string, value string) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
+	if e.header == nil {
+		e.header = make(dto.Header)
+	}
 	e.header.Set(key, value)
 }
 
@@ -128,7 +134,7 @@ func (e *MsgEnvelope) SetReceiverPid(receiver *actor.PID) {
 	e.receiverPid = receiver
 }
 
-func (e *MsgEnvelope) SetSender(client inf.IRpcSender) {
+func (e *MsgEnvelope) SetDispatcher(client inf.IRpcDispatcher) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.sender = client
@@ -261,7 +267,7 @@ func (e *MsgEnvelope) GetReceiverPid() *actor.PID {
 	return e.receiverPid
 }
 
-func (e *MsgEnvelope) GetSender() inf.IRpcSender {
+func (e *MsgEnvelope) GetDispatcher() inf.IRpcDispatcher {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.sender

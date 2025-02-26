@@ -38,7 +38,7 @@ func (h *Handler) SelectByServiceType(serverId int32, serviceType, serviceName s
 	}
 	for _, filter := range filters {
 		for _, bus := range list.(msgbus.MultiBus) {
-			if filter(bus.(inf.IRpcSender).GetPid()) {
+			if filter(bus.(inf.IRpcDispatcher).GetPid()) {
 				returnList = append(returnList, bus)
 			}
 		}
@@ -59,7 +59,7 @@ func (h *Handler) SelectSameServerByServiceType(serviceType, serviceName string,
 	}
 	for _, filter := range filters {
 		for _, bus := range list.(msgbus.MultiBus) {
-			if filter(bus.(inf.IRpcSender).GetPid()) {
+			if filter(bus.(inf.IRpcDispatcher).GetPid()) {
 				returnList = append(returnList, bus)
 			}
 		}

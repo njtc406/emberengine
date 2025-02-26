@@ -60,15 +60,14 @@ type RPCServer struct {
 }
 
 type ServiceInitConf struct {
-	ServiceId         string      `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
-	ServiceName       string      `binding:"required"` // 服务名称
-	Type              string      `binding:"required"` // 服务类型
-	Version           int64       `binding:""`         // 服务版本
-	ServerId          int32       `binding:"required"` // 服务ID
-	TimerConf         *TimerConf  `binding:""`         // 定时器配置
-	RpcType           string      `binding:""`         // 远程调用方式(默认使用rpcx)
-	WorkerConf        *WorkerConf `binding:""`         // 工作线程配置
-	GoroutinePoolSize int         `binding:""`         // 服务专属线程池大小(默认10)
+	ServiceId   string      `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
+	ServiceName string      `binding:"required"` // 服务名称
+	Type        string      `binding:"required"` // 服务类型
+	Version     int64       `binding:""`         // 服务版本
+	ServerId    int32       `binding:"required"` // 服务ID
+	TimerConf   *TimerConf  `binding:""`         // 定时器配置
+	RpcType     string      `binding:""`         // 远程调用方式(默认使用rpcx)
+	WorkerConf  *WorkerConf `binding:""`         // 工作线程配置
 }
 
 type ServiceConfig struct {

@@ -24,7 +24,7 @@ type rpcxSender struct {
 	rpcClient client.XClient
 }
 
-func newRpcxClient(addr string) inf.IRpcSenderHandler {
+func newRpcxClient(addr string) inf.IRpcSender {
 	d, _ := client.NewPeer2PeerDiscovery("tcp@"+addr, "")
 	// 如果调用失败,会自动重试3次
 	rpcClient := client.NewXClient("RpcxListener", client.Failtry, client.RandomSelect, d, client.Option{
@@ -55,11 +55,11 @@ func (rc *rpcxSender) Close() {
 	if err := rc.rpcClient.Close(); err != nil {
 		log.SysLogger.Errorf("close remote client is error : %s", err)
 	}
-	//log.SysLogger.Debugf("############################close remote rpcx client success : %s", rc.IRpcSender.GetPid().String())
+	//log.SysLogger.Debugf("############################close remote rpcx client success : %s", rc.IRpcDispatcher.GetPid().String())
 	rc.rpcClient = nil
 }
 
-func (rc *rpcxSender) send(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if rc.rpcClient == nil {
 		return def.RPCHadClosed
 	}
@@ -78,26 +78,26 @@ func (rc *rpcxSender) send(sender inf.IRpcSender, envelope inf.IEnvelope) error 
 	}
 
 	if _, err := rc.rpcClient.Go(ctx, "RPCCall", msg, nil, nil); err != nil {
-		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, sender.GetPid().GetServiceUid(), err)
+		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
 		return def.RPCCallFailed
 	}
 
 	return nil
 }
 
-func (rc *rpcxSender) SendRequest(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (rc *rpcxSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	// 这里不能释放envelope,因为调用方需要使用
-	return rc.send(sender, envelope)
+	return rc.send(dispatcher, envelope)
 }
 
-func (rc *rpcxSender) SendRequestAndRelease(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (rc *rpcxSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
-	return rc.send(sender, envelope)
+	return rc.send(dispatcher, envelope)
 }
 
-func (rc *rpcxSender) SendResponse(sender inf.IRpcSender, envelope inf.IEnvelope) error {
+func (rc *rpcxSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer msgenvelope.ReleaseMsgEnvelope(envelope)
-	return rc.send(sender, envelope)
+	return rc.send(dispatcher, envelope)
 }
 
 func (rc *rpcxSender) IsClosed() bool {

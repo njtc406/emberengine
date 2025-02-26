@@ -22,7 +22,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		// 需要回复的信息都会加入monitor中,找到对应的信封数据
 		if envelope := monitor.GetRpcMonitor().Remove(req.ReqId); envelope != nil {
 			// 异步回调,直接发送到对应服务处理,服务处理完后会自己释放envelope
-			sender := envelope.GetSender()
+			sender := envelope.GetDispatcher()
 			if sender != nil && sender.IsClosed() {
 				// 调用者已经下线,丢弃回复
 				msgenvelope.ReleaseMsgEnvelope(envelope)
@@ -69,13 +69,13 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		if req.NeedResp {
 			// 需要回复的才设置sender
 			envelope.SetSenderPid(req.SenderPid)
-			envelope.SetSender(sf.GetSender(req.SenderPid))
+			envelope.SetDispatcher(sf.GetDispatcher(req.SenderPid))
 		}
 		envelope.SetRequest(request)
 		envelope.SetResponse(nil)
 		envelope.SetReqId(req.ReqId)
 		envelope.SetNeedResponse(req.NeedResp)
 
-		return sf.GetSender(req.ReceiverPid).SendRequest(envelope)
+		return sf.GetDispatcher(req.ReceiverPid).SendRequest(envelope)
 	}
 }

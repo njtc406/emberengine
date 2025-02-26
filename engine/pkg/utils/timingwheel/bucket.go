@@ -10,10 +10,15 @@ import (
 	"unsafe"
 
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
+
+type ITimer interface {
+	Do()
+	GetName() string
+	GetTimerId() uint64
+}
 
 var timerPool = pool.NewPoolEx(make(chan pool.IPoolData, 100000), func() pool.IPoolData {
 	return &Timer{}
@@ -43,7 +48,7 @@ type Timer struct {
 	cancel     int32                // 0未取消 1取消
 	task       TimerCallback        // 任务
 	taskArgs   []interface{}        // 任务参数
-	c          chan inf.ITimer      // service直接触发通道
+	c          chan ITimer          // service直接触发通道
 	loop       func()               // 循环执行
 	asyncTask  func(...interface{}) // 异步任务
 	scheduler  *TaskScheduler       // 任务调度器
@@ -193,7 +198,7 @@ func (t *Timer) SetTaskArgs(args ...interface{}) {
 	t.taskArgs = args
 }
 
-func (t *Timer) SetC(c chan inf.ITimer) {
+func (t *Timer) SetC(c chan ITimer) {
 	t.c = c
 }
 

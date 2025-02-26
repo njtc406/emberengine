@@ -6,12 +6,8 @@
 package interfaces
 
 import (
-	"time"
-
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timer"
 )
 
 type IModule interface {
@@ -19,7 +15,8 @@ type IModule interface {
 	IModuleIdentity
 	IModuleHierarchy
 	IModuleServiceEvent
-	concurrent.IConcurrent
+	//concurrent.IConcurrent 暂时不暴露
+	//timingwheel.ITimerScheduler 暂时不暴露
 }
 
 type IModuleLifecycle interface {
@@ -53,15 +50,9 @@ type IModuleServiceEvent interface {
 	NotifyEvent(IEvent)                 // 通知事件
 }
 
-type IModuleTimer interface {
-	AfterFunc(d time.Duration, cb func(iTimer timer.ITimer)) timer.ITimer
-	CronFunc(cronExpr *timer.CronExpr, cb func(timer.ITimer)) timer.ITimer
-	NewTicker(d time.Duration, cb func(timer.ITimer)) timer.ITimer
-}
-
 type IMethodMgr interface {
-	AddMethod(name string, info *def.MethodInfo)
-	GetMethod(name string) (*def.MethodInfo, bool)
-	RemoveMethods(names []string)
+	AddMethodFunc(name string, fn def.MethodCallFunc)
+	GetMethodFunc(name string) (def.MethodCallFunc, bool)
+	RemoveMethods(names []string) bool
 	IsPrivate() bool
 }
