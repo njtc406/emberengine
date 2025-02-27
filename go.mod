@@ -19,6 +19,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/smallnest/rpcx v1.8.36
 	github.com/stretchr/testify v1.10.0
+	github.com/xtaci/kcp-go v5.4.20+incompatible
 	go.etcd.io/etcd/api/v3 v3.5.17
 	go.etcd.io/etcd/client/v3 v3.5.17
 	go.uber.org/zap v1.27.0
@@ -86,6 +87,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/quic-go v0.48.2 // indirect
+	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/rubyist/circuitbreaker v2.2.1+incompatible // indirect
 	github.com/sagikazarmark/locafero v0.6.0 // indirect
@@ -106,7 +108,6 @@ require (
 	github.com/valyala/fastrand v1.1.0 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	github.com/xtaci/kcp-go v5.4.20+incompatible // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.17 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect

@@ -9,6 +9,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// TODO 文件需要修改
+
 type MessageInfo struct {
 	msgType    reflect.Type
 	msgHandler MessageHandler
@@ -27,7 +29,7 @@ type PBProcessor struct {
 	unknownMessageHandler UnknownMessageHandler
 	connectHandler        ConnectHandler
 	disconnectHandler     ConnectHandler
-	bytespool.IBytesMempool
+	bytespool.IBytesMemPool
 }
 
 type PBPackInfo struct {
@@ -38,7 +40,7 @@ type PBPackInfo struct {
 
 func NewPBProcessor() *PBProcessor {
 	processor := &PBProcessor{mapMsg: map[uint16]MessageInfo{}}
-	processor.IBytesMempool = bytespool.NewMemAreaPool()
+	processor.IBytesMemPool = bytespool.NewMemAreaPool()
 	return processor
 }
 
@@ -55,7 +57,7 @@ func (slf *PBPackInfo) GetMsg() proto.Message {
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{}) error {
+func (pbProcessor *PBProcessor) MsgRoute(sessionId int64, clientId string, msg interface{}) error {
 	pPackInfo := msg.(*PBPackInfo)
 	v, ok := pbProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
@@ -67,13 +69,13 @@ func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{}) error
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor) Unmarshal(clientId string, data []byte) (interface{}, error) {
+func (pbProcessor *PBProcessor) Unmarshal(data []byte) (interface{}, error) {
 	defer pbProcessor.ReleaseBytes(data)
-	return pbProcessor.UnmarshalWithOutRelease(clientId, data)
+	return pbProcessor.UnmarshalWithOutRelease(data)
 }
 
 // unmarshal but not release data
-func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId string, data []byte) (interface{}, error) {
+func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(data []byte) (interface{}, error) {
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])

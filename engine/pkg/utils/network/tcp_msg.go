@@ -4,11 +4,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
+
 	"io"
 	"math"
 )
 
-// --------------
+// MsgParser --------------
 // | len | data |
 // --------------
 type MsgParser struct {
@@ -17,10 +18,10 @@ type MsgParser struct {
 	MaxMsgLen    uint32
 	LittleEndian bool
 
-	bytespool.IBytesMempool
+	bytespool.IBytesMemPool
 }
 
-func (p *MsgParser) getMaxMsgLen(lenMsgLen int) uint32 {
+func (p *MsgParser) getMaxMsgLen() uint32 {
 	switch p.LenMsgLen {
 	case 1:
 		return math.MaxUint8
@@ -33,17 +34,17 @@ func (p *MsgParser) getMaxMsgLen(lenMsgLen int) uint32 {
 	}
 }
 
-func (p *MsgParser) init() {
-	p.IBytesMempool = bytespool.NewMemAreaPool()
+func (p *MsgParser) Init() {
+	p.IBytesMemPool = bytespool.NewMemAreaPool()
 }
 
 // goroutine safe
-func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
+func (p *MsgParser) Read(r io.Reader) ([]byte, error) {
 	var b [4]byte
 	bufMsgLen := b[:p.LenMsgLen]
 
 	// read len
-	if _, err := io.ReadFull(conn, bufMsgLen); err != nil {
+	if _, err := io.ReadFull(r, bufMsgLen); err != nil {
 		return nil, err
 	}
 
@@ -75,7 +76,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 
 	// data
 	msgData := p.MakeBytes(int(msgLen))
-	if _, err := io.ReadFull(conn, msgData[:msgLen]); err != nil {
+	if _, err := io.ReadFull(r, msgData[:msgLen]); err != nil {
 		p.ReleaseBytes(msgData)
 		return nil, err
 	}
@@ -84,7 +85,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 }
 
 // goroutine safe
-func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
+func (p *MsgParser) Write(conn io.Writer, args ...[]byte) error {
 	// get len
 	var msgLen uint32
 	for i := 0; i < len(args); i++ {
@@ -128,4 +129,10 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	conn.Write(msg)
 
 	return nil
+}
+
+func (p *MsgParser) GetRecyclerReaderBytes() func(data []byte) {
+	return func(data []byte) {
+		p.IBytesMemPool.ReleaseBytes(data)
+	}
 }

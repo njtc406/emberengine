@@ -61,7 +61,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		return
 	}
-	if len(handler.conns) >= handler.maxConnNum {
+	if handler.maxConnNum > 0 && len(handler.conns) >= handler.maxConnNum {
 		handler.mutexConns.Unlock()
 		conn.Close()
 		log.SysLogger.Warning("too many connections")
@@ -72,6 +72,13 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	wsConn := NewWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType)
 	agent := handler.newAgent(wsConn)
+	if agent == nil {
+		wsConn.Close()
+		handler.mutexConns.Lock()
+		delete(handler.conns, conn)
+		handler.mutexConns.Unlock()
+		return
+	}
 	agent.Run()
 
 	// cleanup

@@ -8,6 +8,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
 )
 
+// TODO 文件需要修改
+
 type MessageJsonInfo struct {
 	msgType    reflect.Type
 	msgHandler MessageJsonHandler
@@ -24,7 +26,7 @@ type JsonProcessor struct {
 	unknownMessageHandler UnknownMessageJsonHandler
 	connectHandler        ConnectJsonHandler
 	disconnectHandler     ConnectJsonHandler
-	bytespool.IBytesMempool
+	bytespool.IBytesMemPool
 }
 
 type JsonPackInfo struct {
@@ -35,7 +37,7 @@ type JsonPackInfo struct {
 
 func NewJsonProcessor() *JsonProcessor {
 	processor := &JsonProcessor{mapMsg: map[uint16]MessageJsonInfo{}}
-	processor.IBytesMempool = bytespool.NewMemAreaPool()
+	processor.IBytesMemPool = bytespool.NewMemAreaPool()
 
 	return processor
 }
@@ -45,7 +47,7 @@ func (jsonProcessor *JsonProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (jsonProcessor *JsonProcessor) MsgRoute(clientId string, msg interface{}) error {
+func (jsonProcessor *JsonProcessor) MsgRoute(sessionId int64, clientId string, msg interface{}) error {
 	pPackInfo := msg.(*JsonPackInfo)
 	v, ok := jsonProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
@@ -56,7 +58,7 @@ func (jsonProcessor *JsonProcessor) MsgRoute(clientId string, msg interface{}) e
 	return nil
 }
 
-func (jsonProcessor *JsonProcessor) Unmarshal(clientId string, data []byte) (interface{}, error) {
+func (jsonProcessor *JsonProcessor) Unmarshal(data []byte) (interface{}, error) {
 	typeStruct := struct {
 		Type int `json:"typ"`
 	}{}

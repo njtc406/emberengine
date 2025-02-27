@@ -1,12 +1,13 @@
 package network
 
 import (
+	"github.com/xtaci/kcp-go"
 	"net"
 	"sync"
 	"time"
 )
 
-type TCPClient struct {
+type KCPClient struct {
 	sync.Mutex
 	Addr            string
 	ConnNum         int
@@ -24,7 +25,7 @@ type TCPClient struct {
 	MsgParser
 }
 
-func (client *TCPClient) Start() {
+func (client *KCPClient) Start() {
 	client.init()
 
 	for i := 0; i < client.ConnNum; i++ {
@@ -33,7 +34,7 @@ func (client *TCPClient) Start() {
 	}
 }
 
-func (client *TCPClient) init() {
+func (client *KCPClient) init() {
 	client.Lock()
 	defer client.Unlock()
 
@@ -84,20 +85,23 @@ func (client *TCPClient) init() {
 	client.MsgParser.Init()
 }
 
-func (client *TCPClient) GetCloseFlag() bool {
+func (client *KCPClient) GetCloseFlag() bool {
 	client.Lock()
 	defer client.Unlock()
 
 	return client.closeFlag
 }
 
-func (client *TCPClient) dial() net.Conn {
+func (client *KCPClient) dial() net.Conn {
 	for {
-		conn, err := net.Dial("tcp", client.Addr)
+		conn, err := kcp.DialWithOptions(client.Addr, nil, 10, 3)
 		if client.closeFlag {
 			return conn
 		} else if err == nil && conn != nil {
-			conn.(*net.TCPConn).SetNoDelay(true)
+			conn.SetNoDelay(1, 10, 2, 1)
+			conn.SetDSCP(46)
+			conn.SetStreamMode(true)
+			conn.SetWindowSize(1024, 1024)
 			return conn
 		}
 
@@ -107,9 +111,8 @@ func (client *TCPClient) dial() net.Conn {
 	}
 }
 
-func (client *TCPClient) connect() {
+func (client *KCPClient) connect() {
 	defer client.wg.Done()
-
 reconnect:
 	conn := client.dial()
 	if conn == nil {
@@ -125,12 +128,12 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser, client.WriteDeadline)
-	agent := client.NewAgent(tcpConn)
+	netConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser, client.WriteDeadline)
+	agent := client.NewAgent(netConn)
 	agent.Run()
 
 	// cleanup
-	tcpConn.Close()
+	netConn.Close()
 	client.Lock()
 	delete(client.cons, conn)
 	client.Unlock()
@@ -142,7 +145,7 @@ reconnect:
 	}
 }
 
-func (client *TCPClient) Close(waitDone bool) {
+func (client *KCPClient) Close(waitDone bool) {
 	client.Lock()
 	client.closeFlag = true
 	for conn := range client.cons {

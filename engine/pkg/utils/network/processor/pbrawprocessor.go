@@ -2,7 +2,9 @@ package processor
 
 import (
 	"encoding/binary"
+	"errors"
 	"reflect"
+	"sync"
 )
 
 type RawMessageInfo struct {
@@ -10,11 +12,11 @@ type RawMessageInfo struct {
 	msgHandler RawMessageHandler
 }
 
-type RawMessageHandler func(clientId string, packType uint16, msg []byte)
-type RawConnectHandler func(clientId string)
-type UnknownRawMessageHandler func(clientId string, msg []byte)
+type RawMessageHandler func(sessionId int64, clientId string, msgId int32, msg []byte)
+type RawConnectHandler func(sessionId int64, clientId string)
+type UnknownRawMessageHandler func(sessionId int64, clientId string, msg []byte)
 
-const RawMsgTypeSize = 2
+const HeaderSize = 4
 
 type PBRawProcessor struct {
 	msgHandler            RawMessageHandler
@@ -25,8 +27,32 @@ type PBRawProcessor struct {
 }
 
 type PBRawPackInfo struct {
-	typ    uint16
+	id     int32
 	rawMsg []byte
+}
+
+func (slf *PBRawPackInfo) Reset() {
+	slf.id = 0
+	slf.rawMsg = slf.rawMsg[:0]
+}
+
+func (slf *PBRawPackInfo) GetMsgId() int32 {
+	return slf.id
+}
+
+func (slf *PBRawPackInfo) GetMsg() []byte {
+	return slf.rawMsg
+}
+
+func (slf *PBRawPackInfo) SetPackInfo(id int32, rawMsg []byte) {
+	slf.id = id
+	slf.rawMsg = rawMsg
+}
+
+var pbPackPool = sync.Pool{
+	New: func() interface{} {
+		return &PBRawPackInfo{}
+	},
 }
 
 func NewPBRawProcessor() *PBRawProcessor {
@@ -39,36 +65,52 @@ func (pbRawProcessor *PBRawProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor) MsgRoute(clientId string, msg interface{}) error {
+func (pbRawProcessor *PBRawProcessor) MsgRoute(sessionId int64, clientId string, msg interface{}) error {
 	pPackInfo := msg.(*PBRawPackInfo)
-	pbRawProcessor.msgHandler(clientId, pPackInfo.typ, pPackInfo.rawMsg)
+	defer pbPackPool.Put(pPackInfo)
+	pbRawProcessor.msgHandler(sessionId, clientId, pPackInfo.id, pPackInfo.rawMsg)
 	return nil
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor) Unmarshal(clientId string, data []byte) (interface{}, error) {
-	var msgType uint16
+func (pbRawProcessor *PBRawProcessor) Unmarshal(data []byte) (interface{}, error) {
+	if len(data) < HeaderSize {
+		return nil, nil
+	}
+	var msgId int32
 	if pbRawProcessor.LittleEndian == true {
-		msgType = binary.LittleEndian.Uint16(data[:2])
+		msgId = int32(binary.LittleEndian.Uint32(data[:HeaderSize]))
 	} else {
-		msgType = binary.BigEndian.Uint16(data[:2])
+		msgId = int32(binary.BigEndian.Uint32(data[:HeaderSize]))
 	}
 
-	return &PBRawPackInfo{typ: msgType, rawMsg: data}, nil
+	// TODO 之后可能会在这里加上压缩,序列化类型等等
+
+	pack := pbPackPool.New().(*PBRawPackInfo)
+	pack.SetPackInfo(msgId, data[HeaderSize:])
+
+	return pack, nil
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor) Marshal(clientId string, msg interface{}) ([]byte, error) {
-	pMsg := msg.(*PBRawPackInfo)
-
-	buff := make([]byte, 2, len(pMsg.rawMsg)+RawMsgTypeSize)
-	if pbRawProcessor.LittleEndian == true {
-		binary.LittleEndian.PutUint16(buff[:2], pMsg.typ)
-	} else {
-		binary.BigEndian.PutUint16(buff[:2], pMsg.typ)
+func (pbRawProcessor *PBRawProcessor) Marshal(id int32, msg interface{}) ([]byte, error) {
+	rawMsg, ok := msg.([]byte)
+	if !ok {
+		return nil, errors.New("invalid proto message type")
 	}
 
-	buff = append(buff, pMsg.rawMsg...)
+	// **一次性分配完整 buffer，避免 append 额外的内存分配**
+	buff := make([]byte, HeaderSize+len(rawMsg))
+
+	// 写入消息 ID
+	if pbRawProcessor.LittleEndian {
+		binary.LittleEndian.PutUint32(buff[:HeaderSize], uint32(id))
+	} else {
+		binary.BigEndian.PutUint32(buff[:HeaderSize], uint32(id))
+	}
+
+	// **直接拷贝 PB 数据，避免 append**
+	copy(buff[HeaderSize:], rawMsg)
 	return buff, nil
 }
 
@@ -76,25 +118,36 @@ func (pbRawProcessor *PBRawProcessor) SetRawMsgHandler(handle RawMessageHandler)
 	pbRawProcessor.msgHandler = handle
 }
 
-func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgType uint16, msg []byte, pbRawPackInfo *PBRawPackInfo) {
-	pbRawPackInfo.typ = msgType
+func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgId int32, msg []byte, pbRawPackInfo *PBRawPackInfo) {
+	pbRawPackInfo.id = msgId
 	pbRawPackInfo.rawMsg = msg
 }
 
-func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
+func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(sessionId int64, clientId string, msg interface{}) {
+	defer func() {
+		if msg != nil {
+			pbPackPool.Put(msg)
+		}
+	}()
 	if pbRawProcessor.unknownMessageHandler == nil {
 		return
 	}
-	pbRawProcessor.unknownMessageHandler(clientId, msg.([]byte))
+	pbRawProcessor.unknownMessageHandler(sessionId, clientId, msg.([]byte))
 }
 
 // connect event
-func (pbRawProcessor *PBRawProcessor) ConnectedRoute(clientId string) {
-	pbRawProcessor.connectHandler(clientId)
+func (pbRawProcessor *PBRawProcessor) ConnectedRoute(sessionId int64, clientId string) {
+	if pbRawProcessor.connectHandler == nil {
+		return
+	}
+	pbRawProcessor.connectHandler(sessionId, clientId)
 }
 
-func (pbRawProcessor *PBRawProcessor) DisConnectedRoute(clientId string) {
-	pbRawProcessor.disconnectHandler(clientId)
+func (pbRawProcessor *PBRawProcessor) DisConnectedRoute(sessionId int64, clientId string) {
+	if pbRawProcessor.disconnectHandler == nil {
+		return
+	}
+	pbRawProcessor.disconnectHandler(sessionId, clientId)
 }
 
 func (pbRawProcessor *PBRawProcessor) SetUnknownMsgHandler(unknownMessageHandler UnknownRawMessageHandler) {
@@ -107,17 +160,4 @@ func (pbRawProcessor *PBRawProcessor) SetConnectedHandler(connectHandler RawConn
 
 func (pbRawProcessor *PBRawProcessor) SetDisConnectedHandler(disconnectHandler RawConnectHandler) {
 	pbRawProcessor.disconnectHandler = disconnectHandler
-}
-
-func (slf *PBRawPackInfo) GetPackType() uint16 {
-	return slf.typ
-}
-
-func (slf *PBRawPackInfo) GetMsg() []byte {
-	return slf.rawMsg
-}
-
-func (slf *PBRawPackInfo) SetPackInfo(typ uint16, rawMsg []byte) {
-	slf.typ = typ
-	slf.rawMsg = rawMsg
 }

@@ -6,74 +6,171 @@
 package wsmodule
 
 import (
-	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/network"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+)
+
+const (
+	upGrade = iota
+	running
+	closed
 )
 
 type Client struct {
 	mgr    *ClientMgr
 	status atomic.Int32
-	closed chan struct{}
 	wg     sync.WaitGroup
 
-	roleID string
-	conn   *network.WSConn // 连接
+	msgCnt  uint64
+	timerId uint64
+
+	sessionId int64
+	roleId    string
+	conn      *network.WSConn // 连接
 }
 
 func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
-	return &Client{
-		mgr:    mgr,
-		conn:   conn,
-		closed: make(chan struct{}),
+	c := &Client{
+		mgr:       mgr,
+		conn:      conn,
+		sessionId: mgr.GenSessionId(),
 	}
+	c.status.Store(upGrade)
+	return c
 }
 
 func (c *Client) Run() {
+	c.wg.Add(1)
+	go c.listen()
+	c.mgr.NotifyEvent(&event.Event{
+		Type: event.SysEventWebSocket,
+		Data: &WSPack{
+			Type:      WPTConnected,
+			SessionId: c.sessionId,
+			Data:      c,
+		},
+	})
+	// 启动一个定时器,在10秒后检查是否绑定了roleId,如果没有绑定,则通知客户端断开连接
+	// TODO (这个具体时间之后根据需求调整)
+	c.timerId, _ = c.mgr.AfterFuncWithStorage(time.Second*10, "gate_client_check_auth", c.checkAuth)
+	c.wg.Wait()
+}
+
+func (c *Client) listen() {
+	defer c.wg.Done()
 	for {
-		select {
-		case <-c.closed:
+		msg, err := c.conn.ReadMsg()
+		if err != nil {
+			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
 			return
-		default:
-			if err := c.ReadMsg(); err != nil {
-				log.SysLogger.Errorf("Client read msg error: %s", err)
-			}
 		}
+
+		// 消息解析
+		info, err := c.mgr.Unmarshal(msg)
+		if err != nil {
+			log.SysLogger.Errorf("Client receive msg error: %s", err)
+			c.mgr.NotifyEvent(&event.Event{
+				Type: event.SysEventWebSocket,
+				Data: &WSPack{
+					Type:      WPTUnknownPack,
+					ClientId:  c.roleId,
+					SessionId: c.sessionId,
+					Data:      msg,
+				},
+			})
+			continue
+		}
+
+		if c.msgCnt > 0 && !c.IsRunning() {
+			// 在接收了auth消息之后,如果没有绑定角色,则不处理后续消息
+			continue
+		}
+
+		c.msgCnt++
+
+		c.mgr.NotifyEvent(&event.Event{
+			Type: event.SysEventWebSocket,
+			Data: &WSPack{
+				Type:      WPTPack,
+				ClientId:  c.roleId,
+				SessionId: c.sessionId,
+				Data:      info,
+			},
+		})
 	}
 }
 
 // Close 关闭连接(所有外部想要断开这个客户端,都是用这个接口)
 func (c *Client) Close() {
-	c.status.Store(1)
-	close(c.closed)
-
-	// 先从客户端管理器移除
-	if c.roleID != "" {
-		c.mgr.delClient(c.roleID)
+	if c.status.Load() == closed {
+		return
 	}
+	c.status.Store(closed)
+	if c.mgr.Cancel(atomic.LoadUint64(&c.timerId)) {
+		atomic.StoreUint64(&c.timerId, 0)
+	}
+	if c.conn == nil {
+		return
+	}
+	c.conn.Close()
 }
 
 func (c *Client) OnClose() {
+	// 这个事件放在这是为了保证只调用一次
+	c.mgr.NotifyEvent(&event.Event{
+		Type: event.SysEventWebSocket,
+		Data: &WSPack{
+			Type:      WPTDisConnected,
+			SessionId: c.sessionId,
+			ClientId:  c.roleId,
+		},
+	})
+
 	// 在run返回之后,底层会自动关闭连接,这里只需要置空变量
 	c.conn = nil
+	c.roleId = ""
+	c.sessionId = 0
 }
 
-func (c *Client) BindRole(roleID string) {
-	c.roleID = roleID
-}
-
-func (c *Client) GetRoleID() string {
-	return c.roleID
-}
-
-func (c *Client) SendMsg(msg interface{}) error {
-	if c.roleID == "" {
-		return errors.New("roleID invalid")
+func (c *Client) BindRole(roleId string) {
+	// 移除timer
+	if c.mgr.Cancel(atomic.LoadUint64(&c.timerId)) {
+		atomic.StoreUint64(&c.timerId, 0)
 	}
-	data, err := c.mgr.Marshal(c.roleID, msg)
+
+	c.roleId = roleId
+	// 绑定玩家数据才算运行中
+	c.status.Store(running)
+	c.mgr.NotifyEvent(&event.Event{
+		Type: event.SysEventWebSocket,
+		Data: &WSPack{
+			Type:      WPTReady,
+			SessionId: c.sessionId,
+			ClientId:  roleId,
+			Data:      c,
+		},
+	})
+}
+
+func (c *Client) IsRunning() bool {
+	return c.status.Load() == running
+}
+
+func (c *Client) isClosed() bool {
+	return c.status.Load() == closed
+}
+
+func (c *Client) SendMsg(id int32, msg interface{}) error {
+	if c.isClosed() {
+		return nil
+	}
+	data, err := c.mgr.Marshal(id, msg)
 	if err != nil {
 		return err
 	}
@@ -81,9 +178,11 @@ func (c *Client) SendMsg(msg interface{}) error {
 }
 
 func (c *Client) ReadMsg() error {
-	if c.roleID == "" {
-		return errors.New("roleID invalid")
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.SysLogger.Errorf("Client read msg error: %s", r)
+		}
+	}()
 	msg, err := c.conn.ReadMsg()
 	if err != nil {
 		log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
@@ -91,11 +190,48 @@ func (c *Client) ReadMsg() error {
 	}
 
 	// 消息解析
-	info, err := c.mgr.Unmarshal(c.roleID, msg)
+	info, err := c.mgr.Unmarshal(msg)
 	if err != nil {
 		log.SysLogger.Errorf("Client receive msg error: %s", err)
+		c.mgr.NotifyEvent(&event.Event{
+			Type: event.SysEventWebSocket,
+			Data: &WSPack{
+				Type:      WPTUnknownPack,
+				ClientId:  c.roleId,
+				SessionId: c.sessionId,
+				Data:      msg,
+			},
+		})
 		return err
 	}
 
-	return c.mgr.MsgRoute(c.roleID, info)
+	if c.msgCnt > 0 && !c.IsRunning() {
+		// 在接收了auth消息之后,如果没有绑定角色,则不处理后续消息
+		return nil
+	}
+
+	c.msgCnt++
+
+	c.mgr.NotifyEvent(&event.Event{
+		Type: event.SysEventWebSocket,
+		Data: &WSPack{
+			Type:      WPTPack,
+			ClientId:  c.roleId,
+			SessionId: c.sessionId,
+			Data:      info,
+		},
+	})
+
+	return nil
+}
+
+func (c *Client) checkAuth(_ *timingwheel.Timer, _ ...interface{}) {
+	if c.roleId == "" {
+		atomic.StoreUint64(&c.timerId, 0)
+		c.Close()
+	}
+}
+
+func (c *Client) GetClientIp() string {
+	return c.conn.RemoteAddr().String()
 }
