@@ -61,11 +61,12 @@ type MsgEnvelope struct {
 	err         error       // 错误
 
 	// 缓存信息
-	timeout   time.Duration        // 请求超时时间
-	sender    inf.IRpcDispatcher   // 发送者客户端(用于回调)
-	callbacks []dto.CompletionFunc // 完成回调
-	done      chan struct{}        // 完成信号
-	timerId   uint64               // 定时器ID
+	timeout        time.Duration        // 请求超时时间
+	sender         inf.IRpcDispatcher   // 发送者客户端(用于回调)
+	callbacks      []dto.CompletionFunc // 完成回调
+	callbackParams []interface{}        // 回调透传参数
+	done           chan struct{}        // 完成信号
+	timerId        uint64               // 定时器ID
 }
 
 func (e *MsgEnvelope) Reset() {
@@ -209,6 +210,12 @@ func (e *MsgEnvelope) SetTimerId(timerId uint64) {
 	e.timerId = timerId
 }
 
+func (e *MsgEnvelope) SetCallbackParams(params []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.callbackParams = append(e.callbackParams, params...)
+}
+
 //--------------------------------get------------------------------------
 
 func (e *MsgEnvelope) GetType() int32 {
@@ -324,6 +331,12 @@ func (e *MsgEnvelope) GetTimerId() uint64 {
 	return e.timerId
 }
 
+func (e *MsgEnvelope) GetCallbackParams() []interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.callbackParams
+}
+
 //------------------------------------Check----------------------------------------
 
 func (e *MsgEnvelope) NeedCallback() bool {
@@ -356,7 +369,7 @@ func (e *MsgEnvelope) Done() {
 
 func (e *MsgEnvelope) RunCompletions() {
 	for _, cb := range e.callbacks {
-		cb(e.response, e.err)
+		cb(e.callbackParams, e.response, e.err)
 	}
 }
 

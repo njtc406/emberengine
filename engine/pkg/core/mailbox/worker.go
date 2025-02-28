@@ -32,9 +32,9 @@ func init() {
 }
 
 func hashEvent(key string) int {
-	// key为空时,随机一个值
+	// key为空时,给固定的1
 	if key == "" {
-		return int(globRand.Int31())
+		return 1
 	}
 	// 使用 FNV-1a 哈希算法
 	h := fnv.New32a()

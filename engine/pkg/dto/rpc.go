@@ -10,7 +10,11 @@ type CancelRpc func()
 
 func EmptyCancelRpc() {} // 空的取消函数
 
-type CompletionFunc func(data interface{}, err error) // 异步回调函数
+type CompletionFunc func(params []interface{}, data interface{}, err error) // 异步回调函数
+
+type AsyncCallParams struct {
+	Params []interface{}
+}
 
 type Header map[string]string
 

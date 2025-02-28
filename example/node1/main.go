@@ -104,7 +104,7 @@ func (s *Service1) OnInit() error {
 	//	if err := s.SelectSameServer("2", "Service3").Send("RPCSum", nil, &msg.Msg_Test_Req{A: 1, B: 3}); err != nil {
 	//		log.SysLogger.Errorf("send Service3.RPCSum failed, err:%v", err)
 	//	}
-	//	if _, err := s.SelectSameServer("1", "Service3").AsyncCall("RPCSum", nil, time.Second, &msg.Msg_Test_Req{A: 1, B: 2}, func(data interface{}, err error) {
+	//	if _, err := s.SelectSameServer("1", "Service3").AsyncCall("RPCSum", nil, time.Second, &msg.Msg_Test_Req{A: 1, B: 2},nil, func(data interface{}, err error) {
 	//		if err != nil {
 	//			log.SysLogger.Errorf("AsyncCall Service3.RPCSum response failed, err:%v", err)
 	//			return

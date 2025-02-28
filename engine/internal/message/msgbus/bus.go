@@ -204,7 +204,7 @@ func (mb *MessageBus) CallWithTimeout(method string, headers map[string]string, 
 }
 
 // AsyncCall 异步调用服务
-func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	defer ReleaseMessageBus(mb)
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
@@ -237,6 +237,7 @@ func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeou
 	envelope.SetNeedResponse(true)
 	envelope.SetTimeout(timeout)
 	envelope.SetCallback(callbacks)
+	envelope.SetCallbackParams(param.Params)
 
 	// 加入等待队列
 	mt.Add(envelope)
@@ -330,7 +331,7 @@ func (m MultiBus) CallWithTimeout(method string, headers map[string]string, time
 	return m[0].CallWithTimeout(method, headers, timeout, in, out)
 }
 
-func (m MultiBus) AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+func (m MultiBus) AsyncCall(method string, headers map[string]string, timeout time.Duration, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
 		log.SysLogger.Errorf("===========select empty service to async call %s", method)
 		return nil, def.ServiceIsUnavailable
@@ -343,7 +344,7 @@ func (m MultiBus) AsyncCall(method string, headers map[string]string, timeout ti
 		return dto.EmptyCancelRpc, fmt.Errorf("only one node can be called at a time, now got %v", len(m))
 	}
 	// call只允许调用一个节点
-	return m[0].AsyncCall(method, headers, timeout, in, callbacks...)
+	return m[0].AsyncCall(method, headers, timeout, in, param, callbacks...)
 }
 
 func (m MultiBus) Send(method string, headers map[string]string, in interface{}) error {
