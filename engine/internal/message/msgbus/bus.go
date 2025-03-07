@@ -111,7 +111,7 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 	if err := mb.receiver.SendRequest(envelope); err != nil {
 		// 发送失败,释放资源
 		mt.Remove(envelope.GetReqId())
-		msgenvelope.ReleaseMsgEnvelope(envelope)
+		envelope.Release()
 		log.SysLogger.Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), envelope.GetMethod(), err)
 		return def.RPCCallFailed
 	}
@@ -122,14 +122,14 @@ func (mb *MessageBus) call(method string, headers map[string]string, timeout tim
 	mt.Remove(envelope.GetReqId()) // 容错,不管有没有释放,都释放一次(实际上在所有设置done之前都会释放)
 
 	if err := envelope.GetError(); err != nil {
-		msgenvelope.ReleaseMsgEnvelope(envelope)
+		envelope.Release()
 		return err
 	}
 
 	resp := envelope.GetResponse()
 
 	// 获取到返回后直接释放
-	msgenvelope.ReleaseMsgEnvelope(envelope)
+	envelope.Release()
 
 	// 如果out为nil表示丢弃返回值
 	if out == nil {
@@ -246,7 +246,7 @@ func (mb *MessageBus) AsyncCall(method string, headers map[string]string, timeou
 	if err := mb.receiver.SendRequest(envelope); err != nil {
 		// 发送失败,释放资源
 		mt.Remove(envelope.GetReqId())
-		msgenvelope.ReleaseMsgEnvelope(envelope)
+		envelope.Release()
 		log.SysLogger.Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), envelope.GetMethod(), err)
 		return nil, def.RPCCallFailed
 	}

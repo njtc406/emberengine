@@ -7,7 +7,6 @@ package rpc
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -304,7 +303,7 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 			log.SysLogger.Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
 	} else {
-		msgenvelope.ReleaseMsgEnvelope(envelope)
+		envelope.Release()
 	}
 }
 
@@ -315,7 +314,7 @@ func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
 				h.GetModuleName(), r, debug.Stack())
 		}
 
-		msgenvelope.ReleaseMsgEnvelope(envelope)
+		envelope.Release()
 	}()
 
 	envelope.RunCompletions()

@@ -33,16 +33,6 @@ func NewMsgEnvelope() *MsgEnvelope {
 	return msgEnvelopePool.Get().(*MsgEnvelope)
 }
 
-func ReleaseMsgEnvelope(envelope inf.IEnvelope) {
-	if envelope != nil {
-		//count--
-		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
-		if envelope.IsRef() {
-			msgEnvelopePool.Put(envelope.(*MsgEnvelope))
-		}
-	}
-}
-
 type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!
@@ -419,4 +409,12 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	msg.TypeName = typeName
 
 	return msg
+}
+
+func (e *MsgEnvelope) Release() {
+	if e.IsRef() {
+		//count--
+		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
+		msgEnvelopePool.Put(e)
+	}
 }

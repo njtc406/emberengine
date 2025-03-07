@@ -6,7 +6,6 @@
 package monitor
 
 import (
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"sync"
 	"sync/atomic"
@@ -145,7 +144,7 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收
 		// 如果是远程调用,那么在远程client将消息发送完成后自动回收)
 		if err := envelope.GetDispatcher().PostMessage(envelope); err != nil {
-			msgenvelope.ReleaseMsgEnvelope(envelope)
+			envelope.Release()
 			log.SysLogger.Errorf("send call timeout response error:%s", err.Error())
 		}
 	} else {

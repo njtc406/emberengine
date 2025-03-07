@@ -7,7 +7,6 @@ package client
 
 import (
 	"context"
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"time"
 
@@ -73,12 +72,12 @@ func (rc *grpcSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IE
 }
 
 func (rc *grpcSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer msgenvelope.ReleaseMsgEnvelope(envelope)
+	defer envelope.Release()
 	return rc.send(dispatcher, envelope)
 }
 
 func (rc *grpcSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer msgenvelope.ReleaseMsgEnvelope(envelope)
+	defer envelope.Release()
 	return rc.send(dispatcher, envelope)
 }
 

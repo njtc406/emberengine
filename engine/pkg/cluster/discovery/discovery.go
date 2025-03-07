@@ -173,6 +173,7 @@ func (d *EtcdDiscovery) getAll() {
 			ent.Type = event.SysEventETCDPut
 			ent.Data = kv
 			if err = d.PushEvent(ent); err != nil {
+				ent.Release()
 				log.SysLogger.Errorf("etcd put service error: %v", err)
 			}
 		}
@@ -220,7 +221,10 @@ func (d *EtcdDiscovery) watch() {
 				default:
 					continue
 				}
-				d.PushEvent(ent)
+				if err := d.PushEvent(ent); err != nil {
+					ent.Release()
+					log.SysLogger.Errorf("etcd put service error: %v", err)
+				}
 			}
 		default:
 			time.Sleep(time.Millisecond * 10)

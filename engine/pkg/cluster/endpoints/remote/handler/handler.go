@@ -25,13 +25,13 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			sender := envelope.GetDispatcher()
 			if sender != nil && sender.IsClosed() {
 				// 调用者已经下线,丢弃回复
-				msgenvelope.ReleaseMsgEnvelope(envelope)
+				envelope.Release()
 				return nil
 			}
 			// 解析回复数据
 			response, err := serializer.Deserialize(req.Response, req.TypeName, req.TypeId)
 			if err != nil {
-				msgenvelope.ReleaseMsgEnvelope(envelope)
+				envelope.Release()
 				return err
 			}
 			envelope.SetReply()

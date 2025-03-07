@@ -35,14 +35,14 @@ func (e *Event) GetPriority() int32 {
 	return e.Priority
 }
 
+func (e *Event) Release() {
+	eventPool.Put(e)
+}
+
 var eventPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
 	return &Event{}
 })
 
 func NewEvent() *Event {
 	return eventPool.Get().(*Event)
-}
-
-func ReleaseEvent(e *Event) {
-	eventPool.Put(e)
 }

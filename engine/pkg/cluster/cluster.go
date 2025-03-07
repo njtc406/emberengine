@@ -83,9 +83,7 @@ func (c *Cluster) run() {
 			if ev != nil {
 				switch ev.GetType() {
 				case event.SysEventETCDPut, event.SysEventETCDDel:
-					e := ev.(*event.Event)
 					c.eventProcessor.EventHandler(ev)
-					event.ReleaseEvent(e)
 				}
 			}
 		case <-c.closed:

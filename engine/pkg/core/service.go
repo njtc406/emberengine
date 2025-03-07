@@ -373,6 +373,7 @@ func (s *Service) InvokeSystemMessage(evt inf.IEvent) {
 	default:
 		// 其他系统事件
 		s.eventProcessor.EventHandler(evt)
+		evt.Release()
 	}
 }
 
@@ -394,16 +395,23 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 			}
 		})
 	case event.ServiceTimerCallback:
-		evt := ev.(*event.Event)
-		t := evt.Data.(timingwheel.ITimer)
-		t.Do()
+		s.safeExec(func() {
+			evt := ev.(*event.Event)
+			t := evt.Data.(timingwheel.ITimer)
+			t.Do()
+			ev.Release()
+		})
 	case event.ServiceConcurrentCallback:
-		evt := ev.(*event.Event)
-		t := evt.Data.(concurrent.IConcurrentCallback)
-		t.DoCallback()
+		s.safeExec(func() {
+			evt := ev.(*event.Event)
+			t := evt.Data.(concurrent.IConcurrentCallback)
+			t.DoCallback()
+			ev.Release()
+		})
 	default:
 		s.safeExec(func() {
 			s.eventProcessor.EventHandler(ev)
+			ev.Release()
 		})
 	}
 
