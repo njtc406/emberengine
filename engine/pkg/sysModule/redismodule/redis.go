@@ -42,14 +42,14 @@ func (rm *RedisModule) GetClient() *redis.Client {
 	return rm.client
 }
 
-func (rm *RedisModule) SetString(key string, value interface{}, expire time.Duration) error {
+func (rm *RedisModule) ApiRedisSetString(key string, value interface{}, expire time.Duration) error {
 	if err := rm.client.Set(context.Background(), key, value, expire).Err(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (rm *RedisModule) SetStringJson(key string, value interface{}, expire time.Duration) error {
+func (rm *RedisModule) ApiRedisSetStringJson(key string, value interface{}, expire time.Duration) error {
 	tmp, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -60,7 +60,7 @@ func (rm *RedisModule) SetStringJson(key string, value interface{}, expire time.
 	return nil
 }
 
-func (rm *RedisModule) GetString(key string) (string, error) {
+func (rm *RedisModule) ApiRedisGetString(key string) (string, error) {
 	val, err := rm.client.Get(context.Background(), key).Result()
 	if err != nil {
 		return "", err
@@ -68,7 +68,7 @@ func (rm *RedisModule) GetString(key string) (string, error) {
 	return val, nil
 }
 
-func (rm *RedisModule) GetStringJson(key string, value interface{}) error {
+func (rm *RedisModule) ApiRedisGetStringJson(key string, value interface{}) error {
 	val, err := rm.client.Get(context.Background(), key).Result()
 	if err != nil {
 		return err
@@ -80,8 +80,8 @@ func (rm *RedisModule) GetStringJson(key string, value interface{}) error {
 	return nil
 }
 
-// HSetStruct 保存结构体(结构体需要带redis标签)
-func (rm *RedisModule) HSetStruct(key string, value interface{}) error {
+// ApiRedisHSetStruct 保存结构体(结构体需要带redis标签)
+func (rm *RedisModule) ApiRedisHSetStruct(key string, value interface{}) error {
 	if err := rm.client.HSet(context.Background(), key, value).Err(); err != nil {
 		return err
 	}
@@ -89,15 +89,15 @@ func (rm *RedisModule) HSetStruct(key string, value interface{}) error {
 	return nil
 }
 
-// HGetStruct 获取结构体(结构体需要带redis标签)
-func (rm *RedisModule) HGetStruct(key string, value interface{}) error {
+// ApiRedisHGetStruct 获取结构体(结构体需要带redis标签)
+func (rm *RedisModule) ApiRedisHGetStruct(key string, value interface{}) error {
 	if err := rm.client.HGetAll(context.Background(), key).Scan(value); err != nil {
 		return err
 	}
 	return nil
 }
 
-// ExecuteFun 执行一个函数
-func (rm *RedisModule) ExecuteFun(f Callback, args ...interface{}) (interface{}, error) {
+// ApiRedisExecuteFun 执行一个函数
+func (rm *RedisModule) ApiRedisExecuteFun(f Callback, args ...interface{}) (interface{}, error) {
 	return f(rm.client, args...)
 }
