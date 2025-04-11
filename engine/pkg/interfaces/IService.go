@@ -40,15 +40,28 @@ type IServiceHandler interface {
 }
 
 type IIdentifiable interface {
+	IServer
+	IActor
 	OnSetup(svc IService)
-	SetName(string)
-	GetName() string
-	GetPid() *actor.PID
-	GetServerId() int32
 	IsClosed() bool // 服务是否已经关闭
 }
 
 type IProfiler interface {
 	OpenProfiler()
 	GetProfiler() *profiler.Profiler
+}
+
+type INamed interface {
+	SetName(string)
+	GetName() string
+}
+
+type IServer interface {
+	INamed
+	GetServerId() int32
+}
+
+type IActor interface {
+	SetPid(pid *actor.PID)
+	GetPid() *actor.PID
 }

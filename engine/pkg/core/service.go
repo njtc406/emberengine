@@ -7,6 +7,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"reflect"
 	"runtime/debug"
 	"sync/atomic"
@@ -14,7 +15,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/core/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
@@ -36,8 +36,9 @@ type Service struct {
 	cfg    interface{}  // 服务配置
 	status int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 
-	mailbox        inf.IMailbox        // 邮箱
-	eventProcessor inf.IEventProcessor // 事件管理器
+	mailbox              inf.IMailbox        // 邮箱
+	eventProcessor       inf.IEventProcessor // 事件管理器
+	globalEventProcessor inf.IEventProcessor // 全局事件管理器
 	//profiler       *profiler.Profiler  // 性能分析
 }
 
@@ -141,6 +142,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 注册事件管理器
 	s.eventHandler = event.NewHandler()
 	s.eventHandler.Init(s.eventProcessor)
+
+	s.globalEventProcessor = event.NewProcessor()
+	s.globalEventProcessor.Init(s)
 
 	s.IConcurrent = concurrent.NewTaskScheduler()
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
@@ -357,8 +361,8 @@ func (s *Service) isRunning() bool {
 }
 
 // InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
-func (s *Service) InvokeSystemMessage(evt inf.IEvent) {
-	tp := evt.GetType()
+func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
+	tp := ev.GetType()
 	log.SysLogger.Debugf("service[%s] receive system event[%d]", s.GetName(), tp)
 	switch tp {
 	case event.ServiceSuspended:
@@ -370,10 +374,17 @@ func (s *Service) InvokeSystemMessage(evt inf.IEvent) {
 	case event.SysEventServiceClose:
 		// 服务关闭
 		s.Stop()
+	case event.ServiceGlobalEventTrigger:
+		s.safeExec(func() {
+			evt := ev.(*event.Event)
+			t := evt.Data.(*actor.Event)
+			s.globalEventProcessor.EventHandler(t)
+			ev.Release()
+		})
 	default:
 		// 其他系统事件
-		s.eventProcessor.EventHandler(evt)
-		evt.Release()
+		s.eventProcessor.EventHandler(ev)
+		ev.Release()
 	}
 }
 
@@ -406,6 +417,13 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 			evt := ev.(*event.Event)
 			t := evt.Data.(concurrent.IConcurrentCallback)
 			t.DoCallback()
+			ev.Release()
+		})
+	case event.ServiceGlobalEventTrigger:
+		s.safeExec(func() {
+			evt := ev.(*event.Event)
+			t := evt.Data.(*actor.Event)
+			s.globalEventProcessor.EventHandler(t)
 			ev.Release()
 		})
 	default:

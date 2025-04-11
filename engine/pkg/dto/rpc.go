@@ -41,6 +41,7 @@ func (header Header) Length() int {
 	return len(header)
 }
 
+// ToMap 将Header转换为map,生成新的map
 func (header Header) ToMap() map[string]string {
 	mp := make(map[string]string)
 	for k, v := range header {

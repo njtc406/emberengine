@@ -22,4 +22,6 @@ type IBus interface {
 	Send(method string, headers map[string]string, in interface{}) error
 	// Cast 广播
 	Cast(method string, headers map[string]string, in interface{})
+
+	// TODO 后续如有需要,可以考虑添加单独的多call接口,比如MultiCall,里面分别call所有服务，等待所有服务都返回之后，返回一个结果集，某些特殊场景可能会用到
 }

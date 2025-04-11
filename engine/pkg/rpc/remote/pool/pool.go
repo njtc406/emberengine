@@ -6,10 +6,10 @@
 package pool
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote/gr"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote/rx"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/gr"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/rx"
 )
 
 type ListenerCreator func(cliFactory inf.IRpcSenderFactory) interface{}

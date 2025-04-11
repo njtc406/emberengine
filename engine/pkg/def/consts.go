@@ -81,3 +81,19 @@ const (
 	PriorityUser = 0 // 用户事件
 	PrioritySys  = 1 // 系统事件
 )
+
+const (
+	NatsDefaultMaxReconnects      = -1 // 不限制重连次数
+	NatsDefaultReconnectWait      = 2 * time.Second
+	NatsDefaultPingInterval       = 10 * time.Second
+	NatsDefaultPingMaxOutstanding = 2
+	NatsDefaultReconnectBufSize   = 4096
+	NatsDefaultTimeout            = 10 * time.Second
+)
+
+const (
+	NatsDefaultGlobalPrefix = "global.%d"    // global.eventType
+	NatsDefaultServerPrefix = "server.%d.%d" // server.eventType.serverId
+)
+
+const NatsDefaultShardCount = 16

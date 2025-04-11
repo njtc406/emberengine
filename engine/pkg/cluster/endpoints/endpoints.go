@@ -8,12 +8,12 @@ package endpoints
 import (
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/client"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -183,6 +183,10 @@ func (em *EndpointManager) UpdateService(svc inf.IService) {
 	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
 	ev.Release()
+}
+
+func (em *EndpointManager) GetRepository() *repository.Repository {
+	return em.repository
 }
 
 func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {

@@ -121,6 +121,10 @@ func (m *Module) NewModuleID() uint32 {
 	return m.newModuleID()
 }
 
+func (m *Module) SetPid(pid *actor.PID) {
+	m.root.(inf.IService).SetPid(pid)
+}
+
 func (m *Module) GetPid() *actor.PID {
 	return m.root.(inf.IService).GetPid()
 }

@@ -29,6 +29,7 @@ type NodeConf struct {
 	AntsPoolSize      int           `binding:"required"` // 线程池大小
 	MonitorTimerSize  int           `binding:""`         // 定时器数量(用于监控rpc调用的timer)(默认10000)
 	MonitorBucketSize int           `binding:""`         // 定时器桶数量(默认20)
+	EventBusConf      *EventBusConf `binding:""`         // nats配置
 }
 
 type ClusterConf struct {
@@ -97,4 +98,29 @@ type WorkerConf struct {
 	WorkerNum            int  `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
 	DynamicWorkerScaling bool `binding:""` // 动态线程池扩展(默认false),如果开启则根据负载情况动态扩展线程池(请确保需要单线程的服务不开启这个标记)
 	VirtualWorkerRate    int  `binding:""` // 虚拟线程倍率(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
+}
+
+type EventBusConf struct {
+	GlobalPrefix string    `binding:""` // 全局事件前缀
+	ServerPrefix string    `binding:""` // 服务事件前缀
+	NodePrefix   string    `binding:""` // 节点事件前缀
+	ShardCount   int       `binding:""` // 分段锁数量
+	NatsConf     *NatsConf `binding:""` // nats配置
+}
+
+type NatsConf struct {
+	EndPoints          []string      `binding:""` // nats地址
+	UserName           string        `binding:""` // nats用户名
+	Password           string        `binding:""` // nats密码
+	Token              string        `binding:""` // nats token
+	Secure             string        `binding:""` // nats secure
+	Cert               string        `binding:""` // 证书
+	CertKey            string        `binding:""` // 证书密钥
+	CAs                string        `binding:""` // ca证书
+	MaxReconnects      int           `binding:""` // 最大重连次数
+	ReconnectWait      time.Duration `binding:""` // 重连间隔
+	Timeout            time.Duration `binding:""` // 连接超时时间
+	PingInterval       time.Duration `binding:""` // ping间隔时间
+	PingMaxOutstanding int           `binding:""` // 最大未响应ping数
+	ReconnectBufSize   int           `binding:""` // 重连缓冲区大小
 }

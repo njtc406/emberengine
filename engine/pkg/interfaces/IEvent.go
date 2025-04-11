@@ -16,7 +16,7 @@ type IEvent interface {
 }
 
 type IEventChannel interface {
-	PushEvent(ev IEvent) error
+	PushEvent(ev IEvent) error // 使用接口时,请注意数据引用问题!!
 }
 
 type IEventProcessor interface {
