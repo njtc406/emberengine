@@ -31,6 +31,7 @@ type WSPack struct {
 	Type      WSPackType //0表示连接 1表示断开 2表示数据
 	SessionId int64
 	ClientId  string
+	TraceId   string
 	Data      any
 }
 

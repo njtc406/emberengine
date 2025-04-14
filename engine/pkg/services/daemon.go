@@ -7,7 +7,7 @@ package services
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/eventBus"
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -22,8 +22,8 @@ type daemon struct {
 
 func (d *daemon) OnInit() error {
 	// TODO 注册服务事件
-	eventBus.GetEventBus().SubscribeGlobal(eventBus.EventNewService, d)
-	eventBus.GetEventBus().SubscribeGlobal(eventBus.EventCloseService, d)
+	event.GetEventBus().SubscribeGlobal(event.ServiceNew, d)
+	event.GetEventBus().SubscribeGlobal(event.ServiceClose, d)
 
 	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
 	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)

@@ -5,8 +5,14 @@
 // @Update  pc  2024/11/5
 package interfaces
 
+import (
+	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"google.golang.org/protobuf/proto"
+)
+
 // EventCallBack 事件接受器
 type EventCallBack func(event IEvent)
+type EventOption func(eventType int32, processor IEventProcessor) int
 
 type IEvent interface {
 	GetType() int32
@@ -19,13 +25,30 @@ type IEventChannel interface {
 	PushEvent(ev IEvent) error // 使用接口时,请注意数据引用问题!!
 }
 
+type IListener interface {
+	IEventChannel
+	IServer
+}
+
 type IEventProcessor interface {
 	IEventChannel
 
-	Init(eventChannel IEventChannel)
+	Init(eventChannel IListener)
 	EventHandler(ev IEvent)
+	// 普通事件
 	RegEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
 	UnRegEventReceiverFun(eventType int32, receiver IEventHandler)
+	// 全局事件
+	RegGlobalEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
+	UnRegGlobalEventReceiverFun(eventType int32, receiver IEventHandler)
+	// 服务器事件
+	RegServerEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
+	UnRegServerEventReceiverFun(eventType int32, receiver IEventHandler)
+
+	// 发布全局事件
+	PublishGlobal(eventType int32, data proto.Message, header dto.Header) error
+	// 发布服务器事件
+	PublishServer(eventType int32, data proto.Message, header dto.Header) error
 
 	CastEvent(event IEvent) //广播事件
 	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)

@@ -6,12 +6,14 @@
 package event
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"google.golang.org/protobuf/proto"
 	"sync"
 )
 
 type Processor struct {
-	inf.IEventChannel
+	inf.IListener
 
 	locker              sync.RWMutex
 	mapListenerEvent    map[int32]map[inf.IEventProcessor]int             //监听者信息
@@ -26,8 +28,8 @@ func NewProcessor() inf.IEventProcessor {
 	return p
 }
 
-func (p *Processor) Init(eventChannel inf.IEventChannel) {
-	p.IEventChannel = eventChannel
+func (p *Processor) Init(listener inf.IListener) {
+	p.IListener = listener
 }
 
 // EventHandler 事件处理
@@ -57,6 +59,38 @@ func (p *Processor) UnRegEventReceiverFun(eventType int32, receiver inf.IEventHa
 	p.RemoveListen(eventType, receiver)
 	receiver.GetEventProcessor().RemoveBindEvent(eventType, receiver)
 	receiver.RemoveRegInfo(eventType, p)
+}
+
+// 全局事件
+func (p *Processor) RegGlobalEventReceiverFunc(eventType int32, receiver inf.IEventHandler, callback inf.EventCallBack) {
+	p.RegEventReceiverFunc(eventType, receiver, callback)
+	GetEventBus().SubscribeGlobal(eventType, p)
+}
+
+func (p *Processor) UnRegGlobalEventReceiverFun(eventType int32, receiver inf.IEventHandler) {
+	p.UnRegEventReceiverFun(eventType, receiver)
+	GetEventBus().UnSubscribeGlobal(eventType, p)
+}
+
+// 服务器事件
+func (p *Processor) RegServerEventReceiverFunc(eventType int32, receiver inf.IEventHandler, callback inf.EventCallBack) {
+	p.RegEventReceiverFunc(eventType, receiver, callback)
+	GetEventBus().SubscribeServer(eventType, p)
+}
+
+func (p *Processor) UnRegServerEventReceiverFun(eventType int32, receiver inf.IEventHandler) {
+	p.UnRegEventReceiverFun(eventType, receiver)
+	GetEventBus().UnSubscribeServer(eventType, p)
+}
+
+// 发布全局事件
+func (p *Processor) PublishGlobal(eventType int32, data proto.Message, header dto.Header) error {
+	return GetEventBus().PublishGlobal(eventType, data, header)
+}
+
+// 发布服务器事件
+func (p *Processor) PublishServer(eventType int32, data proto.Message, header dto.Header) error {
+	return GetEventBus().PublishServer(eventType, p.GetServerId(), data, header)
 }
 
 // castEvent 广播事件

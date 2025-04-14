@@ -6,6 +6,7 @@
 package wsmodule
 
 import (
+	"github.com/google/uuid"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -101,6 +102,7 @@ func (c *Client) listen() {
 				ClientId:  c.roleId,
 				SessionId: c.sessionId,
 				Data:      info,
+				TraceId:   uuid.NewString(),
 			},
 		})
 	}

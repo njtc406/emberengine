@@ -27,6 +27,8 @@ const (
 	ServiceSuspended     = -1001 // 服务挂起消息事件
 	ServiceResumed       = -1002 // 服务恢复消息事件
 	SysEventServiceClose = -1003 // 服务关闭事件
+	ServiceNew           = -1004 // 启动服务
+	ServiceClose         = -1005 // 关闭服务
 
 	SysEventKcp       = -1100 // kcp 连接事件
 	SysEventTcp       = -1101 // tcp 连接事件

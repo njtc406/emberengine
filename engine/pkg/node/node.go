@@ -6,7 +6,7 @@
 package node
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/eventBus"
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	"os"
 	"os/signal"
 	"syscall"
@@ -71,7 +71,7 @@ func Start(v string, confPath string) {
 	// 启动集群管理器
 	cluster.GetCluster().Start()
 	// 启动全局事件
-	eventBus.GetEventBus().Init(config.Conf.NodeConf.EventBusConf)
+	event.GetEventBus().Init(config.Conf.NodeConf.EventBusConf)
 
 	// 执行钩子
 	for _, f := range nodeInitHooks {

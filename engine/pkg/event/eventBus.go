@@ -3,7 +3,7 @@
 // @Description  desc
 // @Author  yr  2025/4/10
 // @Update  yr  2025/4/10
-package eventBus
+package event
 
 import (
 	"crypto/tls"
@@ -14,7 +14,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
@@ -22,32 +21,27 @@ import (
 	"strings"
 )
 
-var bus *EventBus
+var bus *Bus
 
-type IListener interface {
-	inf.IEventChannel
-	inf.IServer
-}
-
-type EventBus struct {
+type Bus struct {
 	nc *nats.Conn
 
 	// 全体事件(所有订阅的服务都会收到)
 	globalPrefix      string // 全局事件前缀
 	globalLock        *shardedlock.ShardedRWLock
-	globalSubscribers map[int32]map[string]IListener // map[事件类型]map[服务唯一id]事件通道
+	globalSubscribers map[int32]map[string]inf.IListener // map[事件类型]map[服务唯一id]事件通道
 
 	// 服务器事件(只有相同服务器的订阅会收到)
 	serverPrefix      string // 服务器事件前缀
 	serverLock        *shardedlock.ShardedRWLock
-	serverSubscribers map[int32]map[int32]map[string]IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
+	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
 	subMap map[string]*nats.Subscription
 }
 
-func GetEventBus() *EventBus {
+func GetEventBus() *Bus {
 	if bus == nil {
-		bus = &EventBus{}
+		bus = &Bus{}
 	}
 	return bus
 }
@@ -103,7 +97,7 @@ func switchOpts(conf *config.NatsConf) []nats.Option {
 	return opts
 }
 
-func (eb *EventBus) Init(conf *config.EventBusConf) {
+func (eb *Bus) Init(conf *config.EventBusConf) {
 	if conf != nil && conf.NatsConf != nil && len(conf.NatsConf.EndPoints) != 0 {
 		opts := switchOpts(conf.NatsConf)
 
@@ -130,24 +124,24 @@ func (eb *EventBus) Init(conf *config.EventBusConf) {
 	}
 
 	eb.globalLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.globalSubscribers = make(map[int32]map[string]IListener)
+	eb.globalSubscribers = make(map[int32]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.serverSubscribers = make(map[int32]map[int32]map[string]IListener)
+	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
 
 	eb.subMap = make(map[string]*nats.Subscription)
 }
 
-func (eb *EventBus) Stop() {
+func (eb *Bus) Stop() {
 	if eb.nc != nil {
 		eb.nc.Close()
 	}
 }
 
-func (eb *EventBus) genKey(format string, args ...interface{}) string {
+func (eb *Bus) genKey(format string, args ...interface{}) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func (eb *EventBus) marshalEvent(eventType, serverId int32, data proto.Message, header dto.Header) (*actor.Event, error) {
+func (eb *Bus) marshalEvent(eventType, serverId int32, data proto.Message, header dto.Header) (*actor.Event, error) {
 	// 组装数据
 	rawData, err := proto.Marshal(data)
 	if err != nil {
@@ -174,11 +168,11 @@ func (eb *EventBus) marshalEvent(eventType, serverId int32, data proto.Message, 
 	return e, nil
 }
 
-func (eb *EventBus) isNatsEnabled() bool {
+func (eb *Bus) isNatsEnabled() bool {
 	return eb.nc != nil
 }
 
-func (eb *EventBus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
+func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 	e := &actor.Event{}
 	if err := proto.Unmarshal(eventData, e); err != nil {
 		return nil, err
@@ -187,7 +181,7 @@ func (eb *EventBus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 }
 
 // PublishGlobal 发布全局事件
-func (eb *EventBus) PublishGlobal(eventType int32, data proto.Message, header dto.Header) error {
+func (eb *Bus) PublishGlobal(eventType int32, data proto.Message, header dto.Header) error {
 	e, err := eb.marshalEvent(eventType, 0, data, header)
 	if err != nil {
 		return err
@@ -208,13 +202,13 @@ func (eb *EventBus) PublishGlobal(eventType int32, data proto.Message, header dt
 	}
 }
 
-func (eb *EventBus) publishGlobal(e *actor.Event) {
+func (eb *Bus) publishGlobal(e *actor.Event) {
 	key := eb.genKey(eb.globalPrefix, e.EventType)
 	eb.globalLock.RLock(key)
 	defer eb.globalLock.RUnlock(key)
 	if subMap, ok := eb.globalSubscribers[e.EventType]; ok {
-		ev := event.NewEvent()
-		ev.Type = event.ServiceGlobalEventTrigger
+		ev := NewEvent()
+		ev.Type = ServiceGlobalEventTrigger
 		ev.Data = e
 		ev.Key = e.GetKey()
 		ev.Priority = e.GetPriority()
@@ -229,7 +223,7 @@ func (eb *EventBus) publishGlobal(e *actor.Event) {
 }
 
 // PublishGlobalLocal 发布本地全局事件
-func (eb *EventBus) PublishGlobalLocal(eventType int32, data proto.Message, header dto.Header) error {
+func (eb *Bus) PublishGlobalLocal(eventType int32, data proto.Message, header dto.Header) error {
 	e, err := eb.marshalEvent(eventType, 0, data, header)
 	if err != nil {
 		return err
@@ -239,7 +233,7 @@ func (eb *EventBus) PublishGlobalLocal(eventType int32, data proto.Message, head
 	return nil
 }
 
-func (eb *EventBus) PublishServer(eventType, serverId int32, data proto.Message, header dto.Header) error {
+func (eb *Bus) PublishServer(eventType, serverId int32, data proto.Message, header dto.Header) error {
 	e, err := eb.marshalEvent(eventType, serverId, data, header)
 	if err != nil {
 		return err
@@ -259,13 +253,13 @@ func (eb *EventBus) PublishServer(eventType, serverId int32, data proto.Message,
 	}
 }
 
-func (eb *EventBus) publishServer(e *actor.Event) {
+func (eb *Bus) publishServer(e *actor.Event) {
 	key := eb.genKey(eb.serverPrefix, e.EventType, e.ServerId)
 	eb.serverLock.RLock(key)
 	defer eb.serverLock.RUnlock(key)
 	if serverMap, ok := eb.serverSubscribers[e.EventType]; ok {
-		ev := event.NewEvent()
-		ev.Type = event.ServiceGlobalEventTrigger
+		ev := NewEvent()
+		ev.Type = ServiceGlobalEventTrigger
 		ev.Data = e
 		ev.Key = e.GetKey()
 		ev.Priority = e.GetPriority()
@@ -278,7 +272,7 @@ func (eb *EventBus) publishServer(e *actor.Event) {
 	}
 }
 
-func (eb *EventBus) PublishServerLocal(eventType, serverId int32, data proto.Message, header dto.Header) error {
+func (eb *Bus) PublishServerLocal(eventType, serverId int32, data proto.Message, header dto.Header) error {
 	e, err := eb.marshalEvent(eventType, serverId, data, header)
 	if err != nil {
 		return err
@@ -287,13 +281,13 @@ func (eb *EventBus) PublishServerLocal(eventType, serverId int32, data proto.Mes
 	return nil
 }
 
-func (eb *EventBus) SubscribeGlobal(eventType int32, svc IListener) {
+func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 	key := eb.genKey(eb.globalPrefix, eventType)
 	eb.globalLock.Lock(key)
 	defer eb.globalLock.Unlock(key)
 	var needListen bool
 	if _, ok := eb.globalSubscribers[eventType]; !ok {
-		eb.globalSubscribers[eventType] = make(map[string]IListener)
+		eb.globalSubscribers[eventType] = make(map[string]inf.IListener)
 		needListen = true
 	}
 	eb.globalSubscribers[eventType][svc.GetName()] = svc
@@ -321,16 +315,16 @@ func (eb *EventBus) SubscribeGlobal(eventType int32, svc IListener) {
 	}
 }
 
-func (eb *EventBus) SubscribeServer(eventType int32, svc IListener) {
+func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 	key := eb.genKey(eb.serverPrefix, eventType, svc.GetServerId())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needListen bool
 	if _, ok := eb.serverSubscribers[eventType]; !ok {
-		eb.serverSubscribers[eventType] = make(map[int32]map[string]IListener)
+		eb.serverSubscribers[eventType] = make(map[int32]map[string]inf.IListener)
 	}
 	if _, ok := eb.serverSubscribers[eventType][svc.GetServerId()]; !ok {
-		eb.serverSubscribers[eventType][svc.GetServerId()] = make(map[string]IListener)
+		eb.serverSubscribers[eventType][svc.GetServerId()] = make(map[string]inf.IListener)
 		needListen = true
 	}
 	eb.serverSubscribers[eventType][svc.GetServerId()][svc.GetName()] = svc
@@ -357,7 +351,7 @@ func (eb *EventBus) SubscribeServer(eventType int32, svc IListener) {
 	}
 }
 
-func (eb *EventBus) unSubscribe(key string) {
+func (eb *Bus) unSubscribe(key string) {
 	// 没有订阅者了,那么取消监听
 	if eb.isNatsEnabled() {
 		if subscription, ok := eb.subMap[key]; ok {
@@ -370,7 +364,7 @@ func (eb *EventBus) unSubscribe(key string) {
 	}
 }
 
-func (eb *EventBus) UnSubscribeGlobal(eventType int32, svc IListener) {
+func (eb *Bus) UnSubscribeGlobal(eventType int32, svc inf.IListener) {
 	key := eb.genKey(eb.globalPrefix, eventType)
 	eb.globalLock.Lock(key)
 	defer eb.globalLock.Unlock(key)
@@ -387,7 +381,7 @@ func (eb *EventBus) UnSubscribeGlobal(eventType int32, svc IListener) {
 	}
 }
 
-func (eb *EventBus) UnSubscribeServer(eventType int32, svc IListener) {
+func (eb *Bus) UnSubscribeServer(eventType int32, svc inf.IListener) {
 	key := eb.genKey(eb.serverPrefix, eventType, svc.GetServerId())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)

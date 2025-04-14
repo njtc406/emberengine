@@ -1,11 +1,10 @@
-package eventBus
+package event
 
 import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"sync"
 	"testing"
@@ -30,7 +29,7 @@ func (s *testService) GetServerId() int32 {
 }
 
 func (s *testService) PushEvent(e inf.IEvent) error {
-	ev, ok := e.(*event.Event)
+	ev, ok := e.(*Event)
 	if !ok {
 		return fmt.Errorf("event type is not actor.Event")
 	}
