@@ -1,8 +1,10 @@
 package processor
 
+import "context"
+
 type IProcessor interface {
 	// must goroutine safe
-	MsgRoute(sessionId int64, clientId string, msg interface{}) error
+	MsgRoute(ctx context.Context, sessionId int64, clientId string, msg interface{}) error
 	//must goroutine safe
 	UnknownMsgRoute(sessionId int64, clientId string, msg interface{})
 	// connect event

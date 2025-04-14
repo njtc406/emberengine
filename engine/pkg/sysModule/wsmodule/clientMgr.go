@@ -6,6 +6,7 @@
 package wsmodule
 
 import (
+	"context"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -31,7 +32,7 @@ type WSPack struct {
 	Type      WSPackType //0表示连接 1表示断开 2表示数据
 	SessionId int64
 	ClientId  string
-	TraceId   string
+	Ctx       context.Context
 	Data      any
 }
 
@@ -76,8 +77,8 @@ func (m *ClientMgr) wsEventHandler(e inf.IEvent) {
 		// 未知消息
 		m.IRawProcessor.UnknownMsgRoute(pack.SessionId, pack.ClientId, pack.Data)
 	case WPTPack:
-		if err := m.IRawProcessor.MsgRoute(pack.SessionId, pack.ClientId, pack.Data); err != nil {
-			log.SysLogger.Errorf("Client router msg error: %s", err)
+		if err := m.IRawProcessor.MsgRoute(pack.Ctx, pack.SessionId, pack.ClientId, pack.Data); err != nil {
+			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
 		}
 	}
 }
