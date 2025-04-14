@@ -42,5 +42,8 @@ func (s *grpcServer) Serve(conf *config.RPCServer) error {
 }
 
 func (s *grpcServer) Close() {
+	if s.server == nil {
+		return
+	}
 	s.server.Stop()
 }

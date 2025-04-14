@@ -38,5 +38,8 @@ func (rs *rpcxServer) Serve(conf *config.RPCServer) error {
 }
 
 func (rs *rpcxServer) Close() {
+	if rs.svr == nil {
+		return
+	}
 	rs.svr.Close()
 }
