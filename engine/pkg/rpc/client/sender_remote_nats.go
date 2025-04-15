@@ -7,11 +7,11 @@ package client
 
 import (
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"github.com/nats-io/nats.go"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"google.golang.org/protobuf/proto"
 )
 
 type natsSender struct {
