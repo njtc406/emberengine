@@ -85,17 +85,17 @@ func (s *Service1) OnInit() error {
 	//
 	////rpc test demo
 	//
-	//s.AfterFunc(time.Second*2, "rpc test demo", func(timer *timingwheel.Timer, args ...interface{}) {
-	//	if err := s.SelectSameServer("1", "Service3").Call("RPCTest2", nil, nil, nil); err != nil {
-	//		log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-	//	}
-	//	if err := s.SelectSameServer("2", "Service3").CallWithTimeout("RPCTest2", nil, time.Second*5, nil, nil); err != nil {
-	//		log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-	//	}
-	//	if err := s.SelectSameServer("1", "Service3").Send("RPCTest2", nil, nil); err != nil {
-	//		log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-	//	}
-	//})
+	s.AfterFunc(time.Second*2, "rpc test demo", func(timer *timingwheel.Timer, args ...interface{}) {
+		if err := s.SelectSameServer("1", "Service3").Call("RPCTest2", nil, nil, nil); err != nil {
+			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		}
+		//if err := s.SelectSameServer("2", "Service3").CallWithTimeout("RPCTest2", nil, time.Second*5, nil, nil); err != nil {
+		//	log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		//}
+		if err := s.SelectSameServer("1", "Service3").Send("RPCTest2", nil, nil); err != nil {
+			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		}
+	})
 	//s.AfterFunc(time.Second*2, "rpc test demo1", func(timer *timingwheel.Timer, args ...interface{}) {
 	//	out := &msg.Msg_Test_Resp{}
 	//	if err := s.SelectSameServer("1", "Service3").Call("RPCSum", nil, &msg.Msg_Test_Req{A: 1, B: 2}, out); err != nil {
@@ -218,33 +218,33 @@ func (s *Service1) OnInit() error {
 		//log.SysLogger.Debugf("call Service2.APIWithoutParams out3:%d", out)
 
 		// 12. 多返回值 -> 全部接收 (正常调用)
-		var out1, out2 int
-		if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, []interface{}{&out1, &out2}); err != nil {
-			log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
-		}
-		// 输出 1, 2
-		log.SysLogger.Debugf("call Service2.APIWithMultiResults 1 out1:%d, out2:%d", out1, out2)
-
-		// 13. 多返回值 -> 部分接收 (正常调用)
-		if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, []interface{}{&out2}); err != nil {
-			log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
-		}
-		// 输出 1, 1
-		log.SysLogger.Debugf("call Service2.APIWithMultiResults 2 out1:%d, out2:%d", out1, out2)
-
-		// 14. 多返回值 -> 全都不接收 (正常调用)
-		if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
-		}
-		// 输出 1, 1
-		log.SysLogger.Debugf("call Service2.APIWithMultiResults 3 out1:%d, out2:%d", out1, out2)
-
-		// 15. 多返回值 -> 使用错误类型接收 (报错)
-		if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, &out1); err != nil {
-			log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
-		}
-		// 输出 1, 1
-		log.SysLogger.Debugf("call Service2.APIWithMultiResults 4 out1:%d, out2:%d", out1, out2)
+		//var out1, out2 int
+		//if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, []interface{}{&out1, &out2}); err != nil {
+		//	log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
+		//}
+		//// 输出 1, 2
+		//log.SysLogger.Debugf("call Service2.APIWithMultiResults 1 out1:%d, out2:%d", out1, out2)
+		//
+		//// 13. 多返回值 -> 部分接收 (正常调用)
+		//if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, []interface{}{&out2}); err != nil {
+		//	log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
+		//}
+		//// 输出 1, 1
+		//log.SysLogger.Debugf("call Service2.APIWithMultiResults 2 out1:%d, out2:%d", out1, out2)
+		//
+		//// 14. 多返回值 -> 全都不接收 (正常调用)
+		//if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, nil); err != nil {
+		//	log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
+		//}
+		//// 输出 1, 1
+		//log.SysLogger.Debugf("call Service2.APIWithMultiResults 3 out1:%d, out2:%d", out1, out2)
+		//
+		//// 15. 多返回值 -> 使用错误类型接收 (报错)
+		//if err := s.SelectSameServer("", "Service2").Call("APIWithMultiResults", nil, nil, &out1); err != nil {
+		//	log.SysLogger.Errorf("call Service2.APIWithMultiResults failed, err:%v", err)
+		//}
+		//// 输出 1, 1
+		//log.SysLogger.Debugf("call Service2.APIWithMultiResults 4 out1:%d, out2:%d", out1, out2)
 	})
 
 	return nil

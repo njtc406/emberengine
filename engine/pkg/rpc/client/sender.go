@@ -18,6 +18,7 @@ var senderMap = map[string]SenderCreator{
 	def.RpcTypeLocal: newLClient,
 	def.RpcTypeRpcx:  newRpcxClient,
 	def.RpcTypeGrpc:  newGrpcClient,
+	def.RpcTypeNats:  newNatsClient,
 }
 
 // Register 注册消息发送器(目前由于都是在启动阶段注册,没有动态注册,所以就没有给锁,后面有需求再改)

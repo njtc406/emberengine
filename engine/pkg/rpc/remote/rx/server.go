@@ -28,7 +28,7 @@ func (rs *rpcxServer) Init(sf inf.IRpcSenderFactory) {
 	rs.svr = server.NewServer()
 }
 
-func (rs *rpcxServer) Serve(conf *config.RPCServer) error {
+func (rs *rpcxServer) Serve(conf *config.RPCServer, nodeUid string) error {
 	// 注册rpc监听服务
 	if err := rs.svr.RegisterName("RpcxListener", rs.listener, ""); err != nil {
 		return err
@@ -41,5 +41,6 @@ func (rs *rpcxServer) Close() {
 	if rs.svr == nil {
 		return
 	}
-	rs.svr.Close()
+	_ = rs.svr.Close()
+	rs.svr = nil
 }

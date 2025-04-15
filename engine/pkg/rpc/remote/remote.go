@@ -32,9 +32,9 @@ func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory) 
 	return r
 }
 
-func (r *Remote) Serve() {
+func (r *Remote) Serve(nodeUid string) {
 	go func() {
-		if err := r.svr.Serve(r.conf); err != nil {
+		if err := r.svr.Serve(r.conf, nodeUid); err != nil {
 			log.SysLogger.Warnf("rpc serve stop: %v", err)
 		}
 	}()

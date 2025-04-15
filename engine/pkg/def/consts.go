@@ -52,6 +52,7 @@ const (
 	RpcTypeLocal = "local"
 	RpcTypeRpcx  = "rpcx"
 	RpcTypeGrpc  = "grpc"
+	RpcTypeNats  = "nats"
 )
 
 const (
@@ -92,8 +93,10 @@ const (
 )
 
 const (
-	NatsDefaultGlobalPrefix = "global.%d"    // global.eventType
-	NatsDefaultServerPrefix = "server.%d.%d" // server.eventType.serverId
+	NatsDefaultGlobalPrefix = "event.global.%d"    // global.eventType
+	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.serverId
 )
 
 const NatsDefaultShardCount = 16
+
+const NatsDefaultTopic = "rpc.node.%s"

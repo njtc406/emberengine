@@ -31,7 +31,7 @@ func (s *grpcServer) Init(sf inf.IRpcSenderFactory) {
 	s.server = grpc.NewServer()
 }
 
-func (s *grpcServer) Serve(conf *config.RPCServer) error {
+func (s *grpcServer) Serve(conf *config.RPCServer, nodeUid string) error {
 	log.SysLogger.Infof("grpc server listening at: %s", conf.Addr)
 	lis, err := net.Listen(conf.Protoc, conf.Addr)
 	if err != nil {
@@ -46,4 +46,5 @@ func (s *grpcServer) Close() {
 		return
 	}
 	s.server.Stop()
+	s.server = nil
 }

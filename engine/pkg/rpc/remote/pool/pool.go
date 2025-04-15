@@ -9,6 +9,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/gr"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/nt"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/rx"
 )
 
@@ -22,6 +23,7 @@ type creator struct {
 var remoteMap = map[string]inf.IRemoteServer{
 	def.RpcTypeRpcx: rx.NewRpcxServer(),
 	def.RpcTypeGrpc: gr.NewGrpcServer(),
+	def.RpcTypeNats: nt.NewNatsServer(),
 }
 
 func Register(tp string, server inf.IRemoteServer) {

@@ -58,7 +58,7 @@ func (em *EndpointManager) Start() {
 	em.repository.Start()
 	// 启动rpc监听服务器
 	for _, rt := range em.remotes {
-		rt.Serve()
+		rt.Serve(em.nodeUid)
 	}
 
 	// 新增、修改服务事件

@@ -14,7 +14,6 @@ NodeConf:
   AntsPoolSize: 10000
 
 ClusterConf:
-  OpenRemote: false
   ETCDConf:
     # etcd地址
     EndPoints:
@@ -34,7 +33,9 @@ ClusterConf:
     - Addr: 0.0.0.0:6631
       Protoc: "tcp"
       Type: "grpc"
-  RemoteType: rpcx
+    - Addr: nats://192.168.145.188:4222
+      Protoc: "tcp"
+      Type: "nats"
   DiscoveryType: etcd
   RemoteConfPath: ""
   # 服务发现监听路径

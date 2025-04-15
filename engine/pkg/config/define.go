@@ -55,9 +55,12 @@ type ETCDConf struct {
 }
 
 type RPCServer struct {
-	Addr   string // rpc监听地址
-	Protoc string // 协议
-	Type   string // 服务类型(默认grpc)
+	Addr    string // rpc监听地址
+	Protoc  string // 协议
+	Type    string // 服务类型(默认grpc)
+	Cert    string `binding:""` // 证书
+	CertKey string `binding:""` // 证书密钥
+	CAs     string `binding:""` // ca证书
 }
 
 type ServiceInitConf struct {
