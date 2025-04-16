@@ -23,14 +23,13 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
-// TODO 这里有个东西可以优化,就是如果是cast消息,那么可以预先将消息创建好,避免每个客户端都重新封装一遍
-// 但是需要考虑到如果是不同的连接方式,可能消息格式不同,需要做兼容处理
-
 type MessageBus struct {
 	dto.DataRef
 	sender   inf.IRpcDispatcher
 	receiver inf.IRpcDispatcher
 	err      error
+
+	// TODO 这里实际上还可以做一个options,用来做一些额外的配置,比如如果加入了multiCall,那么是否其中一个返回错误就直接返回,还是其中一个返回成功就成功等等
 }
 
 func (mb *MessageBus) Reset() {
@@ -223,11 +222,6 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 		return nil, def.CallbacksIsEmpty
 	}
 
-	if mb.err != nil {
-		// 这里可能是从MultiBus中产生的
-		return nil, mb.err
-	}
-
 	var timeout time.Duration
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -276,12 +270,8 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 		return mb.err
 	}
 	if mb.receiver == nil {
-		return fmt.Errorf("sender or receiver is nil")
+		return fmt.Errorf("receiver is nil")
 	}
-	if mb.err != nil {
-		return mb.err
-	}
-	mt := monitor.GetRpcMonitor()
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
@@ -291,7 +281,7 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	envelope.SetDispatcher(mb.sender)
 	envelope.SetRequest(in)
 	envelope.SetResponse(nil) // 容错
-	envelope.SetReqId(mt.GenSeq())
+	envelope.SetReqId(monitor.GetRpcMonitor().GenSeq())
 	envelope.SetNeedResponse(false) // 不需要回复
 
 	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
@@ -300,11 +290,9 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 
 func (mb *MessageBus) Cast(ctx context.Context, method string, in interface{}) {
 	if err := mb.Send(ctx, method, in); err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("cast service[%s] failed, error: %v", method, err)
+		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), method, err)
 	}
 }
-
-// TODO 这个还需要修改
 
 // MultiBus 多节点调用
 type MultiBus []inf.IBus

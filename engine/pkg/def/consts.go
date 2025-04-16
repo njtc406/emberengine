@@ -100,3 +100,12 @@ const (
 const NatsDefaultShardCount = 16
 
 const NatsDefaultTopic = "rpc.node.%s"
+
+const DefaultReqDuplicatorTTL = 10 * time.Second
+
+const (
+	DefaultTraceIdKey    = "sys.traceId"
+	DefaultDispatcherKey = "sys.dispatchKey"
+	DefaultTypeKey       = "sys.type"
+	DefaultPriorityKey   = "sys.priority"
+)

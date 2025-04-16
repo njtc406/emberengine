@@ -30,6 +30,7 @@ type NodeConf struct {
 	MonitorTimerSize  int           `binding:""`         // 定时器数量(用于监控rpc调用的timer)(默认10000)
 	MonitorBucketSize int           `binding:""`         // 定时器桶数量(默认20)
 	EventBusConf      *EventBusConf `binding:""`         // nats配置
+	RpcDuplicatorTTL  time.Duration `binding:""`
 }
 
 type ClusterConf struct {

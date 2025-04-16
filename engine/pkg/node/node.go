@@ -7,6 +7,7 @@ package node
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
+	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"os"
 	"os/signal"
 	"syscall"
@@ -60,11 +61,10 @@ func Start(v string, confPath string) {
 	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
 	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
 
+	// 初始化rpc请求去重缓存器
+	dedup.GetRpcReqDuplicator().Init(config.Conf.NodeConf.RpcDuplicatorTTL)
 	// 初始化等待队列,并启动监听
 	monitor.GetRpcMonitor().Init().Start()
-
-	// TODO 考虑把一些公共的组件都使用service去做, 这样就可以不用去考虑并发的一些问题
-	// 比如cluster里面的一些组件
 
 	// 初始化集群设置
 	cluster.GetCluster().Init()

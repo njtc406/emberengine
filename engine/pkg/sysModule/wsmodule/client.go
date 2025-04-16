@@ -6,7 +6,10 @@
 package wsmodule
 
 import (
+	"context"
 	"github.com/google/uuid"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,6 +98,10 @@ func (c *Client) listen() {
 
 		c.msgCnt++
 
+		ctx := context.Background()
+		emberctx.AddHeader(ctx, def.DefaultTraceIdKey, uuid.NewString())
+		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, c.roleId)
+
 		c.mgr.NotifyEvent(&event.Event{
 			Type: event.SysEventWebSocket,
 			Data: &WSPack{
@@ -102,7 +109,7 @@ func (c *Client) listen() {
 				ClientId:  c.roleId,
 				SessionId: c.sessionId,
 				Data:      info,
-				TraceId:   uuid.NewString(),
+				Ctx:       ctx,
 			},
 		})
 	}

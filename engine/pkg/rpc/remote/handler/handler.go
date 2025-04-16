@@ -10,11 +10,10 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/serializer"
 )
-
-// TODO 处理ReqId重复发送的问题
 
 func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 	if req.Reply {
@@ -62,6 +61,18 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			return nil
 		}
 	} else {
+		// 检查重复
+		if dedup.GetRpcReqDuplicator().Seen(req.ReqId) {
+			fields := make(map[string]interface{})
+			if req.MessageHeader != nil {
+				for k, v := range req.MessageHeader {
+					fields[k] = v
+				}
+			}
+			log.SysLogger.WithFields(fields).Errorf("duplicate rpc request: %s", req.String())
+			return nil
+		}
+
 		// 调用
 		request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
 		if err != nil {
@@ -83,6 +94,13 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		envelope.SetReqId(req.ReqId)
 		envelope.SetNeedResponse(req.NeedResp)
 
-		return sf.GetDispatcher(req.ReceiverPid).SendRequest(envelope)
+		err = sf.GetDispatcher(req.ReceiverPid).SendRequest(envelope)
+		if err != nil {
+			return err
+		}
+
+		dedup.GetRpcReqDuplicator().MarkDone(req.ReqId)
+
+		return nil
 	}
 }

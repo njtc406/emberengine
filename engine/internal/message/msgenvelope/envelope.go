@@ -7,6 +7,7 @@ package msgenvelope
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"golang.org/x/net/context"
 	"strconv"
@@ -218,7 +219,7 @@ func (e *MsgEnvelope) SetCallbackParams(params []interface{}) {
 //--------------------------------get------------------------------------
 
 func (e *MsgEnvelope) GetType() int32 {
-	tp := e.GetHeader("Type")
+	tp := e.GetHeader(def.DefaultTypeKey)
 	if tp == "" {
 		return event.RpcMsg
 	} else {
@@ -232,17 +233,17 @@ func (e *MsgEnvelope) GetType() int32 {
 }
 
 func (e *MsgEnvelope) GetKey() string {
-	return e.GetHeader("DispatchKey")
+	return e.GetHeader(def.DefaultDispatcherKey)
 }
 
 func (e *MsgEnvelope) GetPriority() int32 {
-	priority := e.GetHeader("Priority")
+	priority := e.GetHeader(def.DefaultPriorityKey)
 	if priority == "" {
-		return 0
+		return def.PriorityUser
 	} else {
 		priorityInt, err := strconv.Atoi(priority)
 		if err != nil {
-			return 0
+			return def.PriorityUser
 		} else {
 			return int32(priorityInt)
 		}
