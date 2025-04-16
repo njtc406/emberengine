@@ -34,7 +34,6 @@ type ErrCode struct {
 
 // String 当前错误对象的错误信息
 func (e *ErrCode) String() string {
-	// TODO 后面再做一个code转string的操作,这样可以预定义一些错误
 	if e.caller != nil {
 		return fmt.Sprintf("%s ---> code: %d, msg: %s", e.caller.string(), e.Code, e.Msg)
 	} else {

@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// TODO 后面看看要不要换成时间轮,不然任务量大的时候heap可能会比较慢
-
 type OnCloseTimer func(timer ITimer)
 type OnAddTimer func(timer ITimer)
 

@@ -128,8 +128,7 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 			}()
 		} else {
 			if t.task != nil {
-				// TODO 这里之后优化一下,和service的mailbox一起优化,使用mpse来接收消息,防止消费者太慢导致阻塞
-				// 当然,这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
+				// 这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
 				// 执行任务
 				select {
 				case t.c <- t:
