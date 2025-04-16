@@ -7,10 +7,8 @@ package client
 
 import (
 	"context"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"time"
-
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"google.golang.org/grpc"
@@ -40,17 +38,18 @@ func (rc *grpcSender) Close() {
 	rc.rpcClient = nil
 }
 
-func (rc *grpcSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	if rc.rpcClient == nil {
 		return def.RPCHadClosed
 	}
 	// 这里仅仅代表消息发送成功
-	timeout := envelope.GetTimeout()
-	if envelope.GetTimeout() == 0 {
-		timeout = time.Millisecond * 500
+	ctx := envelope.GetContext()
+	_, ok := ctx.Deadline()
+	if !ok {
+		newCtx, cancel := context.WithTimeout(ctx, def.DefaultRpcTimeout)
+		defer cancel()
+		ctx = newCtx
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 
 	// 构建发送消息
 	msg := envelope.ToProtoMsg()
@@ -59,26 +58,28 @@ func (rc *grpcSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	}
 
 	if _, err := rc.rpcClient.RPCCall(ctx, msg); err != nil {
-		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
+		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, envelope.GetReceiverPid().GetServiceUid(), err)
 		return def.RPCCallFailed
 	}
+
+	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, envelope.GetReceiverPid().GetServiceUid())
 
 	return nil
 }
 
-func (rc *grpcSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *grpcSender) SendRequest(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	// 这里不能释放envelope,因为调用方需要使用
-	return rc.send(dispatcher, envelope)
+	return rc.send(envelope)
 }
 
-func (rc *grpcSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *grpcSender) SendRequestAndRelease(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
-	return rc.send(dispatcher, envelope)
+	return rc.send(envelope)
 }
 
-func (rc *grpcSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *grpcSender) SendResponse(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
-	return rc.send(dispatcher, envelope)
+	return rc.send(envelope)
 }
 
 func (rc *grpcSender) IsClosed() bool {

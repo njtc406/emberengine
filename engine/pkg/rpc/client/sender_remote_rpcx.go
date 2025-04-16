@@ -52,7 +52,7 @@ func (rc *rpcxSender) Close() {
 		return
 	}
 	if err := rc.rpcClient.Close(); err != nil {
-		log.SysLogger.Errorf("close remote client is error : %s", err)
+		log.SysLogger.Warnf("close remote client is error : %s", err)
 	}
 	//log.SysLogger.Debugf("############################close remote rpcx client success : %s", rc.IRpcDispatcher.GetPid().String())
 	rc.rpcClient = nil
@@ -63,12 +63,13 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 		return def.RPCHadClosed
 	}
 	// 这里仅仅代表消息发送成功
-	timeout := envelope.GetTimeout()
-	if envelope.GetTimeout() == 0 {
-		timeout = time.Millisecond * 500
+	ctx := envelope.GetContext()
+	_, ok := ctx.Deadline()
+	if !ok {
+		newCtx, cancel := context.WithTimeout(ctx, def.DefaultRpcTimeout)
+		defer cancel()
+		ctx = newCtx
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 
 	// 构建发送消息
 	msg := envelope.ToProtoMsg()
@@ -77,9 +78,11 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	}
 
 	if _, err := rc.rpcClient.Go(ctx, "RPCCall", msg, nil, nil); err != nil {
-		log.SysLogger.Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
+		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
 		return def.RPCCallFailed
 	}
+
+	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())
 
 	return nil
 }

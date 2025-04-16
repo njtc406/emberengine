@@ -12,7 +12,7 @@ import (
 )
 
 func CreateServiceUid(serverId int32, serviceName, serviceId string) string {
-	return fmt.Sprintf("%d:%s@%s", serverId, serviceName, serviceId)
+	return fmt.Sprintf("%s@%d:%s", serviceName, serverId, serviceId)
 }
 
 func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {

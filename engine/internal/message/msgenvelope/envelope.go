@@ -7,6 +7,8 @@ package msgenvelope
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"golang.org/x/net/context"
 	"strconv"
 	"sync"
 	"time"
@@ -37,6 +39,7 @@ type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!
 	locker *sync.RWMutex
+	ctx    context.Context
 
 	// 数据包
 	senderPid   *actor.PID  // 发送者
@@ -44,7 +47,6 @@ type MsgEnvelope struct {
 	method      string      // 调用方法
 	reqID       uint64      // 请求ID(防止重复,目前还未做防重复逻辑)
 	reply       bool        // 是否是回复
-	header      dto.Header  // 消息头
 	request     interface{} // 请求参数
 	response    interface{} // 回复数据
 	needResp    bool        // 是否需要回复
@@ -73,7 +75,7 @@ func (e *MsgEnvelope) Reset() {
 	e.method = ""
 	e.reqID = 0
 	e.reply = false
-	e.header = nil
+	e.ctx = nil
 	e.timeout = 0
 	e.request = nil
 	e.response = nil
@@ -90,27 +92,34 @@ func (e *MsgEnvelope) Reset() {
 
 //-------------------------------------set-----------------------------------------
 
-func (e *MsgEnvelope) SetHeaders(header dto.Header) {
-	if header == nil {
+func (e *MsgEnvelope) WithContext(ctx context.Context) inf.IEnvelope {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.ctx = ctx
+	return e
+}
+
+func (e *MsgEnvelope) SetHeaders(headers dto.Header) {
+	if headers == nil {
 		return
 	}
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	if e.header == nil {
-		e.header = make(dto.Header)
+	if e.ctx == nil {
+		e.ctx = context.Background()
 	}
-	for k, v := range header {
-		e.header.Set(k, v)
+	for k, v := range headers {
+		emberctx.AddHeader(e.ctx, k, v)
 	}
 }
 
 func (e *MsgEnvelope) SetHeader(key string, value string) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	if e.header == nil {
-		e.header = make(dto.Header)
+	if e.ctx == nil {
+		e.ctx = context.Background()
 	}
-	e.header.Set(key, value)
+	emberctx.AddHeader(e.ctx, key, value)
 }
 
 func (e *MsgEnvelope) SetSenderPid(sender *actor.PID) {
@@ -243,13 +252,19 @@ func (e *MsgEnvelope) GetPriority() int32 {
 func (e *MsgEnvelope) GetHeader(key string) string {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return e.header.Get(key)
+	return emberctx.GetHeaderValue(e.ctx, key)
 }
 
 func (e *MsgEnvelope) GetHeaders() dto.Header {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return e.header
+	return emberctx.GetHeader(e.ctx)
+}
+
+func (e *MsgEnvelope) GetContext() context.Context {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.ctx
 }
 
 func (e *MsgEnvelope) GetSenderPid() *actor.PID {
@@ -379,7 +394,7 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 		Request:       nil,
 		Response:      nil,
 		Err:           e.GetErrStr(),
-		MessageHeader: e.header,
+		MessageHeader: emberctx.GetHeader(e.ctx),
 		Reply:         e.reply,
 		ReqId:         e.reqID,
 		NeedResp:      e.needResp,

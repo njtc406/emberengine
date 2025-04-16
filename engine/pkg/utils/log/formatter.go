@@ -12,6 +12,7 @@ package log
 import (
 	"bytes"
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/logrus"
 	"runtime"
 	"sort"
@@ -77,7 +78,7 @@ type Formatter struct {
 	bufPool *defaultPool
 }
 
-// Format a log entry (2006-01-02 15:04:05.000 [DEBUG] (test.go:5 func test) aaa=1 bbb=2 this is message)
+// Format a log entry (2006-01-02 15:04:05.000 [DEBUG] (test.go:5 func test) aaa=1 bbb=2 this is message) [header]
 func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	// output buffer
@@ -126,6 +127,19 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 		b.WriteString(strings.TrimSpace(entry.Message))
 	} else {
 		b.WriteString(entry.Message)
+	}
+
+	if entry.Context != nil {
+		header := emberctx.GetHeader(entry.Context)
+		if header != nil {
+			b.WriteString(" [")
+			var keys []string
+			for k, v := range header {
+				keys = append(keys, fmt.Sprintf("%s=%s", k, v))
+			}
+			b.WriteString(strings.Join(keys, ","))
+			b.WriteString("]")
+		}
 	}
 
 	b.WriteByte('\n')

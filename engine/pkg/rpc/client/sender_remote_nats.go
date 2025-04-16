@@ -50,7 +50,7 @@ func (rc *natsSender) Close() {
 	rc.conn = nil
 }
 
-func (rc *natsSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *natsSender) send(envelope inf.IEnvelope) error {
 	if rc.conn == nil {
 		return def.RPCHadClosed
 	}
@@ -69,19 +69,19 @@ func (rc *natsSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	return rc.conn.Publish(fmt.Sprintf(def.NatsDefaultTopic, envelope.GetReceiverPid().GetNodeUid()), data)
 }
 
-func (rc *natsSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *natsSender) SendRequest(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	// 这里不能释放envelope,因为调用方需要使用
-	return rc.send(dispatcher, envelope)
+	return rc.send(envelope)
 }
 
-func (rc *natsSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *natsSender) SendRequestAndRelease(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
-	return rc.send(dispatcher, envelope)
+	return rc.send(envelope)
 }
 
-func (rc *natsSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *natsSender) SendResponse(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
-	return rc.send(dispatcher, envelope)
+	return rc.send(envelope)
 }
 
 func (rc *natsSender) IsClosed() bool {

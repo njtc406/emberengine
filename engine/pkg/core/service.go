@@ -396,7 +396,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
-			log.SysLogger.Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
+			log.SysLogger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
 			if c.IsReply() {
 				// 回复
 				s.HandleResponse(c)

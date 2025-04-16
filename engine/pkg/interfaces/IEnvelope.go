@@ -6,6 +6,7 @@
 package interfaces
 
 import (
+	"context"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"time"
@@ -16,7 +17,8 @@ type IEnvelope interface {
 
 	// Set
 
-	SetHeaders(header dto.Header)
+	WithContext(ctx context.Context) IEnvelope
+	SetHeaders(headers dto.Header)
 	SetHeader(key string, value string)
 	SetSenderPid(sender *actor.PID)
 	SetReceiverPid(receiver *actor.PID)
@@ -39,6 +41,7 @@ type IEnvelope interface {
 	IEvent
 	GetHeader(key string) string
 	GetHeaders() dto.Header
+	GetContext() context.Context
 	GetSenderPid() *actor.PID
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher

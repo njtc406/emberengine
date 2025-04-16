@@ -51,7 +51,14 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			}
 		} else {
 			// 已经超时,丢弃返回
-			log.SysLogger.Warnf("rpc call timeout, envelope not found: %s", req.String())
+			fields := make(map[string]interface{})
+			if req.MessageHeader != nil {
+				for k, v := range req.MessageHeader {
+					fields[k] = v
+				}
+			}
+
+			log.SysLogger.WithFields(fields).Warnf("rpc call timeout, envelope not found: %s", req.String())
 			return nil
 		}
 	} else {

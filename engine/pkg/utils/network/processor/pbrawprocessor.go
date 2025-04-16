@@ -12,7 +12,7 @@ type RawMessageInfo struct {
 	msgHandler RawMessageHandler
 }
 
-type RawMessageHandler func(sessionId int64, clientId string, msgId int32, msg []byte)
+type RawMessageHandler func(ctx context.Context, sessionId int64, clientId string, msgId int32, msg []byte)
 type RawConnectHandler func(sessionId int64, clientId string)
 type UnknownRawMessageHandler func(sessionId int64, clientId string, msg []byte)
 
@@ -65,10 +65,10 @@ func (pbRawProcessor *PBRawProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor) MsgRoute(sessionId int64, clientId string, msg interface{}) error {
+func (pbRawProcessor *PBRawProcessor) MsgRoute(ctx context.Context, sessionId int64, clientId string, msg interface{}) error {
 	pPackInfo := msg.(*PBRawPackInfo)
 	defer pbPackPool.Put(pPackInfo)
-	pbRawProcessor.msgHandler(sessionId, clientId, pPackInfo.id, pPackInfo.rawMsg)
+	pbRawProcessor.msgHandler(ctx, sessionId, clientId, pPackInfo.id, pPackInfo.rawMsg)
 	return nil
 }
 
