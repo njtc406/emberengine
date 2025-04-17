@@ -126,6 +126,10 @@ func setDefaultValues() {
 		Color:        false,
 		MaxAge:       time.Hour * 24 * 15,
 		RotationTime: time.Hour * 24,
+		AsyncMode: &log.AsyncMode{
+			Enable: false,
+			Config: nil,
+		},
 	})
 
 	// 默认集群配置

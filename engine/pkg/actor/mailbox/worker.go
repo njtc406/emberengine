@@ -8,6 +8,7 @@ package mailbox
 import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 	"hash/fnv"
 	"math/rand"
 	"reflect"
@@ -20,7 +21,6 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpmc"
 )
 
 var globRand *rand.Rand
@@ -207,8 +207,8 @@ func newWorker(pool *WorkerPool, id int) *Worker {
 	return &Worker{
 		workerId:      id,
 		pool:          pool,
-		userMailbox:   mpmc.NewQueue[inf.IEvent](int64(pool.conf.UserMailboxSize)),
-		systemMailbox: mpmc.NewQueue[inf.IEvent](int64(pool.conf.SystemMailboxSize)),
+		userMailbox:   mpsc.New[inf.IEvent](),
+		systemMailbox: mpsc.New[inf.IEvent](),
 	}
 }
 

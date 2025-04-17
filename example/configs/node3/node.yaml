@@ -72,4 +72,12 @@ SystemLogger:
   MaxAge: 720h
   # 日志切分周期(默认24h)
   RotationTime: 24h
+  AsyncMode:
+    # 开启异步模式(内部调试时可以关闭)
+    Enable: true
+    Config:
+      # 刷新间隔
+      FlushInterval: 1s
+      # 缓冲区大小(满时会立即写入)
+      BufferSize: 1048576  # 1MB
 

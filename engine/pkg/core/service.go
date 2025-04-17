@@ -40,6 +40,8 @@ type Service struct {
 	eventProcessor       inf.IEventProcessor // 事件管理器
 	globalEventProcessor inf.IEventProcessor // 全局事件管理器
 	//profiler       *profiler.Profiler  // 性能分析
+
+	// TODO 可能需要给service单独一个日志器,不然所有日志都放system里面可能不太好区分业务日志
 }
 
 func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {

@@ -97,8 +97,8 @@ type TimerConf struct {
 }
 
 type WorkerConf struct {
-	UserMailboxSize      int  `binding:""` // 默认1024(最终值都是2的n次方,不足时向上取到最近的2的n次方)
-	SystemMailboxSize    int  `binding:""` // 默认16(最终值都是2的n次方,不足时向上取到最近的2的n次方)
+	UserMailboxSize      int  `binding:""` // 默认1024(最终值都是2的n次方,不足时向上取到最近的2的n次方)(修改为mpsc后这个暂时没用了)
+	SystemMailboxSize    int  `binding:""` // 默认16(最终值都是2的n次方,不足时向上取到最近的2的n次方)(修改为mpsc后这个暂时没用了)
 	WorkerNum            int  `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
 	DynamicWorkerScaling bool `binding:""` // 动态线程池扩展(默认false),如果开启则根据负载情况动态扩展线程池(请确保需要单线程的服务不开启这个标记)
 	VirtualWorkerRate    int  `binding:""` // 虚拟线程倍率(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)

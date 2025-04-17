@@ -7,6 +7,7 @@ package wsmodule
 
 import (
 	"context"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
@@ -99,7 +100,9 @@ func (c *Client) listen() {
 		c.msgCnt++
 
 		ctx := context.Background()
-		emberctx.AddHeader(ctx, def.DefaultTraceIdKey, uuid.NewString())
+		// 链路追踪
+		emberctx.AddHeader(ctx, def.DefaultTraceIdKey, fmt.Sprintf("%s->%s", c.mgr.GetService().GetPid().GetServiceUid(), uuid.NewString()))
+		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
 		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, c.roleId)
 
 		c.mgr.NotifyEvent(&event.Event{
@@ -184,54 +187,6 @@ func (c *Client) SendMsg(id int32, msg interface{}) error {
 		return err
 	}
 	return c.conn.WriteMsg(data)
-}
-
-func (c *Client) ReadMsg() error {
-	defer func() {
-		if r := recover(); r != nil {
-			log.SysLogger.Errorf("Client read msg error: %s", r)
-		}
-	}()
-	msg, err := c.conn.ReadMsg()
-	if err != nil {
-		log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
-		return err
-	}
-
-	// 消息解析
-	info, err := c.mgr.Unmarshal(msg)
-	if err != nil {
-		log.SysLogger.Errorf("Client receive msg error: %s", err)
-		c.mgr.NotifyEvent(&event.Event{
-			Type: event.SysEventWebSocket,
-			Data: &WSPack{
-				Type:      WPTUnknownPack,
-				ClientId:  c.roleId,
-				SessionId: c.sessionId,
-				Data:      msg,
-			},
-		})
-		return err
-	}
-
-	if c.msgCnt > 0 && !c.IsRunning() {
-		// 在接收了auth消息之后,如果没有绑定角色,则不处理后续消息
-		return nil
-	}
-
-	c.msgCnt++
-
-	c.mgr.NotifyEvent(&event.Event{
-		Type: event.SysEventWebSocket,
-		Data: &WSPack{
-			Type:      WPTPack,
-			ClientId:  c.roleId,
-			SessionId: c.sessionId,
-			Data:      info,
-		},
-	})
-
-	return nil
 }
 
 func (c *Client) checkAuth(_ *timingwheel.Timer, _ ...interface{}) {
