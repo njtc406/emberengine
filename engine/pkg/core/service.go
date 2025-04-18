@@ -8,6 +8,7 @@ package core
 import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"path"
 	"reflect"
 	"runtime/debug"
 	"sync/atomic"
@@ -39,9 +40,11 @@ type Service struct {
 	mailbox              inf.IMailbox        // 邮箱
 	eventProcessor       inf.IEventProcessor // 事件管理器
 	globalEventProcessor inf.IEventProcessor // 全局事件管理器
+
+	// TODO 准备做这个
 	//profiler       *profiler.Profiler  // 性能分析
 
-	// TODO 可能需要给service单独一个日志器,不然所有日志都放system里面可能不太好区分业务日志
+	logger log.ILogger
 }
 
 func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
@@ -62,6 +65,10 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 				DynamicWorkerScaling: false,
 				VirtualWorkerRate:    def.DefaultVirtualWorkerRate,
 			},
+			LogConf: &config.ServiceLogConf{
+				Enable: false,
+				Config: nil,
+			},
 		}
 		return serviceInitConf
 	}
@@ -71,6 +78,12 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 	}
 	if serviceInitConf.RpcType == "" {
 		serviceInitConf.RpcType = def.RpcTypeRpcx
+	}
+	if serviceInitConf.LogConf == nil {
+		serviceInitConf.LogConf = &config.ServiceLogConf{
+			Enable: false,
+			Config: nil,
+		}
 	}
 
 	if serviceInitConf.TimerConf == nil {
@@ -121,10 +134,23 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	}
 	// 整理配置参数
 	serviceInitConf = s.fixConf(serviceInitConf)
-	//log.SysLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
+	//s.logger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
 	// 初始化服务数据
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
+
+	// 初始化日志
+	if serviceInitConf.LogConf.Enable {
+		logger, err := log.NewDefaultLogger(path.Join(serviceInitConf.LogConf.Config.Path, serviceInitConf.LogConf.Config.Name), serviceInitConf.LogConf.Config, config.IsDebug())
+		if err != nil {
+			log.SysLogger.Panicf("service[%s] init logger error: %s", s.GetName(), err)
+		} else {
+			s.logger = logger
+		}
+	} else {
+		// 使用系统日志
+		s.logger = log.SysLogger
+	}
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
@@ -151,7 +177,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.IConcurrent = concurrent.NewTaskScheduler()
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
-		log.SysLogger.Panicf("service[%s] create pid error", s.GetName())
+		s.logger.Panicf("service[%s] create pid error", s.GetName())
 		return
 	}
 
@@ -160,7 +186,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.IRpcHandler = rpc.NewHandler(s.self).Init(s.methodMgr)
 
 	if err := s.src.OnInit(); err != nil {
-		log.SysLogger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+		s.logger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
 	}
 }
 
@@ -181,7 +207,7 @@ func (s *Service) Start() error {
 
 	// 所有服务都注册到服务列表
 	endpoints.GetEndpointManager().AddService(s)
-	log.SysLogger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
+	s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
 	s.setStatus(def.SvcStatusRunning)
 
@@ -196,14 +222,14 @@ func (s *Service) startListenCallback() {
 				return
 			}
 			if err := s.pushConcurrentCallback(t); err != nil {
-				log.SysLogger.Errorf("service [%s] submit concurrent callback error: %v", s.GetName(), err)
+				s.logger.Errorf("service [%s] submit concurrent callback error: %v", s.GetName(), err)
 			}
 		case t, ok := <-s.ITimerScheduler.GetTimerCbChannel():
 			if !ok {
 				return
 			}
 			if err := s.pushTimerCallback(t); err != nil {
-				log.SysLogger.Errorf("service [%s] submit timer callback error: %v", s.GetName(), err)
+				s.logger.Errorf("service [%s] submit timer callback error: %v", s.GetName(), err)
 			}
 		}
 	}
@@ -214,7 +240,7 @@ func (s *Service) Stop() {
 		// 防止多次关闭
 		return
 	}
-	//log.SysLogger.Debugf("service[%s] begin stop", s.GetName())
+	//s.logger.Debugf("service[%s] begin stop", s.GetName())
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
 
 	// 关闭定时器
@@ -235,7 +261,7 @@ func (s *Service) Stop() {
 func (s *Service) release() {
 	defer func() {
 		if err := recover(); err != nil {
-			log.SysLogger.Errorf("service [%s] release error: %v", s.GetName(), err)
+			s.logger.Errorf("service [%s] release error: %v", s.GetName(), err)
 		}
 	}()
 
@@ -322,7 +348,7 @@ func (s *Service) getUniqueKey() string {
 func (s *Service) OpenProfiler() {
 	//s.profiler = profiler.RegProfiler(s.getUniqueKey())
 	//if s.profiler == nil {
-	//	log.SysLogger.Fatalf("profiler %s reg fail", s.GetName())
+	//	s.logger.Fatalf("profiler %s reg fail", s.GetName())
 	//}
 }
 
@@ -343,7 +369,7 @@ func (s *Service) GetServiceCfg() interface{} {
 func (s *Service) safeExec(f func()) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.SysLogger.Errorf("service [%s] exec error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
+			s.logger.Errorf("service [%s] exec error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
 		}
 	}()
 	f()
@@ -365,7 +391,7 @@ func (s *Service) isRunning() bool {
 // InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
 func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 	tp := ev.GetType()
-	log.SysLogger.Debugf("service[%s] receive system event[%d]", s.GetName(), tp)
+	s.logger.Debugf("service[%s] receive system event[%d]", s.GetName(), tp)
 	switch tp {
 	case event.ServiceSuspended:
 		// 服务挂起
@@ -398,7 +424,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
-			log.SysLogger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
+			s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
 			if c.IsReply() {
 				// 回复
 				s.HandleResponse(c)
@@ -434,13 +460,16 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 			ev.Release()
 		})
 	}
-
 }
 
 func (s *Service) EscalateFailure(reason interface{}, evt inf.IEvent) {
-	log.SysLogger.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
+	s.logger.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {
 	return s.methodMgr.IsPrivate()
+}
+
+func (s *Service) GetLogger() log.ILogger {
+	return s.logger
 }

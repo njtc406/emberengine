@@ -37,6 +37,8 @@ type Module struct {
 	timingwheel.ITimerScheduler
 	inf.IRpcHandler                // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
 	methodMgr       inf.IMethodMgr // 接口信息管理器
+
+	logger log.ILogger
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -62,6 +64,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	pModule.parent = m.self
 	pModule.ITimerScheduler = m.GetRoot().GetBaseModule().(*Module).ITimerScheduler
 	pModule.root = m.root
+	pModule.logger = m.GetService().GetLogger()
 	pModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pModule.eventHandler = event.NewHandler()
 	pModule.eventHandler.Init(m.eventHandler.GetEventProcessor())
@@ -73,7 +76,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	m.children[pModule.GetModuleID()] = module
 	m.GetRoot().GetBaseModule().(*Module).rootContains[pModule.GetModuleID()] = module
 
-	//log.SysLogger.Debugf("add module [%s] completed", pModule.GetModuleName())
+	//m.logger.Debugf("add module [%s] completed", pModule.GetModuleName())
 
 	return pModule.moduleId, nil
 }
@@ -81,11 +84,11 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 func (m *Module) ReleaseModule(moduleId uint32) {
 	pModule := m.GetModule(moduleId).GetBaseModule().(*Module)
 	if pModule == nil {
-		log.SysLogger.Errorf("module %d not found", moduleId)
+		m.logger.Errorf("module %d not found", moduleId)
 		return
 	}
 
-	//log.SysLogger.Debugf("release module %s ,id: %d name:%s", m.GetModuleName(), moduleId, pModule.GetModuleName())
+	//m.logger.Debugf("release module %s ,id: %d name:%s", m.GetModuleName(), moduleId, pModule.GetModuleName())
 
 	//释放子孙
 	for id := range pModule.children {
@@ -94,7 +97,7 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 
 	pModule.self.OnRelease()
 	pModule.GetEventHandler().Destroy()
-	//log.SysLogger.Debugf("Release module %s", pModule.GetModuleName())
+	//m.logger.Debugf("Release module %s", pModule.GetModuleName())
 	delete(m.children, moduleId)
 	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
 	// 从methodmgr中移除模块api(service那层的api是不会移除的)
