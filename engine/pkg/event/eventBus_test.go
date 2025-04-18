@@ -1,11 +1,13 @@
 package event
 
 import (
+	"context"
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +36,7 @@ func (s *testService) PushEvent(e inf.IEvent) error {
 		return fmt.Errorf("event type is not actor.Event")
 	}
 	globalEvent := ev.Data.(*actor.Event)
-	fmt.Println("service ", s.name, " eventBus receive ", ev.GetType(), " event type:", globalEvent.GetEventType())
+	fmt.Println("service ", s.name, " eventBus receive ", ev.GetType(), " event type:", globalEvent.GetType())
 	return nil
 }
 
@@ -57,6 +59,8 @@ func TestEventBus(t *testing.T) {
 		"DispatchKey": "111",
 		"Priority":    "0",
 	}
+	ctx := context.Background()
+	ctx = emberctx.AddHeaders(ctx, header)
 
 	service1 := &testService{}
 	service2 := &testService{}
@@ -85,10 +89,10 @@ func TestEventBus(t *testing.T) {
 		time.Sleep(time.Second * 1)
 
 		fmt.Println("publish goroutine start")
-		if err := eb.PublishGlobal(1, nil, header); err != nil {
+		if err := eb.PublishGlobal(ctx, 1, nil); err != nil {
 			t.Error(err)
 		}
-		if err := eb.PublishServer(2, 1, nil, header); err != nil {
+		if err := eb.PublishServer(ctx, 2, 1, nil); err != nil {
 			t.Error(err)
 		}
 		fmt.Println("publish done")

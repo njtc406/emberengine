@@ -9,14 +9,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // IService 服务接口
 // 每个服务就是一个单独的协程
 type IService interface {
-	concurrent.IConcurrent
 	ILifecycle
 	IIdentifiable
 	IServiceHandler

@@ -8,12 +8,10 @@ package mailbox
 import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
-	"hash/fnv"
-	"math/rand"
 	"reflect"
 	"runtime/debug"
-	"sort"
 	"sync"
 	"time"
 
@@ -23,52 +21,17 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
-var globRand *rand.Rand
-
-const globalSalt = "SOME_UNIQUE_SALT_VALUE"
-
-func init() {
-	globRand = rand.New(rand.NewSource(time.Now().UnixNano()))
-}
-
-func hashEvent(key string) int {
-	// key为空时,给固定的1
-	if key == "" {
-		return 1
-	}
-	// 使用 FNV-1a 哈希算法
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return int(h.Sum32())
-}
-
 type queue[T any] interface {
 	Push(T) bool
 	Pop() (T, bool)
 	Empty() bool
 }
 
-// HashRing 表示一个带虚拟节点的一致性哈希环。
-type HashRing struct {
-	nodes    []int        // 排序后的虚拟节点哈希值
-	ring     map[int]int  // 虚拟节点哈希值 -> 实际 workerID 的映射
-	replicas int          // 每个节点的虚拟节点数量
-	mu       sync.RWMutex // 保护 nodes 和 ring
-}
-
-func (h *HashRing) Clear() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.nodes = nil
-	h.ring = nil
-	h.replicas = 0
-}
-
 type WorkerPool struct {
 	conf        config.WorkerConf
 	mu          sync.RWMutex
 	workers     map[int]*Worker
-	ring        *HashRing                // 一致性哈希环，用于分派事件
+	ring        *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
 	invoker     inf.IMessageInvoker      // 消息处理器
 	middlewares []inf.IMailboxMiddleware // 中间件
 	profiler    *profiler.Profiler
@@ -79,7 +42,7 @@ func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlew
 		conf:        *conf,
 		workers:     make(map[int]*Worker, conf.WorkerNum),
 		invoker:     invoker,
-		ring:        NewHashRing(conf.VirtualWorkerRate),
+		ring:        hashring.NewHashRing[int](conf.VirtualWorkerRate),
 		middlewares: middlewares,
 	}
 }
@@ -316,61 +279,4 @@ func (w *Worker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 	for _, ms := range w.pool.middlewares {
 		ms.MessageReceived(e)
 	}
-}
-
-func NewHashRing(replicas int) *HashRing {
-	return &HashRing{
-		nodes:    []int{},
-		ring:     make(map[int]int),
-		replicas: replicas,
-	}
-}
-
-// Add 将一个 worker（通过 workerID 标识）添加到哈希环中，并生成对应的虚拟节点。
-func (h *HashRing) Add(workerID int) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for i := 0; i < h.replicas; i++ {
-		// 生成虚拟节点 key，例如 "workerID-副本编号"
-		virtualNodeKey := fmt.Sprintf("%s-%d-%d", globalSalt, workerID, i)
-		hash := hashEvent(virtualNodeKey)
-		h.nodes = append(h.nodes, hash)
-		h.ring[hash] = workerID
-	}
-	sort.Ints(h.nodes)
-}
-
-// Remove 将一个 worker 从哈希环中移除，其对应的所有虚拟节点都会被删除。
-func (h *HashRing) Remove(workerID int) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var newNodes []int
-	for _, hash := range h.nodes {
-		if h.ring[hash] == workerID {
-			delete(h.ring, hash)
-		} else {
-			newNodes = append(newNodes, hash)
-		}
-	}
-	h.nodes = newNodes
-}
-
-// Get 根据传入的 key 计算哈希值，并在哈希环中查找对应的 workerID。
-func (h *HashRing) Get(key string) (int, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if len(h.nodes) == 0 {
-		return 0, false
-	}
-	hash := hashEvent(key)
-	// 二分查找第一个 >= hash 的虚拟节点
-	idx := sort.Search(len(h.nodes), func(i int) bool {
-		return h.nodes[i] >= hash
-	})
-	if idx == len(h.nodes) {
-		idx = 0
-	}
-	workerID, ok := h.ring[h.nodes[idx]]
-
-	return workerID, ok
 }

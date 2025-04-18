@@ -16,7 +16,6 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -84,22 +83,12 @@ func Start(v string, confPath string) {
 	// 启动服务
 	services.Start()
 
-	running := true
-	pProfilerTicker := new(time.Ticker)
-	defer pProfilerTicker.Stop()
-	if config.Conf.NodeConf.ProfilerInterval > 0 {
-		pProfilerTicker = time.NewTicker(config.Conf.NodeConf.ProfilerInterval)
+	// 监听退出信号
+	select {
+	case sig := <-exitCh:
+		log.SysLogger.Infof("-------------->>received the signal: %v", sig)
 	}
 
-	for running {
-		select {
-		case sig := <-exitCh:
-			log.SysLogger.Infof("-------------->>received the signal: %v", sig)
-			running = false
-		case <-pProfilerTicker.C:
-			profiler.Report()
-		}
-	}
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
 	timingwheel.Stop()
 	services.StopAll()

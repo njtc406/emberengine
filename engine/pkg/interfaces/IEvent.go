@@ -6,7 +6,7 @@
 package interfaces
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"context"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -46,9 +46,9 @@ type IEventProcessor interface {
 	UnRegServerEventReceiverFun(eventType int32, receiver IEventHandler)
 
 	// 发布全局事件
-	PublishGlobal(eventType int32, data proto.Message, header dto.Header) error
+	PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error
 	// 发布服务器事件
-	PublishServer(eventType int32, data proto.Message, header dto.Header) error
+	PublishServer(ctx context.Context, eventType int32, data proto.Message) error
 
 	CastEvent(event IEvent) //广播事件
 	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)

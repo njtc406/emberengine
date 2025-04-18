@@ -33,6 +33,18 @@ func AddHeader(ctx context.Context, key, value string) context.Context {
 	return WithHeader(ctx, newHeaders)
 }
 
+func AddHeaders(ctx context.Context, headers map[string]string) context.Context {
+	oldHeaders := GetHeader(ctx)
+	newHeaders := make(map[string]string)
+	for k, v := range oldHeaders {
+		newHeaders[k] = v
+	}
+	for k, v := range headers {
+		newHeaders[k] = v
+	}
+	return WithHeader(ctx, newHeaders)
+}
+
 func GetHeaderValue(ctx context.Context, key string) string {
 	headers := GetHeader(ctx)
 	if headers == nil {

@@ -6,7 +6,7 @@
 package event
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"context"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"google.golang.org/protobuf/proto"
 	"sync"
@@ -84,13 +84,13 @@ func (p *Processor) UnRegServerEventReceiverFun(eventType int32, receiver inf.IE
 }
 
 // 发布全局事件
-func (p *Processor) PublishGlobal(eventType int32, data proto.Message, header dto.Header) error {
-	return GetEventBus().PublishGlobal(eventType, data, header)
+func (p *Processor) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
+	return GetEventBus().PublishGlobal(ctx, eventType, data)
 }
 
 // 发布服务器事件
-func (p *Processor) PublishServer(eventType int32, data proto.Message, header dto.Header) error {
-	return GetEventBus().PublishServer(eventType, p.GetServerId(), data, header)
+func (p *Processor) PublishServer(ctx context.Context, eventType int32, data proto.Message) error {
+	return GetEventBus().PublishServer(ctx, eventType, p.GetServerId(), data)
 }
 
 // castEvent 广播事件

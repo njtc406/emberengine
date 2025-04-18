@@ -6,6 +6,7 @@
 package event
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"github.com/google/uuid"
@@ -13,8 +14,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"google.golang.org/protobuf/proto"
@@ -141,28 +142,24 @@ func (eb *Bus) genKey(format string, args ...interface{}) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func (eb *Bus) marshalEvent(eventType, serverId int32, data proto.Message, header dto.Header) (*actor.Event, error) {
+func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, data proto.Message) (*actor.Event, error) {
 	// 组装数据
 	rawData, err := proto.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
 
-	var traceId string
-	if v, ok := header["TraceId"]; ok && v != "" {
-		traceId = v
-	} else {
-		traceId = uuid.NewString()
+	if emberctx.GetHeaderValue(ctx, def.DefaultTraceIdKey) == "" {
+		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, uuid.NewString())
 	}
 
 	e := &actor.Event{
 		EventType: eventType,
 		Data: &actor.EventData{
-			Header:  header,
+			Header:  emberctx.GetHeader(ctx),
 			RawData: rawData,
 		},
 		ServerId: serverId,
-		TraceId:  traceId,
 	}
 
 	return e, nil
@@ -181,8 +178,8 @@ func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 }
 
 // PublishGlobal 发布全局事件
-func (eb *Bus) PublishGlobal(eventType int32, data proto.Message, header dto.Header) error {
-	e, err := eb.marshalEvent(eventType, 0, data, header)
+func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
+	e, err := eb.marshalEvent(ctx, eventType, 0, data)
 	if err != nil {
 		return err
 	}
@@ -223,8 +220,8 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 }
 
 // PublishGlobalLocal 发布本地全局事件
-func (eb *Bus) PublishGlobalLocal(eventType int32, data proto.Message, header dto.Header) error {
-	e, err := eb.marshalEvent(eventType, 0, data, header)
+func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data proto.Message) error {
+	e, err := eb.marshalEvent(ctx, eventType, 0, data)
 	if err != nil {
 		return err
 	}
@@ -233,8 +230,8 @@ func (eb *Bus) PublishGlobalLocal(eventType int32, data proto.Message, header dt
 	return nil
 }
 
-func (eb *Bus) PublishServer(eventType, serverId int32, data proto.Message, header dto.Header) error {
-	e, err := eb.marshalEvent(eventType, serverId, data, header)
+func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, data proto.Message) error {
+	e, err := eb.marshalEvent(ctx, eventType, serverId, data)
 	if err != nil {
 		return err
 	}
@@ -272,8 +269,8 @@ func (eb *Bus) publishServer(e *actor.Event) {
 	}
 }
 
-func (eb *Bus) PublishServerLocal(eventType, serverId int32, data proto.Message, header dto.Header) error {
-	e, err := eb.marshalEvent(eventType, serverId, data, header)
+func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, serverId int32, data proto.Message) error {
+	e, err := eb.marshalEvent(ctx, eventType, serverId, data)
 	if err != nil {
 		return err
 	}
