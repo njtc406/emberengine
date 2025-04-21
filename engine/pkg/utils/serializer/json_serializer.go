@@ -1,26 +1,18 @@
 package serializer
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
-	"reflect"
-
-	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
+
+	"reflect"
 )
 
 type jsonSerializer struct {
-	jsonpb.Marshaler
-	jsonpb.Unmarshaler
 }
 
 func newJsonSerializer() Serializer {
-	return &jsonSerializer{
-		Marshaler: jsonpb.Marshaler{},
-		Unmarshaler: jsonpb.Unmarshaler{
-			AllowUnknownFields: true,
-		},
-	}
+	return &jsonSerializer{}
 }
 
 func (j *jsonSerializer) Serialize(msg interface{}) ([]byte, error) {
@@ -28,7 +20,7 @@ func (j *jsonSerializer) Serialize(msg interface{}) ([]byte, error) {
 		return []byte(message.Json), nil
 	} else if message, ok := msg.(proto.Message); ok {
 
-		str, err := j.Marshaler.MarshalToString(message)
+		str, err := json.Marshal(message)
 		if err != nil {
 			return nil, err
 		}
@@ -52,9 +44,7 @@ func (j *jsonSerializer) Deserialize(typeName string, b []byte) (interface{}, er
 	intPtr := reflect.New(t)
 	instance, ok := intPtr.Interface().(proto.Message)
 	if ok {
-		r := bytes.NewReader(b)
-		j.Unmarshaler.Unmarshal(r, instance)
-
+		json.Unmarshal(b, instance)
 		return instance, nil
 	}
 

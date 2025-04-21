@@ -34,6 +34,8 @@ var (
 	ETCDNotInit             = errors.New("etcd not init")                             // etcd 未初始化
 	HandleMessagePanic      = errors.New("handle message panic")                      // 处理消息时发生 panic
 	CallbacksIsEmpty        = errors.New("callbacks is empty")                        // 回调函数为空
+	CantFoundRedisClient    = errors.New("cant found redis client")                   // 未找到 redis 客户端
+	MysqlNotInit            = errors.New("mysql not init")                            // mysql 未初始化
 )
 
 //type RpcErr string

@@ -11,6 +11,10 @@ type Event struct {
 	Key      string
 	Priority int32
 	Data     interface{}
+
+	IntExt    [2]int64
+	StringExt [2]string
+	AnyExt    [2]any
 }
 
 var emptyEvent Event
@@ -31,14 +35,14 @@ func (e *Event) GetPriority() int32 {
 	return e.Priority
 }
 
+func (e *Event) Release() {
+	eventPool.Put(e)
+}
+
 var eventPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
 	return &Event{}
 })
 
 func NewEvent() *Event {
 	return eventPool.Get().(*Event)
-}
-
-func ReleaseEvent(e *Event) {
-	eventPool.Put(e)
 }

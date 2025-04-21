@@ -46,6 +46,8 @@ func Init() {
 			}
 			svc.Init(svc, initConf, cfg)
 			runServices = append(runServices, svc)
+		} else {
+
 		}
 	}
 }

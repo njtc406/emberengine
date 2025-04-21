@@ -6,6 +6,8 @@
 package node
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/event"
+	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,7 +16,6 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -59,16 +60,17 @@ func Start(v string, confPath string) {
 	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
 	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
 
+	// 初始化rpc请求去重缓存器
+	dedup.GetRpcReqDuplicator().Init(config.Conf.NodeConf.RpcDuplicatorTTL)
 	// 初始化等待队列,并启动监听
 	monitor.GetRpcMonitor().Init().Start()
-
-	// TODO 考虑把一些公共的组件都使用service去做, 这样就可以不用去考虑并发的一些问题
-	// 比如cluster里面的一些组件
 
 	// 初始化集群设置
 	cluster.GetCluster().Init()
 	// 启动集群管理器
 	cluster.GetCluster().Start()
+	// 启动全局事件
+	event.GetEventBus().Init(config.Conf.NodeConf.EventBusConf)
 
 	// 执行钩子
 	for _, f := range nodeInitHooks {
@@ -81,22 +83,12 @@ func Start(v string, confPath string) {
 	// 启动服务
 	services.Start()
 
-	running := true
-	pProfilerTicker := new(time.Ticker)
-	defer pProfilerTicker.Stop()
-	if config.Conf.NodeConf.ProfilerInterval > 0 {
-		pProfilerTicker = time.NewTicker(config.Conf.NodeConf.ProfilerInterval)
+	// 监听退出信号
+	select {
+	case sig := <-exitCh:
+		log.SysLogger.Infof("-------------->>received the signal: %v", sig)
 	}
 
-	for running {
-		select {
-		case sig := <-exitCh:
-			log.SysLogger.Infof("-------------->>received the signal: %v", sig)
-			running = false
-		case <-pProfilerTicker.C:
-			profiler.Report()
-		}
-	}
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
 	timingwheel.Stop()
 	services.StopAll()

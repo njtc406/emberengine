@@ -9,18 +9,18 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
+	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // IService 服务接口
 // 每个服务就是一个单独的协程
 type IService interface {
-	concurrent.IConcurrent
 	ILifecycle
 	IIdentifiable
 	IServiceHandler
 	IEventChannel
 	IProfiler
+	ILogger
 }
 
 // ILifecycle 服务生命周期
@@ -40,15 +40,32 @@ type IServiceHandler interface {
 }
 
 type IIdentifiable interface {
+	IServer
+	IActor
 	OnSetup(svc IService)
-	SetName(string)
-	GetName() string
-	GetPid() *actor.PID
-	GetServerId() int32
 	IsClosed() bool // 服务是否已经关闭
 }
 
 type IProfiler interface {
 	OpenProfiler()
 	GetProfiler() *profiler.Profiler
+}
+
+type INamed interface {
+	SetName(string)
+	GetName() string
+}
+
+type IServer interface {
+	INamed
+	GetServerId() int32
+}
+
+type IActor interface {
+	SetPid(pid *actor.PID)
+	GetPid() *actor.PID
+}
+
+type ILogger interface {
+	GetLogger() log.ILogger
 }

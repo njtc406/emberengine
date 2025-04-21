@@ -8,8 +8,8 @@ package gr
 import (
 	"context"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote/handler"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 )
 
 type GrpcListener struct {

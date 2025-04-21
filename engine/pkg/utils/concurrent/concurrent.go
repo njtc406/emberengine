@@ -7,6 +7,7 @@ package concurrent
 
 import (
 	"fmt"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/panjf2000/ants/v2"
@@ -14,12 +15,13 @@ import (
 
 type IConcurrent interface {
 	OpenConcurrent(poolSize, callbackChannelSize int)
-	AsyncDo(f func() error, cb func(err error))
+	AsyncDo(name string, f func() error, cb func(err error))
 	GetChannel() chan IConcurrentCallback
 	Close()
 }
 
 type IConcurrentCallback interface {
+	inf.INamed
 	DoCallback()
 }
 
@@ -49,7 +51,7 @@ func (s *TaskScheduler) GetChannel() chan IConcurrentCallback {
 }
 
 // AsyncDo 添加一个任务到调度器
-func (s *TaskScheduler) AsyncDo(fn func() error, cb func(error)) {
+func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
 	if s.pool == nil || (fn == nil && cb == nil) {
 		return
 	}
@@ -60,7 +62,7 @@ func (s *TaskScheduler) AsyncDo(fn func() error, cb func(error)) {
 
 	if fn == nil && cb != nil {
 		// 只有回调函数,相当于下一帧执行一个指定函数
-		s.notifyCallback(cb, nil)
+		s.notifyCallback(name, cb, nil)
 		return
 	}
 
@@ -74,7 +76,7 @@ func (s *TaskScheduler) AsyncDo(fn func() error, cb func(error)) {
 				}
 			}
 			if task.callback != nil {
-				s.notifyCallback(task.callback, task.err)
+				s.notifyCallback(name, task.callback, task.err)
 			}
 		}()
 
@@ -82,18 +84,18 @@ func (s *TaskScheduler) AsyncDo(fn func() error, cb func(error)) {
 	})
 	if err != nil {
 		// 任务提交失败,直接回调
-		s.notifyCallback(cb, err)
+		s.notifyCallback(name, cb, err)
 	}
 
 }
 
-func (s *TaskScheduler) notifyCallback(cb func(error), err error) {
+func (s *TaskScheduler) notifyCallback(name string, cb func(error), err error) {
 	if cb == nil {
 		return
 	}
 	if s.c != nil {
 		select {
-		case s.c <- &CallbackEvent{cb: cb, err: err}:
+		case s.c <- &CallbackEvent{name: name, cb: cb, err: err}:
 		default:
 			// 通道满了时，可根据需要记录日志或采取其他措施
 			log.SysLogger.Errorf("callback channel full or closed")
@@ -122,12 +124,21 @@ type Task struct {
 
 // CallbackEvent 表示一个回调事件
 type CallbackEvent struct {
-	cb  func(error)
-	err error
+	name string
+	cb   func(error)
+	err  error
 }
 
 func (c *CallbackEvent) DoCallback() {
 	if c.cb != nil {
 		c.cb(c.err)
 	}
+}
+
+func (c *CallbackEvent) GetName() string {
+	return c.name
+}
+
+func (c *CallbackEvent) SetName(name string) {
+	c.name = name
 }

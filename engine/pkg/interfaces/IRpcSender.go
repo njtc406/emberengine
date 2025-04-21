@@ -16,8 +16,7 @@ type IRpcDispatcher interface {
 	SendRequestAndRelease(envelope IEnvelope) error
 	SendResponse(envelope IEnvelope) error
 
-	GetPid() *actor.PID
-	SetPid(pid *actor.PID)
+	IActor
 	Close()
 	IsClosed() bool
 }

@@ -1,7 +1,6 @@
 package network
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"net"
 	"sync"
 	"time"
@@ -16,7 +15,7 @@ type TCPClient struct {
 	ReadDeadline    time.Duration
 	WriteDeadline   time.Duration
 	AutoReconnect   bool
-	NewAgent        func(*TCPConn) Agent
+	NewAgent        func(conn *NetConn) Agent
 	cons            ConnSet
 	wg              sync.WaitGroup
 	closeFlag       bool
@@ -40,29 +39,29 @@ func (client *TCPClient) init() {
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.SysLogger.Infof("invalid ConnNum reset: %d", client.ConnNum)
+		//log.Info("invalid ConnNum", log.Int("reset", client.ConnNum))
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.SysLogger.Infof("invalid ConnectInterval reset: %d", client.ConnectInterval)
+		//log.Info("invalid ConnectInterval", log.Duration("reset", client.ConnectInterval))
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 1000
-		log.SysLogger.Infof("invalid PendingWriteNum reset: %d", client.PendingWriteNum)
+		//log.Info("invalid PendingWriteNum", log.Int("reset", client.PendingWriteNum))
 	}
 	if client.ReadDeadline == 0 {
 		client.ReadDeadline = 15 * time.Second
-		log.SysLogger.Infof("invalid ReadDeadline reset: %f", client.ReadDeadline.Seconds())
+		//log.Info("invalid ReadDeadline", log.Int64("reset", int64(client.ReadDeadline.Seconds())))
 	}
 	if client.WriteDeadline == 0 {
 		client.WriteDeadline = 15 * time.Second
-		log.SysLogger.Infof("invalid WriteDeadline reset: %f", client.WriteDeadline.Seconds())
+		//log.Info("invalid WriteDeadline", log.Int64("reset", int64(client.WriteDeadline.Seconds())))
 	}
 	if client.NewAgent == nil {
-		log.SysLogger.Fatal("NewAgent must not be nil")
+		//log.Fatal("NewAgent must not be nil")
 	}
 	if client.cons != nil {
-		log.SysLogger.Fatal("client is running")
+		//log.Fatal("client is running")
 	}
 
 	if client.MinMsgLen == 0 {
@@ -74,15 +73,15 @@ func (client *TCPClient) init() {
 	if client.LenMsgLen == 0 {
 		client.LenMsgLen = Default_LenMsgLen
 	}
-	maxMsgLen := client.MsgParser.getMaxMsgLen(client.LenMsgLen)
+	maxMsgLen := client.MsgParser.getMaxMsgLen()
 	if client.MaxMsgLen > maxMsgLen {
 		client.MaxMsgLen = maxMsgLen
-		log.SysLogger.Infof("invalid MaxMsgLen reset: %d", client.MaxMsgLen)
+		//log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))
 	}
 
 	client.cons = make(ConnSet)
 	client.closeFlag = false
-	client.MsgParser.init()
+	client.MsgParser.Init()
 }
 
 func (client *TCPClient) GetCloseFlag() bool {
@@ -102,7 +101,7 @@ func (client *TCPClient) dial() net.Conn {
 			return conn
 		}
 
-		log.SysLogger.Warnf("connect error: %s, addr: %s", err.Error(), client.Addr)
+		//log.Warning("connect error ", log.String("error", err.Error()), log.String("Addr", client.Addr))
 		time.Sleep(client.ConnectInterval)
 		continue
 	}
@@ -126,7 +125,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newTCPConn(conn, client.PendingWriteNum, &client.MsgParser, client.WriteDeadline)
+	tcpConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser, client.WriteDeadline)
 	agent := client.NewAgent(tcpConn)
 	agent.Run()
 

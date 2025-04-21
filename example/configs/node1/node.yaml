@@ -18,7 +18,6 @@ NodeConf:
   MonitorBucketSize: 20
 
 ClusterConf:
-  OpenRemote: false
   ETCDConf:
     # etcd地址
     EndPoints:
@@ -38,7 +37,9 @@ ClusterConf:
     - Addr: 0.0.0.0:6611
       Protoc: "tcp"
       Type: "grpc"
-  RemoteType: rpcx
+    - Addr: nats://192.168.145.188:4222
+      Protoc: "tcp"
+      Type: "nats"
   DiscoveryType: etcd
   RemoteConfPath: ""
   DiscoveryConf:
@@ -106,4 +107,12 @@ SystemLogger:
   MaxAge: 720h
   # 日志切分周期(默认24h)
   RotationTime: 24h
+  AsyncMode:
+    # 开启异步模式(内部调试时可以关闭)
+    Enable: true
+    Config:
+      # 刷新间隔
+      FlushInterval: 1s
+      # 缓冲区大小(满时会立即写入)
+      BufferSize: 1048576  # 1MB
 

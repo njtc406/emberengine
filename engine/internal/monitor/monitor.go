@@ -6,7 +6,6 @@
 package monitor
 
 import (
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"sync"
 	"sync/atomic"
@@ -86,18 +85,16 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 		rm.locker.Unlock()
 
 		if envelope == nil || !envelope.IsRef() {
-			rm.locker.Unlock()
-			log.SysLogger.Errorf("call seq is not find,seq:%d", tm.GetTimerId())
+			log.SysLogger.WithContext(envelope.GetContext()).Errorf("call seq is not find,seq:%d", tm.GetTimerId())
 			return
 		}
 
-		log.SysLogger.Debugf("RPC call takes more than %d seconds,method is %s", int64(envelope.GetTimeout().Seconds()), envelope.GetMethod())
+		log.SysLogger.WithContext(envelope.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s", int64(envelope.GetTimeout().Seconds()), envelope.GetMethod())
 		// 调用超时,执行超时回调
 		rm.callTimeout(envelope)
-
 	}, envelope)
 	if err != nil {
-		log.SysLogger.Errorf("add monitor failed,error:%s", err)
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("add monitor failed,error:%s", err)
 		return
 	}
 	envelope.SetTimerId(timerId)
@@ -110,7 +107,9 @@ func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
 		return nil
 	}
 
-	rm.sd.Cancel(envelope.GetTimerId())
+	if !rm.sd.Cancel(envelope.GetTimerId()) {
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("cancel monitor failed,seq:%d", seqId)
+	}
 	delete(rm.waitMap, seqId)
 	return envelope
 }
@@ -134,7 +133,7 @@ func (rm *RpcMonitor) Get(seqId uint64) inf.IEnvelope {
 
 func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	if !envelope.IsRef() {
-		log.SysLogger.Debug("envelope is not ref")
+		log.SysLogger.WithContext(envelope.GetContext()).Debug("envelope is not ref")
 		return // 已经被释放,丢弃
 	}
 
@@ -145,8 +144,8 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收
 		// 如果是远程调用,那么在远程client将消息发送完成后自动回收)
 		if err := envelope.GetDispatcher().PostMessage(envelope); err != nil {
-			msgenvelope.ReleaseMsgEnvelope(envelope)
-			log.SysLogger.Errorf("send call timeout response error:%s", err.Error())
+			envelope.Release()
+			log.SysLogger.WithContext(envelope.GetContext()).Errorf("send call timeout response error:%s", err.Error())
 		}
 	} else {
 		envelope.Done()

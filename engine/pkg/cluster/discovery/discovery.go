@@ -17,7 +17,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -112,7 +111,7 @@ func (d *EtcdDiscovery) Start() {
 	}
 	d.IEventProcessor.RegEventReceiverFunc(event.SysEventServiceReg, d.IEventHandler, d.addService)
 	d.IEventProcessor.RegEventReceiverFunc(event.SysEventServiceDis, d.IEventHandler, d.removeService)
-	asynclib.Go(d.watcher)
+	go d.watcher()
 	d.getAll()
 	//tp := time.AfterFunc(time.Second, d.getAll)
 	//_ = time.AfterFunc(time.Second, d.getAll)
@@ -173,6 +172,7 @@ func (d *EtcdDiscovery) getAll() {
 			ent.Type = event.SysEventETCDPut
 			ent.Data = kv
 			if err = d.PushEvent(ent); err != nil {
+				ent.Release()
 				log.SysLogger.Errorf("etcd put service error: %v", err)
 			}
 		}
@@ -220,7 +220,10 @@ func (d *EtcdDiscovery) watch() {
 				default:
 					continue
 				}
-				d.PushEvent(ent)
+				if err := d.PushEvent(ent); err != nil {
+					ent.Release()
+					log.SysLogger.Errorf("etcd put service error: %v", err)
+				}
 			}
 		default:
 			time.Sleep(time.Millisecond * 10)
@@ -231,7 +234,7 @@ func (d *EtcdDiscovery) watch() {
 }
 
 func (d *EtcdDiscovery) startKeepalive(watcher *watcherInfo) {
-	asynclib.Go(func() {
+	go func() {
 		for {
 			select {
 			case <-d.closed:
@@ -247,7 +250,7 @@ func (d *EtcdDiscovery) startKeepalive(watcher *watcherInfo) {
 				watcher.setLeaseID(leaseID)
 			}
 		}
-	})
+	}()
 }
 
 func (d *EtcdDiscovery) keepaliveForever(watcher *watcherInfo) {

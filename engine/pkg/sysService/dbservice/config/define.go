@@ -1,6 +1,7 @@
 package config
 
 import (
+	mongodbmodule "github.com/njtc406/emberengine/engine/pkg/sysModule/mongomodule"
 	"github.com/njtc406/emberengine/engine/pkg/sysModule/mysqlmodule"
 	"github.com/njtc406/viper"
 	"github.com/redis/go-redis/v9"
@@ -8,8 +9,9 @@ import (
 )
 
 type DBService struct {
-	MysqlConf *mysqlmodule.Conf `binding:"required"` // mysql配置
-	RedisConf *redis.Options    `binding:"required"` // redis配置
+	MysqlConf *mysqlmodule.Conf          `binding:""` // mysql配置
+	RedisConf *redis.Options             `binding:""` // redis配置
+	MongoConf *mongodbmodule.MongoConfig `binding:""` // mongodb配置
 }
 
 func DefaultDBService(parser *viper.Viper) {
@@ -18,7 +20,6 @@ func DefaultDBService(parser *viper.Viper) {
 		Passwd:             "",
 		Net:                "tcp",
 		Addr:               "0.0.0.0:3306",
-		DBNamePrefix:       "ember_",
 		TimeZone:           "Local",
 		Timeout:            time.Second * 10,
 		ReadTimeout:        time.Second * 10,

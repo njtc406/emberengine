@@ -18,6 +18,6 @@ import (
 
 type IRemoteServer interface {
 	Init(IRpcSenderFactory)
-	Serve(*config.RPCServer) error
+	Serve(*config.RPCServer, string) error
 	Close()
 }

@@ -6,19 +6,19 @@
 package dbservice
 
 import (
-	"gorm.io/gorm"
-	"runtime/debug"
-	"time"
-
 	systemConfig "github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/services"
+	mongodbmodule "github.com/njtc406/emberengine/engine/pkg/sysModule/mongomodule"
 	"github.com/njtc406/emberengine/engine/pkg/sysModule/mysqlmodule"
 	"github.com/njtc406/emberengine/engine/pkg/sysModule/redismodule"
 	"github.com/njtc406/emberengine/engine/pkg/sysService/dbservice/config"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"gorm.io/gorm"
+	"runtime/debug"
 )
 
 func init() {
@@ -36,14 +36,14 @@ func init() {
 	})
 }
 
-type Callback func(rdb *redis.Client, mdb *gorm.DB, args ...interface{}) (interface{}, error)
+type Callback func(rdb *redis.Client, mdb *gorm.DB, mgdb *mongo.Client, args ...interface{}) (interface{}, error)
 
 type DBService struct {
 	core.Service
 
 	redisModule *redismodule.RedisModule
 	mysqlModule *mysqlmodule.MysqlModule
-	mongoModule int // 预留
+	mongoModule *mongodbmodule.MongoModule
 }
 
 func (db *DBService) getConf() *config.DBService {
@@ -55,10 +55,13 @@ func (db *DBService) OnInit() error {
 	db.redisModule = redismodule.NewRedisModule()
 	db.redisModule.Init(conf.RedisConf)
 	db.mysqlModule = mysqlmodule.NewMysqlModule()
-	db.mysqlModule.InitConn(conf.MysqlConf, db.GetServerId())
+	db.mysqlModule.Init(conf.MysqlConf)
+	db.mongoModule = mongodbmodule.NewMongoModule()
+	db.mongoModule.Init(conf.MongoConf)
 
 	db.AddModule(db.redisModule)
 	db.AddModule(db.mysqlModule)
+	db.AddModule(db.mongoModule)
 	return nil
 }
 
@@ -73,37 +76,6 @@ func (db *DBService) OnRelease() {
 	log.SysLogger.Infof("db服务释放完成...")
 }
 
-func (db *DBService) APISetRedisString(key string, value interface{}, expire time.Duration) error {
-	return db.redisModule.SetString(key, value, expire)
-}
-
-func (db *DBService) APIGetRedisString(key string) (string, error) {
-	return db.redisModule.GetString(key)
-}
-
-func (db *DBService) APISetRedisStringJson(key string, value interface{}, expire time.Duration) error {
-	return db.redisModule.SetStringJson(key, value, expire)
-}
-
-func (db *DBService) APIGetRedisStringJson(key string, value interface{}) error {
-	return db.redisModule.GetStringJson(key, value)
-}
-
-// APIExecuteRedisFun 执行redis函数
-func (db *DBService) APIExecuteRedisFun(f redismodule.Callback, args ...interface{}) (interface{}, error) {
-	return db.redisModule.ExecuteFun(f, args...)
-}
-
-// APIExecuteMysqlFun 执行mysql函数
-func (db *DBService) APIExecuteMysqlFun(f mysqlmodule.Callback, args ...interface{}) (interface{}, error) {
-	return db.mysqlModule.ExecuteFun(f, args...)
-}
-
-// APIExecuteMysqlTransaction 执行mysql事务
-func (db *DBService) APIExecuteMysqlTransaction(funcList ...mysqlmodule.TransactionCallback) error {
-	return db.mysqlModule.ExecuteTransaction(funcList...)
-}
-
 // APIExecuteMixedFun 执行混合函数
 func (db *DBService) APIExecuteMixedFun(f Callback, args ...interface{}) (interface{}, error) {
 	defer func() {
@@ -111,5 +83,5 @@ func (db *DBService) APIExecuteMixedFun(f Callback, args ...interface{}) (interf
 			log.SysLogger.Errorf("mixed execute function panic: %v\ntrace:%s", r, debug.Stack())
 		}
 	}()
-	return f(db.redisModule.GetClient(), db.mysqlModule.GetClient(), args...)
+	return f(db.redisModule.GetClient(), db.mysqlModule.GetClient(), db.mongoModule.GetClient(), args...)
 }

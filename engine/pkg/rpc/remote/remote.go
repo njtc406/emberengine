@@ -6,10 +6,9 @@
 package remote
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote/pool"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
@@ -33,12 +32,12 @@ func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory) 
 	return r
 }
 
-func (r *Remote) Serve() {
-	_ = asynclib.Go(func() {
-		if err := r.svr.Serve(r.conf); err != nil {
+func (r *Remote) Serve(nodeUid string) {
+	go func() {
+		if err := r.svr.Serve(r.conf, nodeUid); err != nil {
 			log.SysLogger.Warnf("rpc serve stop: %v", err)
 		}
-	})
+	}()
 }
 
 func (r *Remote) Close() {

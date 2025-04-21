@@ -12,6 +12,7 @@ package log
 import (
 	"bytes"
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/logrus"
 	"runtime"
 	"sort"
@@ -73,17 +74,13 @@ type Formatter struct {
 	// CustomCallerFormatter - set custom formatter for caller info
 	CustomCallerFormatter func(*runtime.Frame) string
 
-	// bufPool -  The buffer pool used to format the log
+	// bufPool -  The queue pool used to format the log
 	bufPool *defaultPool
 }
 
-// Format a log entry (2006-01-02 15:04:05.000 [DEBUG] (test.go:5 func test) aaa=1 bbb=2 this is message)
+// Format a log entry (2006-01-02 15:04:05.000 [DEBUG] (test.go:5 func test) aaa=1 bbb=2 this is message) [header]
 func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
-
-	// output buffer
-	b := f.bufPool.Get()
-	defer f.bufPool.Put(b)
-
+	b := entry.Buffer
 	// write time
 	timestampFormat := f.TimestampFormat
 	if timestampFormat == "" {
@@ -126,6 +123,19 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 		b.WriteString(strings.TrimSpace(entry.Message))
 	} else {
 		b.WriteString(entry.Message)
+	}
+
+	if entry.Context != nil {
+		header := emberctx.GetHeader(entry.Context)
+		if header != nil {
+			b.WriteString(" [")
+			var keys []string
+			for k, v := range header {
+				keys = append(keys, fmt.Sprintf("%s=%s", k, v))
+			}
+			b.WriteString(strings.Join(keys, ","))
+			b.WriteString("]")
+		}
 	}
 
 	b.WriteByte('\n')

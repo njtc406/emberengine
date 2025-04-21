@@ -1,18 +1,20 @@
 package processor
 
+import "context"
+
 type IProcessor interface {
 	// must goroutine safe
-	MsgRoute(clientId string, msg interface{}) error
+	MsgRoute(ctx context.Context, sessionId int64, clientId string, msg interface{}) error
 	//must goroutine safe
-	UnknownMsgRoute(clientId string, msg interface{})
+	UnknownMsgRoute(sessionId int64, clientId string, msg interface{})
 	// connect event
-	ConnectedRoute(clientId string)
-	DisConnectedRoute(clientId string)
+	ConnectedRoute(sessionId int64, clientId string)
+	DisConnectedRoute(sessionId int64, clientId string)
 
 	// must goroutine safe
-	Unmarshal(clientId string, data []byte) (interface{}, error)
+	Unmarshal(data []byte) (interface{}, error)
 	// must goroutine safe
-	Marshal(clientId string, msg interface{}) ([]byte, error)
+	Marshal(id int32, msg interface{}) ([]byte, error)
 }
 
 type IRawProcessor interface {
@@ -20,7 +22,7 @@ type IRawProcessor interface {
 
 	SetByteOrder(littleEndian bool)
 	SetRawMsgHandler(handle RawMessageHandler)
-	MakeRawMsg(msgType uint16, msg []byte, pbRawPackInfo *PBRawPackInfo)
+	MakeRawMsg(msgId int32, msg []byte, pbRawPackInfo *PBRawPackInfo)
 	SetUnknownMsgHandler(unknownMessageHandler UnknownRawMessageHandler)
 	SetConnectedHandler(connectHandler RawConnectHandler)
 	SetDisConnectedHandler(disconnectHandler RawConnectHandler)

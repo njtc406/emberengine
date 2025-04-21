@@ -10,11 +10,12 @@ import (
 )
 
 // DefaultMaxOvertime 最大超时时间，一般可以认为是死锁或者死循环，或者极差的性能问题
-var DefaultMaxOvertime time.Duration = 5 * time.Second
+var DefaultMaxOvertime time.Duration = 1 * time.Second
 
 // DefaultOvertime 超过该时间将会提交监控报告
 var DefaultOvertime time.Duration = 10 * time.Millisecond
 var DefaultMaxRecordNum int = 100 //最大记录条数
+var mapLock sync.RWMutex
 var mapProfiler map[string]*Profiler
 
 type ReportFunType func(name string, callNum int, costTime time.Duration, record *list.List)
@@ -39,11 +40,6 @@ type Record struct {
 	RecordName string
 }
 
-type Analyzer struct {
-	elem     *list.Element
-	profiler *Profiler
-}
-
 type Profiler struct {
 	stack       *list.List //Element
 	stackLocker sync.RWMutex
@@ -56,6 +52,8 @@ type Profiler struct {
 	maxOverTime  time.Duration
 	overTime     time.Duration
 	maxRecordNum int
+
+	analyzerPool sync.Pool
 }
 
 func init() {
@@ -63,17 +61,28 @@ func init() {
 }
 
 func RegProfiler(profilerName string) *Profiler {
+	mapLock.Lock()
+	defer mapLock.Unlock()
 	if _, ok := mapProfiler[profilerName]; ok == true {
 		return nil
 	}
 
-	pProfiler := &Profiler{stack: list.New(), record: list.New(), maxOverTime: DefaultMaxOvertime, overTime: DefaultOvertime}
+	pProfiler := &Profiler{
+		stack:       list.New(),
+		record:      list.New(),
+		maxOverTime: DefaultMaxOvertime,
+		overTime:    DefaultOvertime,
+		analyzerPool: sync.Pool{New: func() interface{} {
+			return &Analyzer{}
+		}},
+	}
 	mapProfiler[profilerName] = pProfiler
 	return pProfiler
 }
 
 func UnRegProfiler(profilerName string) {
-	// TODO 这里需要再考虑下,可能有并发风险
+	mapLock.Lock()
+	defer mapLock.Unlock()
 	if _, ok := mapProfiler[profilerName]; !ok {
 		return
 	}
@@ -96,9 +105,13 @@ func (slf *Profiler) Push(tag string) *Analyzer {
 	slf.stackLocker.Lock()
 	defer slf.stackLocker.Unlock()
 
-	pElem := slf.stack.PushBack(&Element{tagName: tag, pushTime: time.Now()}) // 整个项目只有这个文件直接使用time.Now
+	pElem := slf.stack.PushBack(&Element{tagName: tag, pushTime: time.Now()}) // 使用真实时间
 
-	return &Analyzer{elem: pElem, profiler: slf}
+	analyzer := slf.analyzerPool.Get().(*Analyzer)
+	analyzer.elem = pElem
+	analyzer.profiler = slf
+
+	return analyzer
 }
 
 func (slf *Profiler) check(pElem *Element) (*Record, time.Duration) {
@@ -124,8 +137,33 @@ func (slf *Profiler) check(pElem *Element) (*Record, time.Duration) {
 	return &record, subTm
 }
 
+func (slf *Profiler) pushRecordLog(record *Record) {
+	if slf.record.Len() >= DefaultMaxRecordNum {
+		front := slf.stack.Front()
+		if front != nil {
+			slf.stack.Remove(front)
+		}
+	}
+
+	slf.record.PushBack(record)
+}
+
+type Analyzer struct {
+	elem     *list.Element
+	profiler *Profiler
+}
+
+func (slf *Analyzer) Reset() {
+	slf.elem = nil
+	slf.profiler = nil
+}
+
 func (slf *Analyzer) Pop() {
 	slf.profiler.stackLocker.Lock()
+	defer func() {
+		slf.Reset()
+		slf.profiler.analyzerPool.Put(slf)
+	}()
 	defer slf.profiler.stackLocker.Unlock()
 
 	pElement := slf.elem.Value.(*Element)
@@ -136,17 +174,6 @@ func (slf *Analyzer) Pop() {
 		slf.profiler.pushRecordLog(pElem)
 	}
 	slf.profiler.stack.Remove(slf.elem)
-}
-
-func (slf *Profiler) pushRecordLog(record *Record) {
-	if slf.record.Len() >= DefaultMaxRecordNum {
-		front := slf.stack.Front()
-		if front != nil {
-			slf.stack.Remove(front)
-		}
-	}
-
-	slf.record.PushBack(record)
 }
 
 func SetReportFunction(reportFun ReportFunType) {
@@ -180,6 +207,7 @@ func DefaultReportFunction(name string, callNum int, costTime time.Duration, rec
 		elem = elem.Next()
 	}
 
+	// TODO 后面在看这个日志写在哪里
 	log.SysLogger.Infof("report: %s", strReport)
 }
 

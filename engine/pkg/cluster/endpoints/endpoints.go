@@ -8,12 +8,12 @@ package endpoints
 import (
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/client"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/remote"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -58,7 +58,7 @@ func (em *EndpointManager) Start() {
 	em.repository.Start()
 	// 启动rpc监听服务器
 	for _, rt := range em.remotes {
-		rt.Serve()
+		rt.Serve(em.nodeUid)
 	}
 
 	// 新增、修改服务事件
@@ -136,6 +136,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	ev.Type = event.SysEventServiceReg
 	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
+	ev.Release()
 
 	return
 }
@@ -155,6 +156,7 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 	ev.Type = event.SysEventServiceDis
 	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
+	ev.Release()
 }
 
 func (em *EndpointManager) ToPrivateService(svc inf.IService) {
@@ -162,6 +164,7 @@ func (em *EndpointManager) ToPrivateService(svc inf.IService) {
 	ev.Type = event.SysEventServiceDis
 	ev.Data = svc.GetPid()
 	em.IEventProcessor.EventHandler(ev)
+	ev.Release()
 }
 
 // UpdateService 更新服务信息(服务信息发生变化后调用,比如version发生变化等待)
@@ -179,6 +182,11 @@ func (em *EndpointManager) UpdateService(svc inf.IService) {
 	ev.Type = event.SysEventServiceUpdate
 	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
+	ev.Release()
+}
+
+func (em *EndpointManager) GetRepository() *repository.Repository {
+	return em.repository
 }
 
 func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {

@@ -8,7 +8,6 @@ package mysqlmodule
 import (
 	"fmt"
 	syslog "log"
-	"os"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -25,7 +24,6 @@ type Conf struct {
 	Passwd             string        `binding:"required"` // 数据库密码
 	Net                string        `binding:"required"` // 连接方式
 	Addr               string        `binding:"required"` // 数据库地址
-	DBNamePrefix       string        `binding:"required"` // 使用的数据库名的前缀,真正的名字是 DBNamePrefix + "_" + nodeID
 	TimeZone           string        `binding:"required"` // 时区
 	Timeout            time.Duration `binding:""`         // 连接超时时间
 	ReadTimeout        time.Duration `binding:""`         // 读取超时时间
@@ -36,18 +34,13 @@ type Conf struct {
 	SetMaxOpenConns    int           `binding:""`         // 最大打开连接数
 }
 
-var tables []interface{}
-
-func RegisterTable(dst ...interface{}) {
-	tables = append(tables, dst...)
-}
-
 type Callback func(tx *gorm.DB, args ...interface{}) (interface{}, error)
 type TransactionCallback func(tx *gorm.DB) error
 
 type MysqlModule struct {
 	core.Module
 
+	conf   *Conf
 	client *gorm.DB
 }
 
@@ -65,36 +58,10 @@ func (m *MysqlModule) getDBName(prefix string, id int32) string {
 
 func (m *MysqlModule) OnInit() error {
 	// 这个函数是在InitConn之后调用的
-
-	// 初始化表
-	if err := m.client.AutoMigrate(tables...); err != nil {
-		return err
-	}
 	return nil
 }
 
-func (m *MysqlModule) checkDataBase(conf *Conf, id int32) error {
-	db, err := m.initDB(conf, id, true)
-	if err != nil {
-		log.SysLogger.Panic(err)
-	}
-	// 检查数据库是否存在
-	var count int
-	dbName := m.getDBName(conf.DBNamePrefix, id)
-	db.Raw("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", dbName).Scan(&count)
-	if count == 0 {
-		// 数据库不存在，创建它
-		sql := fmt.Sprintf(`create database if not exists %s default charset utf8mb4 collate utf8mb4_unicode_ci`,
-			dbName)
-		if err = db.Exec(sql).Error; err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *MysqlModule) initDB(conf *Conf, id int32, withoutDBName bool) (*gorm.DB, error) {
+func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
 	slowLogger := logger.New(
 		syslog.New(log.SysLogger.GetOutput(), "\n", syslog.LstdFlags),
 		logger.Config{
@@ -107,26 +74,26 @@ func (m *MysqlModule) initDB(conf *Conf, id int32, withoutDBName bool) (*gorm.DB
 	)
 
 	var dsn string
-	if withoutDBName {
+	if database == nil {
 		dsn = fmt.Sprintf("%s:%s@tcp(%s)/?charset=utf8&parseTime=True&loc=%s",
-			conf.UserName,
-			conf.Passwd,
-			conf.Addr,
-			conf.TimeZone,
+			m.conf.UserName,
+			m.conf.Passwd,
+			m.conf.Addr,
+			m.conf.TimeZone,
 		)
 	} else {
 		dsn = fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=True&loc=%s",
-			conf.UserName,
-			conf.Passwd,
-			conf.Addr,
-			m.getDBName(conf.DBNamePrefix, id),
-			conf.TimeZone,
+			m.conf.UserName,
+			m.conf.Passwd,
+			m.conf.Addr,
+			*database,
+			m.conf.TimeZone,
 		)
 	}
 
 	log.SysLogger.Infof("mysql connect : %s", dsn)
 
-	db, err := gorm.Open(mysql.New(mysql.Config{
+	return gorm.Open(mysql.New(mysql.Config{
 		DSN:                     dsn,
 		DontSupportRenameColumn: true,
 		//SkipInitializeWithVersion: false, // 根据数据库版本自动配置
@@ -135,24 +102,13 @@ func (m *MysqlModule) initDB(conf *Conf, id int32, withoutDBName bool) (*gorm.DB
 		PrepareStmt: true, // 开启预处理语句
 		//SkipDefaultTransaction: true, // 跳过默认事务
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return db, nil
 }
 
-// InitConn 初始化连接
-func (m *MysqlModule) InitConn(conf *Conf, id int32) {
-	dbName := os.Getenv("DB_NAME")
-	if dbName != "" {
-		conf.DBNamePrefix = dbName
-	}
+// Init 初始化连接
+func (m *MysqlModule) Init(conf *Conf) {
+	m.conf = conf
 
-	if err := m.checkDataBase(conf, id); err != nil {
-		log.SysLogger.Panic(err)
-	}
-	client, err := m.initDB(conf, id, false)
+	client, err := m.initConn(nil)
 	if err != nil {
 		log.SysLogger.Panic(err)
 	}
@@ -177,17 +133,16 @@ func (m *MysqlModule) InitConn(conf *Conf, id int32) {
 	m.client = client
 }
 
-func (m *MysqlModule) ExecuteFun(f Callback, args ...interface{}) (interface{}, error) {
+func (m *MysqlModule) ApiMysqlExecuteFun(f Callback, args ...interface{}) (interface{}, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.SysLogger.Errorf("mysql execute function panic: %v\ntrace:%s", r, debug.Stack())
 		}
 	}()
-
 	return f(m.client, args...)
 }
 
-func (m *MysqlModule) ExecuteTransaction(funs ...TransactionCallback) error {
+func (m *MysqlModule) ApiMysqlExecuteTransaction(funs ...TransactionCallback) error {
 	if err := m.client.Transaction(func(tx *gorm.DB) error {
 		for _, f := range funs {
 			if err := f(tx); err != nil {
@@ -199,4 +154,45 @@ func (m *MysqlModule) ExecuteTransaction(funs ...TransactionCallback) error {
 		return err
 	}
 	return nil
+}
+
+func (m *MysqlModule) initDatabase(db *gorm.DB, database string) error {
+	// 检查数据库是否存在
+	var count int
+	db.Raw("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", database).Scan(&count)
+	if count == 0 {
+		// 数据库不存在，创建它
+		sql := fmt.Sprintf(`create database if not exists %s default charset utf8mb4 collate utf8mb4_unicode_ci`,
+			database)
+		if err := db.Exec(sql).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *MysqlModule) ApiInitTables(database string, tables ...interface{}) error {
+	db, err := m.initConn(&database)
+	if err != nil {
+		log.SysLogger.Panic(err)
+	}
+
+	if err = m.initDatabase(db, database); err != nil {
+		return err
+	}
+
+	// 配置连接池（参数与主连接保持一致）
+	sqlDB, _ := db.DB()
+	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
+	sqlDB.SetConnMaxLifetime(time.Minute * 10)
+
+	// 设置独立连接池大小
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetMaxOpenConns(2)
+
+	// 执行迁移后立即关闭连接
+	defer sqlDB.Close()
+
+	return db.AutoMigrate(tables...)
 }

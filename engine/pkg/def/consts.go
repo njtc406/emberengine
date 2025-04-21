@@ -52,6 +52,7 @@ const (
 	RpcTypeLocal = "local"
 	RpcTypeRpcx  = "rpcx"
 	RpcTypeGrpc  = "grpc"
+	RpcTypeNats  = "nats"
 )
 
 const (
@@ -80,4 +81,31 @@ const (
 const (
 	PriorityUser = 0 // 用户事件
 	PrioritySys  = 1 // 系统事件
+)
+
+const (
+	NatsDefaultMaxReconnects      = -1 // 不限制重连次数
+	NatsDefaultReconnectWait      = 2 * time.Second
+	NatsDefaultPingInterval       = 10 * time.Second
+	NatsDefaultPingMaxOutstanding = 2
+	NatsDefaultReconnectBufSize   = 4096
+	NatsDefaultTimeout            = 10 * time.Second
+)
+
+const (
+	NatsDefaultGlobalPrefix = "event.global.%d"    // global.eventType
+	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.serverId
+)
+
+const NatsDefaultShardCount = 16
+
+const NatsDefaultTopic = "rpc.node.%s"
+
+const DefaultReqDuplicatorTTL = 10 * time.Second
+
+const (
+	DefaultTraceIdKey    = "sys.traceId"
+	DefaultDispatcherKey = "sys.dispatchKey"
+	DefaultTypeKey       = "sys.type"
+	DefaultPriorityKey   = "sys.priority"
 )

@@ -14,7 +14,10 @@ type RpcCancel struct {
 }
 
 func (rc *RpcCancel) CancelRpc() {
-	GetRpcMonitor().Remove(rc.CallSeq)
+	envelope := GetRpcMonitor().Remove(rc.CallSeq)
+	if envelope != nil {
+		envelope.Release() //取消成功,释放资源
+	}
 }
 
 func NewRpcCancel(seq uint64) dto.CancelRpc {

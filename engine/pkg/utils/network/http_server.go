@@ -5,11 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"time"
-
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
-var DefaultMaxHeaderBytes int = 1 << 20
+var DefaultMaxHeaderBytes = 1 << 20
 
 type CAFile struct {
 	CertFile string
@@ -40,7 +38,7 @@ func (slf *HttpServer) Start() {
 
 func (slf *HttpServer) startListen() error {
 	if slf.httpServer != nil {
-		return errors.New("Duplicate start not allowed")
+		return errors.New("duplicate start not allowed")
 	}
 
 	var tlsCaList []tls.Certificate
@@ -48,7 +46,7 @@ func (slf *HttpServer) startListen() error {
 	for _, caFile := range slf.caFileList {
 		cer, err := tls.LoadX509KeyPair(caFile.CertFile, caFile.Keyfile)
 		if err != nil {
-			log.SysLogger.Fatalf("Load CA file is fail, errdef:%s, certFile:%s, keyFile:%s", err.Error(), caFile.CertFile, caFile.Keyfile)
+			//log.Fatal("Load CA file is fail", log.String("error", err.Error()), log.String("certFile", caFile.CertFile), log.String("keyFile", caFile.Keyfile))
 			return err
 		}
 		tlsCaList = append(tlsCaList, cer)
@@ -75,7 +73,7 @@ func (slf *HttpServer) startListen() error {
 	}
 
 	if err != nil {
-		log.SysLogger.Fatalf("Listen failure, errdef:%s", err.Error())
+		//log.Fatal("Listen failure", log.String("error", err.Error()), log.String("addr:", slf.listenAddr))
 		return err
 	}
 

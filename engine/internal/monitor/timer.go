@@ -1,5 +1,5 @@
 // Package monitor
-// Deprecated: use timingwheel
+
 package monitor
 
 import (
@@ -9,16 +9,19 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
+// Deprecated: use timingwheel
 type CallTimer struct {
 	SeqId    uint64
 	FireTime int64
 }
 
+// Deprecated: use timingwheel
 type CallTimerHeap struct {
 	callTimer   []CallTimer
 	mapSeqIndex map[uint64]int
 }
 
+// Deprecated: use timingwheel
 func (h *CallTimerHeap) Init() {
 	h.mapSeqIndex = make(map[uint64]int, 4096)
 	h.callTimer = make([]CallTimer, 0, 4096)

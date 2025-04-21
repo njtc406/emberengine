@@ -12,7 +12,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
@@ -56,9 +55,7 @@ func (c *Cluster) Init() {
 func (c *Cluster) Start() {
 	c.discovery.Start()
 	c.endpoints.Start()
-	asynclib.Go(func() {
-		c.run()
-	})
+	go c.run()
 }
 
 func (c *Cluster) Close() {
@@ -83,9 +80,7 @@ func (c *Cluster) run() {
 			if ev != nil {
 				switch ev.GetType() {
 				case event.SysEventETCDPut, event.SysEventETCDDel:
-					e := ev.(*event.Event)
 					c.eventProcessor.EventHandler(ev)
-					event.ReleaseEvent(e)
 				}
 			}
 		case <-c.closed:
@@ -93,4 +88,16 @@ func (c *Cluster) run() {
 			return
 		}
 	}
+}
+
+func (c *Cluster) SetName(name string) {
+
+}
+
+func (c *Cluster) GetName() string {
+	return ""
+}
+
+func (c *Cluster) GetServerId() int32 {
+	return 0
 }

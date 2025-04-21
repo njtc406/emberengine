@@ -126,6 +126,10 @@ func setDefaultValues() {
 		Color:        false,
 		MaxAge:       time.Hour * 24 * 15,
 		RotationTime: time.Hour * 24,
+		AsyncMode: &log.AsyncMode{
+			Enable: false,
+			Config: nil,
+		},
 	})
 
 	// 默认集群配置
@@ -157,23 +161,27 @@ func parseServiceConf(confPath string) {
 		}
 		parser := viper.New()
 		parser.SetConfigType("yaml")
+		var err error
 		if Conf.ServiceConf.OpenRemote {
 			// 使用远程服务配置
 			fileName := fmt.Sprintf("%s.%s", v.ConfName, v.ConfType)
-			if err := parser.AddRemoteProvider("etcd3", Conf.ClusterConf.ETCDConf.Endpoints[0], path.Join(Conf.ServiceConf.RemoteConfPath, fileName)); err != nil {
+			if err = parser.AddRemoteProvider("etcd3", Conf.ClusterConf.ETCDConf.Endpoints[0], path.Join(Conf.ServiceConf.RemoteConfPath, fileName)); err != nil {
 				panic(err)
 			}
-			if err := parser.ReadRemoteConfig(); err != nil {
-				panic(err)
-			}
+			err = parser.ReadRemoteConfig()
 		} else {
 			parser.SetConfigType(v.ConfType)
 			parser.SetConfigName(v.ConfName)
 			parser.AddConfigPath(confPath)
-			if err := parser.ReadInConfig(); err != nil {
-				panic(err)
-			}
+			err = parser.ReadInConfig()
 		}
+
+		if err != nil {
+			// 没有找到远程或者本地配置
+			fmt.Println("[WARNING] ----->>>没有找到远程或者本地配置:", v.ConfName)
+			continue
+		}
+
 		cfg := v.CfgCreator()
 		if err := parser.Unmarshal(cfg); err != nil {
 			panic(err)

@@ -128,8 +128,6 @@ func (q *Queue[T]) Pop() (T, bool) {
 			// 使用指数退避来减少忙等开销
 			if backoff < maxBackoff {
 				backoff *= 2
-			} else {
-
 			}
 			time.Sleep(time.Microsecond * time.Duration(backoff))
 

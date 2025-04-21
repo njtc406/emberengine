@@ -7,6 +7,9 @@ package msgenvelope
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"golang.org/x/net/context"
 	"strconv"
 	"sync"
 	"time"
@@ -33,20 +36,11 @@ func NewMsgEnvelope() *MsgEnvelope {
 	return msgEnvelopePool.Get().(*MsgEnvelope)
 }
 
-func ReleaseMsgEnvelope(envelope inf.IEnvelope) {
-	if envelope != nil {
-		//count--
-		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
-		if envelope.IsRef() {
-			msgEnvelopePool.Put(envelope.(*MsgEnvelope))
-		}
-	}
-}
-
 type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!
 	locker *sync.RWMutex
+	ctx    context.Context
 
 	// 数据包
 	senderPid   *actor.PID  // 发送者
@@ -54,18 +48,18 @@ type MsgEnvelope struct {
 	method      string      // 调用方法
 	reqID       uint64      // 请求ID(防止重复,目前还未做防重复逻辑)
 	reply       bool        // 是否是回复
-	header      dto.Header  // 消息头
 	request     interface{} // 请求参数
 	response    interface{} // 回复数据
 	needResp    bool        // 是否需要回复
 	err         error       // 错误
 
 	// 缓存信息
-	timeout   time.Duration        // 请求超时时间
-	sender    inf.IRpcDispatcher   // 发送者客户端(用于回调)
-	callbacks []dto.CompletionFunc // 完成回调
-	done      chan struct{}        // 完成信号
-	timerId   uint64               // 定时器ID
+	timeout        time.Duration        // 请求超时时间
+	sender         inf.IRpcDispatcher   // 发送者客户端(用于回调)
+	callbacks      []dto.CompletionFunc // 完成回调
+	callbackParams []interface{}        // 回调透传参数
+	done           chan struct{}        // 完成信号
+	timerId        uint64               // 定时器ID
 }
 
 func (e *MsgEnvelope) Reset() {
@@ -82,7 +76,7 @@ func (e *MsgEnvelope) Reset() {
 	e.method = ""
 	e.reqID = 0
 	e.reply = false
-	e.header = nil
+	e.ctx = nil
 	e.timeout = 0
 	e.request = nil
 	e.response = nil
@@ -99,27 +93,34 @@ func (e *MsgEnvelope) Reset() {
 
 //-------------------------------------set-----------------------------------------
 
-func (e *MsgEnvelope) SetHeaders(header dto.Header) {
-	if header == nil {
+func (e *MsgEnvelope) WithContext(ctx context.Context) inf.IEnvelope {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.ctx = ctx
+	return e
+}
+
+func (e *MsgEnvelope) SetHeaders(headers dto.Header) {
+	if headers == nil {
 		return
 	}
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	if e.header == nil {
-		e.header = make(dto.Header)
+	if e.ctx == nil {
+		e.ctx = context.Background()
 	}
-	for k, v := range header {
-		e.header.Set(k, v)
+	for k, v := range headers {
+		emberctx.AddHeader(e.ctx, k, v)
 	}
 }
 
 func (e *MsgEnvelope) SetHeader(key string, value string) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	if e.header == nil {
-		e.header = make(dto.Header)
+	if e.ctx == nil {
+		e.ctx = context.Background()
 	}
-	e.header.Set(key, value)
+	emberctx.AddHeader(e.ctx, key, value)
 }
 
 func (e *MsgEnvelope) SetSenderPid(sender *actor.PID) {
@@ -209,10 +210,16 @@ func (e *MsgEnvelope) SetTimerId(timerId uint64) {
 	e.timerId = timerId
 }
 
+func (e *MsgEnvelope) SetCallbackParams(params []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.callbackParams = append(e.callbackParams, params...)
+}
+
 //--------------------------------get------------------------------------
 
 func (e *MsgEnvelope) GetType() int32 {
-	tp := e.GetHeader("Type")
+	tp := e.GetHeader(def.DefaultTypeKey)
 	if tp == "" {
 		return event.RpcMsg
 	} else {
@@ -226,17 +233,17 @@ func (e *MsgEnvelope) GetType() int32 {
 }
 
 func (e *MsgEnvelope) GetKey() string {
-	return e.GetHeader("DispatchKey")
+	return e.GetHeader(def.DefaultDispatcherKey)
 }
 
 func (e *MsgEnvelope) GetPriority() int32 {
-	priority := e.GetHeader("Priority")
+	priority := e.GetHeader(def.DefaultPriorityKey)
 	if priority == "" {
-		return 0
+		return def.PriorityUser
 	} else {
 		priorityInt, err := strconv.Atoi(priority)
 		if err != nil {
-			return 0
+			return def.PriorityUser
 		} else {
 			return int32(priorityInt)
 		}
@@ -246,13 +253,19 @@ func (e *MsgEnvelope) GetPriority() int32 {
 func (e *MsgEnvelope) GetHeader(key string) string {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return e.header.Get(key)
+	return emberctx.GetHeaderValue(e.ctx, key)
 }
 
 func (e *MsgEnvelope) GetHeaders() dto.Header {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return e.header
+	return emberctx.GetHeader(e.ctx)
+}
+
+func (e *MsgEnvelope) GetContext() context.Context {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.ctx
 }
 
 func (e *MsgEnvelope) GetSenderPid() *actor.PID {
@@ -324,6 +337,12 @@ func (e *MsgEnvelope) GetTimerId() uint64 {
 	return e.timerId
 }
 
+func (e *MsgEnvelope) GetCallbackParams() []interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.callbackParams
+}
+
 //------------------------------------Check----------------------------------------
 
 func (e *MsgEnvelope) NeedCallback() bool {
@@ -356,7 +375,7 @@ func (e *MsgEnvelope) Done() {
 
 func (e *MsgEnvelope) RunCompletions() {
 	for _, cb := range e.callbacks {
-		cb(e.response, e.err)
+		cb(e.callbackParams, e.response, e.err)
 	}
 }
 
@@ -376,7 +395,7 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 		Request:       nil,
 		Response:      nil,
 		Err:           e.GetErrStr(),
-		MessageHeader: e.header,
+		MessageHeader: emberctx.GetHeader(e.ctx),
 		Reply:         e.reply,
 		ReqId:         e.reqID,
 		NeedResp:      e.needResp,
@@ -406,4 +425,12 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	msg.TypeName = typeName
 
 	return msg
+}
+
+func (e *MsgEnvelope) Release() {
+	if e.IsRef() {
+		//count--
+		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
+		msgEnvelopePool.Put(e)
+	}
 }

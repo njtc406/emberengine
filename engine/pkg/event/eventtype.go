@@ -24,11 +24,20 @@ const (
 	SysEventNodeConn = -50 // 节点连接事件
 	SysEventNatsConn = -51 // nats 连接事件
 
-	ServiceSuspended          = -1001 // 服务挂起消息事件
-	ServiceResumed            = -1002 // 服务恢复消息事件
-	SysEventServiceClose      = -1003 // 服务关闭事件
+	ServiceSuspended     = -1001 // 服务挂起消息事件
+	ServiceResumed       = -1002 // 服务恢复消息事件
+	SysEventServiceClose = -1003 // 服务关闭事件
+	ServiceNew           = -1004 // 启动服务
+	ServiceClose         = -1005 // 关闭服务
+	ServiceHeartbeat     = -1006 // 心跳事件
+
+	SysEventKcp       = -1100 // kcp 连接事件
+	SysEventTcp       = -1101 // tcp 连接事件
+	SysEventWebSocket = -1102
+
 	ServiceConcurrentCallback = -2001 // 并发回调事件
 	ServiceTimerCallback      = -2002 // 定时器回调事件
+	ServiceGlobalEventTrigger = -2003 // 全局事件系统事件回调
 
 	RpcMsg = -3001 // rpc 消息事件
 

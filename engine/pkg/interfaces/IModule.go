@@ -6,7 +6,6 @@
 package interfaces
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
@@ -25,11 +24,12 @@ type IModuleLifecycle interface {
 }
 
 type IModuleIdentity interface {
+	IActor
 	SetModuleID(uint32) bool // 设置模块ID
 	GetModuleID() uint32     // 获取模块ID
 	GetModuleName() string   // 获取模块名称
 	NewModuleID() uint32     // 生成模块ID
-	GetPid() *actor.PID
+
 }
 
 type IModuleHierarchy interface {
