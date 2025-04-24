@@ -6,6 +6,7 @@
 package mailbox
 
 import (
+	"context"
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
@@ -32,11 +33,12 @@ type queue[T any] interface {
 	Len() int
 }
 
-// TODO 后续再来增加手动设置策略的接口
-
 type WorkerPool struct {
 	conf        config.WorkerConf
 	mu          sync.RWMutex
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
 	workers     map[int]*Worker
 	ring        *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
 	invoker     inf.IMessageInvoker      // 消息处理器
@@ -75,12 +77,15 @@ func fixConf(conf *config.WorkerConf) *config.WorkerConf {
 
 func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
 	conf = fixConf(conf)
+	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
 		conf:        *conf,
 		workers:     make(map[int]*Worker, conf.WorkerNum),
 		invoker:     invoker,
 		ring:        hashring.NewHashRing[int](conf.VirtualWorkerRate),
 		middlewares: middlewares,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
@@ -101,11 +106,16 @@ func (p *WorkerPool) Start() {
 	}
 
 	if p.conf.DynamicWorkerScaling {
+		p.wg.Add(1)
 		go p.autoScaleWorkers()
 	}
 }
 
 func (p *WorkerPool) Stop() {
+	// 先关闭自动扩容
+	p.cancel()
+	p.wg.Wait()
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -189,6 +199,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 
 // 自动调整 worker 数量
 func (p *WorkerPool) autoScaleWorkers() {
+	defer p.wg.Done()
 	if p.autoScaler == nil {
 		strategy, err := BuildStrategy(p.conf.Strategy)
 		if err != nil {
@@ -210,25 +221,29 @@ func (p *WorkerPool) autoScaleWorkers() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		p.mu.RLock()
-		if len(p.workers) == 0 {
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-ticker.C:
+			p.mu.RLock()
+			if len(p.workers) == 0 {
+				p.mu.RUnlock()
+				continue
+			}
+
+			workers := make([]*Worker, 0, len(p.workers))
+			for _, w := range p.workers {
+				workers = append(workers, w)
+			}
+			current := len(workers)
 			p.mu.RUnlock()
-			continue
-		}
 
-		workers := make([]*Worker, 0, len(p.workers))
-		for _, w := range p.workers {
-			workers = append(workers, w)
+			if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
+				log.SysLogger.Infof("resizing from %d -> %d: %s", current, newSize, reason)
+				p.resizeWorkers(newSize)
+			}
 		}
-		current := len(workers)
-		p.mu.RUnlock()
-
-		if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
-			log.SysLogger.Infof("resizing from %d -> %d: %s", current, newSize, reason)
-			p.resizeWorkers(newSize)
-		}
-
 	}
 }
 
@@ -330,6 +345,10 @@ func (w *Worker) run() {
 func (w *Worker) stop() {
 	w.closed = true
 	w.wg.Wait()
+	w.userMailbox = nil
+	w.systemMailbox = nil
+	w.pool = nil
+	w.workerId = 0
 }
 
 func (w *Worker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
@@ -354,4 +373,11 @@ func (w *Worker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 	for _, ms := range w.pool.middlewares {
 		ms.MessageReceived(e)
 	}
+}
+
+func (w *Worker) GetMsgLen() int {
+	if w.userMailbox == nil {
+		return 0
+	}
+	return w.userMailbox.Len()
 }

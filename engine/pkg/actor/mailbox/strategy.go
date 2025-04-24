@@ -75,7 +75,7 @@ func newDefaultStrategy(_ []AutoScalerStrategy, params map[string]interface{}) A
 
 func (d *DefaultStrategy) ShouldScaleUp(workers []*Worker) bool {
 	for _, w := range workers {
-		if w.userMailbox.Len() > d.MaxLoadThreshold {
+		if w.GetMsgLen() > d.MaxLoadThreshold {
 			return true
 		}
 	}
@@ -89,7 +89,7 @@ func (d *DefaultStrategy) ShouldScaleDown(workers []*Worker, min int) bool {
 
 	idleCount := 0
 	for _, w := range workers {
-		if w.userMailbox.Len() == 0 && w.systemMailbox.Len() == 0 {
+		if w.GetMsgLen() == 0 {
 			idleCount++
 		}
 	}
