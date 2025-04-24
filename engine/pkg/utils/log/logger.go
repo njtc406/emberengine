@@ -134,6 +134,7 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 	conf = fixConf(conf)
 	var writers []io.Writer
 
+	var writerCloser io.WriteCloser
 	if len(conf.Name) > 0 {
 		if len(filePath) == 0 {
 			filePath = "./" // 默认当前目录
@@ -159,6 +160,7 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 			return nil, err
 		} else {
 			writers = append(writers, w)
+			writerCloser = w
 		}
 	}
 
@@ -173,17 +175,18 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 		level = "error"
 	}
 
-	var writerCloser io.WriteCloser
+	var wCloser io.WriteCloser
 	var writer io.Writer
 	if conf.AsyncMode != nil && conf.AsyncMode.Enable {
 		// 开启了异步模式,使用异步writer代替同步writer
 		w := NewAsyncWriter(
 			io.MultiWriter(writers...),
 			conf.AsyncMode.Config,
+			writerCloser,
 		)
 		writer = w
 		// 记录异步模式的writer,用于close的时候释放
-		writerCloser = w
+		wCloser = w
 	} else {
 		writer = io.MultiWriter(writers...)
 	}
@@ -200,7 +203,7 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 	//logger.SetNoLock()
 
 	if writerCloser != nil {
-		logWriter(logger, writerCloser)
+		logWriter(logger, wCloser)
 	}
 
 	return logger, nil

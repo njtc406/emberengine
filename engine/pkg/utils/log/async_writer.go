@@ -22,12 +22,13 @@ type AsyncWriterConfig struct {
 }
 
 type AsyncWriter struct {
-	writer io.Writer
-	queue  *mpsc.Queue[[]byte]
-	conf   *AsyncWriterConfig
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	writer       io.Writer
+	writerCloser io.WriteCloser
+	queue        *mpsc.Queue[[]byte]
+	conf         *AsyncWriterConfig
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
 }
 
 func fixAsyncWriterConf(conf *AsyncWriterConfig) *AsyncWriterConfig {
@@ -43,15 +44,16 @@ func fixAsyncWriterConf(conf *AsyncWriterConfig) *AsyncWriterConfig {
 	return conf
 }
 
-func NewAsyncWriter(w io.Writer, conf *AsyncWriterConfig) *AsyncWriter {
+func NewAsyncWriter(w io.Writer, conf *AsyncWriterConfig, writerCloser io.WriteCloser) *AsyncWriter {
 	conf = fixAsyncWriterConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	aw := &AsyncWriter{
-		writer: w,
-		queue:  mpsc.New[[]byte](),
-		conf:   conf,
-		ctx:    ctx,
-		cancel: cancel,
+		writer:       w,
+		queue:        mpsc.New[[]byte](),
+		conf:         conf,
+		ctx:          ctx,
+		cancel:       cancel,
+		writerCloser: writerCloser,
 	}
 
 	aw.wg.Add(1)
@@ -119,5 +121,8 @@ func (aw *AsyncWriter) flush(buf *bytes.Buffer) {
 func (aw *AsyncWriter) Close() error {
 	aw.cancel()
 	aw.wg.Wait()
+	if aw.writerCloser != nil {
+		_ = aw.writerCloser.Close()
+	}
 	return nil
 }
