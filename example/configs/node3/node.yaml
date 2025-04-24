@@ -54,6 +54,33 @@ ServiceConf:
       # 服务器ID
       ServerId: 1
       RpcType: "grpc"
+      WorkerConf:
+        # 用户消息队列大小(默认128)
+        UserMailboxSize: 128
+        # 系统消息队列大小(默认16)
+        SystemMailboxSize: 16
+        # 工作线程数量(初始线程数,默认1)
+        WorkerNum: 1
+        # 最大工作线程数量(默认1)
+        MaxWorkerNum: 10
+        # 是否开启动态线程数调整(默认不开启)
+        DynamicWorkerScaling: true
+        # 虚拟线程比例(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
+        VirtualWorkerRate: 10
+        # 线程池增长因子(默认1.5)(当负载大于最大负载时,则启动新的线程)
+        GrowthFactor: 1.5
+        # 线程池收缩因子(默认0.5)(当负载小于最小负载时,则收缩线程)
+        ShrinkFactor: 0.5
+        # 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
+        ResizeCoolDown: 1s
+        # 扩容策略名称(默认default,根据worker负载扩容)
+        Strategy:
+          # 策略名称
+          Name: default
+          Params:
+            # 最大负载(默认10,超过就会启动动态扩容,扩容后超过半数无负载则开启缩容)
+            max_load_threshold: 10
+          Subs: # 子策略
 
 # 日志配置
 SystemLogger:

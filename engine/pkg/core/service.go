@@ -26,6 +26,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
+// TODO 还需要给部分可自定义的组件增加一个设置的入口,不然需要覆写整个init太麻烦
+
 type Service struct {
 	Module
 	inf.IMessageInvoker
@@ -174,6 +176,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.globalEventProcessor.Init(s)
 
 	s.IConcurrent = concurrent.NewTaskScheduler()
+
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
 		s.logger.Panicf("service[%s] create pid error", s.GetName())
@@ -190,7 +193,6 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 }
 
 func (s *Service) Start() error {
-	// 按理说服务都应该是单线程的被初始化,所以应该不需要这样变更状态的
 	if !atomic.CompareAndSwapInt32(&s.status, def.SvcStatusInit, def.SvcStatusStarting) {
 		return fmt.Errorf("service[%s] status[%d] has inited", s.GetName(), s.status)
 	}
@@ -198,6 +200,7 @@ func (s *Service) Start() error {
 	// 启动邮箱
 	s.mailbox.Start()
 
+	// 启动监听回调
 	go s.startListenCallback()
 
 	if err := s.src.OnStart(); err != nil {
@@ -206,7 +209,7 @@ func (s *Service) Start() error {
 
 	// 所有服务都注册到服务列表
 	endpoints.GetEndpointManager().AddService(s)
-	s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
+	//s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
 	s.setStatus(def.SvcStatusRunning)
 
@@ -266,8 +269,6 @@ func (s *Service) release() {
 
 	s.self.OnRelease()
 	s.closeProfiler()
-
-	// TODO 这里有点问题,流程问题,onRelease里面会注销所有的模块,模块注销时,会删除rpc注册,导致removeService的时候检查到全是私有服务
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
 	endpoints.GetEndpointManager().RemoveService(s)
@@ -491,7 +492,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 			}
 		})
 	case event.ServiceTimerCallback:
-		// TODO 定时器要不要支持系统级回调?
+		// TODO 定时器要不要支持系统级(执行优先级更高)回调?
 		s.safeExec(func() {
 			evt := ev.(*event.Event)
 			t := evt.Data.(timingwheel.ITimer)
@@ -502,7 +503,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 			ev.Release()
 		})
 	case event.ServiceConcurrentCallback:
-		// TODO 并发回调要不要支持系统级回调
+		// TODO 并发回调要不要支持系统级(执行优先级更高)回调?
 		s.safeExec(func() {
 			evt := ev.(*event.Event)
 			t := evt.Data.(concurrent.IConcurrentCallback)

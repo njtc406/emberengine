@@ -80,22 +80,32 @@ func (aw *AsyncWriter) loop() {
 	for {
 		select {
 		case <-aw.ctx.Done():
+			// 循环从队列中读取数据,直到队列为空
+			for aw.read(buf) {
+
+			}
 			aw.flush(buf)
 			return
 		case <-ticker.C:
 			aw.flush(buf)
 		default:
-			if b, ok := aw.queue.Pop(); ok {
-				buf.Write(b)
-
-				if buf.Len() >= aw.conf.BufferSize {
-					aw.flush(buf)
-				}
-			} else {
+			if !aw.read(buf) {
 				time.Sleep(1 * time.Millisecond) // 避免空转
 			}
 		}
 	}
+}
+
+func (aw *AsyncWriter) read(buf *bytes.Buffer) bool {
+	b, ok := aw.queue.Pop()
+	if ok {
+		buf.Write(b)
+
+		if buf.Len() >= aw.conf.BufferSize {
+			aw.flush(buf)
+		}
+	}
+	return ok
 }
 
 func (aw *AsyncWriter) flush(buf *bytes.Buffer) {

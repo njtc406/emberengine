@@ -21,11 +21,18 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
+type Scaler interface {
+	ShouldResize(current int, workers []*Worker) (newSize int, reason string, ok bool)
+}
+
 type queue[T any] interface {
 	Push(T) bool
 	Pop() (T, bool)
 	Empty() bool
+	Len() int
 }
+
+// TODO 后续再来增加手动设置策略的接口
 
 type WorkerPool struct {
 	conf        config.WorkerConf
@@ -34,10 +41,40 @@ type WorkerPool struct {
 	ring        *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
 	invoker     inf.IMessageInvoker      // 消息处理器
 	middlewares []inf.IMailboxMiddleware // 中间件
-	profiler    *profiler.Profiler
+	profiler    *profiler.Profiler       // 性能分析
+	autoScaler  Scaler                   // 自动扩容器
+}
+
+func fixConf(conf *config.WorkerConf) *config.WorkerConf {
+	if conf == nil {
+		conf = &config.WorkerConf{
+			DynamicWorkerScaling: false,
+			SystemMailboxSize:    16,
+			UserMailboxSize:      128,
+			VirtualWorkerRate:    10,
+			WorkerNum:            1,
+			MaxWorkerNum:         1,
+		}
+		return conf
+	}
+
+	if conf.WorkerNum <= 0 {
+		conf.WorkerNum = 1
+	}
+	if conf.MaxWorkerNum <= 0 {
+		conf.MaxWorkerNum = 1
+	}
+	if conf.UserMailboxSize <= 0 {
+		conf.UserMailboxSize = 128
+	}
+	if conf.SystemMailboxSize <= 0 {
+		conf.SystemMailboxSize = 16
+	}
+	return conf
 }
 
 func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
+	conf = fixConf(conf)
 	return &WorkerPool{
 		conf:        *conf,
 		workers:     make(map[int]*Worker, conf.WorkerNum),
@@ -56,6 +93,7 @@ func (p *WorkerPool) Start() {
 		// 将 worker 加入到哈希环中（这里每个都加进入,但是单线程时可能不会使用）
 		p.ring.Add(i)
 	}
+
 	p.mu.Unlock()
 
 	for _, middleware := range p.middlewares {
@@ -126,12 +164,14 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	}
 
 	if newSize > p.conf.WorkerNum {
-		// 增加 workers
-		for i := p.conf.WorkerNum; i < newSize; i++ {
-			worker := newWorker(p, i)
-			p.workers[i] = worker
-			worker.Start()
-			p.ring.Add(i)
+		if newSize < p.conf.MaxWorkerNum {
+			// 增加 workers
+			for i := p.conf.WorkerNum; i < newSize; i++ {
+				worker := newWorker(p, i)
+				p.workers[i] = worker
+				worker.Start()
+				p.ring.Add(i)
+			}
 		}
 	} else {
 		// 减少 workers
@@ -149,11 +189,46 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 
 // 自动调整 worker 数量
 func (p *WorkerPool) autoScaleWorkers() {
+	if p.autoScaler == nil {
+		strategy, err := BuildStrategy(p.conf.Strategy)
+		if err != nil {
+			log.SysLogger.Panic(err)
+		}
+		p.autoScaler = &AutoScaler{
+			MinWorkers:     p.conf.WorkerNum,
+			MaxWorkers:     p.conf.MaxWorkerNum,
+			GrowthFactor:   p.conf.GrowthFactor,
+			ShrinkFactor:   p.conf.ShrinkFactor,
+			ResizeCoolDown: p.conf.ResizeCoolDown,
+			Strategy:       strategy,
+		}
+	}
+
+	// TODO 定时触发检查这部分先这么用吧,主要还没想到什么好的方式来为每种策略定制一个检查机制
+	// TODO 主要是嵌套策略里面可能包含了自驱动和外部驱动两种类型的策略,不太好分开
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// TODO: 根据配置的策略 调整 worker 数量
+		p.mu.RLock()
+		if len(p.workers) == 0 {
+			p.mu.RUnlock()
+			continue
+		}
+
+		workers := make([]*Worker, 0, len(p.workers))
+		for _, w := range p.workers {
+			workers = append(workers, w)
+		}
+		current := len(workers)
+		p.mu.RUnlock()
+
+		if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
+			log.SysLogger.Infof("resizing from %d -> %d: %s", current, newSize, reason)
+			p.resizeWorkers(newSize)
+		}
+
 	}
 }
 
