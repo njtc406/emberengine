@@ -207,7 +207,7 @@ func (d *EtcdDiscovery) watchLoop() {
 				if backoff < maxBackoff {
 					backoff *= 2
 				}
-				time.Sleep(time.Microsecond * time.Duration(backoff))
+				time.Sleep(time.Millisecond * time.Duration(backoff))
 				continue
 			}
 
