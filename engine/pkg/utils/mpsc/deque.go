@@ -21,6 +21,7 @@ type Queue[T any] struct {
 	head, tail *node[T]
 	_nil       T
 	pool       sync.Pool
+	len        int64
 }
 
 func New[T any]() *Queue[T] {
@@ -48,6 +49,7 @@ func (q *Queue[T]) Push(x T) bool {
 
 	// release node to consumer
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&prev.next)), unsafe.Pointer(n))
+	atomic.AddInt64(&q.len, 1)
 	return true
 }
 
@@ -63,6 +65,8 @@ func (q *Queue[T]) Pop() (T, bool) {
 		tail.val = q._nil
 		tail.next = nil
 		q.pool.Put(tail)
+
+		atomic.AddInt64(&q.len, -1)
 		return v, true
 	}
 	return q._nil, false
@@ -75,4 +79,8 @@ func (q *Queue[T]) Empty() bool {
 	tail := q.tail
 	next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next))))
 	return next == nil
+}
+
+func (q *Queue[T]) Len() int {
+	return int(atomic.LoadInt64(&q.len))
 }

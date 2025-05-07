@@ -10,7 +10,7 @@ type Item struct {
 	Index int // The Index of the item in the heap.
 }
 
-// A PriorityQueueSlice implements heap.Interface and holds Items.
+// A PriorityQueueSlice implements heap.Interface and holds Subs.
 type PriorityQueueSlice []*Item
 
 func (pq PriorityQueueSlice) Len() int { return len(pq) }

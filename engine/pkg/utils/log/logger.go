@@ -20,6 +20,29 @@ import (
 	"time"
 )
 
+var locker sync.Mutex
+var writerLog = map[ILogger]io.WriteCloser{}
+
+func logWriter(logger ILogger, writer io.WriteCloser) {
+	locker.Lock()
+	defer locker.Unlock()
+
+	if _, ok := writerLog[logger]; ok {
+		return
+	}
+
+	writerLog[logger] = writer
+}
+
+func logRelease(logger ILogger) {
+	locker.Lock()
+	defer locker.Unlock()
+	if writer, ok := writerLog[logger]; ok {
+		_ = writer.Close()
+		delete(writerLog, logger)
+	}
+}
+
 type AsyncMode struct {
 	Enable bool
 	Config *AsyncWriterConfig
@@ -110,6 +133,8 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogger, error) {
 	conf = fixConf(conf)
 	var writers []io.Writer
+
+	var writerCloser io.WriteCloser
 	if len(conf.Name) > 0 {
 		if len(filePath) == 0 {
 			filePath = "./" // 默认当前目录
@@ -131,10 +156,11 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 			WithPattern(pattern),
 		)
 		if err != nil {
-			w.Close()
+			_ = w.Close()
 			return nil, err
 		} else {
 			writers = append(writers, w)
+			writerCloser = w
 		}
 	}
 
@@ -149,13 +175,18 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 		level = "error"
 	}
 
+	var wCloser io.WriteCloser
 	var writer io.Writer
 	if conf.AsyncMode != nil && conf.AsyncMode.Enable {
 		// 开启了异步模式,使用异步writer代替同步writer
-		writer = NewAsyncWriter(
+		w := NewAsyncWriter(
 			io.MultiWriter(writers...),
 			conf.AsyncMode.Config,
+			writerCloser,
 		)
+		writer = w
+		// 记录异步模式的writer,用于close的时候释放
+		wCloser = w
 	} else {
 		writer = io.MultiWriter(writers...)
 	}
@@ -171,13 +202,17 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 	// 由于是追加模式,所以默认为无锁(gpt认为这里在多线程环境中可能会产生一些问题,在使用中确实遇到过)
 	//logger.SetNoLock()
 
+	if writerCloser != nil {
+		logWriter(logger, wCloser)
+	}
+
 	return logger, nil
 }
 
-func Release(logger ILogger) error {
-	if logger == nil || logger.Writer() == nil {
-		return nil
+func Release(logger ILogger) {
+	if logger == nil {
+		return
 	}
 
-	return logger.Release(os.Stdout)
+	logRelease(logger)
 }

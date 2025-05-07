@@ -6,6 +6,7 @@
 package cluster
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -47,7 +48,7 @@ func (c *Cluster) Init() {
 	if c.discovery == nil {
 		return
 	}
-	if err := c.discovery.Init(c.eventProcessor); err != nil {
+	if err := c.discovery.Init(c.eventProcessor, config.Conf.ClusterConf); err != nil {
 		log.SysLogger.Fatalf("init discovery error:%v", err)
 	}
 }
@@ -81,6 +82,7 @@ func (c *Cluster) run() {
 				switch ev.GetType() {
 				case event.SysEventETCDPut, event.SysEventETCDDel:
 					c.eventProcessor.EventHandler(ev)
+					ev.Release()
 				}
 			}
 		case <-c.closed:
@@ -90,14 +92,16 @@ func (c *Cluster) run() {
 	}
 }
 
-func (c *Cluster) SetName(name string) {
-
+func (c *Cluster) SetPid(pid *actor.PID) {
+	// 这里没有实质内容,为了凑接口
 }
 
-func (c *Cluster) GetName() string {
-	return ""
+func (c *Cluster) GetPid() *actor.PID {
+	// 这里没有实质内容,为了凑接口
+	return nil
 }
 
 func (c *Cluster) GetServerId() int32 {
+	// 这里没有实质内容,为了凑接口
 	return 0
 }

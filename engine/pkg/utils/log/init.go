@@ -1,8 +1,6 @@
 package log
 
 import (
-	"fmt"
-	"os"
 	"path"
 )
 
@@ -28,7 +26,5 @@ func Init(conf *LoggerConf, isDebug bool) {
 
 func Close() {
 	SysLogger.Info("-------->system log release<---------")
-	if err := Release(SysLogger); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-	}
+	Release(SysLogger)
 }

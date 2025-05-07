@@ -11,7 +11,7 @@ NodeConf:
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
   # 线程池大小
-  AntsPoolSize: 100
+  AntsPoolSize: 10000
 
 ClusterConf:
   ETCDConf:
@@ -25,90 +25,37 @@ ClusterConf:
     Password: 123456
   RPCServers:
     # 监听地址
-    - Addr: 0.0.0.0:6610
+    - Addr: 0.0.0.0:6640
       # 协议
       Protoc: "tcp"
       # rpc类型
-      Type: rpcx
-    - Addr: 0.0.0.0:6611
-      Protoc: tcp
-      Type: grpc
+      Type: "rpcx"
+    - Addr: 0.0.0.0:6641
+      Protoc: "tcp"
+      Type: "grpc"
     - Addr: nats://192.168.145.188:4222
-      Type: nats
+      Protoc: "tcp"
+      Type: "nats"
   DiscoveryType: etcd
   RemoteConfPath: ""
+  # 服务发现监听路径
   DiscoveryConf:
     Path: /server/rpc
+    MasterPath: /server/master
 
 ServiceConf:
   OpenRemote: false
   RemoteConfPath: ""
   StartServices:
-    # 服务名称
-    - ServiceName: Service1
+      # 服务id
+    - ServiceId: 2
+      # 服务名称
+      ServiceName: Service111
       # 服务类型
       Type: test
       # 服务器ID
-      ServerId: 1
-      # 服务版本
-      Version: 1
-      # rpc方式
+      ServerId: 2
       RpcType: "grpc"
-      # 系统级线程池大小
-      GoroutinePoolSize: 1000
-      # 定时器配置
-      TimerConf:
-        # 定时器队列长度
-        TimerSize: 1000
-        # 定时器桶大小
-        TimerBucketSize: 100
-      # 工作线程配置
-      WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 1024
-        # 系统消息队列大小
-        SystemMailboxSize: 16
-        # 工作线程数量
-        WorkerNum: 1
-        # 是否开启动态线程数调整
-        DynamicWorkerScaling: false
-        # 虚拟线程比例
-        VirtualWorkerRate: 10
-      ServiceLogConf:
-        # 是否开启独立日志(默认使用系统日志器)
-        Enable: true
-        Config:
-          Path: ./example/data/logs
-          # 日志文件名
-          Name: "service"
-          # 日志级别
-          Level: debug
-          # 是否打印调用文件信息
-          Caller: true
-          # 是否打印完整调用文件信息
-          FullCaller: false
-          # 是否显示日志颜色
-          Color: true
-          # 日志最大保存时间(默认15天)
-          MaxAge: 720h
-          # 日志切分周期(默认24h)
-          RotationTime: 24h
-          AsyncMode:
-            # 开启异步模式(默认不开启,内部调试时可以关闭)
-            Enable: true
-            Config:
-              # 刷新间隔(默认1s)
-              FlushInterval: 1s
-              # 缓冲区大小(默认1M,满时会立即写入)
-              BufferSize: 1048576
-    - ServiceName: Service2
-      Type: test
-      ServerId: 1
-      TimerConf:
-        # 定时器队列长度
-        TimerSize: 1000
-        # 定时器桶大小
-        TimerBucketSize: 100
       WorkerConf:
         # 用户消息队列大小(默认128)
         UserMailboxSize: 128
@@ -119,7 +66,7 @@ ServiceConf:
         # 最大工作线程数量(默认1)
         MaxWorkerNum: 10
         # 是否开启动态线程数调整(默认不开启)
-        DynamicWorkerScaling: false
+        DynamicWorkerScaling: true
         # 虚拟线程比例(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
         VirtualWorkerRate: 10
         # 线程池增长因子(默认1.5)(当负载大于最大负载时,则启动新的线程)
@@ -134,14 +81,14 @@ ServiceConf:
           Name: default
           Params:
             # 最大负载(默认10,超过就会启动动态扩容,扩容后超过半数无负载则开启缩容)
-            MaxLoadThreshold: 10
+            max_load_threshold: 10
           Subs: # 子策略
 
-# 系统日志器配置
+# 日志配置
 SystemLogger:
   Path: ./example/data/logs
   # 日志文件名
-  Name: "system"
+  Name: "system-master"
   # 日志级别
   Level: debug
   # 是否打印调用文件信息
@@ -155,11 +102,11 @@ SystemLogger:
   # 日志切分周期(默认24h)
   RotationTime: 24h
   AsyncMode:
-    # 开启异步模式(默认不开启,内部调试时可以关闭)
+    # 开启异步模式(内部调试时可以关闭)
     Enable: true
     Config:
-      # 刷新间隔(默认1s)
+      # 刷新间隔
       FlushInterval: 1s
-      # 缓冲区大小(默认1M,满时会立即写入)
-      BufferSize: 1048576
+      # 缓冲区大小(满时会立即写入)
+      BufferSize: 1048576  # 1MB
 

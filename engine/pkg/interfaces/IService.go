@@ -41,6 +41,7 @@ type IServiceHandler interface {
 
 type IIdentifiable interface {
 	IServer
+	INamed
 	IActor
 	OnSetup(svc IService)
 	IsClosed() bool // 服务是否已经关闭
@@ -57,7 +58,7 @@ type INamed interface {
 }
 
 type IServer interface {
-	INamed
+	IActor
 	GetServerId() int32
 }
 

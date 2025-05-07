@@ -19,8 +19,9 @@ type tmpInfo struct {
 }
 
 type Repository struct {
-	mapPID    *sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
-	tmpMapPid *sync.Map // 临时服务 [serviceUid]tmpInfo
+	mapPID         *sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
+	tmpMapPid      *sync.Map // 临时服务 [serviceUid]tmpInfo
+	tmpMapStrategy func(*tmpInfo) bool
 
 	ticker *time.Ticker
 
@@ -28,6 +29,7 @@ type Repository struct {
 	mapNodeLock          sync.RWMutex
 	mapSvcBySNameAndSUid map[string]map[string]struct{}            // [serviceName]map[serviceUid]struct{}
 	mapSvcBySTpAndSName  map[string]map[string]map[string]struct{} // [serviceType]map[serviceName]map[serviceUid]struct{}
+	// TODO 之后可以加入tag索引表,每种service自定义自己的tag,这样可以更高效的查询指定服务
 }
 
 func NewRepository() *Repository {
@@ -74,10 +76,14 @@ func (r *Repository) tick() {
 				}
 				r.tmpMapPid.Range(func(key, value any) bool {
 					if tmp, ok := value.(*tmpInfo); ok {
-						// 5分钟未更新则删除
-						// TODO 后续根据需要调整
-						if timelib.Now().Sub(tmp.latest) > time.Minute*5 {
-							r.tmpMapPid.Delete(key)
+						if r.tmpMapStrategy == nil {
+							if r.defaultStrategy(tmp) {
+								r.tmpMapPid.Delete(key)
+							}
+						} else {
+							if r.tmpMapStrategy(tmp) {
+								r.tmpMapPid.Delete(key)
+							}
 						}
 					}
 					return true
@@ -85,6 +91,19 @@ func (r *Repository) tick() {
 			}
 		}
 	}()
+}
+
+func (r *Repository) SetTmpMapStrategy(strategy func(*tmpInfo) bool) {
+	r.tmpMapStrategy = strategy
+}
+
+func (r *Repository) defaultStrategy(tmp *tmpInfo) bool {
+	// 5分钟未更新则删除
+	if timelib.Now().Sub(tmp.latest) > time.Minute*5 {
+		return true
+	}
+
+	return false
 }
 
 func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
@@ -110,6 +129,11 @@ func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
 	defer r.mapNodeLock.Unlock()
 
 	pid := dispatcher.GetPid()
+	if !pid.GetIsMaster() {
+		// 不是主服务,不保存
+		return
+	}
+
 	serviceType := pid.GetServiceType()
 	serviceName := pid.GetName()
 	serviceUid := pid.GetServiceUid()

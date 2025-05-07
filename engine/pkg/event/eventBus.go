@@ -287,7 +287,7 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 		eb.globalSubscribers[eventType] = make(map[string]inf.IListener)
 		needListen = true
 	}
-	eb.globalSubscribers[eventType][svc.GetName()] = svc
+	eb.globalSubscribers[eventType][svc.GetPid().GetServiceUid()] = svc
 	if needListen {
 		// 之前没有监听过这个事件类型
 		if eb.isNatsEnabled() {
@@ -324,7 +324,7 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 		eb.serverSubscribers[eventType][svc.GetServerId()] = make(map[string]inf.IListener)
 		needListen = true
 	}
-	eb.serverSubscribers[eventType][svc.GetServerId()][svc.GetName()] = svc
+	eb.serverSubscribers[eventType][svc.GetServerId()][svc.GetPid().GetServiceUid()] = svc
 	if needListen {
 		// 之前没有监听过这个事件类型
 		if eb.isNatsEnabled() {
@@ -367,7 +367,7 @@ func (eb *Bus) UnSubscribeGlobal(eventType int32, svc inf.IListener) {
 	defer eb.globalLock.Unlock(key)
 	var needUnListen bool
 	if _, ok := eb.globalSubscribers[eventType]; ok {
-		delete(eb.globalSubscribers[eventType], svc.GetName())
+		delete(eb.globalSubscribers[eventType], svc.GetPid().GetServiceUid())
 		if len(eb.globalSubscribers[eventType]) == 0 {
 			delete(eb.globalSubscribers, eventType)
 			needUnListen = true
@@ -385,7 +385,7 @@ func (eb *Bus) UnSubscribeServer(eventType int32, svc inf.IListener) {
 	var needUnListen bool
 	if subMap, ok := eb.serverSubscribers[eventType]; ok {
 		if nameMap, ok := subMap[svc.GetServerId()]; ok {
-			delete(nameMap, svc.GetName())
+			delete(nameMap, svc.GetPid().GetServiceUid())
 			if len(nameMap) == 0 {
 				delete(subMap, svc.GetServerId())
 				needUnListen = true
