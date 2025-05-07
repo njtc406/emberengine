@@ -359,7 +359,6 @@ func (w *Worker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 		}
 	}()
 
-	// TODO analyzer可以使用缓存池
 	var analyzer *profiler.Analyzer
 	if w.pool.profiler != nil {
 		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE ]%s", reflect.TypeOf(e).String()))

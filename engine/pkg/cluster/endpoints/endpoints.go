@@ -133,10 +133,10 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 
 	// 将服务信息发布到集群
 	ev := event.NewEvent()
+	defer ev.Release()
 	ev.Type = event.SysEventServiceReg
 	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
-	ev.Release()
 
 	return
 }

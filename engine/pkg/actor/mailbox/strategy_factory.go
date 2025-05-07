@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"sync"
-	"time"
 )
 
 const (
@@ -59,26 +58,4 @@ func BuildStrategy(cfg *config.WorkerStrategyConfig) (AutoScalerStrategy, error)
 	}
 
 	return builder(subs, cfg.Params), nil
-}
-
-func intFromParams(m map[string]interface{}, key string, def int) int {
-	if v, ok := m[key]; ok {
-		switch t := v.(type) {
-		case float64: // YAML 里数字默认 float64
-			return int(t)
-		case int:
-			return t
-		}
-	}
-	return def
-}
-
-func durationFromParams(m map[string]interface{}, key string, def time.Duration) time.Duration {
-	if v, ok := m[key].(string); ok {
-		d, err := time.ParseDuration(v)
-		if err == nil {
-			return d
-		}
-	}
-	return def
 }

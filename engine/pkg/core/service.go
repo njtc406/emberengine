@@ -28,6 +28,8 @@ import (
 
 // TODO 还需要给部分可自定义的组件增加一个设置的入口,不然需要覆写整个init太麻烦
 
+// TODO 之后将所有的serverId换个名字,叫做namespace,或者group,用来划分服务组
+
 type Service struct {
 	Module
 	inf.IMessageInvoker

@@ -34,11 +34,11 @@ type NodeConf struct {
 }
 
 type ClusterConf struct {
-	ETCDConf       *ETCDConf          `binding:"required"` // etcd配置
-	RPCServers     []*RPCServer       `binding:""`         // rpc服务配置
-	DiscoveryType  string             `binding:""`         // 服务发现类型(默认etcd)
-	RemoteConfPath string             `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)(暂未使用)
-	DiscoveryConf  *EtcdDiscoveryConf `binding:""`         // 服务发现配置(目前先直接配置,后续会支持多种服务发现方式)
+	ETCDConf       *ETCDConf      `binding:"required"` // etcd配置
+	RPCServers     []*RPCServer   `binding:""`         // rpc服务配置
+	DiscoveryType  string         `binding:""`         // 服务发现类型(默认etcd)
+	RemoteConfPath string         `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)(暂未使用)
+	DiscoveryConf  *DiscoveryConf `binding:""`         // 服务发现配置(目前先直接配置,后续会支持多种服务发现方式)
 }
 
 type ServiceConf struct {
@@ -87,9 +87,10 @@ type ServiceConfig struct {
 	OnChangeFun   func()             // 配置变化处理函数
 }
 
-type EtcdDiscoveryConf struct {
-	Path string // rpc注册路径
-	TTL  int64  // 证书有效期(默认3秒)
+type DiscoveryConf struct {
+	Path       string // rpc注册路径
+	TTL        int64  // 证书有效期(默认3秒)
+	MasterPath string // 主从选举路径
 }
 
 type TimerConf struct {
