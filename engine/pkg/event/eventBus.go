@@ -37,6 +37,14 @@ type Bus struct {
 	serverLock        *shardedlock.ShardedRWLock
 	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
+	// 主从事件(只有订阅的从服务会收到)(用于主从同步)
+	masterPrefix      string
+	masterLock        *shardedlock.ShardedRWLock
+	masterSubscribers map[string]inf.IListener // map[服务唯一id]事件通道
+	slavePrefix       string
+	slaveLock         *shardedlock.ShardedRWLock
+	slaveSubscribers  map[string]inf.IListener // map[服务唯一id]事件通道
+
 	subMap map[string]*nats.Subscription
 }
 
@@ -116,6 +124,14 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 		if eb.serverPrefix == "" {
 			eb.serverPrefix = def.NatsDefaultServerPrefix
 		}
+		eb.masterPrefix = conf.MasterPrefix
+		if eb.masterPrefix == "" {
+			eb.masterPrefix = def.NatsDefaultMasterPrefix
+		}
+		eb.slavePrefix = conf.SlavePrefix
+		if eb.slavePrefix == "" {
+			eb.slavePrefix = def.NatsDefaultSlavePrefix
+		}
 		log.SysLogger.Info("==========> nats init success")
 	}
 
@@ -142,7 +158,7 @@ func (eb *Bus) genKey(format string, args ...interface{}) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, data proto.Message) (*actor.Event, error) {
+func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serviceUid string, data proto.Message) (*actor.Event, error) {
 	// 组装数据
 	rawData, err := proto.Marshal(data)
 	if err != nil {
@@ -159,7 +175,8 @@ func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, data
 			Header:  emberctx.GetHeader(ctx),
 			RawData: rawData,
 		},
-		ServerId: serverId,
+		ServerId:   serverId,
+		ServiceUid: serviceUid,
 	}
 
 	return e, nil
@@ -179,7 +196,7 @@ func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 
 // PublishGlobal 发布全局事件
 func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, data)
+	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
@@ -212,6 +229,7 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 
 		for _, ch := range subMap {
 			if err := ch.PushEvent(ev); err != nil {
+				ev.Release()
 				log.SysLogger.Errorf("push global event error: %v", err)
 				//fmt.Println("push global event error:", err)
 			}
@@ -221,7 +239,7 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 
 // PublishGlobalLocal 发布本地全局事件
 func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, data)
+	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
@@ -231,7 +249,7 @@ func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data pro
 }
 
 func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, serverId, data)
+	e, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
 	if err != nil {
 		return err
 	}
@@ -263,6 +281,8 @@ func (eb *Bus) publishServer(e *actor.Event) {
 		if subMap, ok := serverMap[e.ServerId]; ok {
 			for _, ch := range subMap {
 				if err := ch.PushEvent(ev); err != nil {
+					ev.Release()
+					log.SysLogger.Errorf("push server event error: %v", err)
 				}
 			}
 		}
@@ -270,7 +290,7 @@ func (eb *Bus) publishServer(e *actor.Event) {
 }
 
 func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, serverId, data)
+	e, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
 	if err != nil {
 		return err
 	}
@@ -397,5 +417,99 @@ func (eb *Bus) UnSubscribeServer(eventType int32, svc inf.IListener) {
 	}
 	if needUnListen {
 		eb.unSubscribe(key)
+	}
+}
+
+func (eb *Bus) publishMaster(e *actor.Event) {
+	key := eb.genKey(eb.masterPrefix, e.ServiceUid)
+	eb.masterLock.RLock(key)
+	defer eb.masterLock.RUnlock(key)
+	if ch, ok := eb.masterSubscribers[e.ServiceUid]; ok {
+		ev := NewEvent()
+		ev.Type = ServiceMasterEventTrigger
+		ev.Data = e
+		ev.Key = e.GetKey()
+		ev.Priority = e.GetPriority()
+		if err := ch.PushEvent(ev); err != nil {
+			ev.Release()
+			log.SysLogger.Errorf("push master event error: %v", err)
+		}
+	}
+}
+
+func (eb *Bus) SubscribeMaster(svc inf.IListener) {
+	serviceUid := svc.GetPid().GetServiceUid()
+	key := eb.genKey(eb.masterPrefix, serviceUid)
+	eb.masterLock.Lock(key)
+	defer eb.masterLock.Unlock(key)
+	eb.masterSubscribers[serviceUid] = svc
+	if eb.isNatsEnabled() {
+		if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
+			// 解析数据
+			e, err := eb.unmarshalEvent(msg.Data)
+			if err != nil {
+				log.SysLogger.Errorf("unmarshal master event error: %v", err)
+				//fmt.Println("unmarshal master event error:", err)
+				return
+			}
+			eb.publishMaster(e)
+		}); err == nil {
+			eb.subMap[key] = subscription
+		} else {
+			log.SysLogger.Errorf("subscribe master[%s] event error: %v", serviceUid, err)
+		}
+	}
+}
+
+func (eb *Bus) UnSubscribeMaster(svc inf.IListener) {
+	serviceUid := svc.GetPid().GetServiceUid()
+	key := eb.genKey(eb.masterPrefix, serviceUid)
+	eb.masterLock.Lock(key)
+	defer eb.masterLock.Unlock(key)
+	delete(eb.masterSubscribers, serviceUid)
+	eb.unSubscribe(key)
+}
+
+func (eb *Bus) PublishMaster(ctx context.Context, svc inf.IListener, data proto.Message) error {
+	serviceUid := svc.GetPid().GetServiceUid()
+	e, err := eb.marshalEvent(ctx, 0, 0, serviceUid, data)
+	if err != nil {
+		return err
+	}
+	if eb.isNatsEnabled() {
+		// 发到nats
+		eventData, err := proto.Marshal(e)
+		if err != nil {
+			return err
+		}
+
+		return eb.nc.Publish(eb.genKey(eb.masterPrefix, serviceUid), eventData)
+	} else {
+		// 同节点内无法做主从,所以直接丢弃
+		return nil
+	}
+}
+
+func (eb *Bus) SubscribeSlaver(svc inf.IListener) {
+	serviceUid := svc.GetPid().GetServiceUid()
+	key := eb.genKey(eb.slavePrefix, serviceUid)
+	eb.slaveLock.Lock(key)
+	defer eb.slaveLock.Unlock(key)
+	eb.slaveSubscribers[serviceUid] = svc
+	if eb.isNatsEnabled() {
+		if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
+			// 解析数据
+			e, err := eb.unmarshalEvent(msg.Data)
+			if err != nil {
+				log.SysLogger.Errorf("unmarshal master event error: %v", err)
+				//fmt.Println("unmarshal master event error:", err)
+				return
+			}
+			eb.publishMaster(e)
+		}); err == nil {
+			eb.subMap[key] = subscription
+		} else {
+			log.SysLogger.Errorf("subscribe master[%s] event error: %v", serviceUid, err)
+		}
 	}
 }

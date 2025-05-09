@@ -462,12 +462,17 @@ func (w *serviceWatcher) electMaster() {
 	// 先停止监听主节点变化
 	w.stopWatchMaster()
 
+	pidData, err := protojson.Marshal(w.pid)
+	if err != nil {
+		log.SysLogger.Errorf("marshal pid failed: %v", err)
+		return
+	}
 	// TODO 目前暂时使用直接抢占的方式,后续有其他需求再做成策略
 	// TODO etcd/concurrency后续使用这个来优化
 	// 尝试成为主节点
 	txnResp, err := w.discovery.client.Txn(context.Background()).
 		If(clientv3.Compare(clientv3.CreateRevision(masterKey), "=", 0)).
-		Then(clientv3.OpPut(masterKey, w.pid.String(), clientv3.WithLease(w.leaseID))).
+		Then(clientv3.OpPut(masterKey, string(pidData), clientv3.WithLease(w.leaseID))).
 		Commit()
 
 	if err != nil {

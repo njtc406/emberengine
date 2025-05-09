@@ -115,6 +115,8 @@ type WorkerConf struct {
 type EventBusConf struct {
 	GlobalPrefix string    `binding:""` // 全局事件前缀
 	ServerPrefix string    `binding:""` // 服务事件前缀
+	MasterPrefix string    `binding:""` // 主服务事件前缀(用于主从同步)
+	SlavePrefix  string    `binding:""` // 从服务事件前缀(用于主从同步)
 	NodePrefix   string    `binding:""` // 节点事件前缀
 	ShardCount   int       `binding:""` // 分段锁数量
 	NatsConf     *NatsConf `binding:""` // nats配置
