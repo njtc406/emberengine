@@ -227,7 +227,7 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 	if !ok {
 		timeout = def.DefaultRpcTimeout
 	} else {
-		timeout = timelib.Now().Sub(deadline)
+		timeout = deadline.Sub(timelib.Now())
 	}
 
 	mt := monitor.GetRpcMonitor()

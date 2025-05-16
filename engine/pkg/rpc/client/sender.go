@@ -12,6 +12,9 @@ import (
 	"sync"
 )
 
+// TODO 考虑一下使用grpc的方式来构建各种接口,API和RPC的,现在的方式在编译阶段无法排除参数错误的问题,而且使用字符串调用无法定位到被调用api
+// TODO 就无法使用编辑器的跳转,维护代码的时候比较麻烦,优点是增加新的接口的时候直接加就可以了,不需要修改消息的interface
+
 type SenderCreator func(addr string) inf.IRpcSender
 
 var senderMap = map[string]SenderCreator{

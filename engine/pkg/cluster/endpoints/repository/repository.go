@@ -6,6 +6,7 @@
 package repository
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"sync"
 	"time"
 
@@ -26,7 +27,7 @@ type Repository struct {
 	ticker *time.Ticker
 
 	// 快速查询表
-	mapNodeLock          sync.RWMutex
+	mapNodeLock          *shardedlock.ShardedRWLock
 	mapSvcBySNameAndSUid map[string]map[string]struct{}            // [serviceName]map[serviceUid]struct{}
 	mapSvcBySTpAndSName  map[string]map[string]map[string]struct{} // [serviceType]map[serviceName]map[serviceUid]struct{}
 	// TODO 之后可以加入tag索引表,每种service自定义自己的tag,这样可以更高效的查询指定服务
@@ -37,6 +38,7 @@ func NewRepository() *Repository {
 		mapPID:               new(sync.Map),
 		tmpMapPid:            new(sync.Map),
 		ticker:               time.NewTicker(time.Second * 10),
+		mapNodeLock:          shardedlock.NewShardedRWLock(100), // 之后改为配置表
 		mapSvcBySNameAndSUid: make(map[string]map[string]struct{}),
 		mapSvcBySTpAndSName:  make(map[string]map[string]map[string]struct{}),
 	}
@@ -74,6 +76,7 @@ func (r *Repository) tick() {
 				if !ok {
 					return
 				}
+				// TODO 这里考虑分批进行清理,防止出现热点问题
 				r.tmpMapPid.Range(func(key, value any) bool {
 					if tmp, ok := value.(*tmpInfo); ok {
 						if r.tmpMapStrategy == nil {
@@ -117,7 +120,13 @@ func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 }
 
 func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
-	oldClient, ok := r.mapPID.LoadOrStore(dispatcher.GetPid().GetServiceUid(), dispatcher)
+	pid := dispatcher.GetPid()
+	if !pid.GetIsMaster() {
+		// 不是主服务,不保存
+		return
+	}
+	serviceUid := pid.GetServiceUid()
+	oldClient, ok := r.mapPID.LoadOrStore(serviceUid, dispatcher)
 	if ok {
 		//log.SysLogger.Debugf("service already exists: %s", dispatcher.GetPid().GetServiceUid())
 		oldClient.(inf.IRpcDispatcher).Close()                          // 旧的关闭
@@ -125,18 +134,11 @@ func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
 		return
 	}
 
-	r.mapNodeLock.Lock()
-	defer r.mapNodeLock.Unlock()
-
-	pid := dispatcher.GetPid()
-	if !pid.GetIsMaster() {
-		// 不是主服务,不保存
-		return
-	}
+	r.mapNodeLock.Lock(serviceUid)
+	defer r.mapNodeLock.Unlock(serviceUid)
 
 	serviceType := pid.GetServiceType()
 	serviceName := pid.GetName()
-	serviceUid := pid.GetServiceUid()
 
 	nameMap, ok := r.mapSvcBySNameAndSUid[serviceName]
 	if !ok {
@@ -176,8 +178,8 @@ func (r *Repository) Remove(key string) {
 	pid := client.GetPid()
 	client.Close()
 
-	r.mapNodeLock.Lock()
-	defer r.mapNodeLock.Unlock()
+	r.mapNodeLock.Lock(key)
+	defer r.mapNodeLock.Unlock(key)
 	serviceName := pid.GetName()
 	serviceUid := pid.GetServiceUid()
 	serviceType := pid.GetServiceType()
