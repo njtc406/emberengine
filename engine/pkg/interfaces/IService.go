@@ -30,6 +30,7 @@ type ILifecycle interface {
 	Stop()
 	OnInit() error
 	OnStart() error
+	OnStarted() error
 	OnRelease()
 }
 

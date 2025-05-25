@@ -17,6 +17,8 @@ import (
 
 type Service111 struct {
 	core.Service
+
+	a int
 }
 
 func (s *Service111) OnInit() error {
@@ -24,6 +26,18 @@ func (s *Service111) OnInit() error {
 }
 
 func (s *Service111) OnStart() error {
+	return nil
+}
+
+func (s *Service111) OnStarted() error {
+	if s.GetPid().GetIsMaster() {
+		// 如果是主服务,则注册监听从服务的事件
+		// TODO 感觉这里不太对的样子,但是主从同步时应该是自定义的东西,所以好像又是对的
+		s.GetEventProcessor().RegSlaverEventReceiverFunc(s.GetEventHandler(), s.syncMasterDataToSlaver)
+	} else {
+		// 是从服务,监听主服务事件
+		s.GetEventProcessor().RegMasterEventReceiverFunc(s.GetEventHandler(), s.receiveMasterEvent)
+	}
 	return nil
 }
 
@@ -45,6 +59,14 @@ func (s *Service111) RPCSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
 
 func (s *Service111) RPCTestWithError(req *msg.Msg_Test_Req) (*msg.Msg_Test_Resp, error) {
 	return nil, fmt.Errorf("rpc test")
+}
+
+func (s *Service111) syncMasterDataToSlaver(e inf.IEvent) {
+
+}
+
+func (s *Service111) receiveMasterEvent(e inf.IEvent) {
+
 }
 
 func init() {

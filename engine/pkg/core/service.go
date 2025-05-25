@@ -215,6 +215,10 @@ func (s *Service) Start() error {
 
 	s.setStatus(def.SvcStatusRunning)
 
+	if err := s.src.OnStarted(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -327,6 +331,10 @@ func (s *Service) OnInit() error {
 }
 
 func (s *Service) OnStart() error {
+	return nil
+}
+
+func (s *Service) OnStarted() error {
 	return nil
 }
 

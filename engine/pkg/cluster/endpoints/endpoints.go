@@ -126,6 +126,8 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 
 	// 私有服务不发布
 	if svc.IsPrivate() {
+		// 设置未主服务
+		pid.SetMaster(true)
 		return
 	}
 

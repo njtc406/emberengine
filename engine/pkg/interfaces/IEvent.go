@@ -60,7 +60,7 @@ type IEventProcessor interface {
 	RegSlaverEventReceiverFunc(receiver IEventHandler, callback EventCallBack)
 	UnRegSlaverEventReceiverFun(receiver IEventHandler)
 	// 发布到主节点
-	PublishToMaster(ctx context.Context, data proto.Message)
+	PublishToMaster(ctx context.Context, data proto.Message) error
 
 	CastEvent(event IEvent) //广播事件
 	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)

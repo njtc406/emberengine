@@ -513,3 +513,29 @@ func (eb *Bus) SubscribeSlaver(svc inf.IListener) {
 		}
 	}
 }
+
+func (eb *Bus) UnSubscribeSlaver(svc inf.IListener) {
+	serviceUid := svc.GetPid().GetServiceUid()
+	key := eb.genKey(eb.slavePrefix, serviceUid)
+	eb.slaveLock.Lock(key)
+	defer eb.slaveLock.Unlock(key)
+	delete(eb.slaveSubscribers, serviceUid)
+	eb.unSubscribe(key)
+}
+
+func (eb *Bus) PublishSlaver(ctx context.Context, svc inf.IListener, data proto.Message) error {
+	serviceUid := svc.GetPid().GetServiceUid()
+	e, err := eb.marshalEvent(ctx, 0, 0, serviceUid, data)
+	if err != nil {
+		return err
+	}
+	if eb.isNatsEnabled() {
+		// 发到nats
+		eventData, err := proto.Marshal(e)
+		if err != nil {
+			return err
+		}
+		return eb.nc.Publish(eb.genKey(eb.slavePrefix, serviceUid), eventData)
+	}
+	return nil
+}

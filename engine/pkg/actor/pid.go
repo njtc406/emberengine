@@ -33,3 +33,7 @@ func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, ser
 func IsRetired(pid *PID) bool {
 	return atomic.LoadInt32(&pid.State) == def.ServiceStatusRetired
 }
+
+func (pid *PID) SetMaster(master bool) {
+	pid.IsMaster = master
+}

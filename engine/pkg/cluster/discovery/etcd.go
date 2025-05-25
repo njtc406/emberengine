@@ -482,11 +482,13 @@ func (w *serviceWatcher) electMaster() {
 
 	if txnResp.Succeeded {
 		w.isMaster.Store(true)
-		w.pid.IsMaster = true
+		w.pid.SetMaster(true)
 
 		if err := w.registerService(); err != nil {
 			log.SysLogger.Errorf("register master service failed: %v", err)
 		}
+
+		// TODO 同时注册slave消息监听
 
 		log.SysLogger.Debugf("master election success,leaseId:%d pid:%s", w.leaseID, w.pid.String())
 		return
