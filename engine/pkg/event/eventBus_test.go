@@ -30,6 +30,12 @@ func (s *testService) GetServerId() int32 {
 	return s.serverId
 }
 
+func (s *testService) SetPid(pid *actor.PID) {
+}
+func (s *testService) GetPid() *actor.PID {
+	return nil
+}
+
 func (s *testService) PushEvent(e inf.IEvent) error {
 	ev, ok := e.(*Event)
 	if !ok {

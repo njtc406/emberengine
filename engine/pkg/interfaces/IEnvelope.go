@@ -20,21 +20,8 @@ type IEnvelope interface {
 	WithContext(ctx context.Context) IEnvelope
 	SetHeaders(headers dto.Header)
 	SetHeader(key string, value string)
-	SetSenderPid(sender *actor.PID)
-	SetReceiverPid(receiver *actor.PID)
-	SetDispatcher(client IRpcDispatcher)
-	SetMethod(method string)
-	SetReqId(reqId uint64)
-	SetReply()
-	SetTimeout(timeout time.Duration)
-	SetRequest(req interface{})
-	SetResponse(res interface{})
-	SetError(err error)
-	SetErrStr(err string)
-	SetNeedResponse(need bool)
-	SetCallback(cbs []dto.CompletionFunc)
-	SetTimerId(id uint64)
-	SetCallbackParams(params []interface{})
+	SetMeta(meta IEnvelopeMeta)
+	SetData(data IEnvelopeData)
 
 	// Get
 
@@ -42,24 +29,8 @@ type IEnvelope interface {
 	GetHeader(key string) string
 	GetHeaders() dto.Header
 	GetContext() context.Context
-	GetSenderPid() *actor.PID
-	GetReceiverPid() *actor.PID
-	GetDispatcher() IRpcDispatcher
-	GetMethod() string
-	GetReqId() uint64
-	GetRequest() interface{}
-	GetResponse() interface{}
-	GetError() error
-	GetErrStr() string
-	GetTimeout() time.Duration
-	GetTimerId() uint64
-	GetCallbackParams() []interface{}
-
-	// Check
-
-	NeedCallback() bool // 是否需要回调
-	IsReply() bool      // 是否是回复
-	NeedResponse() bool // 是否需要回复
+	GetMeta() IEnvelopeMeta
+	GetData() IEnvelopeData
 
 	// Option
 
@@ -67,4 +38,63 @@ type IEnvelope interface {
 	RunCompletions()
 	Wait()
 	ToProtoMsg() *actor.Message
+}
+
+type IEnvelopeMeta interface {
+	IReset
+	// Set
+
+	SetSenderPid(sender *actor.PID)
+	SetReceiverPid(receiver *actor.PID)
+	SetDispatcher(client IRpcDispatcher)
+	SetTimeout(timeout time.Duration)
+	SetCallback(cbs []dto.CompletionFunc)
+	SetTimerId(id uint64)
+	SetCallbackParams(params []interface{})
+	SetDone()
+
+	// Get
+
+	GetSenderPid() *actor.PID
+	GetReceiverPid() *actor.PID
+	GetDispatcher() IRpcDispatcher
+	GetTimeout() time.Duration
+	GetTimerId() uint64
+	GetCallBacks() []dto.CompletionFunc
+	GetCallbackParams() []interface{}
+	GetDone() <-chan struct{}
+	// check
+
+	NeedCallback() bool // 是否需要回调
+
+}
+
+type IEnvelopeData interface {
+	IReset
+	// Set
+
+	SetMethod(method string)
+	SetReqId(reqId uint64)
+	SetReply()
+	SetRequest(req interface{})
+	SetResponse(res interface{})
+	SetError(err error)
+	SetErrStr(err string)
+	SetNeedResponse(need bool)
+	SetRequestBuff(reqBuff []byte)
+
+	// Get
+
+	GetMethod() string
+	GetReqId() uint64
+	GetRequest() interface{}
+	GetResponse() interface{}
+	GetError() error
+	GetErrStr() string
+	GetRequestBuff() []byte
+
+	// Check
+
+	IsReply() bool      // 是否是回复
+	NeedResponse() bool // 是否需要回复
 }

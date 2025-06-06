@@ -1,6 +1,7 @@
 package pool
 
 import (
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"sync"
 )
 
@@ -10,10 +11,8 @@ type Pool struct {
 }
 
 type IPoolData interface {
-	Reset()
-	IsRef() bool
-	Ref()
-	UnRef()
+	inf.IReset
+	inf.IDataDef
 }
 
 type PoolEx struct {

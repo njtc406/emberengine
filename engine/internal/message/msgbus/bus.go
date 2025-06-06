@@ -17,7 +17,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/errorlib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
@@ -288,14 +287,44 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	return mb.receiver.SendRequestAndRelease(envelope)
 }
 
+func (mb *MessageBus) sendDirect(ctx context.Context, data inf.IEnvelopeData) error {
+	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return mb.err
+	}
+	if mb.receiver == nil {
+		return fmt.Errorf("receiver is nil")
+	}
+
+	// 创建请求
+	envelope := msgenvelope.NewMsgEnvelope()
+	envelope.WithContext(ctx)
+	meta := msgenvelope.NewMeta()
+	meta.SetReceiverPid(mb.receiver.GetPid())
+	meta.SetDispatcher(mb.sender)
+	envelope.SetMeta(meta)
+	envelope.SetData(data)
+
+	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
+	return mb.receiver.SendRequestAndRelease(envelope)
+}
+
 func (mb *MessageBus) Cast(ctx context.Context, method string, in interface{}) {
 	if err := mb.Send(ctx, method, in); err != nil {
 		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), method, err)
 	}
 }
 
+// TODO 多节点调用需要修改为新逻辑, envelope在外层创建data数据,里层只有meta数据组装,这样在批量调用时可以只序列化数据一次
+
+type internalBusInterface interface {
+	inf.IBus
+	sendDirect(ctx context.Context, data inf.IEnvelopeData) error
+}
+
 // MultiBus 多节点调用
-type MultiBus []inf.IBus
+type MultiBus []internalBusInterface
 
 func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	if len(m) == 0 {
@@ -337,8 +366,14 @@ func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error
 		return def.ServiceIsUnavailable
 	}
 	var errs []error
+	envelopeData := msgenvelope.NewData()
+	envelopeData.SetMethod(method)
+	envelopeData.SetRequest(in)
+	envelopeData.SetResponse(nil)
+	envelopeData.SetReqId(monitor.GetRpcMonitor().GenSeq())
+	envelopeData.SetNeedResponse(false)
 	for _, bus := range m {
-		if err := bus.Send(ctx, method, in); err != nil {
+		if err := bus.sendDirect(ctx, envelopeData); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -347,18 +382,7 @@ func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error
 }
 
 func (m MultiBus) Cast(ctx context.Context, method string, in interface{}) {
-	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to send %s", method)
-		return
+	if err := m.Send(ctx, method, in); err != nil {
+		log.SysLogger.Errorf("MultiBus.Send failed, err:%v", err)
 	}
-
-	_ = asynclib.Go(func() {
-		for _, bus := range m {
-			if err := bus.Send(ctx, method, in); err != nil {
-				log.SysLogger.WithContext(ctx).Errorf("cast service[%s] failed, error: %v", method, err)
-			}
-		}
-	})
-
-	return
 }

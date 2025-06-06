@@ -10,3 +10,7 @@ type IDataDef interface {
 	Ref()
 	UnRef()
 }
+
+type IReset interface {
+	Reset()
+}

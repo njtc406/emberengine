@@ -76,7 +76,7 @@ func (c *Client) listen() {
 			return
 		}
 
-		// 消息解析
+		// 消息解析(这里只是最外层的解析)
 		info, err := c.mgr.Unmarshal(msg)
 		if err != nil {
 			log.SysLogger.Errorf("Client receive msg error: %s", err)
