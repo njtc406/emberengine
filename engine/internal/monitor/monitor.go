@@ -77,28 +77,28 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 	rm.locker.Lock()
 	defer rm.locker.Unlock()
 
-	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) {
-		envelope := args[0].(inf.IEnvelope)
+	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) {
+		elp := args[0].(inf.IEnvelope)
 		rm.locker.Lock()
 		// 直接删除
 		delete(rm.waitMap, tm.GetTimerId())
 		rm.locker.Unlock()
 
-		if envelope == nil || !envelope.IsRef() {
-			log.SysLogger.WithContext(envelope.GetContext()).Errorf("call seq is not find,seq:%d", tm.GetTimerId())
+		if elp == nil || !elp.IsRef() {
+			log.SysLogger.WithContext(elp.GetContext()).Errorf("call seq is not find,seq:%d", tm.GetTimerId())
 			return
 		}
 
-		log.SysLogger.WithContext(envelope.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s", int64(envelope.GetTimeout().Seconds()), envelope.GetMethod())
+		log.SysLogger.WithContext(elp.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s", int64(elp.GetMeta().GetTimeout().Seconds()), envelope.GetData().GetMethod())
 		// 调用超时,执行超时回调
-		rm.callTimeout(envelope)
+		rm.callTimeout(elp)
 	}, envelope)
 	if err != nil {
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("add monitor failed,error:%s", err)
 		return
 	}
-	envelope.SetTimerId(timerId)
-	rm.waitMap[envelope.GetReqId()] = envelope
+	envelope.GetMeta().SetTimerId(timerId)
+	rm.waitMap[envelope.GetMeta().GetReqId()] = envelope
 }
 
 func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
@@ -107,7 +107,7 @@ func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
 		return nil
 	}
 
-	if !rm.sd.Cancel(envelope.GetTimerId()) {
+	if !rm.sd.Cancel(envelope.GetMeta().GetTimerId()) {
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("cancel monitor failed,seq:%d", seqId)
 	}
 	delete(rm.waitMap, seqId)
@@ -137,13 +137,13 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 		return // 已经被释放,丢弃
 	}
 
-	envelope.SetResponse(nil)
-	envelope.SetError(def.RPCCallTimeout)
+	envelope.GetData().SetResponse(nil)
+	envelope.GetData().SetError(def.RPCCallTimeout)
 
-	if envelope.NeedCallback() {
+	if envelope.GetMeta().NeedCallback() {
 		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收
 		// 如果是远程调用,那么在远程client将消息发送完成后自动回收)
-		if err := envelope.GetDispatcher().PostMessage(envelope); err != nil {
+		if err := envelope.GetMeta().GetDispatcher().PostMessage(envelope); err != nil {
 			envelope.Release()
 			log.SysLogger.WithContext(envelope.GetContext()).Errorf("send call timeout response error:%s", err.Error())
 		}

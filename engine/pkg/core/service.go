@@ -205,6 +205,7 @@ func (s *Service) Start() error {
 	// 启动监听回调
 	go s.startListenCallback()
 
+	// 主从服务需要在onstart中处理
 	if err := s.src.OnStart(); err != nil {
 		return err
 	}
@@ -443,16 +444,25 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
+			meta := c.GetMeta()
+			data := c.GetData()
+			if meta == nil || data == nil {
+				c.Release()
+				s.logger.Errorf("service[%s] receive call error, meta or data is nil", s.GetName())
+				s.logger.Errorf("meta: %v", meta)
+				s.logger.Errorf("data: %v", data)
+				return
+			}
 			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
-			if c.IsReply() {
+			if data.IsReply() {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_RESP] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_RESP] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// 回复
 				s.HandleResponse(c)
 			} else {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_REQ] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_REQ] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// rpc调用
 				s.HandleRequest(c)
@@ -487,15 +497,24 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
 			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
-			if c.IsReply() {
+			meta := c.GetMeta()
+			data := c.GetData()
+			if meta == nil || data == nil {
+				c.Release()
+				s.logger.Errorf("service[%s] receive rpc msg call error, meta or data is nil", s.GetName())
+				s.logger.Errorf("meta: %v", meta)
+				s.logger.Errorf("data: %v", data)
+				return
+			}
+			if data.IsReply() {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_RESP] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_RESP] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// 回复
 				s.HandleResponse(c)
 			} else {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_REQ] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_REQ] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// rpc调用
 				s.HandleRequest(c)

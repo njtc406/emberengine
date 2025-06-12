@@ -42,8 +42,16 @@ func (s *Service1) OnInit() error {
 			log.SysLogger.Errorf("call Service2.APITest2 failed, err:%v", err)
 		}
 		if err := s.SelectSameServer("", "Service2").Send(ctx, "APITest2", nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APITest2 failed, err:%v", err)
+			log.SysLogger.Errorf("loop call Service2.APITest2 failed, err:%v", err)
 		}
+
+		// 循环call
+		for i := 0; i < 10; i++ {
+			if err := s.SelectSameServer("", "Service2").Call(ctx, "APITest2", nil, nil); err != nil {
+				log.SysLogger.Errorf("call Service2.APITest2 failed, err:%v", err)
+			}
+		}
+
 		//log.SysLogger.Debugf("call Service2.APITest2 cost:%d", timelib.Since(startTime).Microseconds())
 	})
 	s.AfterFunc(time.Second*2, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) {
@@ -148,10 +156,10 @@ func (s *Service1) OnInit() error {
 		log.SysLogger.Debugf("================================>>>")
 		// 1. 让node2开启多线程,然后调用10次cast
 		for i := 0; i < 10; i++ {
-			s.SelectSameServerByServiceType("test", "Service3").Cast(ctx, "RPCTest2", nil)
+			s.SelectSameServerByServiceType("test", "Service3").Send(ctx, "RPCTest2", nil)
 		}
 		// 2. 让node2开启单线程,然后调用1次cast
-		s.SelectSameServerByServiceType("test", "Service3").Cast(ctx, "RPCTest2", nil)
+		s.SelectSameServerByServiceType("test", "Service3").Send(ctx, "RPCTest2", nil)
 	})
 
 	// other test
@@ -268,6 +276,8 @@ func (s *Service1) OnInit() error {
 }
 
 func (s *Service1) OnStart() error {
+	// 只有一个服务,设置为主服务
+	s.GetPid().SetMaster(true)
 	// 测试在onstart阶段call其他服务
 	//s.callTest()
 	return nil
@@ -310,6 +320,8 @@ func (s *Service2) OnInit() error {
 }
 
 func (s *Service2) OnStart() error {
+	// 只有一个服务,设置为主服务
+	s.GetPid().SetMaster(true)
 	//s.AsyncDo(func() bool {
 	//	time.Sleep(time.Second)
 	//	// 创建service1

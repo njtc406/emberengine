@@ -40,12 +40,15 @@ func NewData() inf.IEnvelopeData {
 
 type Meta struct {
 	dto.DataRef
+	locker sync.RWMutex
+
 	senderPid   *actor.PID         // 发送者
 	receiverPid *actor.PID         // 接收者
 	sender      inf.IRpcDispatcher // 发送者客户端(用于回调)
 	// 缓存信息
 	timeout        time.Duration        // 请求超时时间
 	done           chan struct{}        // 完成信号
+	reqID          uint64               // 请求ID(主要用于monitor区分不同的call)
 	timerId        uint64               // 定时器ID
 	callbacks      []dto.CompletionFunc // 完成回调
 	callbackParams []interface{}        // 回调透传参数
@@ -56,6 +59,7 @@ func (e *Meta) Reset() {
 	e.receiverPid = nil
 	e.sender = nil
 	e.timeout = 0
+	e.reqID = 0
 	if e.done == nil {
 		e.done = make(chan struct{}, 1)
 	}
@@ -66,63 +70,103 @@ func (e *Meta) Reset() {
 }
 
 func (e *Meta) SetSenderPid(senderPid *actor.PID) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.senderPid = senderPid
 }
 
 func (e *Meta) SetReceiverPid(receiverPid *actor.PID) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.receiverPid = receiverPid
 }
 
 func (e *Meta) SetDispatcher(client inf.IRpcDispatcher) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.sender = client
 }
 
 func (e *Meta) SetTimeout(timeout time.Duration) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.timeout = timeout
 }
 
+func (e *Meta) SetReqId(reqId uint64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.reqID = reqId
+}
+
 func (e *Meta) SetCallback(cbs []dto.CompletionFunc) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.callbacks = cbs
 }
 
 func (e *Meta) SetTimerId(id uint64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.timerId = id
 }
 
 func (e *Meta) SetCallbackParams(params []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.callbackParams = params
 }
 
 func (e *Meta) SetDone() {
-	e.done = make(chan struct{})
+	e.done <- struct{}{}
 }
 
 func (e *Meta) GetSenderPid() *actor.PID {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.senderPid
 }
 
 func (e *Meta) GetReceiverPid() *actor.PID {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.receiverPid
 }
 
 func (e *Meta) GetDispatcher() inf.IRpcDispatcher {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.sender
 }
 
 func (e *Meta) GetTimeout() time.Duration {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.timeout
 }
 
+func (e *Meta) GetReqId() uint64 {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.reqID
+}
+
 func (e *Meta) GetTimerId() uint64 {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.timerId
 }
 
 func (e *Meta) GetCallBacks() []dto.CompletionFunc {
-	return e.callbacks
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.callbacks[:] // 返回一个快照
 }
 
 func (e *Meta) GetCallbackParams() []interface{} {
-	return e.callbackParams
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.callbackParams[:]
 }
 
 func (e *Meta) GetDone() <-chan struct{} {
@@ -130,13 +174,15 @@ func (e *Meta) GetDone() <-chan struct{} {
 }
 
 func (e *Meta) NeedCallback() bool {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return len(e.callbacks) > 0
 }
 
 type Data struct {
+	locker sync.RWMutex
 	// 数据包
 	method      string      // 调用方法
-	reqID       uint64      // 请求ID(防止重复,目前还未做防重复逻辑)
 	reply       bool        // 是否是回复
 	request     interface{} // 请求参数
 	response    interface{} // 回复数据
@@ -147,7 +193,6 @@ type Data struct {
 
 func (e *Data) Reset() {
 	e.method = ""
-	e.reqID = 0
 	e.reply = false
 	e.request = nil
 	e.response = nil
@@ -157,10 +202,6 @@ func (e *Data) Reset() {
 
 func (e *Data) SetMethod(method string) {
 	e.method = method
-}
-
-func (e *Data) SetReqId(reqId uint64) {
-	e.reqID = reqId
 }
 
 func (e *Data) SetReply() {
@@ -195,10 +236,6 @@ func (e *Data) GetMethod() string {
 	return e.method
 }
 
-func (e *Data) GetReqId() uint64 {
-	return e.reqID
-}
-
 func (e *Data) GetRequest() interface{} {
 	return e.request
 }
@@ -230,8 +267,6 @@ func (e *Data) NeedResponse() bool {
 	return e.needResp
 }
 
-// TODO 需要改造结构,修改为两部分,一部分为meta数据,一部分为data数据,meta中包含了每个服务调用的元数据,data则包含了调用参数信息
-// TODO 这样修改后,data的数据可以单独打包,多个服务就可以公用这部分数据,不必每个服务的都单独打包
 type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!
@@ -251,8 +286,13 @@ func (e *MsgEnvelope) Reset() {
 	}
 
 	e.ctx = nil
-	e.meta.Reset()
-	e.data.Reset()
+	if e.meta != nil {
+		e.meta.Reset()
+	}
+
+	if e.data != nil {
+		e.data.Reset()
+	}
 }
 
 //-------------------------------------set-----------------------------------------
@@ -297,99 +337,6 @@ func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.data = data.(*Data)
-}
-
-func (e *MsgEnvelope) SetSenderPid(senderPid *actor.PID) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetSenderPid(senderPid)
-}
-
-func (e *MsgEnvelope) SetReceiverPid(receiverPid *actor.PID) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetReceiverPid(receiverPid)
-}
-
-func (e *MsgEnvelope) SetDispatcher(client inf.IRpcDispatcher) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetDispatcher(client)
-}
-
-func (e *MsgEnvelope) SetMethod(method string) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetMethod(method)
-}
-
-func (e *MsgEnvelope) SetReqId(reqId uint64) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetReqId(reqId)
-}
-
-func (e *MsgEnvelope) SetReply() {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetReply()
-}
-
-func (e *MsgEnvelope) SetTimeout(timeout time.Duration) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetTimeout(timeout)
-}
-
-func (e *MsgEnvelope) SetRequest(req interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetRequest(req)
-}
-
-func (e *MsgEnvelope) SetResponse(res interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetResponse(res)
-}
-
-func (e *MsgEnvelope) SetError(err error) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetError(err)
-}
-
-func (e *MsgEnvelope) SetErrStr(err string) {
-	if err == "" {
-		return
-	}
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetErrStr(err)
-}
-
-func (e *MsgEnvelope) SetNeedResponse(need bool) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.data.SetNeedResponse(need)
-}
-
-func (e *MsgEnvelope) SetCallback(cbs []dto.CompletionFunc) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetCallback(cbs)
-}
-
-func (e *MsgEnvelope) SetTimerId(timerId uint64) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetTimerId(timerId)
-}
-
-func (e *MsgEnvelope) SetCallbackParams(params []interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.meta.SetCallbackParams(params)
 }
 
 //--------------------------------get------------------------------------
@@ -456,98 +403,6 @@ func (e *MsgEnvelope) GetData() inf.IEnvelopeData {
 	return e.data
 }
 
-func (e *MsgEnvelope) GetSenderPid() *actor.PID {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.GetSenderPid()
-}
-
-func (e *MsgEnvelope) GetReceiverPid() *actor.PID {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.GetReceiverPid()
-}
-
-func (e *MsgEnvelope) GetDispatcher() inf.IRpcDispatcher {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.GetDispatcher()
-}
-
-func (e *MsgEnvelope) GetMethod() string {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.GetMethod()
-}
-
-func (e *MsgEnvelope) GetReqId() uint64 {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.GetReqId()
-}
-
-func (e *MsgEnvelope) GetRequest() interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.GetRequest()
-}
-
-func (e *MsgEnvelope) GetResponse() interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.GetResponse()
-}
-
-func (e *MsgEnvelope) GetError() error {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.GetError()
-}
-
-func (e *MsgEnvelope) GetErrStr() string {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.GetErrStr()
-}
-
-func (e *MsgEnvelope) GetTimeout() time.Duration {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.GetTimeout()
-}
-
-func (e *MsgEnvelope) GetTimerId() uint64 {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.GetTimerId()
-}
-
-func (e *MsgEnvelope) GetCallbackParams() []interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.GetCallbackParams()
-}
-
-//------------------------------------Check----------------------------------------
-
-func (e *MsgEnvelope) NeedCallback() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.meta.NeedCallback()
-}
-
-func (e *MsgEnvelope) IsReply() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.IsReply()
-}
-
-func (e *MsgEnvelope) NeedResponse() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.data.NeedResponse()
-}
-
 //-----------------------------Option-----------------------------------
 
 func (e *MsgEnvelope) Done() {
@@ -576,10 +431,10 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 		Method:        e.data.GetMethod(),
 		Request:       nil,
 		Response:      nil,
-		Err:           e.GetErrStr(),
+		Err:           e.data.GetErrStr(),
 		MessageHeader: emberctx.GetHeader(e.ctx),
 		Reply:         e.data.IsReply(),
-		ReqId:         e.data.GetReqId(),
+		ReqId:         e.meta.GetReqId(),
 		NeedResp:      e.data.NeedResponse(),
 	}
 

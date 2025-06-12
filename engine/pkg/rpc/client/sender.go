@@ -109,7 +109,7 @@ func (c *Dispatcher) SendRequest(envelope inf.IEnvelope) error {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = senderMap[def.RpcTypeLocal](c.pid.GetAddress())
+			c.localHandler = senderMap[def.RpcTypeLocal]("")
 		}
 
 		return c.localHandler.SendRequest(c, envelope)
@@ -126,7 +126,7 @@ func (c *Dispatcher) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = senderMap[def.RpcTypeLocal](c.pid.GetAddress())
+			c.localHandler = senderMap[def.RpcTypeLocal]("")
 		}
 
 		return c.localHandler.SendRequestAndRelease(c, envelope)
@@ -141,7 +141,7 @@ func (c *Dispatcher) SendResponse(envelope inf.IEnvelope) error {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = senderMap[def.RpcTypeLocal](c.pid.GetAddress())
+			c.localHandler = senderMap[def.RpcTypeLocal]("")
 		}
 
 		return c.localHandler.SendResponse(c, envelope)

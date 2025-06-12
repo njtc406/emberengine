@@ -66,7 +66,7 @@ func (rc *natsSender) send(envelope inf.IEnvelope) error {
 		return def.MsgSerializeFailed
 	}
 
-	return rc.conn.Publish(fmt.Sprintf(def.NatsDefaultTopic, envelope.GetReceiverPid().GetNodeUid()), data)
+	return rc.conn.Publish(fmt.Sprintf(def.NatsDefaultTopic, envelope.GetMeta().GetReceiverPid().GetNodeUid()), data)
 }
 
 func (rc *natsSender) SendRequest(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {

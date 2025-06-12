@@ -48,6 +48,7 @@ type IEnvelopeMeta interface {
 	SetReceiverPid(receiver *actor.PID)
 	SetDispatcher(client IRpcDispatcher)
 	SetTimeout(timeout time.Duration)
+	SetReqId(reqId uint64)
 	SetCallback(cbs []dto.CompletionFunc)
 	SetTimerId(id uint64)
 	SetCallbackParams(params []interface{})
@@ -59,6 +60,7 @@ type IEnvelopeMeta interface {
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher
 	GetTimeout() time.Duration
+	GetReqId() uint64
 	GetTimerId() uint64
 	GetCallBacks() []dto.CompletionFunc
 	GetCallbackParams() []interface{}
@@ -74,7 +76,6 @@ type IEnvelopeData interface {
 	// Set
 
 	SetMethod(method string)
-	SetReqId(reqId uint64)
 	SetReply()
 	SetRequest(req interface{})
 	SetResponse(res interface{})
@@ -86,7 +87,6 @@ type IEnvelopeData interface {
 	// Get
 
 	GetMethod() string
-	GetReqId() uint64
 	GetRequest() interface{}
 	GetResponse() interface{}
 	GetError() error

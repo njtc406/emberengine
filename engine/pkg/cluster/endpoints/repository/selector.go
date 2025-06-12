@@ -70,8 +70,8 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 }
 
 func (r *Repository) Select(sender *actor.PID, serverId int32, serviceId, serviceName string) inf.IBus {
-	r.mapNodeLock.RLock()
-	defer r.mapNodeLock.RUnlock()
+	r.mapNodeLock.RLock(sender.GetServiceUid())
+	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
 	serviceUid := actor.CreateServiceUid(serverId, serviceName, serviceId)
 	return r.SelectBySvcUid(sender, serviceUid)
 }
@@ -80,8 +80,8 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serv
 	if serviceType == "" && serviceName == "" {
 		return msgbus.MultiBus{}
 	}
-	r.mapNodeLock.RLock()
-	defer r.mapNodeLock.RUnlock()
+	r.mapNodeLock.RLock(sender.GetServiceUid())
+	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
 
 	var list msgbus.MultiBus
 	var serviceList []string

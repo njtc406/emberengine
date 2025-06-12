@@ -38,7 +38,7 @@ func NewRepository() *Repository {
 		mapPID:               new(sync.Map),
 		tmpMapPid:            new(sync.Map),
 		ticker:               time.NewTicker(time.Second * 10),
-		mapNodeLock:          shardedlock.NewShardedRWLock(100), // 之后改为配置表
+		mapNodeLock:          shardedlock.NewShardedRWLock(64), // 之后改为配置表
 		mapSvcBySNameAndSUid: make(map[string]map[string]struct{}),
 		mapSvcBySTpAndSName:  make(map[string]map[string]map[string]struct{}),
 	}

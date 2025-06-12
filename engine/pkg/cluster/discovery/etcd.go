@@ -412,7 +412,7 @@ func (w *serviceWatcher) keepaliveLoop() {
 			}
 
 			// 这里给一个重连的间隔时间,防止网络波动的时候瞬间有大量链接需要重连
-			interval := util.RandIntn(5)
+			interval := util.RandN(5)
 			if interval > 0 {
 				time.Sleep(time.Duration(interval) * time.Second)
 			}

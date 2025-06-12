@@ -270,36 +270,40 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 }
 
 func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
 	defer func() {
 		if r := recover(); r != nil {
 			log.SysLogger.Errorf("service[%s] handle message from caller: %s panic: %v\n trace:%s",
-				h.GetModuleName(), envelope.GetSenderPid().String(), r, debug.Stack())
-			envelope.SetResponse(nil)
-			envelope.SetError(def.HandleMessagePanic)
+				h.GetModuleName(), meta.GetSenderPid().String(), r, debug.Stack())
+			data.SetResponse(nil)
+			data.SetError(def.HandleMessagePanic)
 		}
 		h.doResponse(envelope)
 	}()
-	call, ok := h.mgr.GetMethodFunc(envelope.GetMethod())
+	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {
-		envelope.SetError(def.MethodNotFound)
+		data.SetError(def.MethodNotFound)
 		return
 	}
-	resp, err := call(envelope.GetRequest())
+	resp, err := call(data.GetRequest())
 	if err != nil {
-		envelope.SetError(err)
+		data.SetError(err)
 		return
 	}
-	envelope.SetResponse(resp)
+	data.SetResponse(resp)
 }
 
 func (h *Handler) doResponse(envelope inf.IEnvelope) {
 	if !envelope.IsRef() {
 		return
 	}
-	if envelope.NeedResponse() {
-		envelope.SetReply()
-		envelope.SetRequest(nil)
-		if err := envelope.GetDispatcher().SendResponse(envelope); err != nil {
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
+	if data.NeedResponse() {
+		data.SetReply()
+		data.SetRequest(nil)
+		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
 			log.SysLogger.Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
 	} else {

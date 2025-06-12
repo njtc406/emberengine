@@ -116,18 +116,17 @@ func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
 
 // AddService 添加本地服务到服务发现中
 func (em *EndpointManager) AddService(svc inf.IService) {
-	//log.SysLogger.Debugf("add local service: %s, pid: %v", pid.String(), mailbox)
+	log.SysLogger.Debugf("add local service: %s, pid: %v", svc.GetName(), svc.GetPid().String())
 	pid := svc.GetPid()
 	if pid == nil {
 		log.SysLogger.Errorf("add service error: pid is nil")
 		return
 	}
+
 	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
 
 	// 私有服务不发布
 	if svc.IsPrivate() {
-		// 设置未主服务
-		pid.SetMaster(true)
 		return
 	}
 
