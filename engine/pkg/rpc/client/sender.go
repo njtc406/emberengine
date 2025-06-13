@@ -103,7 +103,7 @@ func (c *Dispatcher) IsClosed() bool {
 
 func (c *Dispatcher) SendRequest(envelope inf.IEnvelope) error {
 	if c.pid == nil {
-		return def.ServiceNotFound
+		return def.ErrServiceNotFound
 	}
 
 	if c.IMailboxChannel != nil {
@@ -120,7 +120,7 @@ func (c *Dispatcher) SendRequest(envelope inf.IEnvelope) error {
 
 func (c *Dispatcher) SendRequestAndRelease(envelope inf.IEnvelope) error {
 	if c.pid == nil {
-		return def.ServiceNotFound
+		return def.ErrServiceNotFound
 	}
 
 	if c.IMailboxChannel != nil {
@@ -136,7 +136,7 @@ func (c *Dispatcher) SendRequestAndRelease(envelope inf.IEnvelope) error {
 
 func (c *Dispatcher) SendResponse(envelope inf.IEnvelope) error {
 	if c.pid == nil {
-		return def.ServiceNotFound
+		return def.ErrServiceNotFound
 	}
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender

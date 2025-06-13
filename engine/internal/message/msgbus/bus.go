@@ -125,7 +125,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 		mt.Remove(meta.GetReqId())
 		envelope.Release()
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
-		return def.RPCCallFailed
+		return def.ErrRPCCallFailed
 	}
 
 	// 等待回复
@@ -256,7 +256,7 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, par
 		mt.Remove(meta.GetReqId())
 		envelope.Release()
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
-		return nil, def.RPCCallFailed
+		return nil, def.ErrRPCCallFailed
 	}
 
 	return mt.NewCancel(meta.GetReqId()), nil
@@ -273,7 +273,7 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 		return nil, fmt.Errorf("sender or receiver is nil")
 	}
 	if len(callbacks) == 0 {
-		return nil, def.CallbacksIsEmpty
+		return nil, def.ErrCallbacksIsEmpty
 	}
 
 	data := msgenvelope.NewData()
@@ -295,7 +295,7 @@ func (mb *MessageBus) asyncCallDirect(ctx context.Context, data inf.IEnvelopeDat
 		return nil, fmt.Errorf("sender or receiver is nil")
 	}
 	if len(callbacks) == 0 {
-		return nil, def.CallbacksIsEmpty
+		return nil, def.ErrCallbacksIsEmpty
 	}
 
 	return mb.asyncCall(ctx, data, param, callbacks...)
@@ -369,7 +369,7 @@ type MultiBus []internalBus
 func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	if len(m) == 0 {
 		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to call %s", method)
-		return def.ServiceIsUnavailable
+		return def.ErrServiceIsUnavailable
 	}
 
 	if len(m) > 1 {
@@ -387,7 +387,7 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
 		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to async call %s", method)
-		return nil, def.ServiceIsUnavailable
+		return nil, def.ErrServiceIsUnavailable
 	}
 	if len(m) > 1 {
 		// 释放所有节点
@@ -403,7 +403,7 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error {
 	if len(m) == 0 {
 		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to send %s", method)
-		return def.ServiceIsUnavailable
+		return def.ErrServiceIsUnavailable
 	}
 	var errs []error
 	envelopeData := msgenvelope.NewData()

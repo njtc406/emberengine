@@ -60,7 +60,7 @@ func (rc *rpcxSender) Close() {
 
 func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if rc.rpcClient == nil {
-		return def.RPCHadClosed
+		return def.ErrRPCHadClosed
 	}
 	// 这里仅仅代表消息发送成功
 	ctx := envelope.GetContext()
@@ -74,12 +74,12 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	// 构建发送消息
 	msg := envelope.ToProtoMsg()
 	if msg == nil {
-		return def.MsgSerializeFailed
+		return def.ErrMsgSerializeFailed
 	}
 
 	if _, err := rc.rpcClient.Go(ctx, "RPCCall", msg, nil, nil); err != nil {
 		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
-		return def.RPCCallFailed
+		return def.ErrRPCCallFailed
 	}
 
 	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())

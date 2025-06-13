@@ -95,12 +95,10 @@ func (p *Processor) PublishServer(ctx context.Context, eventType int32, data pro
 
 func (p *Processor) RegMasterEventReceiverFunc(receiver inf.IEventHandler, callback inf.EventCallBack) {
 	p.RegEventReceiverFunc(ServiceMasterEventTrigger, receiver, callback)
-	GetEventBus().SubscribeMaster(p)
 }
 
 func (p *Processor) UnRegMasterEventReceiverFun(receiver inf.IEventHandler) {
 	p.UnRegEventReceiverFun(ServiceMasterEventTrigger, receiver)
-	GetEventBus().UnSubscribeMaster(p)
 }
 
 func (p *Processor) PublishToSlaves(ctx context.Context, data proto.Message) error {
@@ -109,11 +107,9 @@ func (p *Processor) PublishToSlaves(ctx context.Context, data proto.Message) err
 
 func (p *Processor) RegSlaverEventReceiverFunc(receiver inf.IEventHandler, callback inf.EventCallBack) {
 	p.RegEventReceiverFunc(ServiceSlaverEventTrigger, receiver, callback)
-	GetEventBus().SubscribeSlaver(p)
 }
 func (p *Processor) UnRegSlaverEventReceiverFun(receiver inf.IEventHandler) {
 	p.UnRegEventReceiverFun(ServiceSlaverEventTrigger, receiver)
-	GetEventBus().UnSubscribeSlaver(p)
 }
 
 func (p *Processor) PublishToMaster(ctx context.Context, data proto.Message) error {

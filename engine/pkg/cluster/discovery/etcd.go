@@ -290,6 +290,7 @@ func (d *EtcdDiscovery) handleServiceRegister(ev inf.IEvent) {
 		return
 	}
 	d.watchers.Add(pid.ServiceUid, watcher)
+	// TODO 这里实际上应该是只有打开了主从模式,才需要启动选举,否则应该直接就是设置为主服务
 	watcher.electMaster()
 }
 
@@ -481,6 +482,7 @@ func (w *serviceWatcher) electMaster() {
 	}
 
 	if txnResp.Succeeded {
+		// 设置为主节点
 		w.isMaster.Store(true)
 		w.pid.SetMaster(true)
 
@@ -489,6 +491,8 @@ func (w *serviceWatcher) electMaster() {
 		}
 
 		// TODO 同时注册slave消息监听
+
+		// TODO 通知服务身份转变
 
 		log.SysLogger.Debugf("master election success,leaseId:%d pid:%s", w.leaseID, w.pid.String())
 		return

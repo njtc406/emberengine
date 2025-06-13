@@ -42,7 +42,7 @@ func (r *Repository) SelectByPid(sender, receiver *actor.PID) inf.IBus {
 		b := msgbus.NewMessageBus(s, c, nil)
 		return b
 	}
-	return msgbus.NewMessageBus(s, c, def.ServiceNotFound)
+	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
 }
 
 func (r *Repository) SelectBySvcUid(sender *actor.PID, serviceUid string) inf.IBus {
@@ -53,7 +53,7 @@ func (r *Repository) SelectBySvcUid(sender *actor.PID, serviceUid string) inf.IB
 		b := msgbus.NewMessageBus(s, c, nil)
 		return b
 	}
-	return msgbus.NewMessageBus(s, c, def.ServiceNotFound)
+	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
 }
 
 func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) inf.IBus {

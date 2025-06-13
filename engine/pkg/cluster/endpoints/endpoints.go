@@ -123,6 +123,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 		return
 	}
 
+	// TODO 这里有点问题,如果是主从,是在后续的步骤中才会生成主从状态,所以这里会导致添加不进去
 	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
 
 	// 私有服务不发布

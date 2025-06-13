@@ -160,7 +160,7 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 				multiOut++
 			}
 		} else if t.Kind() == reflect.Struct {
-			return def.InputParamCantUseStruct
+			return def.ErrInputParamCantUseStruct
 		} else {
 			multiOut++
 		}
@@ -192,13 +192,13 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 			if req == nil {
 				if fixedCount > 0 {
 					log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: 0", name, fixedCount)
-					return nil, def.InputParamNotMatch
+					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				if reqSlice, ok := req.([]interface{}); ok {
 					if len(reqSlice) < fixedCount {
 						log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: %d", name, fixedCount, len(reqSlice))
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 
 					// 如果请求参数有多个,直接添加到参数列表中
@@ -209,7 +209,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 					if fixedCount > 0 {
 						// 只有一个可变参,就不允许有多个参数
 						log.SysLogger.Errorf("method[%s] param count not match", name)
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 					// 否则只有一个参数
 					params = append(params, reflect.ValueOf(req))
@@ -220,14 +220,14 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 			if req == nil {
 				if paramCount != 1 {
 					log.SysLogger.Errorf("method[%s] param count not match, need : %d, got: 0", name, paramCount-1)
-					return nil, def.InputParamNotMatch
+					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				switch reqData := req.(type) {
 				case []interface{}:
 					if len(reqData) != paramCount-1 {
 						log.SysLogger.Errorf("method[%s] param count not match, need: %d, got: %d", name, paramCount-1, len(reqData))
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 					for i := 0; i < len(reqData); i++ {
 						params = append(params, reflect.ValueOf(reqData[i]))
@@ -235,7 +235,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 				default:
 					if paramCount != 2 {
 						log.SysLogger.Errorf("method[%s] param count not match", name)
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 					params = append(params, reflect.ValueOf(req))
 				}
@@ -277,13 +277,13 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 			log.SysLogger.Errorf("service[%s] handle message from caller: %s panic: %v\n trace:%s",
 				h.GetModuleName(), meta.GetSenderPid().String(), r, debug.Stack())
 			data.SetResponse(nil)
-			data.SetError(def.HandleMessagePanic)
+			data.SetError(def.ErrHandleMessagePanic)
 		}
 		h.doResponse(envelope)
 	}()
 	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {
-		data.SetError(def.MethodNotFound)
+		data.SetError(def.ErrMethodNotFound)
 		return
 	}
 	resp, err := call(data.GetRequest())

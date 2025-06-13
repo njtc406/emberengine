@@ -25,7 +25,7 @@ func NewDefaultMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, mid
 
 func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
 	if e.GetPriority() != def.PrioritySys && m.isSuspended() {
-		return def.MailboxNotRunning
+		return def.ErrMailboxNotRunning
 	}
 	return m.workerPool.DispatchEvent(e)
 }

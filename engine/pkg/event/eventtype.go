@@ -40,6 +40,7 @@ const (
 	ServiceGlobalEventTrigger = -2003 // 全局事件系统事件回调
 	ServiceMasterEventTrigger = -2004 // master 事件系统事件回调
 	ServiceSlaverEventTrigger = -2005 // slave 事件系统事件回调
+	ServiceSlaverEventRequest = -2006 // slave 事件系统事件请求
 
 	RpcMsg = -3001 // rpc 消息事件
 

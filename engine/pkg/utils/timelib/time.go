@@ -2,6 +2,9 @@ package timelib
 
 import "time"
 
+// Tips: 服务器的所有时间函数都是用time.Local作为时间源,如果需要用到utc或者其他特殊时区,请自行处理并备注清除
+// 不要直接使用time.Parse解析时间字符串,请使用time.ParseInLocation解析时间字符串,明确指出使用的时区
+
 var timeOffset int64 = 0 // 服务器时间偏移量
 
 // Now 获取服务器当前时间
@@ -41,7 +44,7 @@ func GetDayStartTime(t time.Time) time.Time {
 		t = Now()
 	}
 	year, month, day := t.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
+	return time.Date(year, month, day, 0, 0, 0, 0, time.Local)
 }
 
 // GetDayStartTimeUnix 获取给定时间的当天0点时间戳
@@ -103,8 +106,30 @@ func GetMonthStartEndTime(t time.Time) (int64, int64) {
 		t = Now()
 	}
 	year, month, _ := t.Date()
-	startOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, t.Location())
+	startOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, time.Local)
 	startOfNextMonth := startOfMonth.AddDate(0, 1, 0)
 	endOfMonth := startOfNextMonth.Add(-time.Second)
 	return startOfMonth.Unix(), endOfMonth.Unix()
+}
+
+// ParseDateTime 解析时间字符串并返回时间戳 格式: YYYY:MM:DD HH:mm:ss
+func ParseDateTime(str string) int64 {
+	if str == "" {
+		return 0
+	}
+	if t, err := time.ParseInLocation(time.DateTime, str, time.Local); err == nil {
+		return t.Unix()
+	}
+	return 0
+}
+
+// ParseDateDay 解析时间字符串并返回时间戳 格式: YYYY:MM:DD
+func ParseDateDay(str string) int64 {
+	if str == "" {
+		return 0
+	}
+	if t, err := time.ParseInLocation(time.DateOnly, str, time.Local); err == nil {
+		return t.Unix()
+	}
+	return 0
 }

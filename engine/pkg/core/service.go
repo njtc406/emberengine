@@ -37,9 +37,10 @@ type Service struct {
 	pid  *actor.PID // 服务基础信息
 	name string     // 服务名称
 
-	src    inf.IService // 服务源
-	cfg    interface{}  // 服务配置
-	status int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
+	src                    inf.IService // 服务源
+	cfg                    interface{}  // 服务配置
+	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
+	isPrimarySecondaryMode bool         // 是否是主从模式
 
 	mailbox              inf.IMailbox        // 邮箱
 	eventProcessor       inf.IEventProcessor // 事件管理器
@@ -154,6 +155,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		// 使用系统日志
 		s.logger = log.SysLogger
 	}
+	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
@@ -210,14 +212,34 @@ func (s *Service) Start() error {
 		return err
 	}
 
+	if !s.isPrimarySecondaryMode || s.IsPrivate() {
+		// 没有开启主从模式或者私有服务,那么直接是主服务
+		s.pid.SetMaster(true)
+	}
+
 	// 所有服务都注册到服务列表
 	endpoints.GetEndpointManager().AddService(s)
 	//s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
 	s.setStatus(def.SvcStatusRunning)
 
-	if err := s.src.OnStarted(); err != nil {
-		return err
+	//if err := s.src.OnStarted(); err != nil {
+	//	return err
+	//}
+
+	if s.isPrimarySecondaryMode && !s.IsPrivate() {
+		if s.pid.GetIsMaster() {
+			// 主服务,注册监听从服务
+			//event.GetEventBus().SubscribeMaster()
+		} else {
+			// 先监听主服务事件,防止漏掉某个序列
+
+			// 请求一次主服务的全量数据
+
+			// 成功,则从服务启动完毕
+
+			// 不成功,循环请求,达到最大次数或者超时后,服务启动失败,记录日志并退出
+		}
 	}
 
 	return nil
@@ -283,7 +305,7 @@ func (s *Service) release() {
 
 func (s *Service) PushEvent(evt inf.IEvent) error {
 	if !s.isRunning() {
-		return def.ServiceIsUnavailable
+		return def.ErrServiceIsUnavailable
 	}
 	return s.mailbox.PostMessage(evt)
 }

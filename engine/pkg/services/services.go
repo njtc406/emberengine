@@ -35,19 +35,24 @@ func Init() {
 	defer lock.RUnlock()
 
 	for _, initConf := range config.Conf.ServiceConf.StartServices {
-		if creator, ok := serviceMap[initConf.ServiceName]; ok {
-			log.SysLogger.Infof("Init Service: %s", initConf.ServiceName)
+		if creator, ok := serviceMap[initConf.ClassName]; ok {
+			log.SysLogger.Infof("Init Service: %s", initConf.ClassName)
 			svc := creator()
+			serviceName := initConf.ClassName
+			if initConf.ServiceName != "" {
+				serviceName = initConf.ServiceName
+			}
+			svc.SetName(serviceName)
 			svc.OnSetup(svc)
 			var cfg interface{}
 			//log.SysLogger.Debugf("service[%s] conf: %+v", initConf.ServiceName, config.GetServiceConf(initConf.ServiceName))
-			if serviceConf, ok := config.Conf.ServiceConf.ServicesConfMap[initConf.ServiceName]; ok {
+			if serviceConf, ok := config.Conf.ServiceConf.ServicesConfMap[serviceName]; ok {
 				cfg = serviceConf.Cfg
 			}
 			svc.Init(svc, initConf, cfg)
 			runServices = append(runServices, svc)
 		} else {
-
+			log.SysLogger.Panic("Service[%s] not found", initConf.ClassName)
 		}
 	}
 }

@@ -143,7 +143,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 		if !ok {
 			log.SysLogger.Errorf("No worker available in hash ring")
 			p.mu.RUnlock()
-			return def.EventChannelIsFull
+			return def.ErrEventChannelIsFull
 		}
 		worker, exists = p.workers[workerID]
 	} else {
@@ -155,7 +155,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 
 	if !exists {
 		log.SysLogger.Errorf("Worker %d not found", workerID)
-		return def.EventChannelIsFull
+		return def.ErrEventChannelIsFull
 	}
 	switch evt.GetPriority() {
 	case def.PrioritySys:
@@ -267,14 +267,14 @@ func newWorker(pool *WorkerPool, id int) *Worker {
 
 func (w *Worker) submitUserEvent(e inf.IEvent) error {
 	if !w.userMailbox.Push(e) {
-		return def.EventChannelIsFull
+		return def.ErrEventChannelIsFull
 	}
 	return nil
 }
 
 func (w *Worker) submitSysEvent(e inf.IEvent) error {
 	if !w.systemMailbox.Push(e) {
-		return def.EventChannelIsFull
+		return def.ErrEventChannelIsFull
 	}
 	return nil
 }

@@ -43,7 +43,7 @@ type Module struct {
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	if m.GetEventProcessor() == nil {
-		return 0, def.ModuleNotInitialized
+		return 0, def.ErrModuleNotInitialized
 	}
 
 	pModule := module.GetBaseModule().(*Module)
@@ -57,7 +57,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	}
 
 	if _, ok := m.children[pModule.GetModuleID()]; ok {
-		return 0, def.ModuleHadRegistered
+		return 0, def.ErrModuleHadRegistered
 	}
 
 	pModule.self = module

@@ -138,7 +138,7 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	}
 
 	envelope.GetData().SetResponse(nil)
-	envelope.GetData().SetError(def.RPCCallTimeout)
+	envelope.GetData().SetError(def.ErrRPCCallTimeout)
 
 	if envelope.GetMeta().NeedCallback() {
 		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收

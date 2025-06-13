@@ -276,8 +276,6 @@ func (s *Service1) OnInit() error {
 }
 
 func (s *Service1) OnStart() error {
-	// 只有一个服务,设置为主服务
-	s.GetPid().SetMaster(true)
 	// 测试在onstart阶段call其他服务
 	//s.callTest()
 	return nil
@@ -320,8 +318,6 @@ func (s *Service2) OnInit() error {
 }
 
 func (s *Service2) OnStart() error {
-	// 只有一个服务,设置为主服务
-	s.GetPid().SetMaster(true)
 	//s.AsyncDo(func() bool {
 	//	time.Sleep(time.Second)
 	//	// 创建service1

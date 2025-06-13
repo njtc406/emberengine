@@ -20,16 +20,19 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"google.golang.org/protobuf/proto"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 var bus *Bus
 
 type Bus struct {
-	nc *nats.Conn
+	nc     *nats.Conn // TODO 目前只支持nats,后续再看要不要扩展吧
+	enable atomic.Int32
 
 	// 全体事件(所有订阅的服务都会收到)
-	globalPrefix      string // 全局事件前缀
-	globalLock        *shardedlock.ShardedRWLock
+	globalPrefix      string                             // 全局事件前缀
+	globalLock        *shardedlock.ShardedRWLock         // 用分段锁提升并发能力
 	globalSubscribers map[int32]map[string]inf.IListener // map[事件类型]map[服务唯一id]事件通道
 
 	// 服务器事件(只有相同服务器的订阅会收到)
@@ -37,6 +40,7 @@ type Bus struct {
 	serverLock        *shardedlock.ShardedRWLock
 	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
+	// TODO 之后看把这里面的各个部分做成单独的模块,写一起太乱了
 	// 主从事件(只有订阅的从服务会收到)(用于主从同步)
 	masterPrefix      string
 	masterLock        *shardedlock.ShardedRWLock
@@ -45,7 +49,7 @@ type Bus struct {
 	slaveLock         *shardedlock.ShardedRWLock
 	slaveSubscribers  map[string]inf.IListener // map[服务唯一id]事件通道
 
-	subMap map[string]*nats.Subscription
+	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
 }
 
 func GetEventBus() *Bus {
@@ -116,6 +120,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 			//panic(err)
 		}
 		eb.nc = nc
+		eb.enable.Store(1)
 		eb.globalPrefix = conf.GlobalPrefix
 		if eb.globalPrefix == "" {
 			eb.globalPrefix = def.NatsDefaultGlobalPrefix
@@ -144,14 +149,29 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	eb.globalSubscribers = make(map[int32]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
-
-	eb.subMap = make(map[string]*nats.Subscription)
+	eb.masterLock = shardedlock.NewShardedRWLock(shardCount)
+	eb.masterSubscribers = make(map[string]inf.IListener)
+	eb.slaveLock = shardedlock.NewShardedRWLock(shardCount)
+	eb.slaveSubscribers = make(map[string]inf.IListener)
 }
 
 func (eb *Bus) Stop() {
-	if eb.nc != nil {
+	if eb.nc != nil && eb.enable.CompareAndSwap(1, 0) {
 		eb.nc.Close()
+		eb.nc = nil
 	}
+}
+
+func (eb *Bus) addSub(key string, sub *nats.Subscription) {
+	eb.subMap.Store(key, sub)
+}
+
+func (eb *Bus) loadAndDelSub(key string) (*nats.Subscription, bool) {
+	sub, ok := eb.subMap.LoadAndDelete(key)
+	if !ok {
+		return nil, false
+	}
+	return sub.(*nats.Subscription), true
 }
 
 func (eb *Bus) genKey(format string, args ...interface{}) string {
@@ -169,6 +189,7 @@ func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serv
 		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, uuid.NewString())
 	}
 
+	// TODO 事件中可能还需要带上一个节点信息,好区分是发给哪个从服务的
 	e := &actor.Event{
 		EventType: eventType,
 		Data: &actor.EventData{
@@ -183,7 +204,7 @@ func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serv
 }
 
 func (eb *Bus) isNatsEnabled() bool {
-	return eb.nc != nil
+	return eb.enable.Load() == 1
 }
 
 func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
@@ -201,9 +222,8 @@ func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Me
 		return err
 	}
 	if eb.isNatsEnabled() {
-
 		// 发到nats
-		eventData, err := proto.Marshal(e)
+		eventData, err := e.Marshal()
 		if err != nil {
 			return err
 		}
@@ -323,7 +343,7 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 				eb.publishGlobal(e)
 			}); err == nil {
 				//fmt.Println("subscribe global event from nats success")
-				eb.subMap[key] = subscription
+				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe global event from nats failed, error: %v", err)
 				//fmt.Println("subscribe global event from nats failed, error:", err)
@@ -359,7 +379,7 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 				eb.publishServer(e)
 			}); err == nil {
 				//fmt.Println("subscribe server[", svc.GetServerId(), "] event success")
-				eb.subMap[key] = subscription
+				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe server[%d] event error: %v", svc.GetServerId(), err)
 				//fmt.Println("subscribe server[", svc.GetServerId(), "] event error:", err)
@@ -371,12 +391,11 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 func (eb *Bus) unSubscribe(key string) {
 	// 没有订阅者了,那么取消监听
 	if eb.isNatsEnabled() {
-		if subscription, ok := eb.subMap[key]; ok {
+		if subscription, ok := eb.loadAndDelSub(key); ok {
 			if err := subscription.Unsubscribe(); err != nil {
 				log.SysLogger.Errorf("unsubscribe global event error: %v", err)
 				//fmt.Println("unsubscribe global event error:", err)
 			}
-			delete(eb.subMap, key)
 		}
 	}
 }
@@ -418,124 +437,4 @@ func (eb *Bus) UnSubscribeServer(eventType int32, svc inf.IListener) {
 	if needUnListen {
 		eb.unSubscribe(key)
 	}
-}
-
-func (eb *Bus) publishMaster(e *actor.Event) {
-	key := eb.genKey(eb.masterPrefix, e.ServiceUid)
-	eb.masterLock.RLock(key)
-	defer eb.masterLock.RUnlock(key)
-	if ch, ok := eb.masterSubscribers[e.ServiceUid]; ok {
-		ev := NewEvent()
-		ev.Type = ServiceMasterEventTrigger
-		ev.Data = e
-		ev.Key = e.GetKey()
-		ev.Priority = e.GetPriority()
-		if err := ch.PushEvent(ev); err != nil {
-			ev.Release()
-			log.SysLogger.Errorf("push master event error: %v", err)
-		}
-	}
-}
-
-func (eb *Bus) SubscribeMaster(svc inf.IListener) {
-	serviceUid := svc.GetPid().GetServiceUid()
-	key := eb.genKey(eb.masterPrefix, serviceUid)
-	eb.masterLock.Lock(key)
-	defer eb.masterLock.Unlock(key)
-	eb.masterSubscribers[serviceUid] = svc
-	if eb.isNatsEnabled() {
-		if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
-			// 解析数据
-			e, err := eb.unmarshalEvent(msg.Data)
-			if err != nil {
-				log.SysLogger.Errorf("unmarshal master event error: %v", err)
-				//fmt.Println("unmarshal master event error:", err)
-				return
-			}
-			eb.publishMaster(e)
-		}); err == nil {
-			eb.subMap[key] = subscription
-		} else {
-			log.SysLogger.Errorf("subscribe master[%s] event error: %v", serviceUid, err)
-		}
-	}
-}
-
-func (eb *Bus) UnSubscribeMaster(svc inf.IListener) {
-	serviceUid := svc.GetPid().GetServiceUid()
-	key := eb.genKey(eb.masterPrefix, serviceUid)
-	eb.masterLock.Lock(key)
-	defer eb.masterLock.Unlock(key)
-	delete(eb.masterSubscribers, serviceUid)
-	eb.unSubscribe(key)
-}
-
-func (eb *Bus) PublishMaster(ctx context.Context, svc inf.IListener, data proto.Message) error {
-	serviceUid := svc.GetPid().GetServiceUid()
-	e, err := eb.marshalEvent(ctx, 0, 0, serviceUid, data)
-	if err != nil {
-		return err
-	}
-	if eb.isNatsEnabled() {
-		// 发到nats
-		eventData, err := proto.Marshal(e)
-		if err != nil {
-			return err
-		}
-
-		return eb.nc.Publish(eb.genKey(eb.masterPrefix, serviceUid), eventData)
-	} else {
-		// 同节点内无法做主从,所以直接丢弃
-		return nil
-	}
-}
-
-func (eb *Bus) SubscribeSlaver(svc inf.IListener) {
-	serviceUid := svc.GetPid().GetServiceUid()
-	key := eb.genKey(eb.slavePrefix, serviceUid)
-	eb.slaveLock.Lock(key)
-	defer eb.slaveLock.Unlock(key)
-	eb.slaveSubscribers[serviceUid] = svc
-	if eb.isNatsEnabled() {
-		if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
-			// 解析数据
-			e, err := eb.unmarshalEvent(msg.Data)
-			if err != nil {
-				log.SysLogger.Errorf("unmarshal master event error: %v", err)
-				//fmt.Println("unmarshal master event error:", err)
-				return
-			}
-			eb.publishMaster(e)
-		}); err == nil {
-			eb.subMap[key] = subscription
-		} else {
-			log.SysLogger.Errorf("subscribe master[%s] event error: %v", serviceUid, err)
-		}
-	}
-}
-
-func (eb *Bus) UnSubscribeSlaver(svc inf.IListener) {
-	serviceUid := svc.GetPid().GetServiceUid()
-	key := eb.genKey(eb.slavePrefix, serviceUid)
-	eb.slaveLock.Lock(key)
-	defer eb.slaveLock.Unlock(key)
-	delete(eb.slaveSubscribers, serviceUid)
-	eb.unSubscribe(key)
-}
-
-func (eb *Bus) PublishSlaver(ctx context.Context, svc inf.IListener, data proto.Message) error {
-	serviceUid := svc.GetPid().GetServiceUid()
-	e, err := eb.marshalEvent(ctx, 0, 0, serviceUid, data)
-	if err != nil {
-		return err
-	}
-	if eb.isNatsEnabled() {
-		// 发到nats
-		eventData, err := proto.Marshal(e)
-		if err != nil {
-			return err
-		}
-		return eb.nc.Publish(eb.genKey(eb.slavePrefix, serviceUid), eventData)
-	}
-	return nil
 }

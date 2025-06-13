@@ -69,7 +69,7 @@ func (c *Cluster) PushEvent(ev inf.IEvent) error {
 	select {
 	case c.eventChannel <- ev:
 	default:
-		return def.EventChannelIsFull
+		return def.ErrEventChannelIsFull
 	}
 	return nil
 }
