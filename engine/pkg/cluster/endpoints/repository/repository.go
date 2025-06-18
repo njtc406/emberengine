@@ -121,10 +121,6 @@ func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 
 func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
 	pid := dispatcher.GetPid()
-	if !pid.GetIsMaster() {
-		// 不是主服务,不保存
-		return
-	}
 	serviceUid := pid.GetServiceUid()
 	oldClient, ok := r.mapPID.LoadOrStore(serviceUid, dispatcher)
 	if ok {

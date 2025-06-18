@@ -11,22 +11,27 @@ import (
 	"sync/atomic"
 )
 
-func CreateServiceUid(serverId int32, serviceName, serviceId string) string {
-	return fmt.Sprintf("%s@%d:%s", serviceName, serverId, serviceId)
+const (
+	RoleTypeMaster = "master"
+	RoleTypeSlaver = "slaver"
+)
+
+func CreateServiceUid(serverId int32, serviceName, serviceId, nodeUid string) string {
+	return fmt.Sprintf("%s@%d:%s.%s", serviceName, serverId, serviceId, nodeUid)
 }
 
 func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {
-	serviceUid := CreateServiceUid(serverId, serviceName, serviceID)
 	return &PID{
 		Address:     address,
 		Name:        serviceName,
 		ServiceType: serviceType,
-		ServiceUid:  serviceUid,
+		ServiceId:   serviceID,
 		State:       0,
 		ServerId:    serverId,
 		Version:     version,
 		RpcType:     rpcType,
 		NodeUid:     nodeUid,
+		ServiceUid:  CreateServiceUid(serverId, serviceName, serviceID, nodeUid),
 	}
 }
 
@@ -36,4 +41,11 @@ func IsRetired(pid *PID) bool {
 
 func (pid *PID) SetMaster(master bool) {
 	pid.IsMaster = master
+}
+
+func (pid *PID) GetRoleType() string {
+	if pid.IsMaster {
+		return RoleTypeMaster
+	}
+	return RoleTypeSlaver
 }
