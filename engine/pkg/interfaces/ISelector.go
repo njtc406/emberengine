@@ -7,28 +7,28 @@ package interfaces
 
 import "github.com/njtc406/emberengine/engine/pkg/actor"
 
-type SelectOption struct {
-	ServiceUid  *string
-	ServerId    *int32
-	ServiceName *string
-	ServiceId   *string
-	ServiceType *string
-	IsMaster    *bool
-	NodeUid     *string
-	Version     *int64
-	State       *int32
+// 每条筛选条件
+type PIDPredicate func(pid *actor.PID) bool
+
+// 所有筛选条件的容器
+type FilterCriteria struct {
+	Predicates []PIDPredicate
 }
 
-type SelectorOption func(opt *SelectOption)
+// 用于组合一组筛选条件的构建器函数
+type CriteriaBuilder func(*FilterCriteria)
+
+// 单个构建器（语义清晰）
+type CriteriaFunc = CriteriaBuilder
 
 type ISelector interface {
-	SelectByUid(sender *actor.PID, serviceUid string) IBus
+	//FindOne(sender *actor.PID, serviceUid string) IBus
 
-	Select(sender *actor.PID, options ...SelectorOption) IBus
+	Select(sender *actor.PID, options ...CriteriaBuilder) IBus
 
 	// TODO 这个接口待定,因为可以使用上面的select实现
 	// 只用于搜索从服务
-	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...SelectorOption) IBus
+	//SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...SelectorOption) IBus
 
 	// Select 选择服务
 	//Select(sender *actor.PID, serverId int32, serviceId, serviceName string) IBus

@@ -5,72 +5,67 @@
 // @Update  yr  2024/11/7
 package repository
 
-import (
-	"github.com/njtc406/emberengine/engine/internal/message/msgbus"
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
-)
-
-func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
-	v, ok := r.mapPID.Load(serviceUid)
-	if ok {
-		sender := v.(inf.IRpcDispatcher)
-		if sender != nil && !actor.IsRetired(sender.GetPid()) {
-			return sender
-		}
-	} else {
-		tmpV, ok := r.tmpMapPid.Load(serviceUid)
-		if ok {
-			tmp := tmpV.(*tmpInfo)
-			tmp.latest = timelib.Now()
-			sender := tmp.dispatcher
-			if sender != nil {
-				r.tmpMapPid.Store(serviceUid, tmp)
-				return sender
-			}
-		}
-	}
-	return nil
-}
-
-func (r *Repository) SelectByUid(sender *actor.PID, serviceUid string) inf.IBus {
-	s := r.SelectByServiceUid(sender.GetServiceUid())
-	c := r.SelectByServiceUid(serviceUid)
-	if c != nil && !actor.IsRetired(c.GetPid()) {
-		b := msgbus.NewMessageBus(s, c, nil)
-		return b
-	}
-	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
-}
-
-func (r *Repository) Select(sender *actor.PID, options ...inf.SelectorOption) inf.IBus {
-	s := r.SelectByServiceUid(sender.GetServiceUid())
-
-	opts := &inf.SelectOption{}
-	for _, opt := range options {
-		opt(opts)
-	}
-	var returnList msgbus.MultiBus
-	// 根据options筛选
-	r.mapPID.Range(func(key, value any) bool {
-		c := value.(inf.IRpcDispatcher)
-		var chose bool
-		if opts.ServiceUid != nil && key != opts.ServiceUid {
-			chose = true
-		}
-		if chose {
-			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
-		}
-
-		return true
-	})
-}
-
-func (r *Repository) SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...inf.SelectorOption) inf.IBus {
-	return nil
-}
+//func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
+//	v, ok := r.mapPID.Load(serviceUid)
+//	if ok {
+//		sender := v.(inf.IRpcDispatcher)
+//		if sender != nil && !actor.IsRetired(sender.GetPid()) {
+//			return sender
+//		}
+//	} else {
+//		tmpV, ok := r.tmpMapPid.Load(serviceUid)
+//		if ok {
+//			tmp := tmpV.(*tmpInfo)
+//			tmp.latest = timelib.Now()
+//			sender := tmp.dispatcher
+//			if sender != nil {
+//				r.tmpMapPid.Store(serviceUid, tmp)
+//				return sender
+//			}
+//		}
+//	}
+//	return nil
+//}
+//
+//func (r *Repository) FindOne(sender *actor.PID, serviceUid string) inf.IBus {
+//	s := r.SelectByServiceUid(sender.GetServiceUid())
+//	c := r.SelectByServiceUid(serviceUid)
+//	if c != nil && !actor.IsRetired(c.GetPid()) {
+//		b := msgbus.NewMessageBus(s, c, nil)
+//		return b
+//	}
+//	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
+//}
+//
+//func (r *Repository) Select(sender *actor.PID, builders ...inf.CriteriaBuilder) inf.IBus {
+//	s := r.SelectByServiceUid(sender.GetServiceUid())
+//
+//	criteria := &inf.FilterCriteria{}
+//	for _, build := range builders {
+//		build(criteria)
+//	}
+//
+//	var returnList msgbus.MultiBus
+//	r.mapPID.Range(func(_, value any) bool {
+//		c := value.(inf.IRpcDispatcher)
+//		pid := c.GetPid()
+//
+//		for _, pred := range criteria.Predicates {
+//			if !pred(pid) {
+//				return true
+//			}
+//		}
+//
+//		returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+//		return true
+//	})
+//
+//	return returnList
+//}
+//
+//func (r *Repository) SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...inf.SelectorOption) inf.IBus {
+//	return nil
+//}
 
 // ===============================下面的废弃,使用上面的新接口=============================
 
