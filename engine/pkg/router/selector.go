@@ -11,8 +11,8 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
-func Select(sender *actor.PID, serverId int32, serviceId, serviceName string) inf.IBus {
-	return endpoints.GetEndpointManager().GetRepository().Select(sender, serverId, serviceId, serviceName)
+func Select(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
+	return endpoints.GetEndpointManager().GetRepository().Select(sender, options...)
 }
 
 func SelectByPid(sender, receiver *actor.PID) inf.IBus {
@@ -30,4 +30,8 @@ func SelectByServiceType(sender *actor.PID, serverId int32, serviceType, service
 
 func SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) inf.IBus {
 	return endpoints.GetEndpointManager().GetRepository().SelectByFilterAndChoice(sender, filter, choice)
+}
+
+func SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) inf.IBus {
+	return endpoints.GetEndpointManager().GetRepository().SelectSlavers(sender, serverId, serviceName, serviceId)
 }

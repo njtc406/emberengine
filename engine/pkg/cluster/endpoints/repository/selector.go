@@ -103,7 +103,9 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var returnList msgbus.MultiBus
 	r.mapPID.Range(func(key, value any) bool {
-		if rule(value.(inf.IRpcDispatcher).GetPid()) {
+		c := value.(inf.IRpcDispatcher)
+		pid := c.GetPid()
+		if pid.GetIsMaster() && rule(pid) {
 			returnList = append(returnList, msgbus.NewMessageBus(s, value.(inf.IRpcDispatcher), nil))
 		}
 		return true
@@ -112,11 +114,32 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 	return returnList
 }
 
-func (r *Repository) Select(sender *actor.PID, serverId int32, serviceId, serviceName string) inf.IBus {
+func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
+	s := r.SelectByServiceUid(sender.GetServiceUid())
 	r.mapNodeLock.RLock(sender.GetServiceUid())
 	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
-	serviceUid := actor.CreateServiceUid(serverId, serviceName, serviceId)
-	return r.SelectBySvcUid(sender, serviceUid)
+
+	param := &inf.SelectParam{}
+	for _, build := range options {
+		build(param)
+	}
+
+	nameUidMap, ok := r.mapSvcBySNameAndSUid[*param.ServiceName]
+	if !ok {
+		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
+	}
+
+	var returnList msgbus.MultiBus
+	for serviceUid, _ := range nameUidMap {
+		c := r.SelectByServiceUid(serviceUid)
+		cPid := c.GetPid()
+		// 常规选择只选择主服务
+		if c != nil && !actor.IsRetired(cPid) && (param.ServerId == nil || cPid.GetServerId() == *param.ServerId) && (param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.GetIsMaster() {
+			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+		}
+	}
+
+	return returnList
 }
 
 func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) inf.IBus {
@@ -165,7 +188,8 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serv
 
 	for _, serviceUid := range serviceList {
 		c := r.SelectByServiceUid(serviceUid)
-		if c != nil && !actor.IsRetired(c.GetPid()) && (serverId == 0 || c.GetPid().GetServerId() == serverId) {
+		cPid := c.GetPid()
+		if c != nil && !actor.IsRetired(cPid) && (serverId == 0 || cPid.GetServerId() == serverId) && cPid.GetIsMaster() {
 			list = append(list, msgbus.NewMessageBus(s, c, nil))
 		}
 	}
@@ -188,6 +212,29 @@ func (r *Repository) SelectByFilterAndChoice(sender *actor.PID, filter func(pid 
 	for _, pid := range list {
 		c := r.SelectByServiceUid(pid.GetServiceUid())
 		if c != nil && !actor.IsRetired(c.GetPid()) {
+			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+		}
+	}
+
+	return returnList
+}
+
+func (r *Repository) SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) inf.IBus {
+	s := r.SelectByServiceUid(sender.GetServiceUid())
+	r.mapNodeLock.RLock(sender.GetServiceUid())
+	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
+
+	nameUidMap, ok := r.mapSvcBySNameAndSUid[serviceName]
+	if !ok {
+		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
+	}
+
+	var returnList msgbus.MultiBus
+	for serviceUid, _ := range nameUidMap {
+		c := r.SelectByServiceUid(serviceUid)
+		cPid := c.GetPid()
+		// 常规选择只选择主服务
+		if c != nil && !actor.IsRetired(cPid) && (cPid.GetServerId() == serverId) && (cPid.GetServiceId() == serviceId) && !cPid.GetIsMaster() {
 			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
 		}
 	}

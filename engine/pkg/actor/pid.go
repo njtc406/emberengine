@@ -16,7 +16,7 @@ const (
 	RoleTypeSlaver = "slaver"
 )
 
-func CreateServiceUid(serverId int32, serviceName, serviceId, nodeUid string) string {
+func CreateInstanceId(serverId int32, serviceName, serviceId, nodeUid string) string {
 	// serviceName@serverId:serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
 	return fmt.Sprintf("%s@%d:%s.%s", serviceName, serverId, serviceId, nodeUid)
 }
@@ -32,7 +32,7 @@ func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, ser
 		Version:     version,
 		RpcType:     rpcType,
 		NodeUid:     nodeUid,
-		ServiceUid:  CreateServiceUid(serverId, serviceName, serviceID, nodeUid),
+		ServiceUid:  CreateInstanceId(serverId, serviceName, serviceID, nodeUid),
 	}
 }
 

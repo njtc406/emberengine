@@ -28,7 +28,7 @@ type ISelector interface {
 
 	// TODO 这个接口待定,因为可以使用上面的select实现
 	// 只用于搜索从服务
-	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...SelectorOption) IBus
+	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) IBus
 
 	//Select 选择服务
 	Select(sender *actor.PID, serverId int32, serviceId, serviceName string) IBus

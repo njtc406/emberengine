@@ -18,7 +18,7 @@ type IRpcHandler interface {
 }
 
 type IRpcSelector interface {
-	Select(serverId int32, serviceId, serviceName string) IBus
+	Select(options ...SelectParamBuilder) IBus
 
 	SelectSameServer(serviceId, serviceName string) IBus
 
@@ -39,4 +39,13 @@ type IRpcChannel interface {
 
 type IHttpChannel interface {
 	PushHttpEvent(e interface{}) error
+}
+
+type SelectParamBuilder func(param *SelectParam)
+
+type SelectParam struct {
+	ServerId    *int32
+	ServiceId   *string
+	ServiceName *string
+	ServiceType *string
 }
