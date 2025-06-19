@@ -61,8 +61,9 @@ func (rm *RpcMonitor) listen() {
 			if t == nil {
 				continue
 			}
-			//log.SysLogger.Debugf("RPC monitor starts executing timeout callback:%s", t.GetName())
+			log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", t.GetName())
 			t.Do()
+			log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", t.GetName())
 		case <-rm.closed:
 			return
 		}

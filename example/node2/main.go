@@ -43,6 +43,7 @@ func (s *Service3) RPCSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
 }
 
 func (s *Service3) RpcTestWithError(_ *msg.Msg_Test_Req) (*msg.Msg_Test_Resp, error) {
+	log.SysLogger.Debugf("call %s func RpcTestWithError", s.GetName())
 	return nil, nil
 	//return nil, fmt.Errorf("rpc test")
 }

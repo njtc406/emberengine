@@ -34,17 +34,14 @@ func WithServiceType(serviceType string) inf.SelectParamBuilder {
 // Select 选择服务
 func (h *Handler) Select(options ...inf.SelectParamBuilder) inf.IBus {
 	//log.SysLogger.Debugf("pid:%s", h.GetPid().String())
-	param := &inf.SelectParam{}
-	for _, builder := range options {
-		builder(param)
-	}
-	return router.Select(h.GetPid(), options...)
+	pid := h.GetPid()
+	options = append(options, WithServerId(pid.GetServerId()))
+	return router.Select(pid, options...)
 }
 
 // SelectSameServer 选择相同服务器标识的服务
-func (h *Handler) SelectSameServer(serviceId, serviceName string) inf.IBus {
-	pid := h.GetPid()
-	return router.Select(pid, pid.GetServerId(), serviceId, serviceName)
+func (h *Handler) SelectByOpt(options ...inf.SelectParamBuilder) inf.IBus {
+	return router.Select(h.GetPid(), options...)
 }
 
 func (h *Handler) SelectByPid(receiver *actor.PID) inf.IBus {

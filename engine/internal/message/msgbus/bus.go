@@ -324,6 +324,7 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
+	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	envelope.SetMeta(meta)
@@ -348,6 +349,7 @@ func (mb *MessageBus) sendDirect(ctx context.Context, data inf.IEnvelopeData) er
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
+	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	envelope.SetMeta(meta)

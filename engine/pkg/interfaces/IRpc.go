@@ -18,9 +18,10 @@ type IRpcHandler interface {
 }
 
 type IRpcSelector interface {
+	// 选择相同serverId的服务,如果需要选择其他serverId的服务,使用下面的SelectByOpt
 	Select(options ...SelectParamBuilder) IBus
 
-	SelectSameServer(serviceId, serviceName string) IBus
+	SelectByOpt(options ...SelectParamBuilder) IBus
 
 	SelectByPid(receiver *actor.PID) IBus
 

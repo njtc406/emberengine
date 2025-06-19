@@ -11,7 +11,11 @@ NodeConf:
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
   # 线程池大小
-  AntsPoolSize: 10000
+  AntsPoolSize: 1
+  # 定时器数量(用于监控rpc调用的timer)
+  MonitorTimerSize: 10000
+  # 定时器桶数量(决定锁的粒度)
+  MonitorBucketSize: 20
 
 ClusterConf:
   ETCDConf:
@@ -47,7 +51,8 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
       # 服务ID
-    - ServiceId: 1
+    - ClassName: Service3
+      ServiceId: 1
       # 服务名称
       ServiceName: Service3
       # 服务类型
@@ -66,7 +71,11 @@ ServiceConf:
         # 系统消息队列大小
         SystemMailboxSize: 16
         # 工作线程数量
-        WorkerNum: 10
+        WorkerNum: 1
+        # 是否开启动态线程数调整
+        DynamicWorkerScaling: false
+        # 虚拟线程比例
+        VirtualWorkerRate: 10
 
 # 日志配置
 SystemLogger:

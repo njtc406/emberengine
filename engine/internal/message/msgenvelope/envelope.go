@@ -313,9 +313,8 @@ func (e *MsgEnvelope) SetHeaders(headers dto.Header) {
 	if e.ctx == nil {
 		e.ctx = context.Background()
 	}
-	for k, v := range headers {
-		emberctx.AddHeader(e.ctx, k, v)
-	}
+
+	e.ctx = emberctx.AddHeaders(e.ctx, headers)
 }
 
 func (e *MsgEnvelope) SetHeader(key string, value string) {
@@ -324,7 +323,7 @@ func (e *MsgEnvelope) SetHeader(key string, value string) {
 	if e.ctx == nil {
 		e.ctx = context.Background()
 	}
-	emberctx.AddHeader(e.ctx, key, value)
+	e.ctx = emberctx.AddHeader(e.ctx, key, value)
 }
 
 func (e *MsgEnvelope) SetMeta(meta inf.IEnvelopeMeta) {

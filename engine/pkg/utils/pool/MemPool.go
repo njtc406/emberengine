@@ -2,6 +2,7 @@ package pool
 
 import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"sync"
 )
 
@@ -81,7 +82,8 @@ func (pool *PoolEx) Get() IPoolData {
 
 func (pool *PoolEx) Put(data IPoolData) {
 	if data.IsRef() == false {
-		panic("Repeatedly freeing memory")
+		//panic("Repeatedly freeing memory")
+		log.SysLogger.Panic("Repeatedly freeing memory")
 	}
 	//提前解引用,防止递归释放
 	data.UnRef()

@@ -76,7 +76,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 					fields[k] = v
 				}
 			}
-			log.SysLogger.WithFields(fields).Errorf("duplicate rpc request: %s", req.String())
+			log.SysLogger.WithFields(fields).Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
 			return nil
 		}
 
@@ -88,7 +88,13 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 
 		// 构建消息
 		envelope := msgenvelope.NewMsgEnvelope()
+		if req.Method == "RpcTestWithError" {
+			log.SysLogger.Debugf("===============================%s", req.String())
+		}
 		envelope.SetHeaders(req.MessageHeader)
+		if req.Method == "RpcTestWithError" {
+			log.SysLogger.Debugf("===============================%+v", envelope.GetHeaders())
+		}
 
 		data := msgenvelope.NewData()
 		data.SetMethod(req.Method)

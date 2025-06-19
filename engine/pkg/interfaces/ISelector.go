@@ -26,12 +26,13 @@ type ISelector interface {
 
 	//Select(sender *actor.PID, options ...CriteriaBuilder) IBus
 
-	// TODO 这个接口待定,因为可以使用上面的select实现
+	// TODO 暂时这么写,后续把条件做成query条件
+
 	// 只用于搜索从服务
 	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) IBus
 
 	//Select 选择服务
-	Select(sender *actor.PID, serverId int32, serviceId, serviceName string) IBus
+	Select(sender *actor.PID, options ...SelectParamBuilder) IBus
 
 	// SelectByRule 根据自定义规则选择服务
 	SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus

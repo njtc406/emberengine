@@ -90,6 +90,7 @@ ServiceConf:
         SystemMailboxSize: 16
         # 工作线程数量
         WorkerNum: 1
+      # 是否开启主从模式
       IsPrimarySecondaryMode: true
 
 

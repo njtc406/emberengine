@@ -124,7 +124,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 		build(param)
 	}
 
-	nameUidMap, ok := r.mapSvcBySNameAndSUid[*param.ServiceName]
+	nameUidMap, ok := r.mapSvcBySNameAndSUid[*param.ServiceName] // 不做判断,如果没给serviceName直接崩,免得忘写
 	if !ok {
 		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
 	}

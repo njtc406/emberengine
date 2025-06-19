@@ -288,6 +288,7 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 	}
 	resp, err := call(data.GetRequest())
 	if err != nil {
+		log.SysLogger.WithFields(envelope.GetHeaders().ToFields()).Errorf("method call failed:%v", err)
 		data.SetError(err)
 		return
 	}
