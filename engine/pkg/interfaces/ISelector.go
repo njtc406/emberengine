@@ -24,21 +24,21 @@ type CriteriaFunc = CriteriaBuilder
 type ISelector interface {
 	//FindOne(sender *actor.PID, serviceUid string) IBus
 
-	Select(sender *actor.PID, options ...CriteriaBuilder) IBus
+	//Select(sender *actor.PID, options ...CriteriaBuilder) IBus
 
 	// TODO 这个接口待定,因为可以使用上面的select实现
 	// 只用于搜索从服务
-	//SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...SelectorOption) IBus
+	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...SelectorOption) IBus
 
-	// Select 选择服务
-	//Select(sender *actor.PID, serverId int32, serviceId, serviceName string) IBus
-	//
-	//// SelectByRule 根据自定义规则选择服务
-	//SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus
-	//
-	//SelectByPid(sender, receiver *actor.PID) IBus
-	//
-	//SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) IBus
-	//
-	//SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) IBus
+	//Select 选择服务
+	Select(sender *actor.PID, serverId int32, serviceId, serviceName string) IBus
+
+	// SelectByRule 根据自定义规则选择服务
+	SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus
+
+	SelectByPid(sender, receiver *actor.PID) IBus
+
+	SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) IBus
+
+	SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) IBus
 }
