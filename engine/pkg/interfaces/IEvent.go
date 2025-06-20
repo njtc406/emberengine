@@ -50,18 +50,6 @@ type IEventProcessor interface {
 	// 发布服务器事件
 	PublishServer(ctx context.Context, eventType int32, data proto.Message) error
 
-	// 主节点事件
-	RegMasterEventReceiverFunc(receiver IEventHandler, callback EventCallBack)
-	UnRegMasterEventReceiverFun(receiver IEventHandler)
-	// 发布到从节点
-	PublishToSlaves(ctx context.Context, data proto.Message) error
-
-	// 从节点事件
-	RegSlaverEventReceiverFunc(receiver IEventHandler, callback EventCallBack)
-	UnRegSlaverEventReceiverFun(receiver IEventHandler)
-	// 发布到主节点
-	PublishToMaster(ctx context.Context, data proto.Message) error
-
 	CastEvent(event IEvent) //广播事件
 	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)
 	AddListen(eventType int32, receiver IEventHandler)

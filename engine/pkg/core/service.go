@@ -601,3 +601,7 @@ func (s *Service) IsPrivate() bool {
 func (s *Service) GetLogger() log.ILogger {
 	return s.logger
 }
+
+func (s *Service) IsPrimarySecondaryMode() bool {
+	return s.isPrimarySecondaryMode
+}

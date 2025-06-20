@@ -38,6 +38,7 @@ type IServiceHandler interface {
 	GetServiceCfg() interface{}
 	GetMailbox() IMailbox
 	IsPrivate() bool
+	IsPrimarySecondaryMode() bool
 }
 
 type IIdentifiable interface {

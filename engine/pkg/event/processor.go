@@ -93,29 +93,6 @@ func (p *Processor) PublishServer(ctx context.Context, eventType int32, data pro
 	return GetEventBus().PublishServer(ctx, eventType, p.GetServerId(), data)
 }
 
-func (p *Processor) RegMasterEventReceiverFunc(receiver inf.IEventHandler, callback inf.EventCallBack) {
-	p.RegEventReceiverFunc(ServiceMasterEventTrigger, receiver, callback)
-}
-
-func (p *Processor) UnRegMasterEventReceiverFun(receiver inf.IEventHandler) {
-	p.UnRegEventReceiverFun(ServiceMasterEventTrigger, receiver)
-}
-
-func (p *Processor) PublishToSlaves(ctx context.Context, data proto.Message) error {
-	return GetEventBus().PublishSlaver(ctx, p, data)
-}
-
-func (p *Processor) RegSlaverEventReceiverFunc(receiver inf.IEventHandler, callback inf.EventCallBack) {
-	p.RegEventReceiverFunc(ServiceSlaverEventTrigger, receiver, callback)
-}
-func (p *Processor) UnRegSlaverEventReceiverFun(receiver inf.IEventHandler) {
-	p.UnRegEventReceiverFun(ServiceSlaverEventTrigger, receiver)
-}
-
-func (p *Processor) PublishToMaster(ctx context.Context, data proto.Message) error {
-	return GetEventBus().PublishMaster(ctx, p, data)
-}
-
 // castEvent 广播事件
 func (p *Processor) CastEvent(event inf.IEvent) {
 	if p.mapListenerEvent == nil {

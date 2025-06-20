@@ -123,7 +123,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 		return
 	}
 
-	// TODO 这里有点问题,如果是主从,是在后续的步骤中才会生成主从状态,所以这里会导致添加不进去
+	// 先加入本地集群
 	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
 
 	// 私有服务不发布
@@ -133,11 +133,13 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 
 	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
 
+	// 这是同步执行的
 	// 将服务信息发布到集群
 	ev := event.NewEvent()
 	defer ev.Release()
 	ev.Type = event.SysEventServiceReg
 	ev.Data = pid
+	ev.AnyExt = []any{svc.IsPrimarySecondaryMode()}
 	em.IEventProcessor.EventHandler(ev)
 
 	return

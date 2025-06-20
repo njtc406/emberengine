@@ -25,6 +25,10 @@ type IRpcSelector interface {
 
 	SelectByPid(receiver *actor.PID) IBus
 
+	SelectByServiceUid(receiverServiceUid string) IBus
+
+	SelectSlavers(options ...SelectParamBuilder) IBus
+
 	// SelectByRule 根据自定义规则选择服务
 	SelectByRule(rule func(pid *actor.PID) bool) IBus
 

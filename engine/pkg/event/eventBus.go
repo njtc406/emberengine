@@ -40,15 +40,6 @@ type Bus struct {
 	serverLock        *shardedlock.ShardedRWLock
 	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
-	// TODO 之后看把这里面的各个部分做成单独的模块,写一起太乱了
-	// 主从事件(只有订阅的从服务会收到)(用于主从同步)
-	masterPrefix      string
-	masterLock        *shardedlock.ShardedRWLock
-	masterSubscribers map[string]inf.IListener // map[服务唯一id]事件通道
-	slavePrefix       string
-	slaveLock         *shardedlock.ShardedRWLock
-	slaveSubscribers  map[string]inf.IListener // map[服务唯一id]事件通道
-
 	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
 }
 
@@ -129,14 +120,6 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 		if eb.serverPrefix == "" {
 			eb.serverPrefix = def.NatsDefaultServerPrefix
 		}
-		eb.masterPrefix = conf.MasterPrefix
-		if eb.masterPrefix == "" {
-			eb.masterPrefix = def.NatsDefaultMasterPrefix
-		}
-		eb.slavePrefix = conf.SlavePrefix
-		if eb.slavePrefix == "" {
-			eb.slavePrefix = def.NatsDefaultSlavePrefix
-		}
 		log.SysLogger.Info("==========> nats init success")
 	}
 
@@ -149,10 +132,6 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	eb.globalSubscribers = make(map[int32]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
-	eb.masterLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.masterSubscribers = make(map[string]inf.IListener)
-	eb.slaveLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.slaveSubscribers = make(map[string]inf.IListener)
 }
 
 func (eb *Bus) Stop() {

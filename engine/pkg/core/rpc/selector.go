@@ -92,6 +92,10 @@ func (h *Handler) SelectSameServerByServiceType(serviceType, serviceName string,
 	return returnList
 }
 
-func (h *Handler) SelectSlavers(serverId int32, serviceName, serviceId string) inf.IBus {
-	return router.SelectSlavers(h.GetPid(), serverId, serviceName, serviceId)
+func (h *Handler) SelectSlavers(options ...inf.SelectParamBuilder) inf.IBus {
+	return router.SelectSlavers(h.GetPid(), options...)
+}
+
+func (h *Handler) SelectByServiceUid(receiverServiceUid string) inf.IBus {
+	return router.SelectByServiceUid(h.GetPid(), receiverServiceUid)
 }

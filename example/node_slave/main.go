@@ -27,6 +27,11 @@ func (s *Service111) OnStart() error {
 	return nil
 }
 
+func (s *Service111) OnStarted() error {
+	// 请求主服务数据
+	return nil
+}
+
 func (s *Service111) OnRelease() {
 
 }

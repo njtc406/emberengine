@@ -7,7 +7,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/core"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
@@ -15,30 +14,7 @@ import (
 	"github.com/njtc406/emberengine/example/msg"
 )
 
-type Service111 struct {
-	core.Service
-
-	a int
-}
-
-func (s *Service111) OnInit() error {
-	return nil
-}
-
-func (s *Service111) OnStart() error {
-	return nil
-}
-
-func (s *Service111) OnStarted() error {
-	if s.GetPid().GetIsMaster() {
-		// 如果是主服务,则注册监听从服务的事件
-		// TODO 感觉这里不太对的样子,但是主从同步时应该是自定义的东西,所以好像又是对的
-		s.GetEventProcessor().RegSlaverEventReceiverFunc(s.GetEventHandler(), s.syncMasterDataToSlaver)
-	} else {
-		// 是从服务,监听主服务事件
-		s.GetEventProcessor().RegMasterEventReceiverFunc(s.GetEventHandler(), s.receiveMasterEvent)
-	}
-	return nil
+type data struct {
 }
 
 func (s *Service111) OnRelease() {

@@ -12,9 +12,9 @@ type Event struct {
 	Priority int32
 	Data     interface{}
 
-	IntExt    [2]int64
-	StringExt [2]string
-	AnyExt    [2]any
+	IntExt    []int64
+	StringExt []string
+	AnyExt    []any
 }
 
 var emptyEvent Event

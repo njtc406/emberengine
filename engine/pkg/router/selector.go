@@ -19,6 +19,10 @@ func SelectByPid(sender, receiver *actor.PID) inf.IBus {
 	return endpoints.GetEndpointManager().GetRepository().SelectByPid(sender, receiver)
 }
 
+func SelectByServiceUid(sender *actor.PID, receiverServiceUid string) inf.IBus {
+	return endpoints.GetEndpointManager().GetRepository().SelectBySvcUid(sender, receiverServiceUid)
+}
+
 // SelectByRule 根据自定义规则选择服务
 func SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) inf.IBus {
 	return endpoints.GetEndpointManager().GetRepository().SelectByRule(sender, rule)
@@ -32,6 +36,6 @@ func SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool
 	return endpoints.GetEndpointManager().GetRepository().SelectByFilterAndChoice(sender, filter, choice)
 }
 
-func SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) inf.IBus {
-	return endpoints.GetEndpointManager().GetRepository().SelectSlavers(sender, serverId, serviceName, serviceId)
+func SelectSlavers(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
+	return endpoints.GetEndpointManager().GetRepository().SelectSlavers(sender, options...)
 }
