@@ -53,6 +53,7 @@ type ETCDConf struct {
 	DialTimeout time.Duration // 默认3秒
 	UserName    string
 	Password    string
+	NoLogger    bool `binding:""` // 是否不使用日志
 }
 
 type RPCServer struct {

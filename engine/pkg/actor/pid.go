@@ -50,3 +50,9 @@ func (pid *PID) GetRoleType() string {
 	}
 	return RoleTypeSlaver
 }
+
+func (pid *PID) GetServiceGroup() string {
+	return fmt.Sprintf("%s.%s.%d", pid.GetName(), pid.GetServiceId(), pid.GetServerId())
+}
+
+func (e *Event) IncRef() {}

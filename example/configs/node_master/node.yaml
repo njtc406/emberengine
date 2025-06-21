@@ -17,7 +17,7 @@ ClusterConf:
   ETCDConf:
     # etcd地址
     EndPoints:
-      - 192.168.145.188:2379
+      - ${REMOTE_HOST}:2379
     DialTimeout: 3s
     # etcd用户名
     UserName: root
@@ -33,7 +33,7 @@ ClusterConf:
     - Addr: 0.0.0.0:6641
       Protoc: "tcp"
       Type: "grpc"
-    - Addr: nats://192.168.145.188:4222
+    - Addr: nats://${REMOTE_HOST}:4222
       Protoc: "tcp"
       Type: "nats"
   DiscoveryType: etcd
@@ -48,7 +48,8 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
       # 服务id
-    - ServiceId: 2
+    - ClassName: Service111
+      ServiceId: 2
       # 服务名称
       ServiceName: Service111
       # 服务类型

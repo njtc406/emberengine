@@ -228,7 +228,6 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 
 		for _, ch := range subMap {
 			if err := ch.PushEvent(ev); err != nil {
-				ev.Release()
 				log.SysLogger.Errorf("push global event error: %v", err)
 				//fmt.Println("push global event error:", err)
 			}
@@ -280,7 +279,6 @@ func (eb *Bus) publishServer(e *actor.Event) {
 		if subMap, ok := serverMap[e.ServerId]; ok {
 			for _, ch := range subMap {
 				if err := ch.PushEvent(ev); err != nil {
-					ev.Release()
 					log.SysLogger.Errorf("push server event error: %v", err)
 				}
 			}

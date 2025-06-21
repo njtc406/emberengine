@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/njtc406/emberengine/engine/pkg/config/remote"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -51,12 +52,35 @@ func parseNodeConfig(confPath string) {
 		confPath = defaultConfPath
 	}
 
+	// 1. 加载 .env 文件
+	if err := godotenv.Load(path.Join(confPath, ".env")); err != nil {
+		fmt.Println("No .env file found, fallback to system env")
+		panic(err)
+	}
+
+	fmt.Println("REMOTE_HOST:", os.Getenv("REMOTE_HOST"))
+
+	// 2. 读取原始配置文件（带 ${VAR}）
+	rawYaml, err := os.ReadFile(path.Join(confPath, "node.yaml"))
+	if err != nil {
+		panic(err)
+	}
+
+	// 3. 使用 os.ExpandEnv 替换变量
+	resolvedYaml := os.ExpandEnv(string(rawYaml))
+
 	runtimeViper.SetConfigType("yaml")
-	runtimeViper.SetConfigName("node")
-	runtimeViper.AddConfigPath(confPath)
+	//runtimeViper.SetConfigName("node")
+	//runtimeViper.AddConfigPath(confPath)
 
 	// 解析节点配置
-	parseSystemConfig(runtimeViper, Conf)
+	//parseSystemConfig(runtimeViper, Conf)
+	if err = runtimeViper.ReadConfig(strings.NewReader(resolvedYaml)); err != nil {
+		panic(err)
+	}
+	if err = runtimeViper.Unmarshal(Conf); err != nil {
+		panic(err)
+	}
 
 	// 绑定环境变量(这里需要注意的是,如果在配置中已经配置了,环境变量的优先级是低的一方,即不会覆盖已有配置,所以如果需要使用环境变量配置,就不要配置)
 	runtimeViper.SetEnvPrefix("EMBER_")

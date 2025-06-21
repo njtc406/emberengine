@@ -19,6 +19,7 @@ type IEvent interface {
 	GetKey() string
 	GetPriority() int32
 	Release()
+	IncRef()
 }
 
 type IEventChannel interface {

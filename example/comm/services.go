@@ -18,12 +18,12 @@ type Log struct {
 	Param interface{}
 }
 
+// Service111 测试主从模式服务
 type Service111 struct {
 	core.Service
 
 	version atomic.Uint64
 	a       *TestData
-	log
 }
 
 func (s *Service111) OnInit() error {

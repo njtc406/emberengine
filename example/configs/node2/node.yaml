@@ -21,12 +21,14 @@ ClusterConf:
   ETCDConf:
     # etcd地址
     EndPoints:
-      - 192.168.145.188:2379
+      - ${REMOTE_HOST}:2379
     DialTimeout: 3s
     # etcd用户名
     UserName: root
     # etcd密码
     Password: 123456
+    # 是否开启日志
+    NoLogger: true
   RPCServers:
     # 监听地址
     - Addr: 0.0.0.0:6620
@@ -37,7 +39,7 @@ ClusterConf:
     - Addr: 0.0.0.0:6621
       Protoc: "tcp"
       Type: "grpc"
-    - Addr: nats://192.168.145.188:4222
+    - Addr: nats://${REMOTE_HOST}:4222
       Protoc: "tcp"
       Type: "nats"
   DiscoveryType: etcd

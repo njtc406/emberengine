@@ -30,6 +30,8 @@ ClusterConf:
     UserName: root
     # etcd密码
     Password: 123456
+    # 是否开启日志
+    NoLogger: true
   RPCServers:
     # 监听地址
     - Addr: 0.0.0.0:6610

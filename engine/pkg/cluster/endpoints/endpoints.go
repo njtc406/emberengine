@@ -138,8 +138,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	ev := event.NewEvent()
 	defer ev.Release()
 	ev.Type = event.SysEventServiceReg
-	ev.Data = pid
-	ev.AnyExt = []any{svc.IsPrimarySecondaryMode()}
+	ev.Data = svc
 	em.IEventProcessor.EventHandler(ev)
 
 	return

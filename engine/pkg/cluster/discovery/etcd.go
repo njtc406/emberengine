@@ -139,7 +139,7 @@ package discovery
 //	}
 //
 //	// 先回收watcher的所有key
-//	d.watchers.CloseAll(func(w *serviceWatcher) {
+//	d.watchers.CloseAll(func(w *watcher) {
 //		w.Stop()
 //	})
 //
@@ -265,7 +265,7 @@ package discovery
 //		return
 //	}
 //
-//	watcher = newServiceWatcher(pid, d)
+//	watcher = newWatcher(pid, d)
 //	if err := watcher.Start(); err != nil {
 //		log.SysLogger.Errorf("start service watcher failed: %v", err)
 //		return
@@ -312,24 +312,24 @@ package discovery
 //	return d.client.Watch(ctx, key, options...)
 //}
 //
-//// serviceWatcher 管理单个服务的生命周期
-//type serviceWatcher struct {
+//// watcher 管理单个服务的生命周期
+//type watcher struct {
 //	pid         *actor.PID
 //	discovery   *EtcdDiscovery
 //	leaseID     clientv3.LeaseID
 //	ctx         context.Context
 //	cancel      context.CancelFunc
 //	wg          sync.WaitGroup
-//	watchCtx    context.Context
-//	watchCancel context.CancelFunc
-//	watchWg     sync.WaitGroup
+//	watchMasterCtx    context.Context
+//	watchMasterCancel context.CancelFunc
+//	watchMasterWg     sync.WaitGroup
 //	isMaster    atomic.Bool
 //	closed      atomic.Bool
 //}
 //
-//func newServiceWatcher(pid *actor.PID, d *EtcdDiscovery) *serviceWatcher {
+//func newWatcher(pid *actor.PID, d *EtcdDiscovery) *watcher {
 //	ctx, cancel := context.WithCancel(context.Background())
-//	return &serviceWatcher{
+//	return &watcher{
 //		pid:       pid,
 //		discovery: d,
 //		ctx:       ctx,
@@ -337,7 +337,7 @@ package discovery
 //	}
 //}
 //
-//func (w *serviceWatcher) Start() error {
+//func (w *watcher) Start() error {
 //	if w.closed.Load() {
 //		return nil
 //	}
@@ -353,7 +353,7 @@ package discovery
 //	return nil
 //}
 //
-//func (w *serviceWatcher) Stop() {
+//func (w *watcher) Stop() {
 //	if w.closed.CompareAndSwap(false, true) {
 //		w.stopWatchMaster()
 //		// 释放租约,会自动删除关联的rpckey和masterkey
@@ -363,18 +363,18 @@ package discovery
 //	}
 //}
 //
-//func (w *serviceWatcher) IsMaster() bool {
+//func (w *watcher) IsMaster() bool {
 //	return w.isMaster.Load()
 //}
 //
-//func (w *serviceWatcher) releaseLease() {
+//func (w *watcher) releaseLease() {
 //	if w.leaseID != 0 {
 //		_, _ = w.discovery.client.Revoke(context.Background(), w.leaseID)
 //		w.leaseID = 0
 //	}
 //}
 //
-//func (w *serviceWatcher) initLease() error {
+//func (w *watcher) initLease() error {
 //	resp, err := w.discovery.client.Grant(context.Background(), w.discovery.conf.DiscoveryConf.TTL)
 //	if err != nil {
 //		return fmt.Errorf("create lease failed: %w", err)
@@ -384,7 +384,7 @@ package discovery
 //	return nil
 //}
 //
-//func (w *serviceWatcher) keepaliveLoop() {
+//func (w *watcher) keepaliveLoop() {
 //	defer func() {
 //		if err := recover(); err != nil {
 //			log.SysLogger.Errorf("etcd keepalive error: %v", err)
@@ -413,7 +413,7 @@ package discovery
 //	}
 //}
 //
-//func (w *serviceWatcher) keepalive() {
+//func (w *watcher) keepalive() {
 //	log.SysLogger.Debug("discovery watcher keepalive start")
 //	defer func() {
 //		if err := recover(); err != nil {
@@ -446,7 +446,7 @@ package discovery
 //}
 //
 //// electMaster 选举主节点
-//func (w *serviceWatcher) electMaster() {
+//func (w *watcher) electMaster() {
 //	masterKey := path.Join(
 //		w.discovery.conf.DiscoveryConf.MasterPath,
 //		w.pid.GetServiceUid(),
@@ -495,11 +495,11 @@ package discovery
 //
 //SLAVE:
 //	// 从节点监听主节点变化
-//	w.watchWg.Add(1)
+//	w.watchMasterWg.Add(1)
 //	go w.startWatchMaster(masterKey)
 //}
 //
-//func (w *serviceWatcher) registerService() error {
+//func (w *watcher) registerService() error {
 //	servicePath := path.Join(w.discovery.conf.DiscoveryConf.Path, w.pid.GetServiceUid())
 //	pidData, err := protojson.Marshal(w.pid)
 //	if err != nil {
@@ -515,14 +515,14 @@ package discovery
 //}
 //
 //// startWatchMaster 监听主节点变化
-//func (w *serviceWatcher) startWatchMaster(masterKey string) {
-//	defer w.watchWg.Done()
+//func (w *watcher) startWatchMaster(masterKey string) {
+//	defer w.watchMasterWg.Done()
 //	ctx, cancel := context.WithCancel(context.Background())
-//	w.watchCtx = ctx
-//	w.watchCancel = cancel
+//	w.watchMasterCtx = ctx
+//	w.watchMasterCancel = cancel
 //	defer func() {
-//		w.watchCtx = nil
-//		w.watchCancel = nil
+//		w.watchMasterCtx = nil
+//		w.watchMasterCancel = nil
 //	}()
 //	watchChan := w.discovery.watchKey(ctx, masterKey)
 //	log.SysLogger.Infof("watching master key: %s leaseId:%d", masterKey, w.leaseID)
@@ -531,7 +531,7 @@ package discovery
 //		select {
 //		case <-w.ctx.Done():
 //			return
-//		case <-w.watchCtx.Done():
+//		case <-w.watchMasterCtx.Done():
 //			return
 //		case resp := <-watchChan:
 //			if resp.Err() != nil {
@@ -551,10 +551,10 @@ package discovery
 //	}
 //}
 //
-//func (w *serviceWatcher) stopWatchMaster() {
-//	if w.watchCancel != nil {
-//		w.watchCancel()
-//		w.watchWg.Wait()
+//func (w *watcher) stopWatchMaster() {
+//	if w.watchMasterCancel != nil {
+//		w.watchMasterCancel()
+//		w.watchMasterWg.Wait()
 //	}
 //}
 //
@@ -567,29 +567,29 @@ package discovery
 //	return &watcherManager{}
 //}
 //
-//func (m *watcherManager) Add(key string, watcher *serviceWatcher) {
+//func (m *watcherManager) Add(key string, watcher *watcher) {
 //	m.watchers.Store(key, watcher)
 //}
 //
-//func (m *watcherManager) Get(key string) *serviceWatcher {
+//func (m *watcherManager) Get(key string) *watcher {
 //	v, ok := m.watchers.Load(key)
 //	if !ok {
 //		return nil
 //	}
-//	return v.(*serviceWatcher)
+//	return v.(*watcher)
 //}
 //
-//func (m *watcherManager) Remove(key string) *serviceWatcher {
+//func (m *watcherManager) Remove(key string) *watcher {
 //	v, ok := m.watchers.LoadAndDelete(key)
 //	if !ok {
 //		return nil
 //	}
-//	return v.(*serviceWatcher)
+//	return v.(*watcher)
 //}
 //
-//func (m *watcherManager) CloseAll(f func(w *serviceWatcher)) {
+//func (m *watcherManager) CloseAll(f func(w *watcher)) {
 //	m.watchers.Range(func(key, value interface{}) bool {
-//		if watcher, ok := value.(*serviceWatcher); ok {
+//		if watcher, ok := value.(*watcher); ok {
 //			f(watcher)
 //		}
 //		return true

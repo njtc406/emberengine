@@ -470,6 +470,10 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	return msg
 }
 
+func (e *MsgEnvelope) IncRef() {
+
+}
+
 func (e *MsgEnvelope) Release() {
 	if e.IsRef() {
 		//count--
