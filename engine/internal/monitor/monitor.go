@@ -134,7 +134,7 @@ func (rm *RpcMonitor) Get(seqId uint64) inf.IEnvelope {
 
 func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 	if !envelope.IsRef() {
-		log.SysLogger.WithContext(envelope.GetContext()).Debug("envelope is not ref")
+		//log.SysLogger.WithContext(envelope.GetContext()).Debug("envelope is not ref")
 		return // 已经被释放,丢弃
 	}
 

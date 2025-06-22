@@ -46,7 +46,7 @@ func init() {
 func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf) error {
 	if len(conf.ETCDConf.Endpoints) == 0 {
 		// 允许不使用服务发现,所有调用服务都是本地服务
-		log.SysLogger.Info("etcd end points is empty")
+		log.SysLogger.Debugf("etcd end points is empty")
 		return nil
 	}
 
@@ -158,7 +158,7 @@ func (e *EtcdDiscovery) onUnregister(ev inf.IEvent) {
 	}
 	ent := ev.(*event.Event)
 	pid := ent.Data.(*actor.PID)
-	log.SysLogger.Infof("*****************************************service[%s] unregistered", pid.GetServiceUid())
+	//log.SysLogger.Debugf("*****************************************service[%s] unregistered", pid.GetServiceUid())
 	if v, ok := e.watchers.LoadAndDelete(pid.GetServiceUid()); ok {
 		v.(*watcher).Stop()
 	}

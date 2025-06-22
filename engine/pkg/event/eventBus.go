@@ -120,7 +120,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 		if eb.serverPrefix == "" {
 			eb.serverPrefix = def.NatsDefaultServerPrefix
 		}
-		log.SysLogger.Info("==========> nats init success")
+		log.SysLogger.Debug("==========> nats init success")
 	}
 
 	var shardCount = def.NatsDefaultShardCount
