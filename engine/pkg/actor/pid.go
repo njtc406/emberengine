@@ -17,8 +17,8 @@ const (
 )
 
 func CreateInstanceId(serverId int32, serviceName, serviceId, nodeUid string) string {
-	// serviceName@serverId:serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
-	return fmt.Sprintf("%s@%d:%s.%s", serviceName, serverId, serviceId, nodeUid)
+	// serverId.serviceName.serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
+	return fmt.Sprintf("%d.%s.%s.%s", serverId, serviceName, serviceId, nodeUid)
 }
 
 func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {

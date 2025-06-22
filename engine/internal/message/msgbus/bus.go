@@ -370,8 +370,8 @@ type MultiBus []internalBus
 
 func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to call %s", method)
-		return def.ErrServiceIsUnavailable
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", method)
+		return def.ErrSelectEmptyResult
 	}
 
 	if len(m) > 1 {
@@ -388,8 +388,8 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to async call %s", method)
-		return nil, def.ErrServiceIsUnavailable
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", method)
+		return nil, def.ErrSelectEmptyResult
 	}
 	if len(m) > 1 {
 		// 释放所有节点
@@ -404,8 +404,9 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 
 func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to send %s", method)
-		return def.ErrServiceIsUnavailable
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", method)
+		return nil
+		//return def.ErrSelectEmptyResult
 	}
 	var errs []error
 	envelopeData := msgenvelope.NewData()

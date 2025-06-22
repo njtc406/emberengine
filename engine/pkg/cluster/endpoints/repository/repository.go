@@ -23,8 +23,9 @@ type tmpInfo struct {
 }
 
 type Repository struct {
-	mapPID         *sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
-	tmpMapPid      *sync.Map // 临时服务 [serviceUid]tmpInfo
+	keyMap         sync.Map
+	mapPID         sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
+	tmpMapPid      sync.Map // 临时服务 [serviceUid]tmpInfo
 	tmpMapStrategy func(*tmpInfo) bool
 
 	ticker *time.Ticker
@@ -38,8 +39,6 @@ type Repository struct {
 
 func NewRepository() *Repository {
 	return &Repository{
-		mapPID:               new(sync.Map),
-		tmpMapPid:            new(sync.Map),
 		ticker:               time.NewTicker(time.Second * 10),
 		mapNodeLock:          shardedlock.NewShardedRWLock(64), // 之后改为配置表
 		mapSvcBySNameAndSUid: make(map[string]map[string]struct{}),
@@ -122,8 +121,12 @@ func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 	return dispatcher
 }
 
-func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
+func (r *Repository) Add(key string, dispatcher inf.IRpcDispatcher) {
+
 	pid := dispatcher.GetPid()
+	if key != "" {
+		r.keyMap.Store(key, pid.GetServiceUid())
+	}
 	serviceUid := pid.GetServiceUid()
 	oldClient, ok := r.mapPID.LoadOrStore(serviceUid, dispatcher)
 	if ok {
@@ -169,7 +172,15 @@ func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
 }
 
 func (r *Repository) Remove(key string) {
-	ret, ok := r.mapPID.LoadAndDelete(key)
+	if key == "" {
+		return
+	}
+	val, ok := r.keyMap.LoadAndDelete(key)
+	if !ok {
+		return
+	}
+	serviceUid := val.(string)
+	ret, ok := r.mapPID.LoadAndDelete(serviceUid)
 	if !ok {
 		return
 	}
@@ -180,7 +191,6 @@ func (r *Repository) Remove(key string) {
 	r.mapNodeLock.Lock(key)
 	defer r.mapNodeLock.Unlock(key)
 	serviceName := pid.GetName()
-	serviceUid := pid.GetServiceUid()
 	serviceType := pid.GetServiceType()
 
 	nameMap, ok := r.mapSvcBySNameAndSUid[serviceName]

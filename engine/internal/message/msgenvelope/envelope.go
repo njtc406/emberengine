@@ -189,81 +189,136 @@ type Data struct {
 	needResp    bool        // 是否需要回复
 	err         error       // 错误
 	requestBuff []byte      // 编码好的数据
+	typeName    string      // 类型名
 }
 
 func (e *Data) Reset() {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.method = ""
 	e.reply = false
 	e.request = nil
 	e.response = nil
 	e.needResp = false
 	e.err = nil
+	e.requestBuff = e.requestBuff[:0]
+	e.typeName = ""
 }
 
 func (e *Data) SetMethod(method string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.method = method
 }
 
 func (e *Data) SetReply() {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.reply = true
 }
 
 func (e *Data) SetRequest(req interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.request = req
 }
 
 func (e *Data) SetResponse(res interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.response = res
 }
 
 func (e *Data) SetError(err error) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.err = err
 }
 
 func (e *Data) SetErrStr(err string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	if err == "" {
+		e.err = nil
+		return
+	}
 	e.err = errors.New(err)
 }
 
 func (e *Data) SetNeedResponse(need bool) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.needResp = need
 }
 
 func (e *Data) SetRequestBuff(reqBuff []byte) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
 	e.requestBuff = reqBuff
 }
 
 func (e *Data) GetMethod() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.method
 }
 
 func (e *Data) GetRequest() interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.request
 }
 
 func (e *Data) GetResponse() interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.response
 }
 
 func (e *Data) GetError() error {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.err
 }
 
 func (e *Data) GetErrStr() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	if e.err == nil {
 		return ""
 	}
 	return e.err.Error()
 }
 
-func (e *Data) GetRequestBuff() []byte {
-	return e.requestBuff
+func (e *Data) GetRequestBuff(tpId int32) ([]byte, string, error) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+
+	if e.request == nil {
+		log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] request is nil", e.method)
+		return nil, "", nil
+	}
+
+	if len(e.requestBuff) > 0 {
+		log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] user requestBuff cache data", e.method)
+		return e.requestBuff, e.typeName, e.err
+	}
+
+	e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
+	log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] serialize request data success", e.method)
+
+	return e.requestBuff, e.typeName, e.err
 }
 
 func (e *Data) IsReply() bool {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.reply
 }
 
 func (e *Data) NeedResponse() bool {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
 	return e.needResp
 }
 
@@ -288,10 +343,6 @@ func (e *MsgEnvelope) Reset() {
 	e.ctx = nil
 	if e.meta != nil {
 		e.meta.Reset()
-	}
-
-	if e.data != nil {
-		e.data.Reset()
 	}
 }
 
@@ -441,20 +492,13 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	var typeName string
 	var err error
 
-	if byteData = e.data.GetRequestBuff(); byteData != nil {
-		// 有缓存,直接使用缓存
-		msg.Request = byteData
-	} else {
-		if req := e.data.GetRequest(); req != nil {
-			byteData, typeName, err = serializer.Serialize(req, msg.TypeId)
-			if err != nil {
-				log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
-				return nil
-			}
-			msg.Request = byteData
-			e.data.SetRequestBuff(byteData) // 写入缓存,之后的其他公用数据就不用打包了
-		}
+	byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
+	if err != nil {
+		log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
+		return nil
 	}
+
+	msg.Request = byteData
 
 	if resp := e.data.GetResponse(); resp != nil {
 		byteData, typeName, err = serializer.Serialize(resp, msg.TypeId)
@@ -463,6 +507,7 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 			return nil
 		}
 		msg.Response = byteData
+		// TODO 这里要不要置空返回,按理一个返回只能有一个人取
 	}
 
 	msg.TypeName = typeName
@@ -471,7 +516,8 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 }
 
 func (e *MsgEnvelope) IncRef() {
-
+	// envelope不会被并发处理,每个envelope只会被唯一一个服务处理,只有data是共享
+	// 所以不需要引用计数
 }
 
 func (e *MsgEnvelope) Release() {

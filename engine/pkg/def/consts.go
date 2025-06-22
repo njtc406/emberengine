@@ -79,8 +79,10 @@ const (
 )
 
 const (
-	PriorityUser = 0 // 用户事件
-	PrioritySys  = 1 // 系统事件
+	PriorityUser    = 0 // 用户事件
+	PriorityUserStr = "0"
+	PrioritySys     = 1 // 系统事件
+	PrioritySysStr  = "1"
 )
 
 const (

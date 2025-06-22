@@ -1,6 +1,10 @@
 package emberctx
 
-import "context"
+import (
+	"context"
+	"github.com/google/uuid"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+)
 
 type contextKey struct{}
 
@@ -34,14 +38,9 @@ func AddHeader(ctx context.Context, key, value string) context.Context {
 		headers = make(map[string]string)
 	}
 
-	// 创建一个新 map 而不是直接修改
-	newHeaders := make(map[string]string, len(headers)+1)
-	for k, v := range headers {
-		newHeaders[k] = v
-	}
-	newHeaders[key] = value
+	headers[key] = value
 
-	return WithHeader(ctx, newHeaders)
+	return WithHeader(ctx, headers)
 }
 
 func AddHeaders(ctx context.Context, newHeaders map[string]string) context.Context {
@@ -72,4 +71,22 @@ func GetHeaderValue(ctx context.Context, key string) string {
 		return ""
 	}
 	return headers[key]
+}
+
+type Option func(ctx context.Context)
+
+func WithKV(key, value string) Option {
+	return func(ctx context.Context) {
+		AddHeader(ctx, key, value)
+	}
+}
+
+func NewCtx(options ...Option) context.Context {
+	ctx := AddHeaders(context.Background(), map[string]string{
+		def.DefaultTraceIdKey: uuid.NewString(),
+	})
+	for _, option := range options {
+		option(ctx)
+	}
+	return ctx
 }

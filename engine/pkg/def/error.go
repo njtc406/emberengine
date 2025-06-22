@@ -37,6 +37,7 @@ var (
 	ErrCantFoundRedisClient      = errors.New("cant found redis client")                   // 未找到 redis 客户端
 	ErrMysqlNotInit              = errors.New("mysql not init")                            // mysql 未初始化
 	ErrPrimarySecondNotSupported = errors.New("primary second not supported")              // 不支持主从
+	ErrSelectEmptyResult         = errors.New("select empty result")                       // 查询结果为空
 )
 
 //type RpcErr string

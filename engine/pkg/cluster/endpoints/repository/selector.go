@@ -228,19 +228,18 @@ func (r *Repository) SelectSlavers(sender *actor.PID, options ...inf.SelectParam
 	for _, build := range options {
 		build(param)
 	}
-
+	var returnList msgbus.MultiBus
 	if param.ServiceName == nil || param.ServerId == nil {
-		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
+		return returnList
 	}
 
 	serviceName := *param.ServiceName
 
 	nameUidMap, ok := r.mapSvcBySNameAndSUid[serviceName]
 	if !ok {
-		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
+		return returnList
 	}
 
-	var returnList msgbus.MultiBus
 	for serviceUid, _ := range nameUidMap {
 		c := r.SelectByServiceUid(serviceUid)
 		cPid := c.GetPid()

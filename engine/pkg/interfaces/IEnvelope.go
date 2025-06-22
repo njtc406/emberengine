@@ -91,7 +91,7 @@ type IEnvelopeData interface {
 	GetResponse() interface{}
 	GetError() error
 	GetErrStr() string
-	GetRequestBuff() []byte
+	GetRequestBuff(int32) ([]byte, string, error)
 
 	// Check
 

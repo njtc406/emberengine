@@ -1,0 +1,26 @@
+syntax = "proto3";
+package login_msg;
+option go_package = ".;msg";
+
+message TestData {
+  int32 A = 1;
+  int32 B = 2;
+  int64 Version = 3;
+}
+
+message TestGetAllDataResp {
+    TestData data = 1;
+}
+
+message TestLog {
+  int32 Opt = 1;
+  int32 Param = 2;
+  int64 Version = 3;
+}
+
+message EmptyReq {}
+message EmptyResp {}
+
+service TestService {
+  rpc TestFun(EmptyReq) returns (EmptyResp);
+}

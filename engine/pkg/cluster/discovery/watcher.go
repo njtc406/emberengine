@@ -65,8 +65,8 @@ func (w *watcher) Start() error {
 func (w *watcher) Stop() {
 	if w.started.CompareAndSwap(true, false) {
 		w.cancel()
-		w.stopWatchMaster()
-		w.releaseLease()
+		w.releaseLease()    // 先释放租约
+		w.stopWatchMaster() // 关闭master监听
 		w.wg.Wait()
 	}
 }
@@ -117,7 +117,7 @@ func (w *watcher) initLease() error {
 	if err != nil {
 		return fmt.Errorf("create lease failed: %w", err)
 	}
-	w.releaseLease()
+	w.releaseLease() // 等新的租约申请成功,再释放老的租约,防止key抖动
 	w.leaseID = resp.ID
 	return nil
 }
@@ -206,14 +206,14 @@ func (w *watcher) electMaster() (err error) {
 			log.SysLogger.Errorf("register service to etcd failed: %v\n stack:%s", err, debug.Stack())
 			return err
 		}
-
-		// 通知主状态
-		w.notifyService(event.ServiceBecomeMaster)
 		return
 	}
 
 	pid := w.svc.GetPid()
 	masterKey := path.Join(w.discovery.conf.DiscoveryConf.MasterPath, pid.GetServiceGroup()) // 使用分组key,主从是相同的
+
+	log.SysLogger.Debugf("=======================try to elect master, masterKey: %s", masterKey)
+
 	w.stopWatchMaster()
 
 	isMaster := w.IsMaster()
@@ -223,7 +223,7 @@ func (w *watcher) electMaster() (err error) {
 
 	if isMaster {
 		// 原来是主服务,现在降级
-		w.notifyService(event.ServiceLoseMaster)
+		w.notifyService(event.ServiceLoseMaster, isMaster)
 	}
 
 	if !isEtcdClientConnected(w.discovery.client) {
@@ -250,21 +250,22 @@ func (w *watcher) electMaster() (err error) {
 		w.isMaster.Store(true)
 		pid.SetMaster(true)
 		// 通知主状态
-		w.notifyService(event.ServiceBecomeMaster)
+		w.notifyService(event.ServiceBecomeMaster, isMaster)
 		return
 	}
 
 Slave:
 	w.watchMasterWg.Add(1)
 	go w.startWatchMaster(masterKey)
-	w.notifyService(event.ServiceBecomeSlaver)
+	w.notifyService(event.ServiceBecomeSlaver, isMaster)
 	return
 }
 
-func (w *watcher) notifyService(evtType int32) {
+func (w *watcher) notifyService(evtType int32, oldStateIsMaster bool) {
 	evt := event.NewEvent()
 	evt.Type = evtType
 	evt.Priority = def.PrioritySys
+	evt.Data = oldStateIsMaster
 	if err := w.svc.PushEvent(evt); err != nil {
 		log.SysLogger.Errorf("push event[%d] error: %v", evtType, err)
 	}
