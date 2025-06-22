@@ -37,7 +37,7 @@ func newNatsClient(addr string) inf.IRpcSender {
 		conn: conn,
 	}
 
-	log.SysLogger.Infof("nats client connect success:%s", addr)
+	log.SysLogger.Debugf("nats client connect success:%s", addr)
 
 	return sender
 }

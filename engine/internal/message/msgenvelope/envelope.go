@@ -295,17 +295,14 @@ func (e *Data) GetRequestBuff(tpId int32) ([]byte, string, error) {
 	defer e.locker.Unlock()
 
 	if e.request == nil {
-		log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] request is nil", e.method)
 		return nil, "", nil
 	}
 
 	if len(e.requestBuff) > 0 {
-		log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] user requestBuff cache data", e.method)
 		return e.requestBuff, e.typeName, e.err
 	}
 
 	e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
-	log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] serialize request data success", e.method)
 
 	return e.requestBuff, e.typeName, e.err
 }

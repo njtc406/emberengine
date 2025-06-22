@@ -240,7 +240,7 @@ func (p *WorkerPool) autoScaleWorkers() {
 			p.mu.RUnlock()
 
 			if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
-				log.SysLogger.Infof("resizing from %d -> %d: %s", current, newSize, reason)
+				log.SysLogger.Debugf("resizing from %d -> %d: %s", current, newSize, reason)
 				p.resizeWorkers(newSize)
 			}
 		}

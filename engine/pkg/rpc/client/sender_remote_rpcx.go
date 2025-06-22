@@ -43,7 +43,7 @@ func newRpcxClient(addr string) inf.IRpcSender {
 		rpcClient: rpcClient,
 	}
 
-	log.SysLogger.Infof("create remote client success : %s", addr)
+	log.SysLogger.Debugf("create remote client success : %s", addr)
 	return remoteClient
 }
 

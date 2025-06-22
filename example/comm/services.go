@@ -171,7 +171,7 @@ func (s *Service111) becomeSlaver(e inf.IEvent) {
 	}
 	s.queueCache = s.queueCache[:0]
 
-	s.GetLogger().Infof("become slaver")
+	s.GetLogger().Debugf("become slaver")
 }
 
 func (s *Service111) loseMaster(e inf.IEvent) {

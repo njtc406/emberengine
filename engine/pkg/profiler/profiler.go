@@ -208,7 +208,7 @@ func DefaultReportFunction(name string, callNum int, costTime time.Duration, rec
 	}
 
 	// TODO 后面在看这个日志写在哪里
-	log.SysLogger.Infof("report: %s", strReport)
+	log.SysLogger.Debugf("report: %s", strReport)
 }
 
 func Report() {

@@ -141,7 +141,7 @@ func (w *watcher) keepaliveLoop() {
 	for {
 		select {
 		case <-w.ctx.Done():
-			log.SysLogger.Infof("watcher[%s] exit", w.svc.GetPid().GetServiceUid())
+			log.SysLogger.Debugf("watcher[%s] exit", w.svc.GetPid().GetServiceUid())
 			return
 		default:
 			w.keepalive()
@@ -212,7 +212,7 @@ func (w *watcher) electMaster() (err error) {
 	pid := w.svc.GetPid()
 	masterKey := path.Join(w.discovery.conf.DiscoveryConf.MasterPath, pid.GetServiceGroup()) // 使用分组key,主从是相同的
 
-	log.SysLogger.Debugf("=======================try to elect master, masterKey: %s", masterKey)
+	//log.SysLogger.Debugf("=======================try to elect master, masterKey: %s", masterKey)
 
 	w.stopWatchMaster()
 
@@ -303,7 +303,7 @@ func (w *watcher) startWatchMaster(masterKey string) {
 			}
 			for _, ev := range resp.Events {
 				if ev.Type == clientv3.EventTypeDelete {
-					log.SysLogger.Infof("master node lost, re-electing")
+					log.SysLogger.Debugf("master node lost, re-electing")
 					go w.electMaster()
 					return
 				}

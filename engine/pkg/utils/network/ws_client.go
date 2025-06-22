@@ -40,23 +40,23 @@ func (client *WSClient) init() {
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.SysLogger.Infof("invalid ConnNum reset: %d", client.ConnNum)
+		log.SysLogger.Debugf("invalid ConnNum reset: %d", client.ConnNum)
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.SysLogger.Infof("invalid ConnectInterval reset: %d", client.ConnectInterval)
+		log.SysLogger.Debugf("invalid ConnectInterval reset: %d", client.ConnectInterval)
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 100
-		log.SysLogger.Infof("invalid PendingWriteNum reset: %d", client.PendingWriteNum)
+		log.SysLogger.Debugf("invalid PendingWriteNum reset: %d", client.PendingWriteNum)
 	}
 	if client.MaxMsgLen <= 0 {
 		client.MaxMsgLen = 4096
-		log.SysLogger.Infof("invalid MaxMsgLen reset: %d", client.MaxMsgLen)
+		log.SysLogger.Debugf("invalid MaxMsgLen reset: %d", client.MaxMsgLen)
 	}
 	if client.HandshakeTimeout <= 0 {
 		client.HandshakeTimeout = 10 * time.Second
-		log.SysLogger.Infof("invalid HandshakeTimeout reset: %d", client.HandshakeTimeout)
+		log.SysLogger.Debugf("invalid HandshakeTimeout reset: %d", client.HandshakeTimeout)
 	}
 	if client.NewAgent == nil {
 		log.SysLogger.Fatal("NewAgent must not be nil")
@@ -83,7 +83,7 @@ func (client *WSClient) dial() *websocket.Conn {
 			return conn
 		}
 
-		log.SysLogger.Infof("connect fail, addr: %s, error: %v", client.Addr, err)
+		log.SysLogger.Debugf("connect fail, addr: %s, error: %v", client.Addr, err)
 		time.Sleep(client.ConnectInterval)
 		continue
 	}
