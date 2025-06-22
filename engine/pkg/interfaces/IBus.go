@@ -15,12 +15,10 @@ import (
 type IBus interface {
 	// Call 同步调用服务
 	Call(ctx context.Context, method string, in, out interface{}) error
+
 	// AsyncCall 异步调用服务
 	AsyncCall(ctx context.Context, method string, in interface{}, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
+
 	// Send 无返回调用
 	Send(ctx context.Context, method string, in interface{}) error
-	// Cast 广播
-	Cast(ctx context.Context, method string, in interface{})
-
-	// TODO 后续如有需要,可以考虑添加单独的多call接口,比如MultiCall,里面分别call所有服务，等待所有服务都返回之后，返回一个结果集，某些特殊场景可能会用到
 }

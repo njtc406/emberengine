@@ -160,7 +160,7 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 				multiOut++
 			}
 		} else if t.Kind() == reflect.Struct {
-			return def.InputParamCantUseStruct
+			return def.ErrInputParamCantUseStruct
 		} else {
 			multiOut++
 		}
@@ -192,13 +192,13 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 			if req == nil {
 				if fixedCount > 0 {
 					log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: 0", name, fixedCount)
-					return nil, def.InputParamNotMatch
+					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				if reqSlice, ok := req.([]interface{}); ok {
 					if len(reqSlice) < fixedCount {
 						log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: %d", name, fixedCount, len(reqSlice))
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 
 					// 如果请求参数有多个,直接添加到参数列表中
@@ -209,7 +209,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 					if fixedCount > 0 {
 						// 只有一个可变参,就不允许有多个参数
 						log.SysLogger.Errorf("method[%s] param count not match", name)
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 					// 否则只有一个参数
 					params = append(params, reflect.ValueOf(req))
@@ -220,14 +220,14 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 			if req == nil {
 				if paramCount != 1 {
 					log.SysLogger.Errorf("method[%s] param count not match, need : %d, got: 0", name, paramCount-1)
-					return nil, def.InputParamNotMatch
+					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				switch reqData := req.(type) {
 				case []interface{}:
 					if len(reqData) != paramCount-1 {
 						log.SysLogger.Errorf("method[%s] param count not match, need: %d, got: %d", name, paramCount-1, len(reqData))
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 					for i := 0; i < len(reqData); i++ {
 						params = append(params, reflect.ValueOf(reqData[i]))
@@ -235,7 +235,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 				default:
 					if paramCount != 2 {
 						log.SysLogger.Errorf("method[%s] param count not match", name)
-						return nil, def.InputParamNotMatch
+						return nil, def.ErrInputParamNotMatch
 					}
 					params = append(params, reflect.ValueOf(req))
 				}
@@ -270,36 +270,41 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 }
 
 func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
 	defer func() {
 		if r := recover(); r != nil {
 			log.SysLogger.Errorf("service[%s] handle message from caller: %s panic: %v\n trace:%s",
-				h.GetModuleName(), envelope.GetSenderPid().String(), r, debug.Stack())
-			envelope.SetResponse(nil)
-			envelope.SetError(def.HandleMessagePanic)
+				h.GetModuleName(), meta.GetSenderPid().String(), r, debug.Stack())
+			data.SetResponse(nil)
+			data.SetError(def.ErrHandleMessagePanic)
 		}
 		h.doResponse(envelope)
 	}()
-	call, ok := h.mgr.GetMethodFunc(envelope.GetMethod())
+	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {
-		envelope.SetError(def.MethodNotFound)
+		data.SetError(def.ErrMethodNotFound)
 		return
 	}
-	resp, err := call(envelope.GetRequest())
+	resp, err := call(data.GetRequest())
 	if err != nil {
-		envelope.SetError(err)
+		log.SysLogger.WithFields(envelope.GetHeaders().ToFields()).Errorf("method call failed:%v", err)
+		data.SetError(err)
 		return
 	}
-	envelope.SetResponse(resp)
+	data.SetResponse(resp)
 }
 
 func (h *Handler) doResponse(envelope inf.IEnvelope) {
 	if !envelope.IsRef() {
 		return
 	}
-	if envelope.NeedResponse() {
-		envelope.SetReply()
-		envelope.SetRequest(nil)
-		if err := envelope.GetDispatcher().SendResponse(envelope); err != nil {
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
+	if data.NeedResponse() {
+		data.SetReply()
+		data.SetRequest(nil)
+		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
 			log.SysLogger.Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
 	} else {

@@ -95,7 +95,7 @@ func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
 			return
 		}
 		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr add remote service: %s", pid.String())
-		em.repository.Add(client.NewDispatcher(&pid, nil))
+		em.repository.Add(string(kv.Key), client.NewDispatcher(&pid, nil))
 	}
 }
 
@@ -108,6 +108,7 @@ func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
 	if kv.Key != nil {
+		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr remove remote service: %s", string(kv.Key))
 		em.repository.Remove(string(kv.Key))
 	} else {
 		log.SysLogger.Errorf("remove service error: key is nil")
@@ -116,13 +117,18 @@ func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
 
 // AddService 添加本地服务到服务发现中
 func (em *EndpointManager) AddService(svc inf.IService) {
-	//log.SysLogger.Debugf("add local service: %s, pid: %v", pid.String(), mailbox)
 	pid := svc.GetPid()
 	if pid == nil {
 		log.SysLogger.Errorf("add service error: pid is nil")
 		return
 	}
-	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
+
+	defer func() {
+		//log.SysLogger.Debugf("add local service: %s, pid: %v", svc.GetName(), svc.GetPid().String())
+	}()
+
+	// 先加入本地集群
+	em.repository.Add("", client.NewDispatcher(pid, svc.GetMailbox()))
 
 	// 私有服务不发布
 	if svc.IsPrivate() {
@@ -131,11 +137,12 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 
 	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
 
+	// 这是同步执行的
 	// 将服务信息发布到集群
 	ev := event.NewEvent()
 	defer ev.Release()
 	ev.Type = event.SysEventServiceReg
-	ev.Data = pid
+	ev.Data = svc
 	em.IEventProcessor.EventHandler(ev)
 
 	return
@@ -163,24 +170,6 @@ func (em *EndpointManager) ToPrivateService(svc inf.IService) {
 	ev := event.NewEvent()
 	ev.Type = event.SysEventServiceDis
 	ev.Data = svc.GetPid()
-	em.IEventProcessor.EventHandler(ev)
-	ev.Release()
-}
-
-// UpdateService 更新服务信息(服务信息发生变化后调用,比如version发生变化等待)
-func (em *EndpointManager) UpdateService(svc inf.IService) {
-	pid := svc.GetPid()
-	em.repository.Add(client.NewDispatcher(pid, svc.GetMailbox()))
-	if svc.IsPrivate() {
-		return
-	}
-
-	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
-
-	// 将服务信息发布到集群
-	ev := event.NewEvent()
-	ev.Type = event.SysEventServiceUpdate
-	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
 	ev.Release()
 }

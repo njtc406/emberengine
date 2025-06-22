@@ -146,7 +146,7 @@ func (hs *HttpModule) logFormatter(p gin.LogFormatterParams) string {
 
 func (hs *HttpModule) OnStart() error {
 	if !atomic.CompareAndSwapUint32(&hs.running, 0, 1) {
-		return def.ServiceIsRunning
+		return def.ErrServiceIsRunning
 	}
 	hs.wg.Add(1)
 	go hs.run()

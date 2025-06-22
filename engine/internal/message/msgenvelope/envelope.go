@@ -26,14 +26,300 @@ import (
 var msgEnvelopePool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
 	return &MsgEnvelope{}
 })
+var metaPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+	return &Meta{}
+})
 
-// 测试资源释放
-//var count int
+func NewMeta() inf.IEnvelopeMeta {
+	return metaPool.Get().(inf.IEnvelopeMeta)
+}
 
-func NewMsgEnvelope() *MsgEnvelope {
-	//count++
-	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
-	return msgEnvelopePool.Get().(*MsgEnvelope)
+func NewData() inf.IEnvelopeData {
+	return &Data{} // data不使用缓存池, 因为多个共用相同的data时,前面的释放会导致后面的都取不到了
+}
+
+type Meta struct {
+	dto.DataRef
+	locker sync.RWMutex
+
+	senderPid   *actor.PID         // 发送者
+	receiverPid *actor.PID         // 接收者
+	sender      inf.IRpcDispatcher // 发送者客户端(用于回调)
+	// 缓存信息
+	timeout        time.Duration        // 请求超时时间
+	done           chan struct{}        // 完成信号
+	reqID          uint64               // 请求ID(主要用于monitor区分不同的call)
+	timerId        uint64               // 定时器ID
+	callbacks      []dto.CompletionFunc // 完成回调
+	callbackParams []interface{}        // 回调透传参数
+}
+
+func (e *Meta) Reset() {
+	e.senderPid = nil
+	e.receiverPid = nil
+	e.sender = nil
+	e.timeout = 0
+	e.reqID = 0
+	if e.done == nil {
+		e.done = make(chan struct{}, 1)
+	}
+	if len(e.done) > 0 {
+		<-e.done
+	}
+	e.callbacks = e.callbacks[:0]
+}
+
+func (e *Meta) SetSenderPid(senderPid *actor.PID) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.senderPid = senderPid
+}
+
+func (e *Meta) SetReceiverPid(receiverPid *actor.PID) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.receiverPid = receiverPid
+}
+
+func (e *Meta) SetDispatcher(client inf.IRpcDispatcher) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.sender = client
+}
+
+func (e *Meta) SetTimeout(timeout time.Duration) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.timeout = timeout
+}
+
+func (e *Meta) SetReqId(reqId uint64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.reqID = reqId
+}
+
+func (e *Meta) SetCallback(cbs []dto.CompletionFunc) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.callbacks = cbs
+}
+
+func (e *Meta) SetTimerId(id uint64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.timerId = id
+}
+
+func (e *Meta) SetCallbackParams(params []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.callbackParams = params
+}
+
+func (e *Meta) SetDone() {
+	e.done <- struct{}{}
+}
+
+func (e *Meta) GetSenderPid() *actor.PID {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.senderPid
+}
+
+func (e *Meta) GetReceiverPid() *actor.PID {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.receiverPid
+}
+
+func (e *Meta) GetDispatcher() inf.IRpcDispatcher {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.sender
+}
+
+func (e *Meta) GetTimeout() time.Duration {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.timeout
+}
+
+func (e *Meta) GetReqId() uint64 {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.reqID
+}
+
+func (e *Meta) GetTimerId() uint64 {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.timerId
+}
+
+func (e *Meta) GetCallBacks() []dto.CompletionFunc {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.callbacks[:] // 返回一个快照
+}
+
+func (e *Meta) GetCallbackParams() []interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.callbackParams[:]
+}
+
+func (e *Meta) GetDone() <-chan struct{} {
+	return e.done
+}
+
+func (e *Meta) NeedCallback() bool {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return len(e.callbacks) > 0
+}
+
+type Data struct {
+	locker sync.RWMutex
+	// 数据包
+	method      string      // 调用方法
+	reply       bool        // 是否是回复
+	request     interface{} // 请求参数
+	response    interface{} // 回复数据
+	needResp    bool        // 是否需要回复
+	err         error       // 错误
+	requestBuff []byte      // 编码好的数据
+	typeName    string      // 类型名
+}
+
+func (e *Data) Reset() {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.method = ""
+	e.reply = false
+	e.request = nil
+	e.response = nil
+	e.needResp = false
+	e.err = nil
+	e.requestBuff = e.requestBuff[:0]
+	e.typeName = ""
+}
+
+func (e *Data) SetMethod(method string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.method = method
+}
+
+func (e *Data) SetReply() {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.reply = true
+}
+
+func (e *Data) SetRequest(req interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.request = req
+}
+
+func (e *Data) SetResponse(res interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.response = res
+}
+
+func (e *Data) SetError(err error) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.err = err
+}
+
+func (e *Data) SetErrStr(err string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	if err == "" {
+		e.err = nil
+		return
+	}
+	e.err = errors.New(err)
+}
+
+func (e *Data) SetNeedResponse(need bool) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.needResp = need
+}
+
+func (e *Data) SetRequestBuff(reqBuff []byte) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.requestBuff = reqBuff
+}
+
+func (e *Data) GetMethod() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.method
+}
+
+func (e *Data) GetRequest() interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.request
+}
+
+func (e *Data) GetResponse() interface{} {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.response
+}
+
+func (e *Data) GetError() error {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.err
+}
+
+func (e *Data) GetErrStr() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	if e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *Data) GetRequestBuff(tpId int32) ([]byte, string, error) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+
+	if e.request == nil {
+		log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] request is nil", e.method)
+		return nil, "", nil
+	}
+
+	if len(e.requestBuff) > 0 {
+		log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] user requestBuff cache data", e.method)
+		return e.requestBuff, e.typeName, e.err
+	}
+
+	e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
+	log.SysLogger.Debugf("^^^^^^^^^^^^^^^^^^^method[%s] serialize request data success", e.method)
+
+	return e.requestBuff, e.typeName, e.err
+}
+
+func (e *Data) IsReply() bool {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.reply
+}
+
+func (e *Data) NeedResponse() bool {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.needResp
 }
 
 type MsgEnvelope struct {
@@ -42,24 +328,8 @@ type MsgEnvelope struct {
 	locker *sync.RWMutex
 	ctx    context.Context
 
-	// 数据包
-	senderPid   *actor.PID  // 发送者
-	receiverPid *actor.PID  // 接收者
-	method      string      // 调用方法
-	reqID       uint64      // 请求ID(防止重复,目前还未做防重复逻辑)
-	reply       bool        // 是否是回复
-	request     interface{} // 请求参数
-	response    interface{} // 回复数据
-	needResp    bool        // 是否需要回复
-	err         error       // 错误
-
-	// 缓存信息
-	timeout        time.Duration        // 请求超时时间
-	sender         inf.IRpcDispatcher   // 发送者客户端(用于回调)
-	callbacks      []dto.CompletionFunc // 完成回调
-	callbackParams []interface{}        // 回调透传参数
-	done           chan struct{}        // 完成信号
-	timerId        uint64               // 定时器ID
+	meta *Meta
+	data *Data
 }
 
 func (e *MsgEnvelope) Reset() {
@@ -70,25 +340,10 @@ func (e *MsgEnvelope) Reset() {
 		e.locker = &sync.RWMutex{}
 	}
 
-	e.senderPid = nil
-	e.receiverPid = nil
-	e.sender = nil
-	e.method = ""
-	e.reqID = 0
-	e.reply = false
 	e.ctx = nil
-	e.timeout = 0
-	e.request = nil
-	e.response = nil
-	e.needResp = false
-	if e.done == nil {
-		e.done = make(chan struct{}, 1)
+	if e.meta != nil {
+		e.meta.Reset()
 	}
-	if len(e.done) > 0 {
-		<-e.done
-	}
-	e.err = nil
-	e.callbacks = e.callbacks[:0]
 }
 
 //-------------------------------------set-----------------------------------------
@@ -109,9 +364,8 @@ func (e *MsgEnvelope) SetHeaders(headers dto.Header) {
 	if e.ctx == nil {
 		e.ctx = context.Background()
 	}
-	for k, v := range headers {
-		emberctx.AddHeader(e.ctx, k, v)
-	}
+
+	e.ctx = emberctx.AddHeaders(e.ctx, headers)
 }
 
 func (e *MsgEnvelope) SetHeader(key string, value string) {
@@ -120,100 +374,19 @@ func (e *MsgEnvelope) SetHeader(key string, value string) {
 	if e.ctx == nil {
 		e.ctx = context.Background()
 	}
-	emberctx.AddHeader(e.ctx, key, value)
+	e.ctx = emberctx.AddHeader(e.ctx, key, value)
 }
 
-func (e *MsgEnvelope) SetSenderPid(sender *actor.PID) {
+func (e *MsgEnvelope) SetMeta(meta inf.IEnvelopeMeta) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	e.senderPid = sender
+	e.meta = meta.(*Meta)
 }
 
-func (e *MsgEnvelope) SetReceiverPid(receiver *actor.PID) {
+func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	e.receiverPid = receiver
-}
-
-func (e *MsgEnvelope) SetDispatcher(client inf.IRpcDispatcher) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.sender = client
-}
-
-func (e *MsgEnvelope) SetMethod(method string) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.method = method
-}
-
-func (e *MsgEnvelope) SetReqId(reqId uint64) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.reqID = reqId
-}
-
-func (e *MsgEnvelope) SetReply() {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.reply = true
-}
-
-func (e *MsgEnvelope) SetTimeout(timeout time.Duration) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.timeout = timeout
-}
-
-func (e *MsgEnvelope) SetRequest(req interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.request = req
-}
-
-func (e *MsgEnvelope) SetResponse(res interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.response = res
-}
-
-func (e *MsgEnvelope) SetError(err error) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.err = err
-}
-
-func (e *MsgEnvelope) SetErrStr(err string) {
-	if err == "" {
-		return
-	}
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.err = errors.New(err)
-}
-
-func (e *MsgEnvelope) SetNeedResponse(need bool) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.needResp = need
-}
-
-func (e *MsgEnvelope) SetCallback(cbs []dto.CompletionFunc) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.callbacks = append(e.callbacks, cbs...)
-}
-
-func (e *MsgEnvelope) SetTimerId(timerId uint64) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.timerId = timerId
-}
-
-func (e *MsgEnvelope) SetCallbackParams(params []interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.callbackParams = append(e.callbackParams, params...)
+	e.data = data.(*Data)
 }
 
 //--------------------------------get------------------------------------
@@ -268,158 +441,73 @@ func (e *MsgEnvelope) GetContext() context.Context {
 	return e.ctx
 }
 
-func (e *MsgEnvelope) GetSenderPid() *actor.PID {
+func (e *MsgEnvelope) GetMeta() inf.IEnvelopeMeta {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return e.senderPid
+	return e.meta
 }
 
-func (e *MsgEnvelope) GetReceiverPid() *actor.PID {
+func (e *MsgEnvelope) GetData() inf.IEnvelopeData {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return e.receiverPid
-}
-
-func (e *MsgEnvelope) GetDispatcher() inf.IRpcDispatcher {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.sender
-}
-
-func (e *MsgEnvelope) GetMethod() string {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.method
-}
-
-func (e *MsgEnvelope) GetReqId() uint64 {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.reqID
-}
-
-func (e *MsgEnvelope) GetRequest() interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.request
-}
-
-func (e *MsgEnvelope) GetResponse() interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.response
-}
-
-func (e *MsgEnvelope) GetError() error {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.err
-}
-
-func (e *MsgEnvelope) GetErrStr() string {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	if e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func (e *MsgEnvelope) GetTimeout() time.Duration {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.timeout
-}
-
-func (e *MsgEnvelope) GetTimerId() uint64 {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.timerId
-}
-
-func (e *MsgEnvelope) GetCallbackParams() []interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.callbackParams
-}
-
-//------------------------------------Check----------------------------------------
-
-func (e *MsgEnvelope) NeedCallback() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return len(e.callbacks) > 0
-}
-
-func (e *MsgEnvelope) IsReply() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.reply
-}
-
-func (e *MsgEnvelope) NeedResponse() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.needResp
+	return e.data
 }
 
 //-----------------------------Option-----------------------------------
 
 func (e *MsgEnvelope) Done() {
-	if e.done != nil {
-		e.done <- struct{}{}
-	} else {
-		log.SysLogger.Warn("=================envelope done is nil===================")
-	}
+	e.meta.SetDone()
 }
 
 func (e *MsgEnvelope) RunCompletions() {
-	for _, cb := range e.callbacks {
-		cb(e.callbackParams, e.response, e.err)
+	for _, cb := range e.meta.GetCallBacks() {
+		cb(e.meta.GetCallbackParams(), e.data.GetResponse(), e.data.GetError())
 	}
 }
 
 func (e *MsgEnvelope) Wait() {
-	<-e.done
+	<-e.meta.GetDone()
 }
 
 func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+	// TODO message使用缓存池来获取
 	msg := &actor.Message{
 		TypeId:        0, // 默认使用protobuf(后面有其他需求再修改这里)
 		TypeName:      "",
-		SenderPid:     e.senderPid,
-		ReceiverPid:   e.receiverPid,
-		Method:        e.method,
+		SenderPid:     e.meta.GetSenderPid(),
+		ReceiverPid:   e.meta.GetReceiverPid(),
+		Method:        e.data.GetMethod(),
 		Request:       nil,
 		Response:      nil,
-		Err:           e.GetErrStr(),
+		Err:           e.data.GetErrStr(),
 		MessageHeader: emberctx.GetHeader(e.ctx),
-		Reply:         e.reply,
-		ReqId:         e.reqID,
-		NeedResp:      e.needResp,
+		Reply:         e.data.IsReply(),
+		ReqId:         e.meta.GetReqId(),
+		NeedResp:      e.data.NeedResponse(),
 	}
 
 	var byteData []byte
 	var typeName string
 	var err error
 
-	if e.request != nil {
-		byteData, typeName, err = serializer.Serialize(e.request, msg.TypeId)
-		if err != nil {
-			log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
-			return nil
-		}
-		msg.Request = byteData
+	byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
+	if err != nil {
+		log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
+		return nil
 	}
-	if e.response != nil {
-		byteData, typeName, err = serializer.Serialize(e.response, msg.TypeId)
+
+	msg.Request = byteData
+
+	if resp := e.data.GetResponse(); resp != nil {
+		byteData, typeName, err = serializer.Serialize(resp, msg.TypeId)
 		if err != nil {
 			log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
 			return nil
 		}
 		msg.Response = byteData
+		// TODO 这里要不要置空返回,按理一个返回只能有一个人取
 	}
 
 	msg.TypeName = typeName
@@ -427,10 +515,22 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	return msg
 }
 
+func (e *MsgEnvelope) IncRef() {
+	// envelope不会被并发处理,每个envelope只会被唯一一个服务处理,只有data是共享
+	// 所以不需要引用计数
+}
+
 func (e *MsgEnvelope) Release() {
 	if e.IsRef() {
 		//count--
 		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
+		metaPool.Put(e.meta)
 		msgEnvelopePool.Put(e)
 	}
+}
+
+func NewMsgEnvelope() *MsgEnvelope {
+	//count++
+	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
+	return msgEnvelopePool.Get().(*MsgEnvelope)
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/errorlib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
@@ -28,8 +27,6 @@ type MessageBus struct {
 	sender   inf.IRpcDispatcher
 	receiver inf.IRpcDispatcher
 	err      error
-
-	// TODO 这里实际上还可以做一个options,用来做一些额外的配置,比如如果加入了multiCall,那么是否其中一个返回错误就直接返回,还是其中一个返回成功就成功等等
 }
 
 func (mb *MessageBus) Reset() {
@@ -53,7 +50,7 @@ func ReleaseMessageBus(mb *MessageBus) {
 	busPool.Put(mb)
 }
 
-func (mb *MessageBus) call(ctx context.Context, method string, in, out interface{}) error {
+func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
 		return mb.err
@@ -101,15 +98,21 @@ func (mb *MessageBus) call(ctx context.Context, method string, in, out interface
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
 	envelope.WithContext(ctx)
-	envelope.SetMethod(method)
-	envelope.SetSenderPid(mb.sender.GetPid())
-	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetDispatcher(mb.sender)
-	envelope.SetRequest(in)
-	envelope.SetResponse(nil) // 容错
-	envelope.SetReqId(mt.GenSeq())
-	envelope.SetNeedResponse(true)
-	envelope.SetTimeout(timeout)
+
+	//data := msgenvelope.NewData()
+	//data.SetMethod(method)
+	//data.SetRequest(in)
+	//data.SetResponse(nil) // 容错
+	//data.SetNeedResponse(true)
+	envelope.SetData(data)
+
+	meta := msgenvelope.NewMeta()
+	meta.SetReqId(mt.GenSeq())
+	meta.SetSenderPid(mb.sender.GetPid())
+	meta.SetReceiverPid(mb.receiver.GetPid())
+	meta.SetDispatcher(mb.sender)
+	meta.SetTimeout(timeout)
+	envelope.SetMeta(meta)
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
@@ -119,23 +122,23 @@ func (mb *MessageBus) call(ctx context.Context, method string, in, out interface
 	// 发送消息
 	if err := mb.receiver.SendRequest(envelope); err != nil {
 		// 发送失败,释放资源
-		mt.Remove(envelope.GetReqId())
+		mt.Remove(meta.GetReqId())
 		envelope.Release()
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), envelope.GetMethod(), err)
-		return def.RPCCallFailed
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
+		return def.ErrRPCCallFailed
 	}
 
 	// 等待回复
 	envelope.Wait()
 
-	mt.Remove(envelope.GetReqId()) // 容错,不管有没有释放,都释放一次(实际上在所有设置done之前都会释放)
+	mt.Remove(meta.GetReqId()) // 容错,不管有没有释放,都释放一次(实际上在所有设置done之前都会释放)
 
-	if err := envelope.GetError(); err != nil {
+	if err := data.GetError(); err != nil {
 		envelope.Release()
 		return err
 	}
 
-	resp := envelope.GetResponse()
+	resp := data.GetResponse()
 
 	// 获取到返回后直接释放
 	envelope.Release()
@@ -205,7 +208,58 @@ func (mb *MessageBus) call(ctx context.Context, method string, in, out interface
 // Call 同步调用服务
 func (mb *MessageBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	defer ReleaseMessageBus(mb)
-	return mb.call(ctx, method, in, out)
+	data := msgenvelope.NewData()
+	data.SetMethod(method)
+	data.SetRequest(in)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+	return mb.call(ctx, data, out)
+}
+
+func (mb *MessageBus) callDirect(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {
+	defer ReleaseMessageBus(mb)
+	return mb.call(ctx, data, out)
+}
+
+func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+	var timeout time.Duration
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		timeout = def.DefaultRpcTimeout
+	} else {
+		timeout = deadline.Sub(timelib.Now())
+	}
+
+	mt := monitor.GetRpcMonitor()
+
+	// 创建请求
+	envelope := msgenvelope.NewMsgEnvelope()
+	envelope.WithContext(ctx)
+	envelope.SetData(data)
+
+	meta := msgenvelope.NewMeta()
+	meta.SetReqId(mt.GenSeq())
+	meta.SetSenderPid(mb.sender.GetPid())
+	meta.SetReceiverPid(mb.receiver.GetPid())
+	meta.SetDispatcher(mb.sender)
+	meta.SetTimeout(timeout)
+	meta.SetCallback(callbacks)
+	meta.SetCallbackParams(param.Params)
+	envelope.SetMeta(meta)
+
+	// 加入等待队列
+	mt.Add(envelope)
+
+	// 发送消息,最终callback调用将在response中被执行,所以envelope会在callback执行完后自动回收
+	if err := mb.receiver.SendRequest(envelope); err != nil {
+		// 发送失败,释放资源
+		mt.Remove(meta.GetReqId())
+		envelope.Release()
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
+		return nil, def.ErrRPCCallFailed
+	}
+
+	return mt.NewCancel(meta.GetReqId()), nil
 }
 
 // AsyncCall 异步调用服务
@@ -219,47 +273,32 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 		return nil, fmt.Errorf("sender or receiver is nil")
 	}
 	if len(callbacks) == 0 {
-		return nil, def.CallbacksIsEmpty
+		return nil, def.ErrCallbacksIsEmpty
 	}
 
-	var timeout time.Duration
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		timeout = def.DefaultRpcTimeout
-	} else {
-		timeout = timelib.Now().Sub(deadline)
+	data := msgenvelope.NewData()
+	data.SetMethod(method)
+	data.SetRequest(in)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+
+	return mb.asyncCall(ctx, data, param, callbacks...)
+}
+
+func (mb *MessageBus) asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return nil, mb.err
+	}
+	if mb.sender == nil || mb.receiver == nil {
+		return nil, fmt.Errorf("sender or receiver is nil")
+	}
+	if len(callbacks) == 0 {
+		return nil, def.ErrCallbacksIsEmpty
 	}
 
-	mt := monitor.GetRpcMonitor()
-
-	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
-	envelope.SetMethod(method)
-	envelope.SetSenderPid(mb.sender.GetPid())
-	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetDispatcher(mb.sender)
-	envelope.SetRequest(in)
-	envelope.SetResponse(nil) // 容错
-	envelope.SetReqId(mt.GenSeq())
-	envelope.SetNeedResponse(true)
-	envelope.SetTimeout(timeout)
-	envelope.SetCallback(callbacks)
-	envelope.SetCallbackParams(param.Params)
-
-	// 加入等待队列
-	mt.Add(envelope)
-
-	// 发送消息,最终callback调用将在response中被执行,所以envelope会在callback执行完后自动回收
-	if err := mb.receiver.SendRequest(envelope); err != nil {
-		// 发送失败,释放资源
-		mt.Remove(envelope.GetReqId())
-		envelope.Release()
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), envelope.GetMethod(), err)
-		return nil, def.RPCCallFailed
-	}
-
-	return mt.NewCancel(envelope.GetReqId()), nil
+	return mb.asyncCall(ctx, data, param, callbacks...)
 }
 
 // Send 无返回调用
@@ -275,32 +314,64 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.SetMethod(method)
 	envelope.WithContext(ctx)
-	envelope.SetReceiverPid(mb.receiver.GetPid())
-	envelope.SetDispatcher(mb.sender)
-	envelope.SetRequest(in)
-	envelope.SetResponse(nil) // 容错
-	envelope.SetReqId(monitor.GetRpcMonitor().GenSeq())
-	envelope.SetNeedResponse(false) // 不需要回复
+
+	data := msgenvelope.NewData()
+	data.SetMethod(method)
+	data.SetRequest(in)
+	data.SetResponse(nil)
+	data.SetNeedResponse(false)
+	envelope.SetData(data)
+
+	meta := msgenvelope.NewMeta()
+	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
+	meta.SetReceiverPid(mb.receiver.GetPid())
+	meta.SetDispatcher(mb.sender)
+	envelope.SetMeta(meta)
 
 	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
 	return mb.receiver.SendRequestAndRelease(envelope)
 }
 
-func (mb *MessageBus) Cast(ctx context.Context, method string, in interface{}) {
-	if err := mb.Send(ctx, method, in); err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), method, err)
+func (mb *MessageBus) sendDirect(ctx context.Context, data inf.IEnvelopeData) error {
+	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return mb.err
 	}
+	if mb.receiver == nil {
+		return fmt.Errorf("receiver is nil")
+	}
+
+	// 创建请求
+	envelope := msgenvelope.NewMsgEnvelope()
+	envelope.WithContext(ctx)
+	envelope.SetData(data)
+
+	meta := msgenvelope.NewMeta()
+	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
+	meta.SetReceiverPid(mb.receiver.GetPid())
+	meta.SetDispatcher(mb.sender)
+	envelope.SetMeta(meta)
+
+	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
+	return mb.receiver.SendRequestAndRelease(envelope)
+}
+
+type internalBus interface {
+	inf.IBus
+	callDirect(ctx context.Context, data inf.IEnvelopeData, out interface{}) error
+	asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
+	sendDirect(ctx context.Context, data inf.IEnvelopeData) error
 }
 
 // MultiBus 多节点调用
-type MultiBus []inf.IBus
+type MultiBus []internalBus
 
 func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to call %s", method)
-		return def.ServiceIsUnavailable
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", method)
+		return def.ErrSelectEmptyResult
 	}
 
 	if len(m) > 1 {
@@ -317,8 +388,8 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to async call %s", method)
-		return nil, def.ServiceIsUnavailable
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", method)
+		return nil, def.ErrSelectEmptyResult
 	}
 	if len(m) > 1 {
 		// 释放所有节点
@@ -333,32 +404,21 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 
 func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to send %s", method)
-		return def.ServiceIsUnavailable
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", method)
+		return nil
+		//return def.ErrSelectEmptyResult
 	}
 	var errs []error
+	envelopeData := msgenvelope.NewData()
+	envelopeData.SetMethod(method)
+	envelopeData.SetRequest(in)
+	envelopeData.SetResponse(nil)
+	envelopeData.SetNeedResponse(false)
 	for _, bus := range m {
-		if err := bus.Send(ctx, method, in); err != nil {
+		if err := bus.sendDirect(ctx, envelopeData); err != nil {
 			errs = append(errs, err)
 		}
 	}
 
 	return errorlib.CombineErr(errs...)
-}
-
-func (m MultiBus) Cast(ctx context.Context, method string, in interface{}) {
-	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Errorf("===========select empty service to send %s", method)
-		return
-	}
-
-	_ = asynclib.Go(func() {
-		for _, bus := range m {
-			if err := bus.Send(ctx, method, in); err != nil {
-				log.SysLogger.WithContext(ctx).Errorf("cast service[%s] failed, error: %v", method, err)
-			}
-		}
-	})
-
-	return
 }

@@ -29,7 +29,10 @@ func createTimer() *Timer {
 }
 
 func releaseTimer(t *Timer) {
-	timerPool.Put(t)
+	if t.IsRef() {
+		// 可能会在多线程中被调用,所以做个判断
+		timerPool.Put(t)
+	}
 }
 
 type TimerOption func(t *Timer)
@@ -152,9 +155,7 @@ func (t *Timer) Do() {
 		return
 	}
 
-	if t.IsRef() {
-		releaseTimer(t)
-	}
+	releaseTimer(t)
 }
 
 func (t *Timer) Next(tm time.Time) time.Time {

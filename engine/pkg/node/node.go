@@ -94,7 +94,7 @@ func Start(v string, confPath string) {
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()
-	asynclib.Release()
+	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
 }

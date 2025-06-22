@@ -7,6 +7,7 @@ package actor
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"google.golang.org/protobuf/proto"
 	"strconv"
 )
 
@@ -30,6 +31,10 @@ func (e *Event) GetPriority() int32 {
 			return int32(priorityInt)
 		}
 	}
+}
+
+func (e *Event) Marshal() ([]byte, error) {
+	return proto.Marshal(e)
 }
 
 func (e *Event) Release() {}

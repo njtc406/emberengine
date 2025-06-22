@@ -19,6 +19,7 @@ type IEvent interface {
 	GetKey() string
 	GetPriority() int32
 	Release()
+	IncRef()
 }
 
 type IEventChannel interface {
@@ -41,12 +42,12 @@ type IEventProcessor interface {
 	// 全局事件
 	RegGlobalEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
 	UnRegGlobalEventReceiverFun(eventType int32, receiver IEventHandler)
+	// 发布全局事件
+	PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error
+
 	// 服务器事件
 	RegServerEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
 	UnRegServerEventReceiverFun(eventType int32, receiver IEventHandler)
-
-	// 发布全局事件
-	PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error
 	// 发布服务器事件
 	PublishServer(ctx context.Context, eventType int32, data proto.Message) error
 

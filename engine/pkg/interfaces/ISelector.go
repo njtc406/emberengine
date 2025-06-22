@@ -5,13 +5,34 @@
 // @Update  yr  2024/11/7
 package interfaces
 
-import (
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-)
+import "github.com/njtc406/emberengine/engine/pkg/actor"
+
+// 每条筛选条件
+type PIDPredicate func(pid *actor.PID) bool
+
+// 所有筛选条件的容器
+type FilterCriteria struct {
+	Predicates []PIDPredicate
+}
+
+// 用于组合一组筛选条件的构建器函数
+type CriteriaBuilder func(*FilterCriteria)
+
+// 单个构建器（语义清晰）
+type CriteriaFunc = CriteriaBuilder
 
 type ISelector interface {
-	// Select 选择服务
-	Select(sender *actor.PID, serverId int32, serviceId, serviceName string) IBus
+	//FindOne(sender *actor.PID, serviceUid string) IBus
+
+	//Select(sender *actor.PID, options ...CriteriaBuilder) IBus
+
+	// TODO 暂时这么写,后续把条件做成query条件
+
+	// 只用于搜索从服务
+	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) IBus
+
+	//Select 选择服务
+	Select(sender *actor.PID, options ...SelectParamBuilder) IBus
 
 	// SelectByRule 根据自定义规则选择服务
 	SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus

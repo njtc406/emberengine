@@ -18,11 +18,16 @@ type IRpcHandler interface {
 }
 
 type IRpcSelector interface {
-	Select(serverId int32, serviceId, serviceName string) IBus
+	// 选择相同serverId的服务,如果需要选择其他serverId的服务,使用下面的SelectByOpt
+	Select(options ...SelectParamBuilder) IBus
 
-	SelectSameServer(serviceId, serviceName string) IBus
+	SelectByOpt(options ...SelectParamBuilder) IBus
 
 	SelectByPid(receiver *actor.PID) IBus
+
+	SelectByServiceUid(receiverServiceUid string) IBus
+
+	SelectSlavers(options ...SelectParamBuilder) IBus
 
 	// SelectByRule 根据自定义规则选择服务
 	SelectByRule(rule func(pid *actor.PID) bool) IBus
@@ -39,4 +44,13 @@ type IRpcChannel interface {
 
 type IHttpChannel interface {
 	PushHttpEvent(e interface{}) error
+}
+
+type SelectParamBuilder func(param *SelectParam)
+
+type SelectParam struct {
+	ServerId    *int32
+	ServiceId   *string
+	ServiceName *string
+	ServiceType *string
 }

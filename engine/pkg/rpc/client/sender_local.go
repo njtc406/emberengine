@@ -27,21 +27,21 @@ func (lc *localSender) Close() {
 
 func (lc *localSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if lc.IsClosed() {
-		return def.ServiceNotFound
+		return def.ErrServiceNotFound
 	}
 
 	return dispatcher.PostMessage(envelope)
 }
 
 func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	monitor.GetRpcMonitor().Remove(envelope.GetReqId()) // 回复时先移除监控,防止超时
+	monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
 	if lc.IsClosed() {
-		envelope.SetError(def.ServiceNotFound)
+		envelope.GetData().SetError(def.ErrServiceNotFound)
 		envelope.Done()
-		return def.ServiceNotFound
+		return def.ErrServiceNotFound
 	}
 
-	if envelope.NeedCallback() {
+	if envelope.GetMeta().NeedCallback() {
 		// 本地调用的回复消息,直接发送到对应service的邮箱处理
 		return dispatcher.PostMessage(envelope)
 	} else {

@@ -20,10 +20,14 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		// 回复
 		// 需要回复的信息都会加入monitor中,找到对应的信封数据
 		if envelope := monitor.GetRpcMonitor().Remove(req.ReqId); envelope != nil {
+			meta := envelope.GetMeta()
+			data := envelope.GetData()
+
 			// 异步回调,直接发送到对应服务处理,服务处理完后会自己释放envelope
-			sender := envelope.GetDispatcher()
+			sender := meta.GetDispatcher()
 			if sender != nil && sender.IsClosed() {
 				// 调用者已经下线,丢弃回复
+				// TODO 这里需要想想能不能直接丢弃,看要不要带一个标记,比如true时表示这个回复必须处理,那么可能就需要重新加载service
 				envelope.Release()
 				return nil
 			}
@@ -33,15 +37,18 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 				envelope.Release()
 				return err
 			}
-			envelope.SetReply()
-			envelope.SetRequest(nil)
-			envelope.SetNeedResponse(false) // 已经是回复了
-			envelope.SetResponse(response)
-			envelope.SetErrStr(req.Err)
+
+			// TODO 这里需要注意,当相同的data被重复使用时,response可能被下一个覆盖,虽然按理说如果是call那么一定是排队的,但是怕以后忘记了,先注释一下
+			// 后续如果有了其他的需求,再来考虑这里的覆盖问题
+			data.SetReply()
+			data.SetRequest(nil)
+			data.SetNeedResponse(false) // 已经是回复了
+			data.SetResponse(response)
+			data.SetErrStr(req.Err)
 
 			//log.SysLogger.Debugf("call back envelope: %+v", envelope)
 
-			if envelope.NeedCallback() {
+			if meta.NeedCallback() {
 				return sender.PostMessage(envelope)
 			} else {
 				// 同步回调,回复结果
@@ -69,7 +76,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 					fields[k] = v
 				}
 			}
-			log.SysLogger.WithFields(fields).Errorf("duplicate rpc request: %s", req.String())
+			log.SysLogger.WithFields(fields).Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
 			return nil
 		}
 
@@ -81,18 +88,31 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 
 		// 构建消息
 		envelope := msgenvelope.NewMsgEnvelope()
+		if req.Method == "RpcTestWithError" {
+			log.SysLogger.Debugf("===============================%s", req.String())
+		}
 		envelope.SetHeaders(req.MessageHeader)
-		envelope.SetMethod(req.Method)
-		envelope.SetReceiverPid(req.ReceiverPid)
+		if req.Method == "RpcTestWithError" {
+			log.SysLogger.Debugf("===============================%+v", envelope.GetHeaders())
+		}
+
+		data := msgenvelope.NewData()
+		data.SetMethod(req.Method)
+		data.SetRequest(request)
+		data.SetResponse(nil)
+
+		data.SetNeedResponse(req.NeedResp)
+
+		meta := msgenvelope.NewMeta()
+		meta.SetReceiverPid(req.ReceiverPid)
+		meta.SetReqId(req.ReqId)
 		if req.NeedResp {
 			// 需要回复的才设置sender
-			envelope.SetSenderPid(req.SenderPid)
-			envelope.SetDispatcher(sf.GetDispatcher(req.SenderPid))
+			meta.SetSenderPid(req.SenderPid)
+			meta.SetDispatcher(sf.GetDispatcher(req.SenderPid))
 		}
-		envelope.SetRequest(request)
-		envelope.SetResponse(nil)
-		envelope.SetReqId(req.ReqId)
-		envelope.SetNeedResponse(req.NeedResp)
+		envelope.SetMeta(meta)
+		envelope.SetData(data)
 
 		err = sf.GetDispatcher(req.ReceiverPid).SendRequest(envelope)
 		if err != nil {

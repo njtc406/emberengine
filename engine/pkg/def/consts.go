@@ -79,8 +79,10 @@ const (
 )
 
 const (
-	PriorityUser = 0 // 用户事件
-	PrioritySys  = 1 // 系统事件
+	PriorityUser    = 0 // 用户事件
+	PriorityUserStr = "0"
+	PrioritySys     = 1 // 系统事件
+	PrioritySysStr  = "1"
 )
 
 const (
@@ -95,6 +97,8 @@ const (
 const (
 	NatsDefaultGlobalPrefix = "event.global.%d"    // global.eventType
 	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.serverId
+	NatsDefaultMasterPrefix = "event.master.%s"    // master.serviceUid
+	NatsDefaultSlavePrefix  = "event.slave.%s"     // slave.serviceUid
 )
 
 const NatsDefaultShardCount = 16

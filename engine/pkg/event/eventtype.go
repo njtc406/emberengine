@@ -6,6 +6,7 @@
 package event
 
 const (
+	// TODO 找个时间把这个换成proto枚举,打印的时候可以直接打名称
 
 	// 基础事件 -1000以上 系统事件 -1 到 -999  用户事件 1 - 999
 	SysEventWebsocket = -5
@@ -40,6 +41,11 @@ const (
 	ServiceGlobalEventTrigger = -2003 // 全局事件系统事件回调
 
 	RpcMsg = -3001 // rpc 消息事件
+
+	ServiceBecomeMaster = -4004 // 升级为主服务
+	ServiceLoseMaster   = -4005 // 降级为从服务
+	ServiceBecomeSlaver = -4006 // 抢主结束时为从服务
+	ServiceDisconnected = -4007 // 服务从集群断开(当该服务的服务发现watcher重启超过最大次数时,会有这个事件,服务收到后应该尝试重启或者下线之类的操作)
 
 	MaxType = -1 // 预定义的最大只到-1
 )

@@ -37,9 +37,10 @@ type Service struct {
 	pid  *actor.PID // 服务基础信息
 	name string     // 服务名称
 
-	src    inf.IService // 服务源
-	cfg    interface{}  // 服务配置
-	status int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
+	src                    inf.IService // 服务源
+	cfg                    interface{}  // 服务配置
+	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
+	isPrimarySecondaryMode bool         // 是否是主从模式
 
 	mailbox              inf.IMailbox        // 邮箱
 	eventProcessor       inf.IEventProcessor // 事件管理器
@@ -154,6 +155,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		// 使用系统日志
 		s.logger = log.SysLogger
 	}
+	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
@@ -205,15 +207,25 @@ func (s *Service) Start() error {
 	// 启动监听回调
 	go s.startListenCallback()
 
+	// 主从服务需要在onstart中处理
 	if err := s.src.OnStart(); err != nil {
 		return err
+	}
+
+	s.setStatus(def.SvcStatusRunning) // 到这里算是服务已经准备好所有东西,准备工作都在OnStart中完成
+
+	if !s.isPrimarySecondaryMode || s.IsPrivate() {
+		// 没有开启主从模式或者私有服务,那么直接是主服务
+		s.pid.SetMaster(true)
 	}
 
 	// 所有服务都注册到服务列表
 	endpoints.GetEndpointManager().AddService(s)
 	//s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
-	s.setStatus(def.SvcStatusRunning)
+	if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
+		return err
+	}
 
 	return nil
 }
@@ -277,9 +289,10 @@ func (s *Service) release() {
 }
 
 func (s *Service) PushEvent(evt inf.IEvent) error {
-	if !s.isRunning() {
-		return def.ServiceIsUnavailable
-	}
+	//if !s.isRunning() {
+	//	return def.ErrServiceIsUnavailable
+	//}
+	evt.IncRef()
 	return s.mailbox.PostMessage(evt)
 }
 
@@ -327,6 +340,10 @@ func (s *Service) OnInit() error {
 }
 
 func (s *Service) OnStart() error {
+	return nil
+}
+
+func (s *Service) OnStarted() error {
 	return nil
 }
 
@@ -396,27 +413,33 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 		open = true
 	}
 
+	// TODO 这里需要改造一下,这么平铺写很麻烦,每次加了都要改,做成注册,性能分析那里可以在外层包一个函数,在这个函数里面执行注册的函数
+
 	s.logger.Debugf("service[%s] receive system event[%d]", s.GetName(), tp)
 	switch tp {
 	case event.ServiceSuspended:
+		ev.Release()
 		if open {
 			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG]%d", event.ServiceSuspended))
 		}
 		// 服务挂起
 		s.mailbox.Suspend()
 	case event.ServiceResumed:
+		ev.Release()
 		if open {
 			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", event.ServiceSuspended))
 		}
 		// 服务恢复
 		s.mailbox.Resume()
 	case event.SysEventServiceClose:
+		ev.Release()
 		if open {
 			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", event.ServiceSuspended))
 		}
 		// 服务关闭
 		s.Stop()
 	case event.ServiceHeartbeat:
+		ev.Release()
 		if open {
 			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", event.ServiceSuspended))
 		}
@@ -435,16 +458,25 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
+			meta := c.GetMeta()
+			data := c.GetData()
+			if meta == nil || data == nil {
+				c.Release()
+				s.logger.Errorf("service[%s] receive call error, meta or data is nil", s.GetName())
+				s.logger.Errorf("meta: %v", meta)
+				s.logger.Errorf("data: %v", data)
+				return
+			}
 			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
-			if c.IsReply() {
+			if data.IsReply() {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_RESP] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_RESP] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// 回复
 				s.HandleResponse(c)
 			} else {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_REQ] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_REQ] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// rpc调用
 				s.HandleRequest(c)
@@ -472,22 +504,31 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 	if s.profiler != nil {
 		open = true
 	}
-
+	// TODO 这里需要改造一下,这么平铺写很麻烦,每次加了都要改,做成注册,性能分析那里可以在外层包一个函数,在这个函数里面执行注册的函数
 	switch tp {
 	case event.RpcMsg:
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
 			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
-			if c.IsReply() {
+			meta := c.GetMeta()
+			data := c.GetData()
+			if meta == nil || data == nil {
+				c.Release()
+				s.logger.Errorf("service[%s] receive rpc msg call error, meta or data is nil", s.GetName())
+				s.logger.Errorf("meta: %v", meta)
+				s.logger.Errorf("data: %v", data)
+				return
+			}
+			if data.IsReply() {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_RESP] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_RESP] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// 回复
 				s.HandleResponse(c)
 			} else {
 				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_REQ] service:%s method:%s", c.GetReceiverPid().GetServiceUid(), c.GetMethod()))
+					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_REQ] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 				}
 				// rpc调用
 				s.HandleRequest(c)
@@ -496,42 +537,42 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 	case event.ServiceTimerCallback:
 		// TODO 定时器要不要支持系统级(执行优先级更高)回调?
 		s.safeExec(func() {
+			defer ev.Release()
 			evt := ev.(*event.Event)
 			t := evt.Data.(timingwheel.ITimer)
 			if open {
 				analyzer = s.profiler.Push(fmt.Sprintf("[USER_TIME_CB] name:%s", t.GetName()))
 			}
 			t.Do()
-			ev.Release()
 		})
 	case event.ServiceConcurrentCallback:
 		// TODO 并发回调要不要支持系统级(执行优先级更高)回调?
 		s.safeExec(func() {
+			defer ev.Release()
 			evt := ev.(*event.Event)
 			t := evt.Data.(concurrent.IConcurrentCallback)
 			if open {
 				analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", t.GetName()))
 			}
 			t.DoCallback()
-			ev.Release()
 		})
 	case event.ServiceGlobalEventTrigger:
 		s.safeExec(func() {
+			defer ev.Release()
 			evt := ev.(*event.Event)
 			t := evt.Data.(*actor.Event)
 			if open {
 				analyzer = s.profiler.Push(fmt.Sprintf("[USER_GLB_EVENT] type:%d", t.GetType()))
 			}
 			s.globalEventProcessor.EventHandler(t)
-			ev.Release()
 		})
 	default:
 		if open {
 			analyzer = s.profiler.Push(fmt.Sprintf("[USER_OTHER_EVENT] type:%d", ev.GetType()))
 		}
 		s.safeExec(func() {
+			defer ev.Release()
 			s.eventProcessor.EventHandler(ev)
-			ev.Release()
 		})
 	}
 
@@ -551,4 +592,8 @@ func (s *Service) IsPrivate() bool {
 
 func (s *Service) GetLogger() log.ILogger {
 	return s.logger
+}
+
+func (s *Service) IsPrimarySecondaryMode() bool {
+	return s.isPrimarySecondaryMode
 }

@@ -20,16 +20,19 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"google.golang.org/protobuf/proto"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 var bus *Bus
 
 type Bus struct {
-	nc *nats.Conn
+	nc     *nats.Conn // TODO 目前只支持nats,后续再看要不要扩展吧
+	enable atomic.Int32
 
 	// 全体事件(所有订阅的服务都会收到)
-	globalPrefix      string // 全局事件前缀
-	globalLock        *shardedlock.ShardedRWLock
+	globalPrefix      string                             // 全局事件前缀
+	globalLock        *shardedlock.ShardedRWLock         // 用分段锁提升并发能力
 	globalSubscribers map[int32]map[string]inf.IListener // map[事件类型]map[服务唯一id]事件通道
 
 	// 服务器事件(只有相同服务器的订阅会收到)
@@ -37,7 +40,7 @@ type Bus struct {
 	serverLock        *shardedlock.ShardedRWLock
 	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
-	subMap map[string]*nats.Subscription
+	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
 }
 
 func GetEventBus() *Bus {
@@ -108,6 +111,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 			//panic(err)
 		}
 		eb.nc = nc
+		eb.enable.Store(1)
 		eb.globalPrefix = conf.GlobalPrefix
 		if eb.globalPrefix == "" {
 			eb.globalPrefix = def.NatsDefaultGlobalPrefix
@@ -128,21 +132,32 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	eb.globalSubscribers = make(map[int32]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
-
-	eb.subMap = make(map[string]*nats.Subscription)
 }
 
 func (eb *Bus) Stop() {
-	if eb.nc != nil {
+	if eb.nc != nil && eb.enable.CompareAndSwap(1, 0) {
 		eb.nc.Close()
+		eb.nc = nil
 	}
+}
+
+func (eb *Bus) addSub(key string, sub *nats.Subscription) {
+	eb.subMap.Store(key, sub)
+}
+
+func (eb *Bus) loadAndDelSub(key string) (*nats.Subscription, bool) {
+	sub, ok := eb.subMap.LoadAndDelete(key)
+	if !ok {
+		return nil, false
+	}
+	return sub.(*nats.Subscription), true
 }
 
 func (eb *Bus) genKey(format string, args ...interface{}) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, data proto.Message) (*actor.Event, error) {
+func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serviceUid string, data proto.Message) (*actor.Event, error) {
 	// 组装数据
 	rawData, err := proto.Marshal(data)
 	if err != nil {
@@ -153,20 +168,22 @@ func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, data
 		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, uuid.NewString())
 	}
 
+	// TODO 事件中可能还需要带上一个节点信息,好区分是发给哪个从服务的
 	e := &actor.Event{
 		EventType: eventType,
 		Data: &actor.EventData{
 			Header:  emberctx.GetHeader(ctx),
 			RawData: rawData,
 		},
-		ServerId: serverId,
+		ServerId:   serverId,
+		ServiceUid: serviceUid,
 	}
 
 	return e, nil
 }
 
 func (eb *Bus) isNatsEnabled() bool {
-	return eb.nc != nil
+	return eb.enable.Load() == 1
 }
 
 func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
@@ -179,14 +196,13 @@ func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 
 // PublishGlobal 发布全局事件
 func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, data)
+	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
 	if eb.isNatsEnabled() {
-
 		// 发到nats
-		eventData, err := proto.Marshal(e)
+		eventData, err := e.Marshal()
 		if err != nil {
 			return err
 		}
@@ -221,7 +237,7 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 
 // PublishGlobalLocal 发布本地全局事件
 func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, data)
+	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
@@ -231,7 +247,7 @@ func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data pro
 }
 
 func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, serverId, data)
+	e, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
 	if err != nil {
 		return err
 	}
@@ -263,6 +279,7 @@ func (eb *Bus) publishServer(e *actor.Event) {
 		if subMap, ok := serverMap[e.ServerId]; ok {
 			for _, ch := range subMap {
 				if err := ch.PushEvent(ev); err != nil {
+					log.SysLogger.Errorf("push server event error: %v", err)
 				}
 			}
 		}
@@ -270,7 +287,7 @@ func (eb *Bus) publishServer(e *actor.Event) {
 }
 
 func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, serverId, data)
+	e, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
 	if err != nil {
 		return err
 	}
@@ -303,7 +320,7 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 				eb.publishGlobal(e)
 			}); err == nil {
 				//fmt.Println("subscribe global event from nats success")
-				eb.subMap[key] = subscription
+				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe global event from nats failed, error: %v", err)
 				//fmt.Println("subscribe global event from nats failed, error:", err)
@@ -339,7 +356,7 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 				eb.publishServer(e)
 			}); err == nil {
 				//fmt.Println("subscribe server[", svc.GetServerId(), "] event success")
-				eb.subMap[key] = subscription
+				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe server[%d] event error: %v", svc.GetServerId(), err)
 				//fmt.Println("subscribe server[", svc.GetServerId(), "] event error:", err)
@@ -351,12 +368,11 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 func (eb *Bus) unSubscribe(key string) {
 	// 没有订阅者了,那么取消监听
 	if eb.isNatsEnabled() {
-		if subscription, ok := eb.subMap[key]; ok {
+		if subscription, ok := eb.loadAndDelSub(key); ok {
 			if err := subscription.Unsubscribe(); err != nil {
 				log.SysLogger.Errorf("unsubscribe global event error: %v", err)
 				//fmt.Println("unsubscribe global event error:", err)
 			}
-			delete(eb.subMap, key)
 		}
 	}
 }

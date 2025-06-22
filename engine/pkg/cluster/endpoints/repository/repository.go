@@ -6,12 +6,16 @@
 package repository
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"sync"
 	"time"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
+
+// TODO 存储改造,使用go-memdb内存数据库来存储所有的pid数据
+// 同时他还提供了索引功能,可以快速查询指定服务
 
 type tmpInfo struct {
 	dispatcher inf.IRpcDispatcher
@@ -19,14 +23,15 @@ type tmpInfo struct {
 }
 
 type Repository struct {
-	mapPID         *sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
-	tmpMapPid      *sync.Map // 临时服务 [serviceUid]tmpInfo
+	keyMap         sync.Map
+	mapPID         sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
+	tmpMapPid      sync.Map // 临时服务 [serviceUid]tmpInfo
 	tmpMapStrategy func(*tmpInfo) bool
 
 	ticker *time.Ticker
 
 	// 快速查询表
-	mapNodeLock          sync.RWMutex
+	mapNodeLock          *shardedlock.ShardedRWLock
 	mapSvcBySNameAndSUid map[string]map[string]struct{}            // [serviceName]map[serviceUid]struct{}
 	mapSvcBySTpAndSName  map[string]map[string]map[string]struct{} // [serviceType]map[serviceName]map[serviceUid]struct{}
 	// TODO 之后可以加入tag索引表,每种service自定义自己的tag,这样可以更高效的查询指定服务
@@ -34,9 +39,8 @@ type Repository struct {
 
 func NewRepository() *Repository {
 	return &Repository{
-		mapPID:               new(sync.Map),
-		tmpMapPid:            new(sync.Map),
 		ticker:               time.NewTicker(time.Second * 10),
+		mapNodeLock:          shardedlock.NewShardedRWLock(64), // 之后改为配置表
 		mapSvcBySNameAndSUid: make(map[string]map[string]struct{}),
 		mapSvcBySTpAndSName:  make(map[string]map[string]map[string]struct{}),
 	}
@@ -74,6 +78,7 @@ func (r *Repository) tick() {
 				if !ok {
 					return
 				}
+				// TODO 这里考虑分批进行清理,防止出现热点问题
 				r.tmpMapPid.Range(func(key, value any) bool {
 					if tmp, ok := value.(*tmpInfo); ok {
 						if r.tmpMapStrategy == nil {
@@ -116,8 +121,14 @@ func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 	return dispatcher
 }
 
-func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
-	oldClient, ok := r.mapPID.LoadOrStore(dispatcher.GetPid().GetServiceUid(), dispatcher)
+func (r *Repository) Add(key string, dispatcher inf.IRpcDispatcher) {
+
+	pid := dispatcher.GetPid()
+	if key != "" {
+		r.keyMap.Store(key, pid.GetServiceUid())
+	}
+	serviceUid := pid.GetServiceUid()
+	oldClient, ok := r.mapPID.LoadOrStore(serviceUid, dispatcher)
 	if ok {
 		//log.SysLogger.Debugf("service already exists: %s", dispatcher.GetPid().GetServiceUid())
 		oldClient.(inf.IRpcDispatcher).Close()                          // 旧的关闭
@@ -125,18 +136,11 @@ func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
 		return
 	}
 
-	r.mapNodeLock.Lock()
-	defer r.mapNodeLock.Unlock()
-
-	pid := dispatcher.GetPid()
-	if !pid.GetIsMaster() {
-		// 不是主服务,不保存
-		return
-	}
+	r.mapNodeLock.Lock(serviceUid)
+	defer r.mapNodeLock.Unlock(serviceUid)
 
 	serviceType := pid.GetServiceType()
 	serviceName := pid.GetName()
-	serviceUid := pid.GetServiceUid()
 
 	nameMap, ok := r.mapSvcBySNameAndSUid[serviceName]
 	if !ok {
@@ -168,7 +172,15 @@ func (r *Repository) Add(dispatcher inf.IRpcDispatcher) {
 }
 
 func (r *Repository) Remove(key string) {
-	ret, ok := r.mapPID.LoadAndDelete(key)
+	if key == "" {
+		return
+	}
+	val, ok := r.keyMap.LoadAndDelete(key)
+	if !ok {
+		return
+	}
+	serviceUid := val.(string)
+	ret, ok := r.mapPID.LoadAndDelete(serviceUid)
 	if !ok {
 		return
 	}
@@ -176,10 +188,9 @@ func (r *Repository) Remove(key string) {
 	pid := client.GetPid()
 	client.Close()
 
-	r.mapNodeLock.Lock()
-	defer r.mapNodeLock.Unlock()
+	r.mapNodeLock.Lock(key)
+	defer r.mapNodeLock.Unlock(key)
 	serviceName := pid.GetName()
-	serviceUid := pid.GetServiceUid()
 	serviceType := pid.GetServiceType()
 
 	nameMap, ok := r.mapSvcBySNameAndSUid[serviceName]

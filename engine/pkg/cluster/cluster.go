@@ -66,11 +66,15 @@ func (c *Cluster) Close() {
 }
 
 func (c *Cluster) PushEvent(ev inf.IEvent) error {
+	ev.IncRef() // 增加引用
 	select {
-	case c.eventChannel <- ev:
+	case c.eventChannel <- ev: // 发送成功则里面释放
+
 	default:
-		return def.EventChannelIsFull
+		ev.Release() // 发送不成功直接释放
+		return def.ErrEventChannelIsFull
 	}
+
 	return nil
 }
 

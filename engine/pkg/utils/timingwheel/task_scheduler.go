@@ -271,9 +271,7 @@ func (scheduler *TaskScheduler) Cancel(taskId uint64) bool {
 		return true
 	}
 	ok := task.Stop()
-	if task.IsRef() {
-		releaseTimer(task)
-	}
+	releaseTimer(task)
 	return ok
 }
 

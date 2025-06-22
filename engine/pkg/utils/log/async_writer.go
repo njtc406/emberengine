@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
+	"github.com/njtc406/logrus"
 	"io"
 	"sync"
 	"time"
@@ -55,7 +56,10 @@ func NewAsyncWriter(w io.Writer, conf *AsyncWriterConfig, writerCloser io.WriteC
 		cancel:       cancel,
 		writerCloser: writerCloser,
 	}
-
+	// 注册一个退出函数,确保使用FATAL级别的时候也能正确打印出错误信息后再退出
+	logrus.RegisterExitHandler(func() {
+		_ = aw.Close()
+	})
 	aw.wg.Add(1)
 	go aw.loop()
 	return aw
@@ -84,7 +88,6 @@ func (aw *AsyncWriter) loop() {
 		case <-aw.ctx.Done():
 			// 循环从队列中读取数据,直到队列为空
 			for aw.read(buf) {
-
 			}
 			aw.flush(buf)
 			return

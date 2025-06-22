@@ -10,8 +10,15 @@ NodeConf:
   PVPath: ./example/cache
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
-  # 线程池大小
-  AntsPoolSize: 100
+  # 线程池大小=cpu核数*设置值 (配置0表示不开启线程池)
+  # 这个根据业务自行调整,cpu密集型一般直接为cpu核数,即设为1
+  # 如果是io密集型可以根据:CPU核数 * (1 + 平均等待时间/平均计算时间) 来计算
+  # 混合型就只能自行压测找最优
+  AntsPoolSize: 1
+  # 定时器数量(用于监控rpc调用的timer)
+  MonitorTimerSize: 10000
+  # 定时器桶数量(决定锁的粒度)
+  MonitorBucketSize: 20
 
 ClusterConf:
   ETCDConf:
@@ -23,6 +30,8 @@ ClusterConf:
     UserName: root
     # etcd密码
     Password: 123456
+    # 是否开启日志
+    NoLogger: true
   RPCServers:
     # 监听地址
     - Addr: 0.0.0.0:6610
@@ -45,7 +54,8 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
     # 服务名称
-    - ServiceName: Service1
+    - ClassName: Service1
+      ServiceName: Service1
       # 服务类型
       Type: test
       # 服务器ID
@@ -101,7 +111,8 @@ ServiceConf:
               FlushInterval: 1s
               # 缓冲区大小(默认1M,满时会立即写入)
               BufferSize: 1048576
-    - ServiceName: Service2
+    - ClassName: Service2
+      ServiceName: Service2
       Type: test
       ServerId: 1
       TimerConf:

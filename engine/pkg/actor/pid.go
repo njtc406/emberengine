@@ -11,25 +11,48 @@ import (
 	"sync/atomic"
 )
 
-func CreateServiceUid(serverId int32, serviceName, serviceId string) string {
-	return fmt.Sprintf("%s@%d:%s", serviceName, serverId, serviceId)
+const (
+	RoleTypeMaster = "master"
+	RoleTypeSlaver = "slaver"
+)
+
+func CreateInstanceId(serverId int32, serviceName, serviceId, nodeUid string) string {
+	// serverId.serviceName.serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
+	return fmt.Sprintf("%d.%s.%s.%s", serverId, serviceName, serviceId, nodeUid)
 }
 
 func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {
-	serviceUid := CreateServiceUid(serverId, serviceName, serviceID)
 	return &PID{
 		Address:     address,
 		Name:        serviceName,
 		ServiceType: serviceType,
-		ServiceUid:  serviceUid,
+		ServiceId:   serviceID,
 		State:       0,
 		ServerId:    serverId,
 		Version:     version,
 		RpcType:     rpcType,
 		NodeUid:     nodeUid,
+		ServiceUid:  CreateInstanceId(serverId, serviceName, serviceID, nodeUid),
 	}
 }
 
 func IsRetired(pid *PID) bool {
 	return atomic.LoadInt32(&pid.State) == def.ServiceStatusRetired
 }
+
+func (pid *PID) SetMaster(master bool) {
+	pid.IsMaster = master
+}
+
+func (pid *PID) GetRoleType() string {
+	if pid.IsMaster {
+		return RoleTypeMaster
+	}
+	return RoleTypeSlaver
+}
+
+func (pid *PID) GetServiceGroup() string {
+	return fmt.Sprintf("%s.%s.%d", pid.GetName(), pid.GetServiceId(), pid.GetServerId())
+}
+
+func (e *Event) IncRef() {}

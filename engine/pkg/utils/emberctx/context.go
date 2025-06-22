@@ -1,6 +1,10 @@
 package emberctx
 
-import "context"
+import (
+	"context"
+	"github.com/google/uuid"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+)
 
 type contextKey struct{}
 
@@ -17,7 +21,12 @@ func GetHeader(ctx context.Context) map[string]string {
 		return nil
 	}
 	if v, ok := ctx.Value(emberHeaderKey).(map[string]string); ok {
-		return v
+		// 返回一个副本以防止外部修改
+		copied := make(map[string]string, len(v))
+		for k, val := range v {
+			copied[k] = val
+		}
+		return copied
 	}
 	return nil
 }
@@ -25,24 +34,35 @@ func GetHeader(ctx context.Context) map[string]string {
 // AddHeader 添加单个 header，如果 header 不存在会自动初始化
 func AddHeader(ctx context.Context, key, value string) context.Context {
 	headers := GetHeader(ctx)
-	newHeaders := make(map[string]string)
-	for k, v := range headers {
-		newHeaders[k] = v
+	if headers == nil {
+		headers = make(map[string]string)
 	}
-	newHeaders[key] = value
-	return WithHeader(ctx, newHeaders)
+
+	headers[key] = value
+
+	return WithHeader(ctx, headers)
 }
 
-func AddHeaders(ctx context.Context, headers map[string]string) context.Context {
-	oldHeaders := GetHeader(ctx)
-	newHeaders := make(map[string]string)
-	for k, v := range oldHeaders {
-		newHeaders[k] = v
+func AddHeaders(ctx context.Context, newHeaders map[string]string) context.Context {
+	if len(newHeaders) == 0 {
+		return ctx
 	}
+
+	headers := GetHeader(ctx)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+
+	// 创建一个新 map 而不是直接修改
+	merged := make(map[string]string, len(headers)+len(newHeaders))
 	for k, v := range headers {
-		newHeaders[k] = v
+		merged[k] = v
 	}
-	return WithHeader(ctx, newHeaders)
+	for k, v := range newHeaders {
+		merged[k] = v
+	}
+
+	return WithHeader(ctx, merged)
 }
 
 func GetHeaderValue(ctx context.Context, key string) string {
@@ -51,4 +71,22 @@ func GetHeaderValue(ctx context.Context, key string) string {
 		return ""
 	}
 	return headers[key]
+}
+
+type Option func(ctx context.Context)
+
+func WithKV(key, value string) Option {
+	return func(ctx context.Context) {
+		AddHeader(ctx, key, value)
+	}
+}
+
+func NewCtx(options ...Option) context.Context {
+	ctx := AddHeaders(context.Background(), map[string]string{
+		def.DefaultTraceIdKey: uuid.NewString(),
+	})
+	for _, option := range options {
+		option(ctx)
+	}
+	return ctx
 }

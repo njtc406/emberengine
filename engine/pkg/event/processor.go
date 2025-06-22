@@ -8,6 +8,7 @@ package event
 import (
 	"context"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"google.golang.org/protobuf/proto"
 	"sync"
 )
@@ -32,6 +33,16 @@ func (p *Processor) Init(listener inf.IListener) {
 	p.IListener = listener
 }
 
+func (p *Processor) safeExec(f func(e inf.IEvent), e inf.IEvent) {
+	defer func() {
+		if err := recover(); err != nil {
+			//log.Error("event handler panic:", err)
+			log.SysLogger.Errorf("event handler panic: %v", err)
+		}
+	}()
+	f(e)
+}
+
 // EventHandler 事件处理
 func (p *Processor) EventHandler(ev inf.IEvent) {
 	eventType := ev.GetType()
@@ -40,7 +51,7 @@ func (p *Processor) EventHandler(ev inf.IEvent) {
 		return
 	}
 	for _, callback := range mapCallBack {
-		callback(ev)
+		p.safeExec(callback, ev)
 	}
 }
 

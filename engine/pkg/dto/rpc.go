@@ -5,6 +5,8 @@
 // @Update  yr  2024/11/8
 package dto
 
+import "github.com/njtc406/logrus"
+
 // CancelRpc 异步调用时的取消函数,可用于取消回调(请注意,一旦调用发送后是无法取消的,只能取消回调)
 type CancelRpc func()
 
@@ -48,6 +50,14 @@ func (header Header) ToMap() map[string]string {
 		mp[k] = v
 	}
 	return mp
+}
+
+func (header Header) ToFields() logrus.Fields {
+	f := make(logrus.Fields, len(header))
+	for k, v := range header {
+		f[k] = v
+	}
+	return f
 }
 
 type RPCResponse struct{}

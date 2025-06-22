@@ -30,6 +30,7 @@ type ILifecycle interface {
 	Stop()
 	OnInit() error
 	OnStart() error
+	OnStarted() error
 	OnRelease()
 }
 
@@ -37,6 +38,7 @@ type IServiceHandler interface {
 	GetServiceCfg() interface{}
 	GetMailbox() IMailbox
 	IsPrivate() bool
+	IsPrimarySecondaryMode() bool
 }
 
 type IIdentifiable interface {

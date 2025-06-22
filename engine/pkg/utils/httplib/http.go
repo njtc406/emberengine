@@ -35,7 +35,7 @@ func Request(method, addr, api string, body interface{}, resData interface{}) er
 		if err != nil {
 			//log.SysLogger.Errorf("json marshal failed: %v", err)
 			fmt.Println("json marshal failed:", err)
-			return def.JsonMarshalFailed
+			return def.ErrJsonMarshalFailed
 		}
 		bodyReader = strings.NewReader(string(bodyBytes))
 	}
@@ -46,14 +46,14 @@ func Request(method, addr, api string, body interface{}, resData interface{}) er
 	if err != nil {
 		//log.SysLogger.Errorf("http create request failed: %v", err)
 		fmt.Println("http create request failed:", err)
-		return def.HttpCreateRequestFailed
+		return def.ErrHttpCreateRequestFailed
 	}
 
 	res, err := client.Do(req)
 	if err != nil {
 		//log.SysLogger.Errorf("http request failed: %v", err)
 		fmt.Println("http request failed:", err)
-		return def.HttpRequestFailed
+		return def.ErrHttpRequestFailed
 	}
 
 	// 获取数据
@@ -63,13 +63,13 @@ func Request(method, addr, api string, body interface{}, resData interface{}) er
 	if err != nil {
 		//log.SysLogger.Errorf("read response body failed: %v", err)
 		fmt.Println("read response body failed:", err)
-		return def.HttpReadResponseFailed
+		return def.ErrHttpReadResponseFailed
 	}
 
 	if err = json.Unmarshal(resBody, &resData); err != nil {
 		//log.SysLogger.Errorf("json unmarshal failed: %v", err)
 		fmt.Println("json unmarshal failed:", err)
-		return def.JsonUnmarshalFailed
+		return def.ErrJsonUnmarshalFailed
 	}
 
 	//log.SysLogger.Debugf("resData %+v", resData)
