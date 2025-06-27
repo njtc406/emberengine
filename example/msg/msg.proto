@@ -2,6 +2,15 @@ syntax = "proto3";
 package login_msg;
 option go_package = ".;msg";
 
+message Msg_Test_Req {
+  int32 A = 1;
+  int32 B = 2;
+}
+
+message Msg_Test_Resp {
+  int32 Ret = 1;
+}
+
 message TestData {
   int32 A = 1;
   int32 B = 2;
