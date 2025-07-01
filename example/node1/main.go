@@ -409,5 +409,8 @@ func init() {
 var version = "1.0"
 
 func main() {
-	node.Start(version, "./example/configs/node1")
+	node.Start(
+		node.WithConfPath("./example/configs/node1"),
+		node.WithVersion(version),
+	)
 }

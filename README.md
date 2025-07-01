@@ -1,10 +1,8 @@
 # EmberEngine 🔥
-只考虑自己的只能叫想法,能平衡各个方面的才叫设计
+### 只考虑自己的只能叫想法,能平衡各个方面的才叫设计
+
 ---
-
 ## 简介
-目前正是进入2.0版本,当前版本对比1.0版本增加了非常多功能
-
 EmberEngine 是一个基于 Actor 模型和 RPC 通信的分布式框架，旨在提供高性能、低延迟的分布式通信解决方案。
 - **逻辑层次**：整个框架分为三个层级，分别为：
 1. 节点(node): 是一个进程，包含可以运行多个服务
@@ -35,7 +33,7 @@ EmberEngine 的主要部分：
 ---
 
 ## 使用示例
-- **详细使用示例请直接参考[https://github.com/njtc406/emberengine/tree/main/] example中的示例文件**
+- **详细使用示例请直接参考[https://github.com/njtc406/emberengine/tree/main/example] 中的示例文件**
 ---
 
 ## 快速开始
@@ -47,7 +45,7 @@ EmberEngine 的主要部分：
 
 2. 安装依赖：
     ```sh
-    go mod tidy
+    go mod down
     ```
 
 3. 运行示例：

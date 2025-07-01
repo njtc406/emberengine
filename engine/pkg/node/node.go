@@ -8,6 +8,9 @@ package node
 import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
+	"github.com/njtc406/emberengine/engine/pkg/utils/title"
+	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
+	"github.com/njtc406/emberengine/engine/pkg/utils/version"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,14 +24,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pid"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/njtc406/emberengine/engine/pkg/utils/version"
 )
 
 var (
-	exitCh        = make(chan os.Signal)
-	ID            int32
-	Type          string
-	nodeInitHooks []func() // 启动时需要执行的钩子
+	exitCh = make(chan os.Signal)
+	ID     int32
+	Type   string
 )
 
 func init() {
@@ -36,16 +37,73 @@ func init() {
 	signal.Notify(exitCh, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
 }
 
-func SetStartHook(f ...func()) {
-	nodeInitHooks = append(nodeInitHooks, f...)
+func fixVersion(v string) string {
+	if v == "" {
+		return version.Version // 目前的框架版本
+	}
+	return v
 }
 
-func Start(v string, confPath string) {
+type HookFun func(map[any]any)
+
+type StartParam struct {
+	Language translate.LanguageType
+	Version  string
+	ConfPath string
+	Hooks    []HookFun
+	Extra    map[any]any
+}
+
+type StartOption func(*StartParam)
+
+func WithLanguage(language translate.LanguageType) StartOption {
+	return func(p *StartParam) {
+		p.Language = language
+	}
+}
+
+func WithVersion(v string) StartOption {
+	return func(p *StartParam) {
+		p.Version = v
+	}
+}
+
+func WithConfPath(confPath string) StartOption {
+	return func(p *StartParam) {
+		p.ConfPath = confPath
+	}
+}
+
+func WithHooks(hooks ...HookFun) StartOption {
+	return func(p *StartParam) {
+		p.Hooks = hooks
+	}
+}
+
+func WithExtra(extra map[any]any) StartOption {
+	return func(p *StartParam) {
+		p.Extra = extra
+	}
+}
+
+func Start(opts ...StartOption) {
+
+	startTime := time.Now()
+	param := StartParam{}
+	for _, f := range opts {
+		f(&param)
+	}
+	param.Version = fixVersion(param.Version)
+
+	if param.Language > 0 {
+		translate.SetLanguage(param.Language)
+	}
+
 	// 打印版本信息
-	version.EchoVersion(v)
+	title.EchoTitle(param.Version)
 
 	// 初始化节点配置
-	config.Init(confPath)
+	config.Init(param.ConfPath)
 
 	// 初始化日志
 	log.Init(config.Conf.SystemLogger, config.IsDebug())
@@ -73,8 +131,8 @@ func Start(v string, confPath string) {
 	event.GetEventBus().Init(config.Conf.NodeConf.EventBusConf)
 
 	// 执行钩子
-	for _, f := range nodeInitHooks {
-		f()
+	for _, f := range param.Hooks {
+		f(param.Extra)
 	}
 
 	// 初始化服务
@@ -97,4 +155,5 @@ func Start(v string, confPath string) {
 	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
+	title.GracefulExit(time.Since(startTime), param.Version)
 }

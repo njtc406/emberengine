@@ -18,8 +18,6 @@ func init() {
 	})
 }
 
-var version = "1.0"
-
 func main() {
-	node.Start(version, "./example/configs/node_slave")
+	node.Start(node.WithConfPath("./example/configs/node_slave"))
 }
