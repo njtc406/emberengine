@@ -58,8 +58,6 @@ func parseNodeConfig(confPath string) {
 		panic(err)
 	}
 
-	fmt.Println("REMOTE_HOST:", os.Getenv("REMOTE_HOST"))
-
 	// 2. 读取原始配置文件（带 ${VAR}）
 	rawYaml, err := os.ReadFile(path.Join(confPath, "node.yaml"))
 	if err != nil {
