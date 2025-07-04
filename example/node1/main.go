@@ -43,7 +43,7 @@ func (s *Service1) OnInit() error {
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*10)
 		defer cancel()
 		if err := s.Select(rpc.WithServiceName(ServiceName2)).Call(ctxWithTimeout, "APITest2", nil, nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APITest2 failed, err:%v", err)
+			s.GetLogger().Errorf("call Service2.APITest2 failed, err:%v", err)
 		}
 		if err := s.Select(rpc.WithServiceName(ServiceName2)).Call(ctx, "APITest2", nil, nil); err != nil {
 			log.SysLogger.Errorf("call Service2.APITest2 failed, err:%v", err)
