@@ -37,7 +37,7 @@ func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.
 	monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
 	if lc.IsClosed() {
 		envelope.GetData().SetError(def.ErrServiceNotFound)
-		envelope.Done()
+		envelope.SetDone()
 		return def.ErrServiceNotFound
 	}
 
@@ -46,7 +46,7 @@ func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.
 		return dispatcher.PostMessage(envelope)
 	} else {
 		// 同步调用,直接设置调用结束
-		envelope.Done()
+		envelope.SetDone()
 	}
 	return nil
 }

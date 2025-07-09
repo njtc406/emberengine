@@ -149,7 +149,7 @@ func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
 			log.SysLogger.WithContext(envelope.GetContext()).Errorf("send call timeout response error:%s", err.Error())
 		}
 	} else {
-		envelope.Done()
+		envelope.SetDone()
 	}
 }
 

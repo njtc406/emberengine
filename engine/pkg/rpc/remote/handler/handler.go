@@ -52,7 +52,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 				return sender.PostMessage(envelope)
 			} else {
 				// 同步回调,回复结果
-				envelope.Done()
+				envelope.SetDone()
 				return nil
 			}
 		} else {

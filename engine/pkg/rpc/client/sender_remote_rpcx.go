@@ -67,8 +67,7 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	_, ok := ctx.Deadline()
 	if !ok {
 		newCtx, cancel := context.WithTimeout(ctx, def.DefaultRpcTimeout)
-		defer cancel()
-		ctx = newCtx
+		ctx.WithCancelContext(newCtx, cancel)
 	}
 
 	// 构建发送消息
@@ -82,7 +81,7 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 		return def.ErrRPCCallFailed
 	}
 
-	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())
+	//log.SysLogger.WithContext(ebCtx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())
 
 	return nil
 }

@@ -2,12 +2,13 @@ package comm
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/ebCtx"
+
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 	"github.com/njtc406/emberengine/example/msg"
@@ -105,8 +106,7 @@ func (s *Service111) becomeMaster(e inf.IEvent) {
 	s.timer = s.TickerFunc(time.Second, "master tick", s.tick)
 	s.saveTimer = s.TickerFunc(time.Second*10, "save all data", s.saveAllData)
 
-	ctx := emberctx.NewCtx(emberctx.WithKV(def.DefaultPriorityKey, def.PrioritySysStr))
-
+	ctx := ebCtx.NewEContext().SetHeader(def.DefaultPriorityKey, def.PrioritySysStr)
 	// 向所有从服务同步一次完整数据
 	if err := s.selectSelfSlavers().Send(ctx, "RpcSyncAllData", s.packageData()); err != nil {
 		s.GetLogger().WithContext(ctx).Errorf("sync all data to slaver failed, err:%v", err)
@@ -142,7 +142,7 @@ func (s *Service111) becomeSlaver(e inf.IEvent) {
 		s.saveTimer = nil
 	}
 
-	ctx := emberctx.NewCtx(emberctx.WithKV(def.DefaultPriorityKey, def.PrioritySysStr))
+	ctx := ebCtx.NewEContext().SetHeader(def.DefaultPriorityKey, def.PrioritySysStr)
 	// 从主服务同步一次完整数据
 	resp := &msg.TestData{}
 	if err := s.selectSelfMaster().Call(ctx, "RpcGetAllData", nil, resp); err != nil {
@@ -277,7 +277,8 @@ func (s *Service111) tick(timer *timingwheel.Timer, args ...interface{}) {
 	s.option(opt, param)
 
 	// 同步所有从服务
-	ctx := emberctx.NewCtx() // 日志同步处理优先级别可以不用那么高,默认会使用user级别
+	ctx := ebCtx.NewEContext()
+
 	if err := s.selectSelfSlavers().Send(ctx, "RpcSyncLog", log.ToProto()); err != nil {
 		s.GetLogger().WithContext(ctx).Errorf("sync all data to slaver failed, err:%v", err)
 	}

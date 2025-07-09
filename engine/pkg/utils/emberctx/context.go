@@ -73,20 +73,20 @@ func GetHeaderValue(ctx context.Context, key string) string {
 	return headers[key]
 }
 
-type Option func(ctx context.Context)
+type Option func(ctx context.Context) context.Context
 
 func WithKV(key, value string) Option {
-	return func(ctx context.Context) {
-		AddHeader(ctx, key, value)
+	return func(ctx context.Context) context.Context {
+		return AddHeader(ctx, key, value)
 	}
 }
 
-func NewCtx(options ...Option) context.Context {
-	ctx := AddHeaders(context.Background(), map[string]string{
+func NewCtx(ctx context.Context, options ...Option) context.Context {
+	ctx = AddHeaders(ctx, map[string]string{
 		def.DefaultTraceIdKey: uuid.NewString(),
 	})
 	for _, option := range options {
-		option(ctx)
+		ctx = option(ctx)
 	}
 	return ctx
 }

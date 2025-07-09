@@ -62,7 +62,7 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 		return def.ErrRPCCallFailed
 	}
 
-	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, envelope.GetReceiverPid().GetServiceUid())
+	//log.SysLogger.WithContext(ebCtx).Infof("send message[%+v] to %s success", envelope, envelope.GetReceiverPid().GetServiceUid())
 
 	return nil
 }

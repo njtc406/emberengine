@@ -24,7 +24,7 @@ const (
 
 // GrpcListenerClient is the client API for GrpcListener service.
 //
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+// For semantics around ebCtx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GrpcListenerClient interface {
 	RPCCall(ctx context.Context, in *Message, opts ...grpc.CallOption) (*RpcCallResponse, error)
 }
