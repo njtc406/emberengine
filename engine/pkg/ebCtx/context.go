@@ -24,15 +24,32 @@ type EContext struct {
 }
 
 // NewEContext creates a new EContext with background context.
-func NewEContext() *EContext {
+func NewEContext(ctx context.Context) *EContext {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &EContext{
-		Context: emberctx.NewCtx(context.Background()),
+		Context: emberctx.NewCtx(ctx),
 	}
 }
 
 // NewEContextWithCancel creates a new EContext with background context and cancel.
-func NewEContextWithCancel() *EContext {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewEContextWithCancel(ctx context.Context) *EContext {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	return &EContext{
+		Context: emberctx.NewCtx(ctx),
+		cancel:  cancel,
+	}
+}
+
+func NewEContextWithTimeout(ctx context.Context, timeout time.Duration) *EContext {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	return &EContext{
 		Context: emberctx.NewCtx(ctx),
 		cancel:  cancel,
