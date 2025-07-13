@@ -79,10 +79,10 @@ const (
 )
 
 const (
-	PriorityUser    = 0 // 用户事件
-	PriorityUserStr = "0"
-	PrioritySys     = 1 // 系统事件
-	PrioritySysStr  = "1"
+	PriorityUser    int32 = 0 // 用户事件
+	PriorityUserStr       = "0"
+	PrioritySys     int32 = 1 // 系统事件
+	PrioritySysStr        = "1"
 )
 
 const (
@@ -105,7 +105,7 @@ const NatsDefaultShardCount = 16
 
 const NatsDefaultTopic = "rpc.node.%s"
 
-const DefaultReqDuplicatorTTL = 10 * time.Second
+const DefaultReqDuplicatorTTL = 1 * time.Second
 
 const (
 	DefaultTraceIdKey    = "sys.traceId"

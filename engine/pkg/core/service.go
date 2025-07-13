@@ -310,7 +310,7 @@ func (s *Service) pushConcurrentCallback(evt concurrent.IConcurrentCallback) err
 func (s *Service) pushTimerCallback(t timingwheel.ITimer) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceTimerCallback
-	ev.Key = t.GetName() // 保证相同的回调在同一个worker处理
+	ev.SetHeader(def.DefaultDispatcherKey, t.GetName()) // 保证相同的回调在同一个worker处理
 	ev.Data = t
 	return s.mailbox.PostMessage(ev)
 }
@@ -405,6 +405,9 @@ func (s *Service) isRunning() bool {
 
 // InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
 func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
+	if !ev.IsRef() {
+		return
+	}
 	tp := ev.GetType()
 
 	var analyzer *profiler.Analyzer
@@ -497,6 +500,10 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 }
 
 func (s *Service) InvokeUserMessage(ev inf.IEvent) {
+	if !ev.IsRef() {
+		// 前面的超时之后导致后面的已经被丢弃
+		return
+	}
 	tp := ev.GetType()
 
 	var analyzer *profiler.Analyzer
@@ -510,7 +517,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
-			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
+			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetData().GetMethod())
 			meta := c.GetMeta()
 			data := c.GetData()
 			if meta == nil || data == nil {

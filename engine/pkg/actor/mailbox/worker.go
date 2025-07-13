@@ -139,7 +139,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	p.mu.RLock()
 	if len(p.workers) > 1 {
 		var ok bool
-		workerID, ok = p.ring.Get(evt.GetKey())
+		workerID, ok = p.ring.Get(evt.GetDispatcherKey())
 		if !ok {
 			log.SysLogger.Errorf("No worker available in hash ring")
 			p.mu.RUnlock()

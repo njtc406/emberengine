@@ -288,7 +288,7 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 	}
 	resp, err := call(data.GetRequest())
 	if err != nil {
-		log.SysLogger.WithFields(envelope.GetHeaders().ToFields()).Errorf("method call failed:%v", err)
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("method call failed:%v", err)
 		data.SetError(err)
 		return
 	}
@@ -305,7 +305,7 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 		data.SetReply()
 		data.SetRequest(nil)
 		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
-			log.SysLogger.Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
+			log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
 	} else {
 		envelope.Release()

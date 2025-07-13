@@ -40,7 +40,8 @@ const (
 	ServiceTimerCallback      = -2002 // 定时器回调事件
 	ServiceGlobalEventTrigger = -2003 // 全局事件系统事件回调
 
-	RpcMsg = -3001 // rpc 消息事件
+	UnknownEvent = -3000 // 未知事件
+	RpcMsg       = -3001 // rpc 消息事件
 
 	ServiceBecomeMaster = -4004 // 升级为主服务
 	ServiceLoseMaster   = -4005 // 降级为从服务

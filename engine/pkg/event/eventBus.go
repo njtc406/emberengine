@@ -223,8 +223,8 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 		ev := NewEvent()
 		ev.Type = ServiceGlobalEventTrigger
 		ev.Data = e
-		ev.Key = e.GetKey()
-		ev.Priority = e.GetPriority()
+		ev.SetHeader(def.DefaultDispatcherKey, e.GetDispatcherKey())
+		ev.SetHeader(def.DefaultPriorityKey, e.GetPriority())
 
 		for _, ch := range subMap {
 			if err := ch.PushEvent(ev); err != nil {
@@ -274,8 +274,9 @@ func (eb *Bus) publishServer(e *actor.Event) {
 		ev := NewEvent()
 		ev.Type = ServiceGlobalEventTrigger
 		ev.Data = e
-		ev.Key = e.GetKey()
-		ev.Priority = e.GetPriority()
+		ev.SetHeader(def.DefaultDispatcherKey, e.GetDispatcherKey())
+		ev.SetHeader(def.DefaultPriorityKey, e.GetPriority())
+
 		if subMap, ok := serverMap[e.ServerId]; ok {
 			for _, ch := range subMap {
 				if err := ch.PushEvent(ev); err != nil {

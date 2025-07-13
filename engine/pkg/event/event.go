@@ -3,19 +3,16 @@ package event
 import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/engine/pkg/xcontext"
 	"sync/atomic"
 )
 
 type Event struct {
 	dto.DataRef
-	Type     int32
-	Key      string
-	Priority int32
-	Data     interface{}
+	xcontext.XContext
 
-	IntExt    []int64
-	StringExt []string
-	AnyExt    []any
+	Type int32
+	Data interface{}
 
 	refCount atomic.Int32
 }
@@ -27,15 +24,10 @@ func (e *Event) Reset() {
 }
 
 func (e *Event) GetType() int32 {
-	return e.Type
-}
-
-func (e *Event) GetKey() string {
-	return e.Key
-}
-
-func (e *Event) GetPriority() int32 {
-	return e.Priority
+	if e.IsRef() {
+		return e.Type
+	}
+	return UnknownEvent
 }
 
 func (e *Event) IncRef() {
@@ -54,5 +46,7 @@ var eventPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPo
 
 // TODO 这个不能使用pool,因为使用者可能会循环的发给不同订阅者,一个订阅者处理完之后就会释放,可能会导致并发问题,所以直接new
 func NewEvent() *Event {
-	return eventPool.Get().(*Event)
+	evt := eventPool.Get().(*Event)
+	evt.XContext = xcontext.New(nil)
+	return evt
 }

@@ -14,9 +14,9 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/engine/pkg/xcontext"
 	"github.com/njtc406/emberengine/example/msg"
 	"time"
 )
@@ -34,13 +34,14 @@ type Service1 struct {
 }
 
 func (s *Service1) OnInit() error {
-	ctx := context.Background()
-	ctx = emberctx.AddHeader(ctx, "traceId", "123")
+
+	var ctx context.Context
+
 	// method test demo
 	s.AfterFunc(time.Second*2, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) {
 		//startTime := timelib.GetTime()
 		// 调用Service2.APITest2
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*10)
+		ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*10)
 		defer cancel()
 		if err := s.Select(rpc.WithServiceName(ServiceName2)).Call(ctxWithTimeout, "APITest2", nil, nil); err != nil {
 			s.GetLogger().Errorf("call Service2.APITest2 failed, err:%v", err)
@@ -109,17 +110,17 @@ func (s *Service1) OnInit() error {
 	//rpc test demo
 
 	s.AfterFunc(time.Second*2, "rpc test demo", func(timer *timingwheel.Timer, args ...interface{}) {
-		if err := s.Select(rpc.WithServiceName(ServiceName3), rpc.WithServiceId("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-		}
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*5)
+		//if err := s.Select(rpc.WithServiceName(ServiceName3), rpc.WithServiceId("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
+		//	log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		//}
+		ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*1000)
 		defer cancel()
 		if err := s.Select(rpc.WithServiceName(ServiceName3), rpc.WithServiceId("2")).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
 			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
 		}
-		if err := s.Select(rpc.WithServiceName(ServiceName3), rpc.WithServiceId("1")).Send(ctx, "RPCTest2", nil); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-		}
+		//if err := s.Select(rpc.WithServiceName(ServiceName3), rpc.WithServiceId("1")).Send(ctx, "RPCTest2", nil); err != nil {
+		//	log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		//}
 	})
 	s.AfterFunc(time.Second*2, "rpc test demo1", func(timer *timingwheel.Timer, args ...interface{}) {
 		out := &msg.Msg_Test_Resp{}
@@ -151,9 +152,8 @@ func (s *Service1) OnInit() error {
 		}
 
 		// 测试调用对象有参数,但是使用nil的情形
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*3)
+		ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*3)
 		defer cancel()
-		ctxWithTimeout = emberctx.AddHeader(ctxWithTimeout, "traceId", "222")
 		if err := s.Select(rpc.WithServiceName(ServiceName3), rpc.WithServiceId("1")).Call(ctxWithTimeout, "RpcTestWithError", nil, nil); err != nil {
 			log.SysLogger.Errorf("call Service3.RpcTestWithError failed, err:%v", err)
 		}
@@ -346,7 +346,7 @@ func (s *Service2) OnRelease() {
 }
 
 func (s *Service2) APITest2() {
-	//time.Sleep(time.Second * 5) // 模拟耗时操作
+	time.Sleep(time.Second * 6) // 模拟耗时操作
 	log.SysLogger.Debugf("call %s func APITest2", s.GetName())
 }
 

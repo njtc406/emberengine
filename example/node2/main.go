@@ -37,6 +37,7 @@ func (s *Service3) RPCTest2() {
 
 func (s *Service3) RPCSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
 	//time.Sleep(time.Second * 2)
+	log.SysLogger.Debugf("call %s func RPCSum", s.GetName())
 	return &msg.Msg_Test_Resp{
 		Ret: req.A + req.B,
 	}

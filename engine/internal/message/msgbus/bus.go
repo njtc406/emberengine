@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
+	"runtime/debug"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
@@ -86,18 +87,24 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	}
 
 	var timeout time.Duration
-	deadline, ok := ctx.Deadline()
-	if !ok {
+	if ctx != nil {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			timeout = deadline.Sub(timelib.Now())
+		}
+	}
+
+	if timeout <= 0 {
 		timeout = def.DefaultRpcTimeout
-	} else {
-		timeout = deadline.Sub(timelib.Now())
 	}
 
 	mt := monitor.GetRpcMonitor()
 
+	a := data.(*msgenvelope.Data)
+	b := *a
+
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 
 	//data := msgenvelope.NewData()
 	//data.SetMethod(method)
@@ -114,6 +121,8 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	meta.SetTimeout(timeout)
 	envelope.SetMeta(meta)
 
+	c := *meta.(*msgenvelope.Meta)
+
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
 	// 加入等待队列
@@ -129,6 +138,10 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	}
 
 	// 等待回复
+	//<-meta.GetDone()
+	if !envelope.IsRef() {
+		log.SysLogger.WithContext(ctx).Errorf("****************************************************************************************************************meta:%+v data:%+v  trace:%s", c, b, debug.Stack())
+	}
 	envelope.Wait()
 
 	mt.Remove(meta.GetReqId()) // 容错,不管有没有释放,都释放一次(实际上在所有设置done之前都会释放)
@@ -223,18 +236,21 @@ func (mb *MessageBus) callDirect(ctx context.Context, data inf.IEnvelopeData, ou
 
 func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	var timeout time.Duration
-	deadline, ok := ctx.Deadline()
-	if !ok {
+	if ctx != nil {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			timeout = deadline.Sub(timelib.Now())
+		}
+	}
+
+	if timeout <= 0 {
 		timeout = def.DefaultRpcTimeout
-	} else {
-		timeout = deadline.Sub(timelib.Now())
 	}
 
 	mt := monitor.GetRpcMonitor()
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
@@ -313,8 +329,7 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	}
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 
 	data := msgenvelope.NewData()
 	data.SetMethod(method)
@@ -344,8 +359,7 @@ func (mb *MessageBus) sendDirect(ctx context.Context, data inf.IEnvelopeData) er
 	}
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
