@@ -90,7 +90,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	if !ok {
 		timeout = def.DefaultRpcTimeout
 	} else {
-		timeout = timelib.Now().Sub(deadline)
+		timeout = deadline.Sub(timelib.Now())
 	}
 
 	mt := monitor.GetRpcMonitor()
