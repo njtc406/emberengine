@@ -191,8 +191,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.methodMgr = rpc.NewMethodMgr()
 	s.IRpcHandler = rpc.NewHandler(s.self).Init(s.methodMgr)
 
-	if err := s.src.OnInit(); err != nil {
-		s.logger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+	if s.src.OnInit != nil {
+		if err := s.src.OnInit(); err != nil {
+			s.logger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+		}
 	}
 }
 
@@ -208,8 +210,10 @@ func (s *Service) Start() error {
 	go s.startListenCallback()
 
 	// 主从服务需要在onstart中处理
-	if err := s.src.OnStart(); err != nil {
-		return err
+	if s.src.OnStart != nil {
+		if err := s.src.OnStart(); err != nil {
+			return err
+		}
 	}
 
 	s.setStatus(def.SvcStatusRunning) // 到这里算是服务已经准备好所有东西,准备工作都在OnStart中完成
@@ -223,8 +227,10 @@ func (s *Service) Start() error {
 	endpoints.GetEndpointManager().AddService(s)
 	//s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
-	if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
-		return err
+	if s.src.OnStarted != nil {
+		if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
+			return err
+		}
 	}
 
 	return nil
@@ -281,7 +287,9 @@ func (s *Service) release() {
 		}
 	}()
 
-	s.self.OnRelease()
+	if s.self.OnRelease != nil {
+		s.self.OnRelease()
+	}
 	s.closeProfiler()
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)

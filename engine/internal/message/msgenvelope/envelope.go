@@ -150,14 +150,14 @@ func (e *MsgEnvelope) IncRef() {
 	// 所以不需要引用计数
 }
 
-//var count int32
+var count int32
 
 func (e *MsgEnvelope) Release() {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	if e.IsRef() {
-		//count--
-		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
+		count--
+		log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
 		if e.meta != nil && e.meta.IsRef() {
 			metaPool.Put(e.meta)
 		}
@@ -167,8 +167,8 @@ func (e *MsgEnvelope) Release() {
 }
 
 func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
-	//count++
-	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
+	count++
+	log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
 	ep := msgEnvelopePool.Get().(*MsgEnvelope)
 	ep.XContext = xcontext.New(ctx)
 	return ep
