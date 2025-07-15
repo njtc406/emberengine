@@ -31,12 +31,12 @@ ClusterConf:
     NoLogger: true
   RPCServers:
       # 监听地址
-    - Addr: 0.0.0.0:6610
+    - Addr: 0.0.0.0:6670
       # 协议
       Protoc: "tcp"
       # rpc类型
       Type: "rpcx"
-    - Addr: 0.0.0.0:6611
+    - Addr: 0.0.0.0:6671
       Protoc: "tcp"
       Type: "grpc"
     - Addr: nats://${REMOTE_HOST}:4222
@@ -52,24 +52,6 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
     # 服务名称
-    - ClassName: Service2
-      ServiceName: Service2
-      Type: test
-      ServerId: 1
-      TimerConf:
-        # 定时器队列长度
-        TimerSize: 1000
-        # 定时器桶大小
-        TimerBucketSize: 100
-      WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 102400
-        # 系统消息队列大小
-        SystemMailboxSize: 16
-        # 工作线程数量
-        WorkerNum: 1
-      # 是否开启主从模式
-      IsPrimarySecondaryMode: false
     - ClassName: Service1
       ServiceName: Service1
       # 服务类型

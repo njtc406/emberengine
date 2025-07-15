@@ -117,7 +117,7 @@ func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
 		return nil
 	}
 
-	if !rm.sd.Cancel(envelope.GetMeta().GetTimerId()) {
+	if !rm.sd.CancelTimer(envelope.GetMeta().GetTimerId()) {
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("cancel monitor failed,seq:%d", seqId)
 	}
 	delete(rm.waitMap, seqId)

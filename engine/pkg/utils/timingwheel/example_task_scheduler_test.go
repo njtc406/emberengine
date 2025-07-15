@@ -32,7 +32,7 @@ func Example_scheduleTimer() {
 		tId, err := dp.CronFuncWithStorage("0 */1 * * * *", "", printTask, "hello")
 		if err != nil {
 			fmt.Println("err:", err)
-			dp.Cancel(tId)
+			dp.CancelTimer(tId)
 		} else {
 			fmt.Println("tId:", tId)
 		}

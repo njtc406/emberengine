@@ -8,6 +8,7 @@ package client
 import (
 	"fmt"
 	"github.com/nats-io/nats.go"
+	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -60,6 +61,7 @@ func (rc *natsSender) send(envelope inf.IEnvelope) error {
 	if msg == nil {
 		return def.ErrMsgSerializeFailed
 	}
+	defer msgenvelope.ReleaseMessage(msg)
 
 	data, err := proto.Marshal(msg)
 	if err != nil {

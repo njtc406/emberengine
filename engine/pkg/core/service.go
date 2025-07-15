@@ -411,6 +411,10 @@ func (s *Service) isRunning() bool {
 	return atomic.LoadInt32(&s.status) == def.SvcStatusRunning
 }
 
+func (s *Service) GetServiceName() string {
+	return s.name
+}
+
 // InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
 func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 	if !ev.IsRef() {

@@ -36,7 +36,7 @@ func NewTaskScheduler() IConcurrent {
 	return &TaskScheduler{}
 }
 
-// OpenConcurrent 初始化并发调度器
+// OpenConcurrent 初始化并发调度器 第一个参数为线程池大小, 第二个参数为回调函数的通道大小
 func (s *TaskScheduler) OpenConcurrent(poolSize, callbackChannelSize int) {
 	if s.pool == nil {
 		s.pool = asynclib.NewAntsPool(poolSize)
@@ -86,7 +86,6 @@ func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
 		// 任务提交失败,直接回调
 		s.notifyCallback(name, cb, err)
 	}
-
 }
 
 func (s *TaskScheduler) notifyCallback(name string, cb func(error), err error) {

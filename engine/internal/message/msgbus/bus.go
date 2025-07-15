@@ -132,8 +132,9 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	if err := mb.receiver.SendRequest(envelope); err != nil {
 		// 发送失败,释放资源
 		mt.Remove(meta.GetReqId())
+
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", envelope.GetMeta().GetSenderPid().GetName(), data.GetMethod(), err)
 		envelope.Release()
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
 		return def.ErrRPCCallFailed
 	}
 

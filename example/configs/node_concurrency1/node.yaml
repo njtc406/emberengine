@@ -31,12 +31,12 @@ ClusterConf:
     NoLogger: true
   RPCServers:
       # 监听地址
-    - Addr: 0.0.0.0:6610
+    - Addr: 0.0.0.0:6680
       # 协议
       Protoc: "tcp"
       # rpc类型
       Type: "rpcx"
-    - Addr: 0.0.0.0:6611
+    - Addr: 0.0.0.0:6681
       Protoc: "tcp"
       Type: "grpc"
     - Addr: nats://${REMOTE_HOST}:4222
@@ -56,6 +56,7 @@ ServiceConf:
       ServiceName: Service2
       Type: test
       ServerId: 1
+      RpcType: "rpcx"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -70,43 +71,6 @@ ServiceConf:
         WorkerNum: 1
       # 是否开启主从模式
       IsPrimarySecondaryMode: false
-    - ClassName: Service1
-      ServiceName: Service1
-      # 服务类型
-      Type: test
-      # 服务器ID
-      ServerId: 1
-      # 定时器配置
-      TimerConf:
-        # 定时器队列长度
-        TimerSize: 1000
-        # 定时器桶大小
-        TimerBucketSize: 100
-      # 工作线程配置
-      WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 102400
-        # 系统消息队列大小
-        SystemMailboxSize: 16
-        # 工作线程数量
-        WorkerNum: 1
-        # 是否开启动态线程数调整
-        DynamicWorkerScaling: false
-        # 虚拟线程比例
-        VirtualWorkerRate: 10
-    - ClassName: PprofService
-      ServiceName: PprofService
-      Type: test
-      ServerId: 1
-      TimerConf:
-        TimerSize: 1000
-        TimerBucketSize: 100
-      WorkerConf:
-        UserMailboxSize: 102400
-        SystemMailboxSize: 16
-        WorkerNum: 1
-        DynamicWorkerScaling: false
-        VirtualWorkerRate: 10
 
 
 

@@ -9,8 +9,10 @@ import (
 var (
 	ErrModuleNotInitialized      = errors.New("module not initialized")                    // 模块未初始化
 	ErrModuleHadRegistered       = errors.New("module had registered")                     // 已经注册过该模块
-	ErrEventChannelIsFull        = errors.New("event channel is full")                     // 事件通道已满
+	ErrEventChannelIsFull        = errors.New("111111111event channel is full")            // 事件通道已满
+	ErrSysEventChannelIsFull     = errors.New("sys event channel is full")                 // 系统事件通道已满
 	ErrMailboxNotRunning         = errors.New("mailbox not running")                       // 邮箱未运行
+	ErrMailboxWorkerIsFull       = errors.New("mailbox worker is full")                    // 邮箱工作线程已满
 	ErrRPCCallTimeout            = errors.New("rpc call timeout")                          // RPC 调用超时
 	ErrServiceNotFound           = errors.New("service not found")                         // 服务未找到
 	ErrServiceIsRunning          = errors.New("service is running")                        // 服务正在运行

@@ -56,10 +56,9 @@ func getSenderHandler(addr string, tp string) inf.IRpcSender {
 }
 
 func addSenderHandler(addr, tp string) inf.IRpcSender {
-	handler := senderMap[tp](addr)
-
 	lock.Lock()
 	defer lock.Unlock()
+	handler := senderMap[tp](addr)
 	if tps, ok := senderHandlerMap[addr]; ok {
 		tps[tp] = handler
 	} else {

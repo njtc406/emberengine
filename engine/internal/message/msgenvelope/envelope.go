@@ -18,6 +18,7 @@ import (
 	"golang.org/x/net/context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 )
 
 var msgEnvelopePool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
@@ -103,20 +104,19 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	// TODO message使用缓存池来获取
-	msg := &actor.Message{
-		TypeId:        0, // 默认使用protobuf(后面有其他需求再修改这里)
-		TypeName:      "",
-		SenderPid:     e.meta.GetSenderPid(),
-		ReceiverPid:   e.meta.GetReceiverPid(),
-		Method:        e.data.GetMethod(),
-		Request:       nil,
-		Response:      nil,
-		Err:           e.data.GetErrStr(),
-		MessageHeader: e.GetHeaders(),
-		Reply:         e.data.IsReply(),
-		ReqId:         e.meta.GetReqId(),
-		NeedResp:      e.data.NeedResponse(),
-	}
+	msg := NewMessage()
+	msg.TypeId = 0 // 默认使用protobuf(后面有其他需求再修改这里)
+	msg.TypeName = ""
+	msg.SenderPid = e.meta.GetSenderPid()
+	msg.ReceiverPid = e.meta.GetReceiverPid()
+	msg.Method = e.data.GetMethod()
+	msg.Request = nil
+	msg.Response = nil
+	msg.Err = e.data.GetErrStr()
+	msg.MessageHeader = e.GetHeaders()
+	msg.Reply = e.data.IsReply()
+	msg.ReqId = e.meta.GetReqId()
+	msg.NeedResp = e.data.NeedResponse()
 
 	var byteData []byte
 	var typeName string
@@ -150,14 +150,17 @@ func (e *MsgEnvelope) IncRef() {
 	// 所以不需要引用计数
 }
 
-var count int32
+var count atomic.Int32
 
 func (e *MsgEnvelope) Release() {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	if e.IsRef() {
-		count--
-		log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count)
+		count.Add(-1)
+		if count.Load() < 0 {
+			log.SysLogger.Errorf("msgEnvelopePool.Put() count: %d", count.Load())
+		}
+		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count.Load())
 		if e.meta != nil && e.meta.IsRef() {
 			metaPool.Put(e.meta)
 		}
@@ -167,8 +170,8 @@ func (e *MsgEnvelope) Release() {
 }
 
 func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
-	count++
-	log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count)
+	count.Add(1)
+	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count.Load())
 	ep := msgEnvelopePool.Get().(*MsgEnvelope)
 	ep.XContext = xcontext.New(ctx)
 	return ep

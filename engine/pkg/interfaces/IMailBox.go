@@ -13,6 +13,7 @@ type IMailboxMiddleware interface {
 
 // IMessageInvoker 处理消息
 type IMessageInvoker interface {
+	GetServiceName() string
 	InvokeSystemMessage(evt IEvent)
 	InvokeUserMessage(evt IEvent)
 	EscalateFailure(reason interface{}, evt IEvent)
