@@ -9,6 +9,7 @@ import "context"
 
 type IContext interface {
 	context.Context
+	IReset
 
 	SetHeaders(headers map[string]string)
 	SetHeader(key string, value any)
@@ -21,6 +22,4 @@ type IContext interface {
 	GetDispatcherKey() string
 	GetPriority() int32
 	GetType() int32
-
-	Reset()
 }

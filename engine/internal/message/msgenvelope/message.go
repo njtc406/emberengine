@@ -10,12 +10,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
-var msgPool = pool.NewPool(make(chan interface{}, 1000), func() interface{} {
+var msgPool = pool.NewPrePPool(1024, func() *actor.Message {
 	return &actor.Message{}
 })
 
 func NewMessage() *actor.Message {
-	return msgPool.Get().(*actor.Message)
+	return msgPool.Get()
 }
 
 func ReleaseMessage(msg *actor.Message) {

@@ -43,15 +43,15 @@ type Cron struct {
 	Timer
 }
 
-var timerPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+var timerPool = pool.NewPrePPoolEx(4096, func() pool.IPoolData {
 	return &Timer{}
 })
 
-var cronPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+var cronPool = pool.NewPrePPoolEx(4096, func() pool.IPoolData {
 	return &Cron{}
 })
 
-var tickerPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+var tickerPool = pool.NewPrePPoolEx(4096, func() pool.IPoolData {
 	return &Ticker{}
 })
 

@@ -69,7 +69,7 @@ func (s *ConcurrencyTest) OnInit() error {
 	s.OpenConcurrent(1000, 1000000)
 
 	total := 100_000
-	concurrency := 500
+	concurrency := 500 // 控制一下并发数
 	wg := sync.WaitGroup{}
 	wg.Add(total)
 
@@ -95,9 +95,9 @@ func (s *ConcurrencyTest) OnInit() error {
 
 						start := time.Now()
 
-						//var result msg.Msg_Test_Resp
-						//err := s.Select(rpc.WithServiceName(ServiceName2)).Call(nil, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &result)
-						err := s.Select(rpc.WithServiceName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
+						var result msg.Msg_Test_Resp
+						err := s.Select(rpc.WithServiceName(ServiceName2)).Call(nil, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &result)
+						//err := s.Select(rpc.WithServiceName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
 						if err != nil {
 							log.SysLogger.Errorf("call error: %v", err)
 							return

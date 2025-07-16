@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 )
 
-var msgEnvelopePool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+var msgEnvelopePool = pool.NewPrePPoolEx(10240, func() pool.IPoolData {
 	return &MsgEnvelope{}
 })
 

@@ -34,7 +34,7 @@ func (mb *MessageBus) Reset() {
 	mb.receiver = nil
 }
 
-var busPool = pool.NewPoolEx(make(chan pool.IPoolData, 2048), func() pool.IPoolData {
+var busPool = pool.NewPrePPoolEx(2048, func() pool.IPoolData {
 	return &MessageBus{}
 })
 

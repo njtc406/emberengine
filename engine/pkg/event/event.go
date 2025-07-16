@@ -40,7 +40,7 @@ func (e *Event) Release() {
 	}
 }
 
-var eventPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+var eventPool = pool.NewPrePPoolEx(4096, func() pool.IPoolData {
 	return &Event{}
 })
 

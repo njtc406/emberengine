@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-var metaPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
+var metaPool = pool.NewPrePPoolEx(10240, func() pool.IPoolData {
 	return &Meta{}
 })
 

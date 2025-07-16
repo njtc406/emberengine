@@ -20,7 +20,7 @@ type ITimer interface {
 	GetTimerId() uint64
 }
 
-var timerPool = pool.NewPoolEx(make(chan pool.IPoolData, 100000), func() pool.IPoolData {
+var timerPool = pool.NewPrePPoolEx(8192, func() pool.IPoolData {
 	return &Timer{}
 })
 
