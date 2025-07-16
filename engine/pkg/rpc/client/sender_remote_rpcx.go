@@ -9,6 +9,7 @@ import (
 	"context"
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -29,10 +30,14 @@ type rpcxSender struct {
 func newRpcxClient(addr string) inf.IRpcSender {
 	d, _ := client.NewPeer2PeerDiscovery("tcp@"+addr, "")
 	// 如果调用失败,会自动重试3次
-	// TODO 并发需要多创建几个连接
 	var clients []client.XClient
-	for i := 0; i < 10; i++ {
-		rpcClient := client.NewXClient("RpcxListener", client.Failtry, client.RandomSelect, d, client.Option{
+	cpuNum := runtime.NumCPU()
+	connNum := cpuNum / 2
+	if connNum < 1 {
+		connNum = 1
+	}
+	for i := 0; i < connNum; i++ {
+		rpcClient := client.NewXClient("RpcxListener", client.Failfast, client.RoundRobin, d, client.Option{
 			Retries:             3, // 重试3次
 			RPCPath:             share.DefaultRPCPath,
 			ConnectTimeout:      time.Second,            // 连接超时

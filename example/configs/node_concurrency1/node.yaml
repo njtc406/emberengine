@@ -52,11 +52,11 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
     # 服务名称
-    - ClassName: Service2
-      ServiceName: Service2
+    - ClassName: ConcurrencyTest1
+      ServiceName: ConcurrencyTest1
       Type: test
       ServerId: 1
-      RpcType: "rpcx"
+      RpcType: "nats"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000

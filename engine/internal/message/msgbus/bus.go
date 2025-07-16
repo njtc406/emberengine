@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
-	"runtime/debug"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
@@ -100,9 +99,6 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 
 	mt := monitor.GetRpcMonitor()
 
-	a := data.(*msgenvelope.Data)
-	b := *a
-
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope(ctx)
 
@@ -121,8 +117,6 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	meta.SetTimeout(timeout)
 	envelope.SetMeta(meta)
 
-	c := *meta.(*msgenvelope.Meta)
-
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
 	// 加入等待队列
@@ -139,10 +133,6 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	}
 
 	// 等待回复
-	//<-meta.GetDone()
-	if !envelope.IsRef() {
-		log.SysLogger.WithContext(ctx).Errorf("****************************************************************************************************************meta:%+v data:%+v  trace:%s", c, b, debug.Stack())
-	}
 	envelope.Wait()
 
 	mt.Remove(meta.GetReqId()) // 容错,不管有没有释放,都释放一次(实际上在所有设置done之前都会释放)

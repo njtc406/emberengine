@@ -13,8 +13,8 @@ import (
 )
 
 func init() {
-	services.SetService("Service111", func() inf.IService {
-		return &comm.Service111{}
+	services.SetService("MasterSlaverTest", func() inf.IService {
+		return &comm.MasterSlaverTest{}
 	})
 }
 

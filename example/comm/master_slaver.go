@@ -7,9 +7,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
+	"github.com/njtc406/emberengine/engine/pkg/xcontext"
 	"github.com/njtc406/emberengine/example/msg"
 	"google.golang.org/protobuf/proto"
 	"sync/atomic"
@@ -42,8 +42,8 @@ const (
 	Div              // 除
 )
 
-// Service111 测试主从模式服务
-type Service111 struct {
+// MasterSlaverTest 测试主从模式服务
+type MasterSlaverTest struct {
 	core.Service
 
 	inited     atomic.Bool
@@ -54,23 +54,23 @@ type Service111 struct {
 	saveTimer  *timingwheel.Timer
 }
 
-func (s *Service111) OnInit() error {
+func (s *MasterSlaverTest) OnInit() error {
 	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceBecomeMaster, s.GetEventHandler(), s.becomeMaster) // 升级为主服务
 	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceBecomeSlaver, s.GetEventHandler(), s.becomeSlaver) // 降级为从服务
 	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceLoseMaster, s.GetEventHandler(), s.loseMaster)     // 主服务降级
 	return nil
 }
 
-func (s *Service111) OnStart() error {
+func (s *MasterSlaverTest) OnStart() error {
 
 	return nil
 }
 
-func (s *Service111) OnStarted() error {
+func (s *MasterSlaverTest) OnStarted() error {
 	return nil
 }
 
-func (s *Service111) OnRelease() {
+func (s *MasterSlaverTest) OnRelease() {
 	if s.timer != nil {
 		s.timer.Stop()
 		s.timer = nil
@@ -82,7 +82,7 @@ func (s *Service111) OnRelease() {
 	// 保存数据
 }
 
-func (s *Service111) becomeMaster(e inf.IEvent) {
+func (s *MasterSlaverTest) becomeMaster(e inf.IEvent) {
 	evt := e.(*event.Event)
 	oldStateIsMaster := evt.Data.(bool)
 	if oldStateIsMaster {
@@ -105,7 +105,8 @@ func (s *Service111) becomeMaster(e inf.IEvent) {
 	s.timer = s.TickerFunc(time.Second, "master tick", s.tick)
 	s.saveTimer = s.TickerFunc(time.Second*10, "save all data", s.saveAllData)
 
-	ctx := emberctx.NewCtx(emberctx.WithKV(def.DefaultPriorityKey, def.PrioritySysStr))
+	ctx := xcontext.New(nil)
+	ctx.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
 
 	// 向所有从服务同步一次完整数据
 	if err := s.selectSelfSlavers().Send(ctx, "RpcSyncAllData", s.packageData()); err != nil {
@@ -115,21 +116,21 @@ func (s *Service111) becomeMaster(e inf.IEvent) {
 	s.GetLogger().Debugf("master start...")
 }
 
-func (s *Service111) selectSelfSlavers() inf.IBus {
+func (s *MasterSlaverTest) selectSelfSlavers() inf.IBus {
 	return s.SelectSlavers(
 		rpc.WithServiceName(s.GetName()),
 		rpc.WithServiceId(s.GetPid().GetServiceId()),
 		rpc.WithServerId(s.GetServerId()))
 }
 
-func (s *Service111) selectSelfMaster() inf.IBus {
+func (s *MasterSlaverTest) selectSelfMaster() inf.IBus {
 	return s.Select(
 		rpc.WithServiceName(s.GetName()),
 		rpc.WithServiceId(s.GetPid().GetServiceId()),
 		rpc.WithServerId(s.GetServerId()))
 }
 
-func (s *Service111) becomeSlaver(e inf.IEvent) {
+func (s *MasterSlaverTest) becomeSlaver(e inf.IEvent) {
 	// 降级为从服务
 	// TODO 屏蔽所有数据操作,只允许使用主服务数据记录回放操作数据
 	// ...
@@ -141,8 +142,8 @@ func (s *Service111) becomeSlaver(e inf.IEvent) {
 		s.saveTimer.Stop()
 		s.saveTimer = nil
 	}
-
-	ctx := emberctx.NewCtx(emberctx.WithKV(def.DefaultPriorityKey, def.PrioritySysStr))
+	ctx := xcontext.New(nil)
+	ctx.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
 	// 从主服务同步一次完整数据
 	resp := &msg.TestData{}
 	if err := s.selectSelfMaster().Call(ctx, "RpcGetAllData", nil, resp); err != nil {
@@ -174,7 +175,7 @@ func (s *Service111) becomeSlaver(e inf.IEvent) {
 	s.GetLogger().Debugf("become slaver")
 }
 
-func (s *Service111) loseMaster(e inf.IEvent) {
+func (s *MasterSlaverTest) loseMaster(e inf.IEvent) {
 	evt := e.(*event.Event)
 	oldStateIsMaster := evt.Data.(bool)
 	if oldStateIsMaster {
@@ -199,7 +200,7 @@ func (s *Service111) loseMaster(e inf.IEvent) {
 	s.GetLogger().Debugf("lose master...")
 }
 
-func (s *Service111) packageData() proto.Message {
+func (s *MasterSlaverTest) packageData() proto.Message {
 	return &msg.TestData{
 		A:       s.a.A,
 		Version: s.a.Version,
@@ -207,7 +208,7 @@ func (s *Service111) packageData() proto.Message {
 }
 
 // RpcSyncAllData 主服务向从服务同步最新全量数据
-func (s *Service111) RpcSyncAllData(req *msg.TestData) error {
+func (s *MasterSlaverTest) RpcSyncAllData(req *msg.TestData) error {
 	if req == nil {
 		return def.ErrParamNotMatch
 	}
@@ -223,7 +224,7 @@ func (s *Service111) RpcSyncAllData(req *msg.TestData) error {
 }
 
 // RpcGetAllData 从服务向主服务请求最新全量数据
-func (s *Service111) RpcGetAllData() (*msg.TestData, error) {
+func (s *MasterSlaverTest) RpcGetAllData() (*msg.TestData, error) {
 	if !s.inited.Load() {
 		// 主服务还未加载完成
 		return nil, fmt.Errorf("主服务还未加载完成")
@@ -238,7 +239,7 @@ func (s *Service111) RpcGetAllData() (*msg.TestData, error) {
 	}, nil
 }
 
-func (s *Service111) RpcSyncLog(req *msg.TestLog) error {
+func (s *MasterSlaverTest) RpcSyncLog(req *msg.TestLog) error {
 	if !s.inited.Load() {
 		// 从服务还为获取到完整的全量数据,放入缓存
 		s.queueCache = append(s.queueCache, req)
@@ -259,7 +260,7 @@ func (s *Service111) RpcSyncLog(req *msg.TestLog) error {
 	return nil
 }
 
-func (s *Service111) tick(timer *timingwheel.Timer, args ...interface{}) {
+func (s *MasterSlaverTest) tick(timer *timingwheel.Timer, args ...interface{}) {
 	opt := util.RandN[int32](4)     // 产生一个0-3的操作
 	param := util.RandN[int32](100) // 随机产生一个参数
 
@@ -277,7 +278,7 @@ func (s *Service111) tick(timer *timingwheel.Timer, args ...interface{}) {
 	s.option(opt, param)
 
 	// 同步所有从服务
-	ctx := emberctx.NewCtx() // 日志同步处理优先级别可以不用那么高,默认会使用user级别
+	ctx := xcontext.New(nil)
 	if err := s.selectSelfSlavers().Send(ctx, "RpcSyncLog", log.ToProto()); err != nil {
 		s.GetLogger().WithContext(ctx).Errorf("sync all data to slaver failed, err:%v", err)
 	}
@@ -285,13 +286,13 @@ func (s *Service111) tick(timer *timingwheel.Timer, args ...interface{}) {
 	// TODO 如果有任何需要操作其他的东西,都只有主服务可以进行后续,从服务只做数据更新
 }
 
-func (s *Service111) saveAllData(timer *timingwheel.Timer, args ...interface{}) {
+func (s *MasterSlaverTest) saveAllData(timer *timingwheel.Timer, args ...interface{}) {
 	// 定时做完整数据镜像,并清空log
 
 	s.logs = s.logs[:0]
 }
 
-func (s *Service111) option(opt, param int32) {
+func (s *MasterSlaverTest) option(opt, param int32) {
 	// 执行日志
 	switch opt {
 	case Add:

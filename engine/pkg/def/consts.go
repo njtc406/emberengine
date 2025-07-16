@@ -86,11 +86,11 @@ const (
 )
 
 const (
-	NatsDefaultMaxReconnects      = -1 // 不限制重连次数
+	NatsDefaultMaxReconnects      = 5 // 不限制重连次数
 	NatsDefaultReconnectWait      = 2 * time.Second
-	NatsDefaultPingInterval       = 10 * time.Second
+	NatsDefaultPingInterval       = 30 * time.Second
 	NatsDefaultPingMaxOutstanding = 2
-	NatsDefaultReconnectBufSize   = 4096
+	NatsDefaultReconnectBufSize   = 1024 * 1024 * 8
 	NatsDefaultTimeout            = 10 * time.Second
 )
 

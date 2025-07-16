@@ -304,6 +304,10 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 	if data.NeedResponse() {
 		data.SetReply()
 		data.SetRequest(nil)
+
+		// 将receiver设置为sender,防止nats那里找不到对应的topic
+		sender := meta.GetSenderPid()
+		meta.SetReceiverPid(sender)
 		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
 			log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}

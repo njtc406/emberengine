@@ -7,7 +7,7 @@ package nt
 
 import (
 	"github.com/nats-io/nats.go"
-	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -19,17 +19,20 @@ type NatsListener struct {
 }
 
 func (n *NatsListener) Handle(msg *nats.Msg) {
-	var req actor.Message
-	err := proto.Unmarshal(msg.Data, &req)
+	req := msgenvelope.NewMessage()
+	defer msgenvelope.ReleaseMessage(req)
+	err := proto.Unmarshal(msg.Data, req)
 	if err != nil {
 		log.SysLogger.Errorf("unmarshal nats message error: %v", err)
 		return
 	}
 
-	if err = handler.RpcMessageHandler(n.cliFactory, &req); err != nil {
+	if err = handler.RpcMessageHandler(n.cliFactory, req); err != nil {
 		log.SysLogger.Errorf("handle nats message error: %v", err)
 	}
-	if err = msg.Ack(); err != nil {
-		log.SysLogger.Errorf("ack nats message error: %v", err)
-	}
+
+	// request才有
+	//if err = msg.Ack(); err != nil {
+	//	log.SysLogger.Errorf("ack nats message error: %v", err)
+	//}
 }
