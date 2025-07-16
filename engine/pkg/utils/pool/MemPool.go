@@ -3,11 +3,12 @@ package pool
 import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpmc"
 	"sync"
 )
 
-type Pool struct {
-	C        chan interface{} //最大缓存的数量
+type Pool[T any] struct {
+	queue    *mpmc.Queue[T] //最大缓存的数量
 	syncPool sync.Pool
 }
 
@@ -17,35 +18,34 @@ type IPoolData interface {
 }
 
 type PoolEx struct {
-	C        chan IPoolData //最大缓存的数量
+	queue    *mpmc.Queue[IPoolData] //最大缓存的数量
 	syncPool sync.Pool
 }
 
-func (pool *Pool) Get() interface{} {
-	select {
-	case d := <-pool.C:
-		return d
-	default:
-		return pool.syncPool.Get()
+func (pool *Pool[T]) Get() T {
+	t, ok := pool.queue.Pop()
+	if ok {
+		return t
 	}
-
-	return nil
+	return pool.syncPool.Get().(T)
 }
 
-func (pool *Pool) Put(data interface{}) {
-	select {
-	case pool.C <- data:
-	default:
+func (pool *Pool[T]) Put(data T) {
+	if !pool.queue.Push(data) {
 		pool.syncPool.Put(data)
 	}
-
 }
 
-func NewPool(C chan interface{}, New func() interface{}) *Pool {
-	var p Pool
-	p.C = C
-	p.syncPool.New = New
-	return &p
+func NewPool[T any](queueSize int, New func() interface{}) *Pool[T] {
+	//var p Pool
+	//p.queue = mpmc.NewQueue[T](int64(queueSize))
+	//p.syncPool.New = New
+	return &Pool[T]{
+		queue: mpmc.NewQueue(int64(queueSize)),
+		syncPool: sync.Pool{
+			New: New,
+		},
+	}
 }
 
 func NewPoolEx(C chan IPoolData, New func() IPoolData) *PoolEx {

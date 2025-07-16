@@ -1,4 +1,4 @@
-// Package actor
+// Package msgenvelope
 // 模块名: 模块名
 // 功能描述: 描述
 // 作者:  yr  2025/7/16 0016 2:19
@@ -9,12 +9,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
-
-//var msgPool = sync.Pool{
-//	New: func() interface{} {
-//		return &Message{}
-//	},
-//}
 
 var msgPool = pool.NewPool(make(chan interface{}, 1000), func() interface{} {
 	return &actor.Message{}
