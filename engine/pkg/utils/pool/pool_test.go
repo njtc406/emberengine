@@ -44,6 +44,8 @@ func BenchmarkPoolParallel(b *testing.B) {
 	p := NewPool(1024, func() *TestData {
 		return &TestData{}
 	})
+	b.ReportAllocs()
+	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			obj := p.Get()
@@ -87,6 +89,8 @@ func BenchmarkExtendedPoolParallel(b *testing.B) {
 	p := NewExtendedPool(1024, func() *TestData {
 		return &TestData{}
 	})
+	b.ReportAllocs()
+	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			obj := p.Get()
@@ -94,6 +98,16 @@ func BenchmarkExtendedPoolParallel(b *testing.B) {
 		}
 	})
 }
+
+/*
+goos: windows
+goarch: amd64
+pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
+cpu: AMD Ryzen 7 2700 Eight-Core Processor
+BenchmarkExtendedPoolParallel
+BenchmarkExtendedPoolParallel-16        14852881                79.54 ns/op
+PASS
+*/
 
 func BenchmarkChannelPool_GetPut(b *testing.B) {
 	pool := NewChannelPool[*TestData](1024, func() *TestData {
@@ -119,6 +133,8 @@ func BenchmarkChannelPool_GetPutParallel(b *testing.B) {
 	pool := NewChannelPool[*TestData](1024, func() *TestData {
 		return &TestData{}
 	})
+	b.ReportAllocs()
+	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			obj := pool.Get()
@@ -138,13 +154,49 @@ op
 PASS
 */
 
+func BenchmarkPrePPool_GetPut(b *testing.B) {
+	pool := NewPrePPool[*TestData](1024, func() *TestData {
+		return &TestData{}
+	})
+
+	for i := 0; i < b.N; i++ {
+		obj := pool.Get()
+		pool.Put(obj)
+	}
+}
+
 /*
 goos: windows
 goarch: amd64
 pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
 cpu: AMD Ryzen 7 2700 Eight-Core Processor
-BenchmarkExtendedPoolParallel
-BenchmarkExtendedPoolParallel-16        14852881                79.54 ns/op
+BenchmarkPrePPool_GetPut
+BenchmarkPrePPool_GetPut-16     93102645                13.11 ns/op
+PASS
+*/
+
+func BenchmarkPrePPool_GetPutParallel(b *testing.B) {
+	pool := NewPrePPool[*TestData](1024, func() *TestData {
+		return &TestData{}
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			obj := pool.Get()
+			pool.Put(obj)
+		}
+	})
+
+}
+
+/*
+goos: windows
+goarch: amd64
+pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
+cpu: AMD Ryzen 7 2700 Eight-Core Processor
+BenchmarkPrePPool_GetPutParallel
+BenchmarkPrePPool_GetPutParallel-16     706656765                1.552 ns/op
 PASS
 */
 
