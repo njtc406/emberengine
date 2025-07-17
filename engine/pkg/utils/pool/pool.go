@@ -298,3 +298,28 @@ func (p *PrePPoolEx[T]) Put(obj T) {
 	// 2. 放回全局池
 	p.globalPool.Put(obj)
 }
+
+type SyncPool[T inf.IReset] struct {
+	pool sync.Pool
+}
+
+func NewSyncPool[T inf.IReset](factory func() T) *SyncPool[T] {
+	return &SyncPool[T]{
+		pool: sync.Pool{
+			New: func() any {
+				return factory()
+			},
+		},
+	}
+}
+
+func (p *SyncPool[T]) Get() T {
+	t := p.pool.Get().(T)
+	t.Reset()
+	return t
+}
+
+func (p *SyncPool[T]) Put(obj T) {
+	obj.Reset()
+	p.pool.Put(obj)
+}

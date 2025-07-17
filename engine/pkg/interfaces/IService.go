@@ -51,7 +51,7 @@ type IIdentifiable interface {
 
 type IProfiler interface {
 	OpenProfiler()
-	GetProfiler() *profiler.Profiler
+	GetProfiler() *profiler.Profiler // TODO 需要将这个做成interface
 }
 
 type INamed interface {
