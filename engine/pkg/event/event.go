@@ -40,13 +40,28 @@ func (e *Event) Release() {
 	}
 }
 
-var eventPool = pool.NewPrePPoolEx(4096, func() pool.IPoolData {
-	return &Event{}
-})
+var eventPool = pool.NewSyncPoolWrapper(
+	func() *Event {
+		return &Event{}
+	},
+	pool.NewStatsRecorder("eventPool"),
+	pool.WithRef(func(t *Event) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *Event) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *Event) {
+		t.Reset()
+	}),
+)
 
-// TODO 这个不能使用pool,因为使用者可能会循环的发给不同订阅者,一个订阅者处理完之后就会释放,可能会导致并发问题,所以直接new
 func NewEvent() *Event {
-	evt := eventPool.Get().(*Event)
+	evt := eventPool.Get() // 事件使用时,会使用incRef来保证所有地方都释放之后才真正释放
 	evt.XContext = xcontext.New(nil)
 	return evt
+}
+
+func GetEventPoolStats() *pool.Stats {
+	return eventPool.Stats()
 }

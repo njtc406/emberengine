@@ -5,7 +5,7 @@
 // @Update  yr  2025/7/17
 package pool
 
-type IPoolWithRef[T IPoolData] interface {
+type IPool[T any] interface {
 	Get() T
 	Put(obj T)
 	Stats() *Stats

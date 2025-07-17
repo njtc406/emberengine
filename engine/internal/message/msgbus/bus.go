@@ -34,12 +34,24 @@ func (mb *MessageBus) Reset() {
 	mb.receiver = nil
 }
 
-var busPool = pool.NewPrePPoolEx(2048, func() pool.IPoolData {
-	return &MessageBus{}
-})
+var busPool = pool.NewSyncPoolWrapper(
+	func() *MessageBus {
+		return &MessageBus{}
+	},
+	pool.NewStatsRecorder("busPool"),
+	pool.WithRef(func(t *MessageBus) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *MessageBus) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(mb *MessageBus) {
+		mb.Reset()
+	}),
+)
 
 func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
-	mb := busPool.Get().(*MessageBus)
+	mb := busPool.Get()
 	mb.sender = sender
 	mb.receiver = receiver
 	mb.err = err
@@ -48,6 +60,10 @@ func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err e
 
 func ReleaseMessageBus(mb *MessageBus) {
 	busPool.Put(mb)
+}
+
+func GetMessageBusPoolStats() *pool.Stats {
+	return busPool.Stats()
 }
 
 func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {

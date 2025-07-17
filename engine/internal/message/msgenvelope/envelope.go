@@ -21,9 +21,21 @@ import (
 	"sync/atomic"
 )
 
-var msgEnvelopePool = pool.NewPrePPoolEx(10240, func() pool.IPoolData {
-	return &MsgEnvelope{}
-})
+var msgEnvelopePool = pool.NewSyncPoolWrapper(
+	func() *MsgEnvelope {
+		return &MsgEnvelope{}
+	},
+	pool.NewStatsRecorder("msgEnvelopePool"),
+	pool.WithRef(func(t *MsgEnvelope) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *MsgEnvelope) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *MsgEnvelope) {
+		t.Reset()
+	}),
+)
 
 type MsgEnvelope struct {
 	dto.DataRef
@@ -172,7 +184,11 @@ func (e *MsgEnvelope) Release() {
 func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
 	count.Add(1)
 	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count.Load())
-	ep := msgEnvelopePool.Get().(*MsgEnvelope)
+	ep := msgEnvelopePool.Get()
 	ep.XContext = xcontext.New(ctx)
 	return ep
+}
+
+func GetMsgEnvelopePoolStats() *pool.Stats {
+	return msgEnvelopePool.Stats()
 }

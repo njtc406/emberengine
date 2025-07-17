@@ -10,9 +10,16 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
-var msgPool = pool.NewPrePPool(1024, func() *actor.Message {
-	return &actor.Message{}
-})
+var msgPool = pool.NewPerPPoolWrapper(
+	8096,
+	func() *actor.Message {
+		return &actor.Message{}
+	},
+	pool.NewStatsRecorder("rpcMsgPool"),
+	pool.WithPReset(func(msg *actor.Message) {
+		msg.Reset()
+	}),
+)
 
 func NewMessage() *actor.Message {
 	return msgPool.Get()
@@ -20,4 +27,8 @@ func NewMessage() *actor.Message {
 
 func ReleaseMessage(msg *actor.Message) {
 	msgPool.Put(msg)
+}
+
+func GetMsgPoolStats() *pool.Stats {
+	return msgPool.Stats()
 }

@@ -8,6 +8,7 @@ package comm
 import (
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
@@ -163,6 +164,12 @@ func (s *ConcurrencyTest) OnInit() error {
 		for _, v := range samples {
 			s.GetLogger().Debugf("%s = %v\n", v.Name, v.Value)
 		}
+
+		// 打印缓存池
+		//s.GetLogger().Debug(msgenvelope.GetMsgPoolStats())
+		//s.GetLogger().Debug(msgenvelope.GetMetaPoolStats())
+		s.GetLogger().Debug(timingwheel.GetTimerPoolStats().String())
+		s.GetLogger().Debug(event.GetEventPoolStats().String())
 	}()
 
 	return nil

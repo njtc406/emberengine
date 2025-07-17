@@ -14,12 +14,28 @@ import (
 	"time"
 )
 
-var metaPool = pool.NewPrePPoolEx(10240, func() pool.IPoolData {
-	return &Meta{}
-})
+var metaPool = pool.NewSyncPoolWrapper(
+	func() *Meta {
+		return &Meta{}
+	},
+	pool.NewStatsRecorder("msgEnvelopePool"),
+	pool.WithRef(func(t *Meta) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *Meta) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *Meta) {
+		t.Reset()
+	}),
+)
 
 func NewMeta() inf.IEnvelopeMeta {
-	return metaPool.Get().(inf.IEnvelopeMeta)
+	return metaPool.Get()
+}
+
+func GetMetaPoolStats() *pool.Stats {
+	return metaPool.Stats()
 }
 
 type Meta struct {
