@@ -52,7 +52,7 @@ func Init() {
 			svc.Init(svc, initConf, cfg)
 			runServices = append(runServices, svc)
 		} else {
-			log.SysLogger.Panic("Service[%s] not found", initConf.ClassName)
+			log.SysLogger.Panicf("Service[%s] not found", initConf.ClassName)
 		}
 	}
 }

@@ -183,16 +183,16 @@ func (s *ConcurrencyTest) OnRelease() {
 	s.CancelTimer(s.autoCallTimerId)
 }
 
-type Service2TestModule struct {
+type ConcurrencyTest1Module struct {
 	core.Module
 }
 
-func (s *Service2TestModule) RpcSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
+func (s *ConcurrencyTest1Module) RpcSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
 	//log.SysLogger.Debugf(">>>>>>>>>>> call %s func RpcSum, a:%d, b:%d", s.GetModuleName(), a, b)
 	return &msg.Msg_Test_Resp{Ret: req.A + req.B}
 }
 
-func (s *Service2TestModule) ApiSum(a, b int) int {
+func (s *ConcurrencyTest1Module) ApiSum(a, b int) int {
 	//log.SysLogger.Debugf(">>>>>>>>>>> call %s func ApiSum, a:%d, b:%d", s.GetModuleName(), a, b)
 	return a + b
 }
@@ -202,7 +202,7 @@ type ConcurrencyTest1 struct {
 }
 
 func (s *ConcurrencyTest1) OnInit() error {
-	_, _ = s.AddModule(&Service2TestModule{})
+	_, _ = s.AddModule(&ConcurrencyTest1Module{})
 	return nil
 }
 

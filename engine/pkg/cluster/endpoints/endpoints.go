@@ -25,10 +25,11 @@ type EndpointManager struct {
 	inf.IEventProcessor
 	inf.IEventHandler
 
-	nodeUid    string
-	remotes    map[string]*remote.Remote // 远程服务监听器
-	stopped    bool                      // 是否已停止
-	repository *repository.Repository    // 服务存储仓库
+	nodeUid       string
+	isClusterMode bool
+	remotes       map[string]*remote.Remote // 远程服务监听器
+	stopped       bool                      // 是否已停止
+	repository    *repository.Repository    // 服务存储仓库
 }
 
 func GetEndpointManager() *EndpointManager {
@@ -75,6 +76,10 @@ func (em *EndpointManager) Stop() {
 	em.repository.Stop()
 	client.Close() // 关闭所有连接
 	log.SysLogger.Debugf("endpoints manager stopped")
+}
+
+func (em *EndpointManager) SetClusterMode(isClusterMode bool) {
+	em.isClusterMode = isClusterMode
 }
 
 // updateServiceInfo 更新远程服务信息事件
@@ -124,14 +129,14 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	}
 
 	defer func() {
-		//log.SysLogger.Debugf("add local service: %s, pid: %v", svc.GetName(), svc.GetPid().String())
+		log.SysLogger.Debugf("add local service: %s, pid: %v", svc.GetName(), svc.GetPid().String())
 	}()
 
 	// 先加入本地集群
 	em.repository.Add("", client.NewDispatcher(pid, svc.GetMailbox()))
 
-	// 私有服务不发布
-	if svc.IsPrivate() {
+	// 私有服务不发布,没有开启集群也不发布
+	if svc.IsPrivate() || !em.isClusterMode {
 		return
 	}
 
@@ -190,9 +195,8 @@ func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
 func (em *EndpointManager) CreatePid(serverId int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID {
 	rt, ok := em.remotes[rpcType]
 	if !ok {
-		log.SysLogger.Errorf("not found rpc type: %s", rpcType)
-		return nil
+		return actor.NewPID("", em.nodeUid, serverId, serviceId, serviceType, serviceName, version, "")
+	} else {
+		return actor.NewPID(rt.GetAddress(), em.nodeUid, serverId, serviceId, serviceType, serviceName, version, rpcType)
 	}
-
-	return actor.NewPID(rt.GetAddress(), em.nodeUid, serverId, serviceId, serviceType, serviceName, version, rpcType)
 }

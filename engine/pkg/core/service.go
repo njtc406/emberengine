@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"path"
 	"reflect"
 	"runtime/debug"
@@ -219,8 +220,8 @@ func (s *Service) Start() error {
 
 	s.setStatus(def.SvcStatusRunning) // 到这里算是服务已经准备好所有东西,准备工作都在OnStart中完成
 
-	if !s.isPrimarySecondaryMode || s.IsPrivate() {
-		// 没有开启主从模式或者私有服务,那么直接是主服务
+	if !s.isPrimarySecondaryMode || s.IsPrivate() || !cluster.GetCluster().IsClusterMode() {
+		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
 		s.pid.SetMaster(true)
 	}
 
