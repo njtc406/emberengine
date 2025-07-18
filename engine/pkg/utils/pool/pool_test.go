@@ -13,12 +13,12 @@ type TestData struct {
 }
 
 func BenchmarkSyncPoolWrapper_GetPut(b *testing.B) {
-	//pool := NewSyncPoolWrapper(func() *TestData {
-	//	return &TestData{}
-	//}, NewStatsRecorder("test"))
 	pool := NewSyncPoolWrapper(func() *TestData {
 		return &TestData{}
-	}, nil)
+	}, NewStatsRecorder("test"))
+	//pool := NewSyncPoolWrapper(func() *TestData {
+	//	return &TestData{}
+	//}, nil)
 	for i := 0; i < b.N; i++ {
 		pool.Put(pool.Get())
 	}
@@ -46,12 +46,12 @@ PASS
 */
 
 func BenchmarkSyncPoolWrapper_GetPutParallel(b *testing.B) {
-	//pool := NewSyncPoolWrapper(func() *TestData {
-	//	return &TestData{}
-	//}, NewStatsRecorder("test"))
 	pool := NewSyncPoolWrapper(func() *TestData {
 		return &TestData{}
-	}, nil)
+	}, NewStatsRecorder("test"))
+	//pool := NewSyncPoolWrapper(func() *TestData {
+	//	return &TestData{}
+	//}, nil)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			pool.Put(pool.Get())
@@ -82,12 +82,12 @@ PASS
 */
 
 func BenchmarkPerPPoolWrapper_GetPut(b *testing.B) {
-	//pool := NewPerPPoolWrapper(1024, func() *TestData {
-	//	return &TestData{}
-	//}, NewStatsRecorder("test"))
 	pool := NewPerPPoolWrapper(1024, func() *TestData {
 		return &TestData{}
-	}, nil)
+	}, NewStatsRecorder("test"))
+	//pool := NewPerPPoolWrapper(1024, func() *TestData {
+	//	return &TestData{}
+	//}, nil)
 	for i := 0; i < b.N; i++ {
 		pool.Put(pool.Get())
 	}
@@ -115,12 +115,12 @@ PASS
 */
 
 func BenchmarkPerPPoolWrapper_GetPutParallel(b *testing.B) {
-	//pool := NewPerPPoolWrapper(1024, func() *TestData {
-	//	return &TestData{}
-	//}, NewStatsRecorder("test"))
 	pool := NewPerPPoolWrapper(1024, func() *TestData {
 		return &TestData{}
-	}, nil)
+	}, NewStatsRecorder("test"))
+	//pool := NewPerPPoolWrapper(1024, func() *TestData {
+	//	return &TestData{}
+	//}, nil)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			pool.Put(pool.Get())

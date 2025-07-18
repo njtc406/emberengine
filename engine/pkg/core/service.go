@@ -7,6 +7,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"path"
 	"reflect"
@@ -615,4 +616,13 @@ func (s *Service) GetLogger() log.ILogger {
 
 func (s *Service) IsPrimarySecondaryMode() bool {
 	return s.isPrimarySecondaryMode
+}
+
+func (s *Service) PoolStats() []string {
+	var stats []string
+	stats = append(stats, msgenvelope.GetMsgPoolStats().String())
+	stats = append(stats, msgenvelope.GetMetaPoolStats().String())
+	stats = append(stats, timingwheel.GetTimerPoolStats().String())
+	stats = append(stats, event.GetEventPoolStats().String())
+	return stats
 }

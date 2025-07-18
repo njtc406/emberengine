@@ -68,7 +68,7 @@ func NewSyncPoolWrapper[T any](newFunc func() T, recorder IStatsRecorder, opts .
 }
 func (p *SyncPoolWrapper[T]) Get() T {
 	val := p.pool.Get().(T)
-	p.recorder.incHit()
+	p.recorder.decCurrentSize() // 这个地方的计数只是代表借出了多少个,配合put来查看有没有泄露
 
 	if p.resetFunc != nil {
 		p.resetFunc(val)
@@ -91,8 +91,8 @@ func (p *SyncPoolWrapper[T]) Put(t T) {
 		p.unrefFunc(t) // 这里是为了防止reset中误标记
 	}
 
-	p.pool.Put(t)
 	p.recorder.incCurrentSize()
+	p.pool.Put(t)
 }
 
 // Stats 获取当前统计信息
@@ -130,7 +130,6 @@ func WithPUnref[T any](f func(T)) POption[T] {
 type pPool[T any] struct {
 	_        [cacheLineSize]byte
 	queue    []T // 本地无锁队列
-	_        [cacheLineSize]byte
 	capacity int
 	_        [cacheLineSize]byte
 }
@@ -193,6 +192,11 @@ func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecord
 	return p
 }
 
+// Get 从当前逻辑 P 对应的本地池中获取一个对象。
+// 若本地池为空，则退回到全局 sync.Pool 获取（可能发生 GC 分配）。
+//
+// 本方法为 goroutine 局部缓存设计，不应跨 goroutine 获取对象。
+// 不遵守此限制可能导致缓存命中率下降，甚至破坏池内部结构
 func (p *PerPPoolWrapper[T]) Get() T {
 	pid := procPin()
 	local := p.localPools[pid]
@@ -202,6 +206,7 @@ func (p *PerPPoolWrapper[T]) Get() T {
 		local.queue = local.queue[:len(local.queue)-1]
 		procUnpin()
 		p.recorder.incHit()
+		p.recorder.decCurrentSize()
 
 		if p.resetFunc != nil {
 			p.resetFunc(obj)
@@ -215,7 +220,6 @@ func (p *PerPPoolWrapper[T]) Get() T {
 
 	// 本地 miss，从全局池取
 	obj := p.globalPool.Get().(T)
-	p.recorder.incCurrentSize()
 	p.recorder.incMiss()
 
 	if p.resetFunc != nil {
@@ -228,6 +232,11 @@ func (p *PerPPoolWrapper[T]) Get() T {
 	return obj
 }
 
+// Put 将对象放回当前逻辑 P 的本地池中，以备后续复用。
+// 若本地池已满，则放入全局 sync.Pool 作为后备缓存。
+//
+// 注意：仅允许将对象放回获取它的 goroutine 所在的本地池。
+// 跨 goroutine 释放对象将导致缓存污染，增加误命中风险或内存泄露。
 func (p *PerPPoolWrapper[T]) Put(obj T) {
 	if p.unrefFunc != nil {
 		p.unrefFunc(obj)
@@ -244,9 +253,7 @@ func (p *PerPPoolWrapper[T]) Put(obj T) {
 	if len(local.queue) < local.capacity {
 		local.queue = append(local.queue, obj)
 		procUnpin()
-		// 命中本地，算当前 size 增加
 		p.recorder.incCurrentSize()
-
 		return
 	}
 	procUnpin()
@@ -254,7 +261,6 @@ func (p *PerPPoolWrapper[T]) Put(obj T) {
 	// 回退到全局池（本地缓存失败）
 	p.globalPool.Put(obj)
 	p.recorder.incOverflow()
-	p.recorder.decCurrentSize()
 }
 
 func (p *PerPPoolWrapper[T]) Stats() *Stats {

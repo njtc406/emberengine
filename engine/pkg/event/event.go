@@ -35,7 +35,7 @@ func (e *Event) IncRef() {
 }
 
 func (e *Event) Release() {
-	if e.refCount.Add(-1) == 0 {
+	if e.refCount.Add(-1) <= 0 { // 有的地方可能不需要inc,这里-1就会变成负数
 		eventPool.Put(e)
 	}
 }

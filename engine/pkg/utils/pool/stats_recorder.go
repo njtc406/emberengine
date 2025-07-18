@@ -40,11 +40,19 @@ func (nopStats) stats() Stats {
 type Stats struct {
 	Name string
 
-	HitCount      int64 // 命中本地池
-	MissCount     int64 // 未命中本地池（从全局取）
-	OverflowCount int64 // 本地池满了，放入全局
-	CurrentSize   int64 // 当前对象数（含本地和全局，估算）
-	TotalAlloc    int64 // 总共分配的新对象数
+	_ [cacheLineSize]byte
+
+	HitCount        int64 // 命中本地池
+	_               [cacheLineSize - 8]byte
+	MissCount       int64 // 未命中本地池（从全局取）
+	_               [cacheLineSize - 8]byte
+	OverflowCount   int64 // 本地池满了，放入全局
+	_               [cacheLineSize - 8]byte
+	CurrentSize     int64 // 当前对象数（本地,不是准确数量）(数量如果和总分配数对不上,表明全局池缓存了对象,缓存的命中率降低了)
+	_               [cacheLineSize - 8]byte
+	TotalAlloc      int64 // 总共分配的新对象数
+	_               [cacheLineSize - 8]byte
+	MaxObservedSize int64 // 最大对象数(本地)
 }
 
 func (s *Stats) String() string {
@@ -65,7 +73,21 @@ func (s *Stats) incMiss() {
 	atomic.AddInt64(&s.MissCount, 1)
 }
 func (s *Stats) incCurrentSize() {
-	atomic.AddInt64(&s.CurrentSize, 1)
+	newSize := atomic.AddInt64(&s.CurrentSize, 1)
+
+	// 循环更新MaxObservedSize
+	for {
+		currentMax := atomic.LoadInt64(&s.MaxObservedSize)
+		// 如果新值不超过当前最大值，则退出
+		if newSize <= currentMax {
+			break
+		}
+		// 尝试原子更新最大值
+		if atomic.CompareAndSwapInt64(&s.MaxObservedSize, currentMax, newSize) {
+			break
+		}
+		// 其他goroutine已更新，重试
+	}
 }
 
 func (s *Stats) decCurrentSize() {

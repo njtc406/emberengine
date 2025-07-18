@@ -160,18 +160,18 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 
 	// 将服务信息发布到集群
 	ev := event.NewEvent()
+	defer ev.Release()
 	ev.Type = event.SysEventServiceDis
 	ev.Data = pid
 	em.IEventProcessor.EventHandler(ev)
-	ev.Release()
 }
 
 func (em *EndpointManager) ToPrivateService(svc inf.IService) {
 	ev := event.NewEvent()
+	defer ev.Release()
 	ev.Type = event.SysEventServiceDis
 	ev.Data = svc.GetPid()
 	em.IEventProcessor.EventHandler(ev)
-	ev.Release()
 }
 
 func (em *EndpointManager) GetRepository() *repository.Repository {
