@@ -8,6 +8,7 @@ package client
 import (
 	"fmt"
 	"github.com/nats-io/nats.go"
+	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
@@ -19,13 +20,15 @@ type natsSender struct {
 }
 
 func newNatsClient(addr string) inf.IRpcSender {
-	var opts []nats.Option
-	opts = append(opts, nats.MaxReconnects(def.NatsDefaultMaxReconnects))
-	opts = append(opts, nats.ReconnectWait(def.NatsDefaultReconnectWait))
-	opts = append(opts, nats.PingInterval(def.NatsDefaultPingInterval))
-	opts = append(opts, nats.MaxPingsOutstanding(def.NatsDefaultPingMaxOutstanding))
-	opts = append(opts, nats.ReconnectBufSize(def.NatsDefaultReconnectBufSize))
-	opts = append(opts, nats.Timeout(def.NatsDefaultTimeout))
+	opts := []nats.Option{
+		nats.MaxReconnects(def.NatsDefaultMaxReconnects),
+		nats.PingInterval(def.NatsDefaultPingInterval),
+		nats.MaxPingsOutstanding(def.NatsDefaultPingMaxOutstanding),
+		nats.ReconnectBufSize(def.NatsDefaultReconnectBufSize),
+		nats.Timeout(def.NatsDefaultTimeout),
+		//nats.NoEcho(),
+		//nats.Compression(false),
+	}
 
 	conn, err := nats.Connect(addr, opts...)
 	if err != nil {
@@ -60,6 +63,7 @@ func (rc *natsSender) send(envelope inf.IEnvelope) error {
 	if msg == nil {
 		return def.ErrMsgSerializeFailed
 	}
+	defer msgenvelope.ReleaseMessage(msg)
 
 	data, err := proto.Marshal(msg)
 	if err != nil {

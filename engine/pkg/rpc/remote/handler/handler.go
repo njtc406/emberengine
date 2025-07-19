@@ -33,10 +33,19 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			}
 			// 解析回复数据
 			response, err := serializer.Deserialize(req.Response, req.TypeName, req.TypeId)
-			if err != nil {
-				envelope.Release()
-				return err
-			}
+			defer func() {
+				if err != nil {
+					envelope.GetData().SetError(err)
+				}
+				if meta.NeedCallback() {
+					if err = sender.PostMessage(envelope); err != nil {
+						log.SysLogger.WithContext(envelope.GetContext()).Errorf("call back envelope error: %s", err)
+					}
+				} else {
+					// 同步回调,回复结果
+					envelope.SetDone()
+				}
+			}()
 
 			// TODO 这里需要注意,当相同的data被重复使用时,response可能被下一个覆盖,虽然按理说如果是call那么一定是排队的,但是怕以后忘记了,先注释一下
 			// 后续如果有了其他的需求,再来考虑这里的覆盖问题
@@ -47,14 +56,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			data.SetErrStr(req.Err)
 
 			//log.SysLogger.Debugf("call back envelope: %+v", envelope)
-
-			if meta.NeedCallback() {
-				return sender.PostMessage(envelope)
-			} else {
-				// 同步回调,回复结果
-				envelope.Done()
-				return nil
-			}
+			return err
 		} else {
 			// 已经超时,丢弃返回
 			fields := make(map[string]interface{})
@@ -87,14 +89,8 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		}
 
 		// 构建消息
-		envelope := msgenvelope.NewMsgEnvelope()
-		if req.Method == "RpcTestWithError" {
-			log.SysLogger.Debugf("===============================%s", req.String())
-		}
+		envelope := msgenvelope.NewMsgEnvelope(nil)
 		envelope.SetHeaders(req.MessageHeader)
-		if req.Method == "RpcTestWithError" {
-			log.SysLogger.Debugf("===============================%+v", envelope.GetHeaders())
-		}
 
 		data := msgenvelope.NewData()
 		data.SetMethod(req.Method)

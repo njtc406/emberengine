@@ -28,5 +28,5 @@ var zhCnMap = map[string]string{
 	"HeapAlloc":                  "堆分配",
 	"GC Cycles":                  "GC次数",
 	"Last GC Pause":              "上次GC耗时",
-	"Goroutines":                 "线程数",
+	"Goroutines":                 "活跃协程数量",
 }

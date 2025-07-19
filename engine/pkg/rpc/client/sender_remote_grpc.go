@@ -7,39 +7,58 @@ package client
 
 import (
 	"context"
+	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"runtime"
+	"sync/atomic"
 )
 
 type grpcSender struct {
-	conn      *grpc.ClientConn
-	rpcClient actor.GrpcListenerClient
+	conns      []*grpc.ClientConn
+	rpcClients []actor.GrpcListenerClient
+	i          atomic.Int64
 }
 
 func newGrpcClient(addr string) inf.IRpcSender {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.SysLogger.Panicf("grpcxSender newGrpcClient error: %v", err)
+	var clients []actor.GrpcListenerClient
+	var conns []*grpc.ClientConn
+	cpuNum := runtime.NumCPU()
+	connNum := cpuNum / 2
+	if connNum < 1 {
+		connNum = 1
 	}
-	cli := actor.NewGrpcListenerClient(conn)
+
+	for i := 0; i < connNum; i++ {
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			log.SysLogger.Panicf("grpcxSender newGrpcClient error: %v", err)
+		}
+		conns = append(conns, conn)
+		clients = append(clients, actor.NewGrpcListenerClient(conn))
+	}
+
 	return &grpcSender{
-		conn: conn,
+		conns: conns,
 		//IRpcDispatcher: sender,
-		rpcClient: cli,
+		rpcClients: clients,
 	}
 }
 
 func (rc *grpcSender) Close() {
-	_ = rc.conn.Close()
-	rc.rpcClient = nil
+	for _, conn := range rc.conns {
+		_ = conn.Close()
+	}
+	rc.conns = nil
+	rc.rpcClients = nil
 }
 
 func (rc *grpcSender) send(envelope inf.IEnvelope) error {
-	if rc.rpcClient == nil {
+	if rc.IsClosed() {
 		return def.ErrRPCHadClosed
 	}
 	// 这里仅仅代表消息发送成功
@@ -56,8 +75,11 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	if msg == nil {
 		return def.ErrMsgSerializeFailed
 	}
+	defer msgenvelope.ReleaseMessage(msg)
 
-	if _, err := rc.rpcClient.RPCCall(ctx, msg); err != nil {
+	rpcClient := rc.rpcClients[rc.i.Add(1)%int64(len(rc.rpcClients))]
+
+	if _, err := rpcClient.RPCCall(ctx, msg); err != nil {
 		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, envelope.GetMeta().GetReceiverPid().GetServiceUid(), err)
 		return def.ErrRPCCallFailed
 	}
@@ -83,5 +105,5 @@ func (rc *grpcSender) SendResponse(_ inf.IRpcDispatcher, envelope inf.IEnvelope)
 }
 
 func (rc *grpcSender) IsClosed() bool {
-	return rc.rpcClient == nil
+	return rc.rpcClients == nil || len(rc.rpcClients) == 0
 }

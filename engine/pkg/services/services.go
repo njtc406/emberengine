@@ -52,7 +52,8 @@ func Init() {
 			svc.Init(svc, initConf, cfg)
 			runServices = append(runServices, svc)
 		} else {
-			log.SysLogger.Panic("Service[%s] not found", initConf.ClassName)
+			// 包中没有引入这个服务,但是配置中配置了启动这个服务
+			log.SysLogger.Errorf("Service[%s] is configured to start but not imported in the package. Please check service dependencies or remove it from configuration", initConf.ClassName)
 		}
 	}
 }

@@ -11,7 +11,7 @@ NodeConf:
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
   # 线程池大小
-  AntsPoolSize: 1
+  AntsPoolSize: 100000
   # 定时器数量(用于监控rpc调用的timer)
   MonitorTimerSize: 10000
   # 定时器桶数量(决定锁的粒度)
@@ -52,6 +52,24 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
     # 服务名称
+    - ClassName: Service2
+      ServiceName: Service2
+      Type: test
+      ServerId: 1
+      TimerConf:
+        # 定时器队列长度
+        TimerSize: 1000
+        # 定时器桶大小
+        TimerBucketSize: 100
+      WorkerConf:
+        # 用户消息队列大小
+        UserMailboxSize: 102400
+        # 系统消息队列大小
+        SystemMailboxSize: 16
+        # 工作线程数量
+        WorkerNum: 1
+      # 是否开启主从模式
+      IsPrimarySecondaryMode: false
     - ClassName: Service1
       ServiceName: Service1
       # 服务类型
@@ -67,7 +85,7 @@ ServiceConf:
       # 工作线程配置
       WorkerConf:
         # 用户消息队列大小
-        UserMailboxSize: 1024
+        UserMailboxSize: 102400
         # 系统消息队列大小
         SystemMailboxSize: 16
         # 工作线程数量
@@ -76,24 +94,20 @@ ServiceConf:
         DynamicWorkerScaling: false
         # 虚拟线程比例
         VirtualWorkerRate: 10
-    - ClassName: Service2
-      ServiceName: Service2
+    - ClassName: PprofService
+      ServiceName: PprofService
       Type: test
       ServerId: 1
       TimerConf:
-        # 定时器队列长度
         TimerSize: 1000
-        # 定时器桶大小
         TimerBucketSize: 100
       WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 1024
-        # 系统消息队列大小
+        UserMailboxSize: 102400
         SystemMailboxSize: 16
-        # 工作线程数量
         WorkerNum: 1
-      # 是否开启主从模式
-      IsPrimarySecondaryMode: true
+        DynamicWorkerScaling: false
+        VirtualWorkerRate: 10
+
 
 
 # 日志配置

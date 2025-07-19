@@ -1,4 +1,4 @@
-Conf:
+PprofConf:
   Addr: 0.0.0.0:99
   ReadHeaderTimeout: 10s
   IdleTimeout: 30s

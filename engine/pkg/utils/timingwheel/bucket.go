@@ -20,12 +20,24 @@ type ITimer interface {
 	GetTimerId() uint64
 }
 
-var timerPool = pool.NewPoolEx(make(chan pool.IPoolData, 100000), func() pool.IPoolData {
-	return &Timer{}
-})
+var timerPool = pool.NewSyncPoolWrapper(
+	func() *Timer {
+		return &Timer{}
+	},
+	pool.NewStatsRecorder("timerPool"),
+	pool.WithRef(func(t *Timer) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *Timer) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *Timer) {
+		t.Reset()
+	}),
+)
 
 func createTimer() *Timer {
-	return timerPool.Get().(*Timer)
+	return timerPool.Get()
 }
 
 func releaseTimer(t *Timer) {
@@ -33,6 +45,10 @@ func releaseTimer(t *Timer) {
 		// 可能会在多线程中被调用,所以做个判断
 		timerPool.Put(t)
 	}
+}
+
+func GetTimerPoolStats() *pool.Stats {
+	return timerPool.Stats()
 }
 
 type TimerOption func(t *Timer)

@@ -3,7 +3,7 @@
 // Mode Desc: 模块功能描述
 package version
 
-var Version = "2.0.0"
+var Version = "2.1.0"
 
 // CompareVersion 返回 1 表示 v1 > v2（即 v1 更新），
 // 返回 -1 表示 v1 < v2（即 v2 更新），返回 0 表示两者相等。

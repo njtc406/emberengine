@@ -45,16 +45,20 @@ func (c *Cluster) Init() {
 	c.endpoints = endpoints.GetEndpointManager().Init(c.eventProcessor)
 
 	c.discovery = discovery.CreateDiscovery(config.Conf.ClusterConf.DiscoveryType)
-	if c.discovery == nil {
-		return
+	if c.discovery != nil {
+		if err := c.discovery.Init(c.eventProcessor, config.Conf.ClusterConf); err != nil {
+			log.SysLogger.Fatalf("init discovery error:%v", err)
+		}
 	}
-	if err := c.discovery.Init(c.eventProcessor, config.Conf.ClusterConf); err != nil {
-		log.SysLogger.Fatalf("init discovery error:%v", err)
-	}
+
+	c.endpoints.SetClusterMode(c.IsClusterMode())
 }
 
 func (c *Cluster) Start() {
-	c.discovery.Start()
+	if c.discovery != nil {
+		c.discovery.Start()
+	}
+
 	c.endpoints.Start()
 	go c.run()
 }
@@ -62,7 +66,9 @@ func (c *Cluster) Start() {
 func (c *Cluster) Close() {
 	close(c.closed)
 	c.endpoints.Stop()
-	c.discovery.Close()
+	if c.discovery != nil {
+		c.discovery.Close()
+	}
 }
 
 func (c *Cluster) PushEvent(ev inf.IEvent) error {
@@ -108,4 +114,8 @@ func (c *Cluster) GetPid() *actor.PID {
 func (c *Cluster) GetServerId() int32 {
 	// 这里没有实质内容,为了凑接口
 	return 0
+}
+
+func (c *Cluster) IsClusterMode() bool {
+	return c.discovery != nil
 }

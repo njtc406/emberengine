@@ -25,7 +25,7 @@ type ITimerScheduler interface {
 	CronFunc(spec string, name string, f TimerCallback, args ...interface{}) *Timer
 	CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *Timer
 
-	Cancel(taskId uint64) bool
+	CancelTimer(taskId uint64) bool
 	Stop()
 
 	GetTimerCbChannel() chan ITimer
@@ -262,7 +262,7 @@ func (scheduler *TaskScheduler) CronAsyncFunc(spec string, name string, f func(.
 	})
 }
 
-func (scheduler *TaskScheduler) Cancel(taskId uint64) bool {
+func (scheduler *TaskScheduler) CancelTimer(taskId uint64) bool {
 	if taskId == 0 {
 		return true
 	}

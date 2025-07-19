@@ -49,10 +49,10 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
       # 服务id
-    - ClassName: Service111
+    - ClassName: MasterSlaverTest
       ServiceId: 1
       # 服务名称
-      ServiceName: Service111
+      ServiceName: MasterSlaverTest
       # 服务类型
       Type: test
       # 服务器ID

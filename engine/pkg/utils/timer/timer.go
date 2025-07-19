@@ -43,20 +43,56 @@ type Cron struct {
 	Timer
 }
 
-var timerPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
-	return &Timer{}
-})
+var timerPool = pool.NewSyncPoolWrapper(
+	func() *Timer {
+		return &Timer{}
+	},
+	pool.NewStatsRecorder("timerPool"),
+	pool.WithRef(func(t *Timer) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *Timer) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *Timer) {
+		t.Reset()
+	}),
+)
 
-var cronPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
-	return &Cron{}
-})
+var cronPool = pool.NewSyncPoolWrapper(
+	func() *Cron {
+		return &Cron{}
+	},
+	pool.NewStatsRecorder("cronPool"),
+	pool.WithRef(func(t *Cron) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *Cron) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *Cron) {
+		t.Reset()
+	}),
+)
 
-var tickerPool = pool.NewPoolEx(make(chan pool.IPoolData, 10240), func() pool.IPoolData {
-	return &Ticker{}
-})
+var tickerPool = pool.NewSyncPoolWrapper(
+	func() *Ticker {
+		return &Ticker{}
+	},
+	pool.NewStatsRecorder("tickerPool"),
+	pool.WithRef(func(t *Ticker) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *Ticker) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(t *Ticker) {
+		t.Reset()
+	}),
+)
 
 func newTimer(d time.Duration, c chan ITimer, cb func(uint64, interface{}), additionData interface{}) *Timer {
-	timer := timerPool.Get().(*Timer)
+	timer := timerPool.Get()
 	timer.AdditionData = additionData
 	timer.C = c
 	timer.fireTime = Now().Add(d)
@@ -71,7 +107,7 @@ func releaseTimer(timer *Timer) {
 }
 
 func newTicker() *Ticker {
-	t := tickerPool.Get().(*Ticker)
+	t := tickerPool.Get()
 	return t
 }
 
@@ -80,7 +116,7 @@ func releaseTicker(ticker *Ticker) {
 }
 
 func newCron() *Cron {
-	cron := cronPool.Get().(*Cron)
+	cron := cronPool.Get()
 	return cron
 }
 

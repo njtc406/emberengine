@@ -6,7 +6,6 @@
 package interfaces
 
 import (
-	"context"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"time"
@@ -14,30 +13,26 @@ import (
 
 type IEnvelope interface {
 	IDataDef
+	IEvent
+	IContext
 
 	// Set
 
-	WithContext(ctx context.Context) IEnvelope
-	SetHeaders(headers dto.Header)
-	SetHeader(key string, value string)
 	SetMeta(meta IEnvelopeMeta)
 	SetData(data IEnvelopeData)
 
 	// Get
 
-	IEvent
-	GetHeader(key string) string
-	GetHeaders() dto.Header
-	GetContext() context.Context
 	GetMeta() IEnvelopeMeta
 	GetData() IEnvelopeData
 
 	// Option
 
-	Done()
+	SetDone()
 	RunCompletions()
 	Wait()
 	ToProtoMsg() *actor.Message
+	Clone() IEnvelope
 }
 
 type IEnvelopeMeta interface {
@@ -65,10 +60,14 @@ type IEnvelopeMeta interface {
 	GetCallBacks() []dto.CompletionFunc
 	GetCallbackParams() []interface{}
 	GetDone() <-chan struct{}
+
 	// check
 
 	NeedCallback() bool // 是否需要回调
 
+	// Option
+
+	Clone() IEnvelopeMeta
 }
 
 type IEnvelopeData interface {

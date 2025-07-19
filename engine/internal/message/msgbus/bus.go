@@ -34,12 +34,24 @@ func (mb *MessageBus) Reset() {
 	mb.receiver = nil
 }
 
-var busPool = pool.NewPoolEx(make(chan pool.IPoolData, 2048), func() pool.IPoolData {
-	return &MessageBus{}
-})
+var busPool = pool.NewSyncPoolWrapper(
+	func() *MessageBus {
+		return &MessageBus{}
+	},
+	pool.NewStatsRecorder("busPool"),
+	pool.WithRef(func(t *MessageBus) {
+		t.Ref()
+	}),
+	pool.WithUnref(func(t *MessageBus) {
+		t.UnRef()
+	}),
+	pool.WithReset(func(mb *MessageBus) {
+		mb.Reset()
+	}),
+)
 
 func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
-	mb := busPool.Get().(*MessageBus)
+	mb := busPool.Get()
 	mb.sender = sender
 	mb.receiver = receiver
 	mb.err = err
@@ -48,6 +60,10 @@ func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err e
 
 func ReleaseMessageBus(mb *MessageBus) {
 	busPool.Put(mb)
+}
+
+func GetMessageBusPoolStats() *pool.Stats {
+	return busPool.Stats()
 }
 
 func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {
@@ -86,18 +102,21 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	}
 
 	var timeout time.Duration
-	deadline, ok := ctx.Deadline()
-	if !ok {
+	if ctx != nil {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			timeout = deadline.Sub(timelib.Now())
+		}
+	}
+
+	if timeout <= 0 {
 		timeout = def.DefaultRpcTimeout
-	} else {
-		timeout = timelib.Now().Sub(deadline)
 	}
 
 	mt := monitor.GetRpcMonitor()
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 
 	//data := msgenvelope.NewData()
 	//data.SetMethod(method)
@@ -123,8 +142,9 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	if err := mb.receiver.SendRequest(envelope); err != nil {
 		// 发送失败,释放资源
 		mt.Remove(meta.GetReqId())
+
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", envelope.GetMeta().GetSenderPid().GetName(), data.GetMethod(), err)
 		envelope.Release()
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
 		return def.ErrRPCCallFailed
 	}
 
@@ -223,18 +243,21 @@ func (mb *MessageBus) callDirect(ctx context.Context, data inf.IEnvelopeData, ou
 
 func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	var timeout time.Duration
-	deadline, ok := ctx.Deadline()
-	if !ok {
+	if ctx != nil {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			timeout = deadline.Sub(timelib.Now())
+		}
+	}
+
+	if timeout <= 0 {
 		timeout = def.DefaultRpcTimeout
-	} else {
-		timeout = deadline.Sub(timelib.Now())
 	}
 
 	mt := monitor.GetRpcMonitor()
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
@@ -313,8 +336,7 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	}
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 
 	data := msgenvelope.NewData()
 	data.SetMethod(method)
@@ -344,8 +366,7 @@ func (mb *MessageBus) sendDirect(ctx context.Context, data inf.IEnvelopeData) er
 	}
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope()
-	envelope.WithContext(ctx)
+	envelope := msgenvelope.NewMsgEnvelope(ctx)
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()

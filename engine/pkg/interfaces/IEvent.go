@@ -15,9 +15,8 @@ type EventCallBack func(event IEvent)
 type EventOption func(eventType int32, processor IEventProcessor) int
 
 type IEvent interface {
-	GetType() int32
-	GetKey() string
-	GetPriority() int32
+	IDataDef
+	IContext
 	Release()
 	IncRef()
 }

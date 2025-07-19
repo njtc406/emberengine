@@ -98,7 +98,7 @@ func (w *watcher) Restart() {
 		log.SysLogger.Errorf("watcher start failed after %d retries", maxRetry)
 		evt := event.NewEvent()
 		evt.Type = event.ServiceDisconnected
-		evt.Priority = def.PrioritySys
+		evt.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
 		if pushErr := w.svc.PushEvent(evt); pushErr != nil {
 			log.SysLogger.Errorf("failed to notify service disconnection: %v", pushErr)
 		}
@@ -264,7 +264,7 @@ Slave:
 func (w *watcher) notifyService(evtType int32, oldStateIsMaster bool) {
 	evt := event.NewEvent()
 	evt.Type = evtType
-	evt.Priority = def.PrioritySys
+	evt.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
 	evt.Data = oldStateIsMaster
 	if err := w.svc.PushEvent(evt); err != nil {
 		log.SysLogger.Errorf("push event[%d] error: %v", evtType, err)

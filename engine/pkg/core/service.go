@@ -7,7 +7,9 @@ package core
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"path"
 	"reflect"
 	"runtime/debug"
@@ -191,8 +193,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.methodMgr = rpc.NewMethodMgr()
 	s.IRpcHandler = rpc.NewHandler(s.self).Init(s.methodMgr)
 
-	if err := s.src.OnInit(); err != nil {
-		s.logger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+	if s.src.OnInit != nil {
+		if err := s.src.OnInit(); err != nil {
+			s.logger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+		}
 	}
 }
 
@@ -208,14 +212,16 @@ func (s *Service) Start() error {
 	go s.startListenCallback()
 
 	// 主从服务需要在onstart中处理
-	if err := s.src.OnStart(); err != nil {
-		return err
+	if s.src.OnStart != nil {
+		if err := s.src.OnStart(); err != nil {
+			return err
+		}
 	}
 
 	s.setStatus(def.SvcStatusRunning) // 到这里算是服务已经准备好所有东西,准备工作都在OnStart中完成
 
-	if !s.isPrimarySecondaryMode || s.IsPrivate() {
-		// 没有开启主从模式或者私有服务,那么直接是主服务
+	if !s.isPrimarySecondaryMode || s.IsPrivate() || !cluster.GetCluster().IsClusterMode() {
+		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
 		s.pid.SetMaster(true)
 	}
 
@@ -223,8 +229,10 @@ func (s *Service) Start() error {
 	endpoints.GetEndpointManager().AddService(s)
 	//s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
-	if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
-		return err
+	if s.src.OnStarted != nil {
+		if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
+			return err
+		}
 	}
 
 	return nil
@@ -281,7 +289,9 @@ func (s *Service) release() {
 		}
 	}()
 
-	s.self.OnRelease()
+	if s.self.OnRelease != nil {
+		s.self.OnRelease()
+	}
 	s.closeProfiler()
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
@@ -310,7 +320,7 @@ func (s *Service) pushConcurrentCallback(evt concurrent.IConcurrentCallback) err
 func (s *Service) pushTimerCallback(t timingwheel.ITimer) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceTimerCallback
-	ev.Key = t.GetName() // 保证相同的回调在同一个worker处理
+	ev.SetHeader(def.DefaultDispatcherKey, t.GetName()) // 保证相同的回调在同一个worker处理
 	ev.Data = t
 	return s.mailbox.PostMessage(ev)
 }
@@ -403,8 +413,15 @@ func (s *Service) isRunning() bool {
 	return atomic.LoadInt32(&s.status) == def.SvcStatusRunning
 }
 
+func (s *Service) GetServiceName() string {
+	return s.name
+}
+
 // InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
 func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
+	if !ev.IsRef() {
+		return
+	}
 	tp := ev.GetType()
 
 	var analyzer *profiler.Analyzer
@@ -458,6 +475,10 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
+			if !c.IsRef() {
+				// 已经被释放了,可能是本地调用者取消或者超时
+				return
+			}
 			meta := c.GetMeta()
 			data := c.GetData()
 			if meta == nil || data == nil {
@@ -497,6 +518,10 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 }
 
 func (s *Service) InvokeUserMessage(ev inf.IEvent) {
+	if !ev.IsRef() {
+		// 前面的超时之后导致后面的已经被丢弃
+		return
+	}
 	tp := ev.GetType()
 
 	var analyzer *profiler.Analyzer
@@ -510,7 +535,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
-			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
+			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetData().GetMethod())
 			meta := c.GetMeta()
 			data := c.GetData()
 			if meta == nil || data == nil {
@@ -596,4 +621,14 @@ func (s *Service) GetLogger() log.ILogger {
 
 func (s *Service) IsPrimarySecondaryMode() bool {
 	return s.isPrimarySecondaryMode
+}
+
+func (s *Service) PoolStats() []string {
+	var stats []string
+	stats = append(stats, msgenvelope.GetMsgPoolStats().String())
+	stats = append(stats, msgenvelope.GetMetaPoolStats().String())
+	stats = append(stats, msgenvelope.GetMsgEnvelopePoolStats().String())
+	stats = append(stats, timingwheel.GetTimerPoolStats().String())
+	stats = append(stats, event.GetEventPoolStats().String())
+	return stats
 }

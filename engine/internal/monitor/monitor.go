@@ -61,9 +61,10 @@ func (rm *RpcMonitor) listen() {
 			if t == nil {
 				continue
 			}
-			log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", t.GetName())
+			//name := t.GetName()
+			//log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", name)
 			t.Do()
-			log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", t.GetName())
+			//log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", name)
 		case <-rm.closed:
 			return
 		}
@@ -80,10 +81,18 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 
 	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) {
 		elp := args[0].(inf.IEnvelope)
+		if !elp.IsRef() {
+			return
+		}
 		rm.locker.Lock()
 		// 直接删除
+		_, ok := rm.waitMap[tm.GetTimerId()]
 		delete(rm.waitMap, tm.GetTimerId())
 		rm.locker.Unlock()
+		if !ok {
+			// 已经在其他地方被移除了,不再执行后续的超时
+			return
+		}
 
 		if elp == nil || !elp.IsRef() {
 			log.SysLogger.WithContext(elp.GetContext()).Errorf("call seq is not find,seq:%d", tm.GetTimerId())
@@ -108,7 +117,7 @@ func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
 		return nil
 	}
 
-	if !rm.sd.Cancel(envelope.GetMeta().GetTimerId()) {
+	if !rm.sd.CancelTimer(envelope.GetMeta().GetTimerId()) {
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("cancel monitor failed,seq:%d", seqId)
 	}
 	delete(rm.waitMap, seqId)
@@ -133,23 +142,21 @@ func (rm *RpcMonitor) Get(seqId uint64) inf.IEnvelope {
 }
 
 func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
-	if !envelope.IsRef() {
-		//log.SysLogger.WithContext(envelope.GetContext()).Debug("envelope is not ref")
-		return // 已经被释放,丢弃
-	}
+	//if !envelope.IsRef() {
+	//	//log.SysLogger.WithContext(envelope.GetContext()).Debug("envelope is not ref")
+	//	return // 已经被释放,丢弃
+	//}
 
 	envelope.GetData().SetResponse(nil)
 	envelope.GetData().SetError(def.ErrRPCCallTimeout)
 
 	if envelope.GetMeta().NeedCallback() {
-		// (这里的envelope会在两个地方回收,如果是本地调用,那么会在requestHandler执行完成后自动回收
-		// 如果是远程调用,那么在远程client将消息发送完成后自动回收)
 		if err := envelope.GetMeta().GetDispatcher().PostMessage(envelope); err != nil {
 			envelope.Release()
 			log.SysLogger.WithContext(envelope.GetContext()).Errorf("send call timeout response error:%s", err.Error())
 		}
 	} else {
-		envelope.Done()
+		envelope.SetDone()
 	}
 }
 

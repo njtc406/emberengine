@@ -124,7 +124,7 @@ func (c *Client) Close() {
 		return
 	}
 	c.status.Store(closed)
-	if c.mgr.Cancel(atomic.LoadUint64(&c.timerId)) {
+	if c.mgr.CancelTimer(atomic.LoadUint64(&c.timerId)) {
 		atomic.StoreUint64(&c.timerId, 0)
 	}
 	if c.conn == nil {
@@ -152,7 +152,7 @@ func (c *Client) OnClose() {
 
 func (c *Client) BindRole(roleId string) {
 	// 移除timer
-	if c.mgr.Cancel(atomic.LoadUint64(&c.timerId)) {
+	if c.mgr.CancelTimer(atomic.LoadUint64(&c.timerId)) {
 		atomic.StoreUint64(&c.timerId, 0)
 	}
 

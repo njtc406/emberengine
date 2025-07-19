@@ -26,33 +26,38 @@ func (lc *localSender) Close() {
 }
 
 func (lc *localSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	if lc.IsClosed() {
-		return def.ErrServiceNotFound
+	if lc == nil || lc.IsClosed() {
+		return def.ErrServiceIsClosedOrExited
 	}
 
-	return dispatcher.PostMessage(envelope)
+	// clone一个envelope,保持envelope本身的归属性,不然释放很麻烦
+	return dispatcher.PostMessage(envelope.Clone())
 }
 
 func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
-	if lc.IsClosed() {
-		envelope.GetData().SetError(def.ErrServiceNotFound)
-		envelope.Done()
-		return def.ErrServiceNotFound
+	defer envelope.Release()
+	originEnvelope := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
+	if originEnvelope == nil {
+		return def.ErrEnvelopeNotFound
 	}
 
-	if envelope.GetMeta().NeedCallback() {
+	if lc == nil || lc.IsClosed() {
+		originEnvelope.Release() // 调用者已经下线,丢弃回复
+		return def.ErrServiceIsClosedOrExited
+	}
+
+	if originEnvelope.GetMeta().NeedCallback() {
 		// 本地调用的回复消息,直接发送到对应service的邮箱处理
-		return dispatcher.PostMessage(envelope)
+		return dispatcher.PostMessage(originEnvelope)
 	} else {
 		// 同步调用,直接设置调用结束
-		envelope.Done()
+		originEnvelope.SetDone()
 	}
 	return nil
 }
 
 func (lc *localSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	// 本地调用envelope在接收者处理后释放
+	defer envelope.Release()
 	return lc.SendRequest(dispatcher, envelope)
 }
 

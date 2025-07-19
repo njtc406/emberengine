@@ -90,6 +90,7 @@ func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlew
 }
 
 func (p *WorkerPool) Start() {
+	log.SysLogger.Debugf("Starting service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
 	p.mu.Lock()
 	for i := 0; i < p.conf.WorkerNum; i++ {
 		worker := newWorker(p, i)
@@ -109,6 +110,8 @@ func (p *WorkerPool) Start() {
 		p.wg.Add(1)
 		go p.autoScaleWorkers()
 	}
+
+	log.SysLogger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
 }
 
 func (p *WorkerPool) Stop() {
@@ -139,23 +142,22 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	p.mu.RLock()
 	if len(p.workers) > 1 {
 		var ok bool
-		workerID, ok = p.ring.Get(evt.GetKey())
+		workerID, ok = p.ring.Get(evt.GetDispatcherKey())
 		if !ok {
 			log.SysLogger.Errorf("No worker available in hash ring")
 			p.mu.RUnlock()
-			return def.ErrEventChannelIsFull
+			return def.ErrMailboxWorkerIsFull
 		}
 		worker, exists = p.workers[workerID]
 	} else {
 		// 单线程时直接使用workerID=0
-		workerID = 0
 		worker, exists = p.workers[workerID]
 	}
 	p.mu.RUnlock()
 
 	if !exists {
-		log.SysLogger.Errorf("Worker %d not found", workerID)
-		return def.ErrEventChannelIsFull
+		log.SysLogger.Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
+		return def.ErrMailboxWorkerIsFull
 	}
 	switch evt.GetPriority() {
 	case def.PrioritySys:
@@ -266,15 +268,18 @@ func newWorker(pool *WorkerPool, id int) *Worker {
 }
 
 func (w *Worker) submitUserEvent(e inf.IEvent) error {
-	if !w.userMailbox.Push(e) {
+	if w.userMailbox == nil {
 		return def.ErrEventChannelIsFull
+	}
+	if !w.userMailbox.Push(e) {
+		return nil //def.ErrEventChannelIsFull
 	}
 	return nil
 }
 
 func (w *Worker) submitSysEvent(e inf.IEvent) error {
 	if !w.systemMailbox.Push(e) {
-		return def.ErrEventChannelIsFull
+		return def.ErrSysEventChannelIsFull
 	}
 	return nil
 }
