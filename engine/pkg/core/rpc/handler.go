@@ -191,13 +191,13 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 
 			if req == nil {
 				if fixedCount > 0 {
-					log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: 0", name, fixedCount)
+					log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: 0    params:%+v", name, fixedCount, params)
 					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				if reqSlice, ok := req.([]interface{}); ok {
 					if len(reqSlice) < fixedCount {
-						log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: %d", name, fixedCount, len(reqSlice))
+						log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: %d     params:%+v", name, fixedCount, len(reqSlice), params)
 						return nil, def.ErrInputParamNotMatch
 					}
 
@@ -219,14 +219,14 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 			// 非 variadic 方法处理
 			if req == nil {
 				if paramCount != 1 {
-					log.SysLogger.Errorf("method[%s] param count not match, need : %d, got: 0", name, paramCount-1)
+					log.SysLogger.Errorf("method[%s] param count not match, need : %d, got: 0    params:%+v", name, paramCount-1, params)
 					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				switch reqData := req.(type) {
 				case []interface{}:
 					if len(reqData) != paramCount-1 {
-						log.SysLogger.Errorf("method[%s] param count not match, need: %d, got: %d", name, paramCount-1, len(reqData))
+						log.SysLogger.Errorf("method[%s] param count not match, need: %d, got: %d     params:%+v", name, paramCount-1, len(reqData), params)
 						return nil, def.ErrInputParamNotMatch
 					}
 					for i := 0; i < len(reqData); i++ {

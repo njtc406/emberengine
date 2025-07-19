@@ -11,9 +11,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/serializer"
 	"github.com/njtc406/emberengine/engine/pkg/xcontext"
 	"golang.org/x/net/context"
 	"strconv"
@@ -111,7 +111,7 @@ func (e *MsgEnvelope) SetDone() {
 
 func (e *MsgEnvelope) RunCompletions() {
 	for _, cb := range e.meta.GetCallBacks() {
-		cb(e.meta.GetCallbackParams(), e.data.GetResponse(), e.data.GetError())
+		cb(e.data.GetResponse(), e.data.GetError(), e.meta.GetCallbackParams()...)
 	}
 }
 
@@ -148,22 +148,24 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	var byteData []byte
 	var typeName string
 
-	byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
-	if err != nil {
-		log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
-		return nil
+	if req := e.data.GetRequest(); req != nil {
+		byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
+		if err != nil {
+			log.SysLogger.WithContext(e.GetContext()).Errorf("serialize message[%+v] is error: %s", e, err)
+			return nil
+		}
+
+		msg.Request = byteData
 	}
 
-	msg.Request = byteData
-
 	if resp := e.data.GetResponse(); resp != nil {
-		byteData, typeName, err = serializer.Serialize(resp, msg.TypeId)
+		byteData, typeName, err = codec.Encode(msg.TypeId, resp)
+		//byteData, typeName, err = serializer.Serialize(resp, msg.TypeId)
 		if err != nil {
-			log.SysLogger.Errorf("serialize message[%+v] is error: %s", e, err)
+			log.SysLogger.WithContext(e.GetContext()).Errorf("serialize message[%+v] is error: %s", e, err)
 			return nil
 		}
 		msg.Response = byteData
-		// TODO 这里要不要置空返回,按理一个返回只能有一个人取
 	}
 
 	msg.TypeName = typeName

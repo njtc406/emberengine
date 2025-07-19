@@ -11,7 +11,7 @@ NodeConf:
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
   # 线程池大小
-  AntsPoolSize: 100000
+  AntsPoolSize: 5000
   # 定时器数量(用于监控rpc调用的timer)
   MonitorTimerSize: 10000
   # 定时器桶数量(决定锁的粒度)
@@ -68,7 +68,9 @@ ServiceConf:
         # 系统消息队列大小
         SystemMailboxSize: 16
         # 工作线程数量
-        WorkerNum: 1
+        WorkerNum: 10
+        # 虚拟线程比例 建议如果
+        VirtualWorkerRate: 100
       # 是否开启主从模式
       IsPrimarySecondaryMode: false
 

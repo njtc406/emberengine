@@ -117,12 +117,6 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope(ctx)
-
-	//data := msgenvelope.NewData()
-	//data.SetMethod(method)
-	//data.SetRequest(in)
-	//data.SetResponse(nil) // 容错
-	//data.SetNeedResponse(true)
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
@@ -266,9 +260,11 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, par
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	meta.SetTimeout(timeout)
-	meta.SetCallback(callbacks)
 	meta.SetCallbackParams(param.Params)
+	meta.SetCallback(callbacks)
 	envelope.SetMeta(meta)
+
+	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
 	// 加入等待队列
 	mt.Add(envelope)

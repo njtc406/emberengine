@@ -10,6 +10,7 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"path"
 	"reflect"
 	"runtime/debug"
@@ -83,7 +84,8 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 		serviceInitConf.Type = "Normal"
 	}
 	if serviceInitConf.RpcType == "" {
-		serviceInitConf.RpcType = def.RpcTypeRpcx
+		// 优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
+		serviceInitConf.RpcType = def.RpcTypeNats
 	}
 	if serviceInitConf.LogConf == nil {
 		serviceInitConf.LogConf = &config.ServiceLogConf{
@@ -630,5 +632,9 @@ func (s *Service) PoolStats() []string {
 	stats = append(stats, msgenvelope.GetMsgEnvelopePoolStats().String())
 	stats = append(stats, timingwheel.GetTimerPoolStats().String())
 	stats = append(stats, event.GetEventPoolStats().String())
+	for _, one := range codec.Stats() {
+		stats = append(stats, one.String())
+	}
+
 	return stats
 }

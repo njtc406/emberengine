@@ -113,3 +113,8 @@ const (
 	DefaultTypeKey       = "sys.type"
 	DefaultPriorityKey   = "sys.priority"
 )
+
+const (
+	ProtoBuf int32 = iota
+	Json
+)

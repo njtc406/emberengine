@@ -28,7 +28,7 @@ func (n *NatsListener) Handle(msg *nats.Msg) {
 	}
 
 	if err = handler.RpcMessageHandler(n.cliFactory, req); err != nil {
-		log.SysLogger.Errorf("handle nats message error: %v", err)
+		log.SysLogger.Errorf("handle nats message error: %v  req:%+v", err, req)
 	}
 
 	// request才有

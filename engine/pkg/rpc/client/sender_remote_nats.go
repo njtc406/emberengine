@@ -11,8 +11,8 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"google.golang.org/protobuf/proto"
 )
 
 type natsSender struct {
@@ -65,7 +65,8 @@ func (rc *natsSender) send(envelope inf.IEnvelope) error {
 	}
 	defer msgenvelope.ReleaseMessage(msg)
 
-	data, err := proto.Marshal(msg)
+	data, _, err := codec.Encode(def.ProtoBuf, msg)
+	//data, err := proto.Marshal(msg)
 	if err != nil {
 		return def.ErrMsgSerializeFailed
 	}
