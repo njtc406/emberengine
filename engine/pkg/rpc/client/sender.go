@@ -58,13 +58,22 @@ func getSenderHandler(addr string, tp string) inf.IRpcSender {
 func addSenderHandler(addr, tp string) inf.IRpcSender {
 	lock.Lock()
 	defer lock.Unlock()
-	handler := senderMap[tp](addr)
+
+	// 检查地址是否已存在
 	if tps, ok := senderHandlerMap[addr]; ok {
+		// 检查类型是否已存在
+		if handler, ok := tps[tp]; ok {
+			return handler
+		}
+		// 类型不存在，创建新handler
+		handler := senderMap[tp](addr)
 		tps[tp] = handler
-	} else {
-		senderHandlerMap[addr] = make(map[string]inf.IRpcSender)
-		senderHandlerMap[addr][tp] = handler
+		return handler
 	}
+
+	// 地址不存在，初始化并创建handler
+	handler := senderMap[tp](addr)
+	senderHandlerMap[addr] = map[string]inf.IRpcSender{tp: handler}
 	return handler
 }
 

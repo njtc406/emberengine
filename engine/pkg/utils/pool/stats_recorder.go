@@ -6,7 +6,7 @@
 package pool
 
 import (
-	"encoding/json"
+	"fmt"
 	"sync/atomic"
 )
 
@@ -48,7 +48,7 @@ type Stats struct {
 	_               [cacheLineSize - 8]byte
 	OverflowCount   int64 // 本地池满了，放入全局
 	_               [cacheLineSize - 8]byte
-	CurrentSize     int64 // 当前对象数（本地,不是准确数量）(数量如果和总分配数对不上,表明全局池缓存了对象,缓存的命中率降低了)
+	CurrentSize     int64 // 当前对象数 (perpPool:数量如果和总分配数对不上,表明全局池缓存了对象,缓存的命中率降低了, syncPool:如果不为0,表示有泄漏)
 	_               [cacheLineSize - 8]byte
 	TotalAlloc      int64 // 总共分配的新对象数
 	_               [cacheLineSize - 8]byte
@@ -56,11 +56,7 @@ type Stats struct {
 }
 
 func (s *Stats) String() string {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return ""
-	}
-	return string(data)
+	return fmt.Sprintf("pool_name: %s, hit: %d, miss: %d, current: %d, total_alloc: %d, max_observed: %d, overflow: %d", s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
 }
 
 func NewStatsRecorder(name string) IStatsRecorder {

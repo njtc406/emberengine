@@ -182,8 +182,8 @@ func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecord
 	}
 	for i := range p.localPools {
 		p.localPools[i] = &pPool[T]{
-			queue:    make([]T, 0, size/numProcs+1),
-			capacity: size / numProcs,
+			queue:    make([]T, 0, size),
+			capacity: size,
 		}
 	}
 	for _, opt := range options {
@@ -258,6 +258,7 @@ func (p *PerPPoolWrapper[T]) Put(obj T) {
 	}
 	procUnpin()
 
+	// TODO 这里后面考虑一下有没必要做扩容策略
 	// 回退到全局池（本地缓存失败）
 	p.globalPool.Put(obj)
 	p.recorder.incOverflow()

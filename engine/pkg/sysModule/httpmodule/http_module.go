@@ -178,7 +178,7 @@ func (hs *HttpModule) run() {
 		}
 	} else {
 		if err := hs.server.ListenAndServe(); err != nil {
-			hs.logger.Error(err)
+			hs.logger.Warn(err)
 		}
 	}
 }

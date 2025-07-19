@@ -89,3 +89,9 @@ func (x *XContext) GetType() int32 {
 	}
 	return -3000
 }
+
+func (x *XContext) Clone() *XContext {
+	return &XContext{
+		Context: x.Context,
+	}
+}

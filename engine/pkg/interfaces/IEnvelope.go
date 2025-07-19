@@ -32,6 +32,7 @@ type IEnvelope interface {
 	RunCompletions()
 	Wait()
 	ToProtoMsg() *actor.Message
+	Clone() IEnvelope
 }
 
 type IEnvelopeMeta interface {
@@ -59,10 +60,14 @@ type IEnvelopeMeta interface {
 	GetCallBacks() []dto.CompletionFunc
 	GetCallbackParams() []interface{}
 	GetDone() <-chan struct{}
+
 	// check
 
 	NeedCallback() bool // 是否需要回调
 
+	// Option
+
+	Clone() IEnvelopeMeta
 }
 
 type IEnvelopeData interface {

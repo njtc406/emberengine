@@ -18,7 +18,6 @@ import (
 	"golang.org/x/net/context"
 	"strconv"
 	"sync"
-	"sync/atomic"
 )
 
 var msgEnvelopePool = pool.NewSyncPoolWrapper(
@@ -62,13 +61,21 @@ func (e *MsgEnvelope) Reset() {
 func (e *MsgEnvelope) SetMeta(meta inf.IEnvelopeMeta) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	e.meta = meta.(*Meta)
+	if meta == nil {
+		e.meta = nil
+	} else {
+		e.meta = meta.(*Meta)
+	}
 }
 
 func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
-	e.data = data.(*Data)
+	if data == nil {
+		e.data = nil
+	} else {
+		e.data = data.(*Data)
+	}
 }
 
 //--------------------------------get------------------------------------
@@ -115,8 +122,16 @@ func (e *MsgEnvelope) Wait() {
 func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	// TODO message使用缓存池来获取
+
+	var err error
 	msg := NewMessage()
+	defer func() {
+		if err != nil {
+			// 没有创建成功,需要释放msg
+			ReleaseMessage(msg)
+		}
+	}()
+
 	msg.TypeId = 0 // 默认使用protobuf(后面有其他需求再修改这里)
 	msg.TypeName = ""
 	msg.SenderPid = e.meta.GetSenderPid()
@@ -132,7 +147,6 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 
 	var byteData []byte
 	var typeName string
-	var err error
 
 	byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
 	if err != nil {
@@ -157,22 +171,24 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	return msg
 }
 
+func (e *MsgEnvelope) Clone() inf.IEnvelope {
+	envelope := NewMsgEnvelope(e.XContext.Clone())
+	envelope.meta = e.meta.Clone().(*Meta)
+	envelope.data = e.data
+	return envelope
+}
+
 func (e *MsgEnvelope) IncRef() {
 	// envelope不会被并发处理,每个envelope只会被唯一一个服务处理,只有data是共享
 	// 所以不需要引用计数
 }
 
-var count atomic.Int32
-
 func (e *MsgEnvelope) Release() {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	if e.IsRef() {
-		count.Add(-1)
-		if count.Load() < 0 {
-			log.SysLogger.Errorf("msgEnvelopePool.Put() count: %d", count.Load())
-		}
-		//log.SysLogger.Infof("<<<<<<<<<<<<<<<<<<<<<<<<<<<msgEnvelopePool.Put() count: %d", count.Load())
+		// envelope/meta 是可复用资源，需要回收到对象池
+		// data 可能是外部创建并可能被多个服务共享的，不归 MsgEnvelope 释放
 		if e.meta != nil && e.meta.IsRef() {
 			metaPool.Put(e.meta)
 		}
@@ -182,8 +198,6 @@ func (e *MsgEnvelope) Release() {
 }
 
 func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
-	count.Add(1)
-	//log.SysLogger.Infof(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>msgEnvelopePool.Get() count: %d", count.Load())
 	ep := msgEnvelopePool.Get()
 	ep.XContext = xcontext.New(ctx)
 	return ep

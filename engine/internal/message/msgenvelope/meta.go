@@ -18,7 +18,7 @@ var metaPool = pool.NewSyncPoolWrapper(
 	func() *Meta {
 		return &Meta{}
 	},
-	pool.NewStatsRecorder("msgEnvelopePool"),
+	pool.NewStatsRecorder("metaPool"),
 	pool.WithRef(func(t *Meta) {
 		t.Ref()
 	}),
@@ -177,4 +177,21 @@ func (e *Meta) NeedCallback() bool {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return len(e.callbacks) > 0
+}
+
+func (e *Meta) Clone() inf.IEnvelopeMeta {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+
+	meta := NewMeta().(*Meta)
+	meta.senderPid = e.senderPid
+	meta.receiverPid = e.receiverPid
+	meta.sender = e.sender
+	meta.timeout = e.timeout
+	meta.reqID = e.reqID
+	meta.timerId = e.timerId
+	meta.callbacks = e.callbacks
+	meta.callbackParams = e.callbackParams
+
+	return meta
 }

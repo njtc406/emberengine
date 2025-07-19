@@ -10,12 +10,13 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
+// TODO 需要做成配置
 var msgPool = pool.NewPerPPoolWrapper(
-	8096,
+	1024, // 自行根据并发量设置,压测时10w个请求,并发数为500,设置为1024已经满足要求
 	func() *actor.Message {
 		return &actor.Message{}
 	},
-	pool.NewStatsRecorder("rpcMsgPool"),
+	pool.NewStatsRecorder("rpcMsgPool-perpPool"),
 	pool.WithPReset(func(msg *actor.Message) {
 		msg.Reset()
 	}),

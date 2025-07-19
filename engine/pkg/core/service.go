@@ -475,6 +475,10 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 		s.safeExec(func() {
 			// rpc调用
 			c := ev.(inf.IEnvelope)
+			if !c.IsRef() {
+				// 已经被释放了,可能是本地调用者取消或者超时
+				return
+			}
 			meta := c.GetMeta()
 			data := c.GetData()
 			if meta == nil || data == nil {
@@ -623,6 +627,7 @@ func (s *Service) PoolStats() []string {
 	var stats []string
 	stats = append(stats, msgenvelope.GetMsgPoolStats().String())
 	stats = append(stats, msgenvelope.GetMetaPoolStats().String())
+	stats = append(stats, msgenvelope.GetMsgEnvelopePoolStats().String())
 	stats = append(stats, timingwheel.GetTimerPoolStats().String())
 	stats = append(stats, event.GetEventPoolStats().String())
 	return stats
