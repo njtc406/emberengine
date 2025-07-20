@@ -85,7 +85,6 @@ func (rc *natsSender) SendRequestAndRelease(_ inf.IRpcDispatcher, envelope inf.I
 }
 
 func (rc *natsSender) SendResponse(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
 	return rc.send(envelope)
 }
 

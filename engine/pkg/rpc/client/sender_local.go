@@ -35,7 +35,6 @@ func (lc *localSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.I
 }
 
 func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
 	originEnvelope := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
 	if originEnvelope == nil {
 		return def.ErrEnvelopeNotFound

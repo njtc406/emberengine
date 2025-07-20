@@ -311,8 +311,6 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
 			log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
-	} else {
-		envelope.Release()
 	}
 }
 
@@ -322,8 +320,6 @@ func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
 			log.SysLogger.Errorf("service[%s] handle message panic: %v\n trace:%s",
 				h.GetModuleName(), r, debug.Stack())
 		}
-
-		envelope.Release()
 	}()
 
 	envelope.RunCompletions()

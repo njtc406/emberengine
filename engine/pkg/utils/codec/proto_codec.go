@@ -28,7 +28,7 @@ func NewProtoCodec() inf.ICodec {
 			AllowPartial:  true,
 			Deterministic: true,
 		},
-		bufferPool: NewBytePoolManager([]int{32 * 1023, 64 * 1023, 128 * 1024, 512 * 1024, 1024 * 1024, 2048 * 1024}),
+		bufferPool: NewBytePoolManager([]int{32 * 1024, 64 * 1024, 128 * 1024, 512 * 1024, 1024 * 1024, 2048 * 1024}),
 	}
 }
 

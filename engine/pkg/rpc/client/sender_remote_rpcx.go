@@ -129,7 +129,6 @@ func (rc *rpcxSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envel
 }
 
 func (rc *rpcxSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
 	return rc.send(dispatcher, envelope)
 }
 
