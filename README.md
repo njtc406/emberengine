@@ -86,20 +86,19 @@ go run main.go
 
 ```go
 
-// 所有的调用都支持优先级
-ctx := emberctx.NewCtx(emberctx.WithKV(def.DefaultPriorityKey, def.PrioritySysStr)) // 系统级（在执行完当前任务后，优先执行系统级任务）
-ctx := emberctx.NewCtx(emberctx.WithKV(def.DefaultPriorityKey, def.PriorityUserStr)) // 用户级
-
+// 所有的调用都支持优先级 
+ctx := xcontext.New(nil)
+ctx.SetHeader(def.DefaultPriorityKey, def.PrioritySysStr) // 系统级（在执行完当前任务后，优先执行系统级任务）
+ctx.SetHeader(def.DefaultPriorityKey, def.PriorityUserStr) // 用户级
 // Select 选择目标服务(结果可以是一个或多个)
-bus := serviceInstance.Select(rpc.WithServiceName(ServiceName2)) 
 
 // 同步调用远程服务方法（带返回值）
-err := bus.Call(ctxWithTimeout, "APITest2", nil, nil)
+err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).Call(ctxWithTimeout, "APITest2", nil, nil)
 
 // 异步调用远程服务方法
-err := bus.AsyncCall(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{
+err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).AsyncCall(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{
     Params: []interface{}{1, 2, "a"},
-   }, func(params []interface{}, data interface{}, err error) {
+   }, func(data interface{}, err error, params ...interface{}) {
          if err != nil {
 			 serviceInstance.GetLogger().Errorf("AsyncCall Service3.RPCSum response failed, err:%v", err)
 			 return
@@ -112,7 +111,7 @@ err := bus.AsyncCall(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCal
    })
 
 // 或发送消息（不等待响应）
-err := bus.Send(ctx, "APITest2", nil)
+err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).Send(ctx, "APITest2", nil)
 ```
 
 ---
@@ -135,15 +134,15 @@ err := bus.Send(ctx, "APITest2", nil)
 
 * **Q:** Actor 是否是单线程？
 
-   * **A:** 如果没有开启并发模式,那么service是严格单线程执行,如果开启了并发模式,那么service是多线程执行
+  * **A:** 如果没有开启并发模式,那么service是严格单线程执行,如果开启了并发模式,那么service是多线程执行
 
 * **Q:** 支持热更新吗？
 
-   * **A:** 暂不支持二进制热更，但可通过主从切换、重载 Worker 达到平滑迁移。
+  * **A:** 暂不支持二进制热更，但可通过主从切换、重载 Worker 达到平滑迁移。
 
 * **Q:** 如何实现消息的顺序性？
 
-   * **A:** 对于同一 UID，通过 `%` 哈希绑定固定 Worker，可以保证有序。
+  * **A:** 对于同一 UID，通过 `%` 哈希绑定固定 Worker，可以保证有序。
 
 ---
 
