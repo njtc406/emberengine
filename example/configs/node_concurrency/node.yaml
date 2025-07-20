@@ -10,8 +10,8 @@ NodeConf:
   PVPath: ./example/cache
   # 性能监控(0表示不开启监控)
   ProfilerInterval: 10s
-  # 线程池大小
-  AntsPoolSize: 100000
+  # 线程池大小 cpu_num*size
+  AntsPoolSize: 10000
   # 定时器数量(用于监控rpc调用的timer)
   MonitorTimerSize: 10000
   # 定时器桶数量(决定锁的粒度)
@@ -72,18 +72,18 @@ ServiceConf:
         # 系统消息队列大小
         SystemMailboxSize: 16
         # 工作线程数量
-        WorkerNum: 1
+        WorkerNum: 1000
         # 是否开启动态线程数调整
         DynamicWorkerScaling: false
         # 虚拟线程比例
-        VirtualWorkerRate: 10
+        VirtualWorkerRate: 100
     - ClassName: PprofService
       ServiceName: PprofService
       Type: test
       ServerId: 1
       TimerConf:
-        TimerSize: 1000
-        TimerBucketSize: 100
+        TimerSize: 100000
+        TimerBucketSize: 10
       WorkerConf:
         UserMailboxSize: 102400
         SystemMailboxSize: 16

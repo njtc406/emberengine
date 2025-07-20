@@ -10,7 +10,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/example/comm"
-	"runtime"
 )
 
 func init() {
@@ -20,7 +19,7 @@ func init() {
 }
 
 func main() {
-	runtime.GOMAXPROCS(16) // 匹配CPU核心数
-	runtime.SetMutexProfileFraction(1)
+	//runtime.GOMAXPROCS(16) // 匹配CPU核心数
+	//runtime.SetMutexProfileFraction(1)
 	node.Start(node.WithConfPath("./example/configs/node_concurrency1"))
 }

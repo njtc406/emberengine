@@ -10,9 +10,9 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/serializer"
 )
 
 func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
@@ -32,13 +32,15 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 				return nil
 			}
 			// 解析回复数据
-			response, err := serializer.Deserialize(req.Response, req.TypeName, req.TypeId)
+			response, err := codec.Decode(req.TypeId, req.TypeName, req.Response)
+			//response, err := serializer.Deserialize(req.Response, req.TypeName, req.TypeId)
 			defer func() {
 				if err != nil {
 					envelope.GetData().SetError(err)
 				}
 				if meta.NeedCallback() {
 					if err = sender.PostMessage(envelope); err != nil {
+						envelope.Release()
 						log.SysLogger.WithContext(envelope.GetContext()).Errorf("call back envelope error: %s", err)
 					}
 				} else {
@@ -46,6 +48,10 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 					envelope.SetDone()
 				}
 			}()
+			if err != nil {
+				envelope.Release()
+				return err
+			}
 
 			// TODO 这里需要注意,当相同的data被重复使用时,response可能被下一个覆盖,虽然按理说如果是call那么一定是排队的,但是怕以后忘记了,先注释一下
 			// 后续如果有了其他的需求,再来考虑这里的覆盖问题
@@ -83,7 +89,8 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		}
 
 		// 调用
-		request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
+		request, err := codec.Decode(req.TypeId, req.TypeName, req.Request)
+		//request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
 		if err != nil {
 			return err
 		}

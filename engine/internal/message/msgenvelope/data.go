@@ -8,7 +8,7 @@ package msgenvelope
 import (
 	"errors"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/serializer"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"sync"
 )
 
@@ -139,7 +139,8 @@ func (e *Data) GetRequestBuff(tpId int32) ([]byte, string, error) {
 		return e.requestBuff, e.typeName, e.err
 	}
 
-	e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
+	e.requestBuff, e.typeName, e.err = codec.Encode(tpId, e.request)
+	//e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
 
 	return e.requestBuff, e.typeName, e.err
 }

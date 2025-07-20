@@ -7,22 +7,29 @@ package hashring
 
 import (
 	"fmt"
-	"hash/fnv"
+	"github.com/cespare/xxhash/v2"
 	"sort"
 	"sync"
 )
 
 const hashSalt = "ember_salt_key_y_w"
 
+//func hashEvent(key string) int {
+//	// key为空时,给固定的1
+//	if key == "" {
+//		return 1
+//	}
+//	// 使用 FNV-1a 哈希算法
+//	h := fnv.New32a()
+//	_, _ = h.Write([]byte(key))
+//	return int(h.Sum32())
+//}
+
 func hashEvent(key string) int {
-	// key为空时,给固定的1
 	if key == "" {
 		return 1
 	}
-	// 使用 FNV-1a 哈希算法
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return int(h.Sum32())
+	return int(xxhash.Sum64String(key)) // 用 64-bit 更好分布
 }
 
 // HashRing 表示一个带虚拟节点的一致性哈希环。

@@ -10,6 +10,7 @@ import (
 	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"path"
 	"reflect"
 	"runtime/debug"
@@ -50,6 +51,12 @@ type Service struct {
 
 	profiler *profiler.Profiler // 性能监控
 
+	userEventHandlers map[int32]eventHandler
+	sysEventHandlers  map[int32]eventHandler
+
+	userMsgHooks []MsgHookFun
+	sysMsgHooks  []MsgHookFun
+
 	logger log.ILogger
 }
 
@@ -83,7 +90,8 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 		serviceInitConf.Type = "Normal"
 	}
 	if serviceInitConf.RpcType == "" {
-		serviceInitConf.RpcType = def.RpcTypeRpcx
+		// 优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
+		serviceInitConf.RpcType = def.RpcTypeNats
 	}
 	if serviceInitConf.LogConf == nil {
 		serviceInitConf.LogConf = &config.ServiceLogConf{
@@ -182,6 +190,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.globalEventProcessor.Init(s)
 
 	s.IConcurrent = concurrent.NewTaskScheduler()
+
+	// 注册邮箱事件
+	s.initEventHandlers()
 
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
@@ -417,196 +428,6 @@ func (s *Service) GetServiceName() string {
 	return s.name
 }
 
-// InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
-func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
-	if !ev.IsRef() {
-		return
-	}
-	tp := ev.GetType()
-
-	var analyzer *profiler.Analyzer
-	var open bool
-	if s.profiler != nil {
-		open = true
-	}
-
-	// TODO 这里需要改造一下,这么平铺写很麻烦,每次加了都要改,做成注册,性能分析那里可以在外层包一个函数,在这个函数里面执行注册的函数
-
-	s.logger.Debugf("service[%s] receive system event[%d]", s.GetName(), tp)
-	switch tp {
-	case event.ServiceSuspended:
-		ev.Release()
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG]%d", event.ServiceSuspended))
-		}
-		// 服务挂起
-		s.mailbox.Suspend()
-	case event.ServiceResumed:
-		ev.Release()
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", event.ServiceSuspended))
-		}
-		// 服务恢复
-		s.mailbox.Resume()
-	case event.SysEventServiceClose:
-		ev.Release()
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", event.ServiceSuspended))
-		}
-		// 服务关闭
-		s.Stop()
-	case event.ServiceHeartbeat:
-		ev.Release()
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", event.ServiceSuspended))
-		}
-		// TODO 服务健康检查,需要回复服务负载等等信息
-	case event.ServiceGlobalEventTrigger:
-		s.safeExec(func() {
-			evt := ev.(*event.Event)
-			t := evt.Data.(*actor.Event)
-			if open {
-				analyzer = s.profiler.Push(fmt.Sprintf("[SYS_GLB_EVENT] type:%d", t.GetType()))
-			}
-			s.globalEventProcessor.EventHandler(t)
-			ev.Release()
-		})
-	case event.RpcMsg:
-		s.safeExec(func() {
-			// rpc调用
-			c := ev.(inf.IEnvelope)
-			if !c.IsRef() {
-				// 已经被释放了,可能是本地调用者取消或者超时
-				return
-			}
-			meta := c.GetMeta()
-			data := c.GetData()
-			if meta == nil || data == nil {
-				c.Release()
-				s.logger.Errorf("service[%s] receive call error, meta or data is nil", s.GetName())
-				s.logger.Errorf("meta: %v", meta)
-				s.logger.Errorf("data: %v", data)
-				return
-			}
-			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetMethod())
-			if data.IsReply() {
-				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_RESP] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
-				}
-				// 回复
-				s.HandleResponse(c)
-			} else {
-				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_REQ] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
-				}
-				// rpc调用
-				s.HandleRequest(c)
-			}
-		})
-	default:
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_OTHER_EVENT] type:%d", ev.GetType()))
-		}
-		// 其他系统事件
-		s.eventProcessor.EventHandler(ev)
-		ev.Release()
-	}
-	if analyzer != nil {
-		analyzer.Pop()
-		analyzer = nil
-	}
-}
-
-func (s *Service) InvokeUserMessage(ev inf.IEvent) {
-	if !ev.IsRef() {
-		// 前面的超时之后导致后面的已经被丢弃
-		return
-	}
-	tp := ev.GetType()
-
-	var analyzer *profiler.Analyzer
-	var open bool
-	if s.profiler != nil {
-		open = true
-	}
-	// TODO 这里需要改造一下,这么平铺写很麻烦,每次加了都要改,做成注册,性能分析那里可以在外层包一个函数,在这个函数里面执行注册的函数
-	switch tp {
-	case event.RpcMsg:
-		s.safeExec(func() {
-			// rpc调用
-			c := ev.(inf.IEnvelope)
-			//s.logger.WithContext(c.GetContext()).Debugf("service[%s] receive call method[%s]", s.GetName(), c.GetData().GetMethod())
-			meta := c.GetMeta()
-			data := c.GetData()
-			if meta == nil || data == nil {
-				c.Release()
-				s.logger.Errorf("service[%s] receive rpc msg call error, meta or data is nil", s.GetName())
-				s.logger.Errorf("meta: %v", meta)
-				s.logger.Errorf("data: %v", data)
-				return
-			}
-			if data.IsReply() {
-				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_RESP] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
-				}
-				// 回复
-				s.HandleResponse(c)
-			} else {
-				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_REQ] service:%s method:%s", meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
-				}
-				// rpc调用
-				s.HandleRequest(c)
-			}
-		})
-	case event.ServiceTimerCallback:
-		// TODO 定时器要不要支持系统级(执行优先级更高)回调?
-		s.safeExec(func() {
-			defer ev.Release()
-			evt := ev.(*event.Event)
-			t := evt.Data.(timingwheel.ITimer)
-			if open {
-				analyzer = s.profiler.Push(fmt.Sprintf("[USER_TIME_CB] name:%s", t.GetName()))
-			}
-			t.Do()
-		})
-	case event.ServiceConcurrentCallback:
-		// TODO 并发回调要不要支持系统级(执行优先级更高)回调?
-		s.safeExec(func() {
-			defer ev.Release()
-			evt := ev.(*event.Event)
-			t := evt.Data.(concurrent.IConcurrentCallback)
-			if open {
-				analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", t.GetName()))
-			}
-			t.DoCallback()
-		})
-	case event.ServiceGlobalEventTrigger:
-		s.safeExec(func() {
-			defer ev.Release()
-			evt := ev.(*event.Event)
-			t := evt.Data.(*actor.Event)
-			if open {
-				analyzer = s.profiler.Push(fmt.Sprintf("[USER_GLB_EVENT] type:%d", t.GetType()))
-			}
-			s.globalEventProcessor.EventHandler(t)
-		})
-	default:
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[USER_OTHER_EVENT] type:%d", ev.GetType()))
-		}
-		s.safeExec(func() {
-			defer ev.Release()
-			s.eventProcessor.EventHandler(ev)
-		})
-	}
-
-	if analyzer != nil {
-		analyzer.Pop()
-		analyzer = nil
-	}
-}
-
 func (s *Service) EscalateFailure(reason interface{}, evt inf.IEvent) {
 	s.logger.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
 }
@@ -630,5 +451,9 @@ func (s *Service) PoolStats() []string {
 	stats = append(stats, msgenvelope.GetMsgEnvelopePoolStats().String())
 	stats = append(stats, timingwheel.GetTimerPoolStats().String())
 	stats = append(stats, event.GetEventPoolStats().String())
+	for _, one := range codec.Stats() {
+		stats = append(stats, one.String())
+	}
+
 	return stats
 }

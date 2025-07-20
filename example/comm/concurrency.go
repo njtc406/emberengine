@@ -7,12 +7,16 @@ package comm
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/engine/pkg/xcontext"
 	"github.com/njtc406/emberengine/example/msg"
 	"runtime"
 	"sort"
@@ -68,16 +72,22 @@ func (s *ConcurrencyTest) OnInit1() error {
 func (s *ConcurrencyTest) OnInit() error {
 	s.OpenConcurrent(1000, 1000000)
 
-	total := 100_000
-	// 控制一下并发数
+	//total := 100_000
+	total := 100000
+	//控制一下并发数
+	//concurrency := 1
 	//concurrency := 100
-	//concurrency := 500
+	concurrency := 500
 	//concurrency := 1000
-	concurrency := 5000
+	//concurrency := 5000
 	wg := sync.WaitGroup{}
+	//testType := "send"
+	//testType := "call"
+	testType := "asyncCall"
 	wg.Add(total)
 
 	var count atomic.Int32
+	locker := sync.RWMutex{}
 	durations := make([]int64, total)
 
 	var startTime time.Time
@@ -99,16 +109,51 @@ func (s *ConcurrencyTest) OnInit() error {
 
 						start := time.Now()
 
-						//var result msg.Msg_Test_Resp
-						//err := s.Select(rpc.WithServiceName(ServiceName2)).Call(nil, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &result)
-						err := s.Select(rpc.WithServiceName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
+						var err error
+						ctx := xcontext.New(nil)
+						ctx.SetHeader(def.DefaultDispatcherKey, uuid.NewString())
+						if testType == "send" {
+							err = s.Select(rpc.WithServiceName(ServiceName2)).Send(ctx, "RpcEmptyFun", nil)
+						} else if testType == "asyncCall" {
+							_, err = s.Select(rpc.WithServiceName(ServiceName2)).AsyncCall(ctx, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{Params: []interface{}{start, idx}}, func(data interface{}, err error, params ...interface{}) {
+								if err != nil {
+									log.SysLogger.Errorf("call error: %v", err)
+									return
+								}
+
+								// XXX: 特别注意,如果使用异步模式大并发请求,请给调用方足够的处理回包的worker数量,或者将rpc的timeout调大,否则可能会导致调用方超时
+								// 回包的处理速度回成为瓶颈
+
+								//resp, ok := data.(*msg.Msg_Test_Resp)
+								//if !ok {
+								//	log.SysLogger.Errorf("call error: %v", err)
+								//	return
+								//} else {
+								//	log.SysLogger.Debugf("result:%d", resp.Ret)
+								//}
+								start := params[0].(time.Time)
+								idx := params[1].(int)
+								duration := time.Since(start).Microseconds()
+								locker.Lock()
+								durations[idx] = duration
+								locker.Unlock()
+								count.Add(1)
+							})
+							return
+						} else {
+							var result msg.Msg_Test_Resp
+							err = s.Select(rpc.WithServiceName(ServiceName2)).Call(ctx, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &result)
+						}
+
 						if err != nil {
 							log.SysLogger.Errorf("call error: %v", err)
 							return
 						}
 
 						duration := time.Since(start).Microseconds()
+						locker.Lock()
 						durations[idx] = duration
+						locker.Unlock()
 						count.Add(1)
 					}(i)
 				})
@@ -119,7 +164,10 @@ func (s *ConcurrencyTest) OnInit() error {
 
 	go func() {
 		wg.Wait()
+
 		totalCost := time.Since(startTime).Milliseconds()
+
+		time.Sleep(1 * time.Second)
 
 		sort.Slice(durations, func(i, j int) bool {
 			return durations[i] < durations[j]
@@ -128,6 +176,7 @@ func (s *ConcurrencyTest) OnInit() error {
 		fmt.Println("======== RPC Bench Result ========")
 		fmt.Printf("Total requests  : %d\n", total)
 		fmt.Printf("Concurrency Num : %d\n", concurrency)
+		fmt.Printf("Test type       : %s\n", testType)
 		fmt.Printf("Total time      : %d ms\n", totalCost)
 		fmt.Printf("Avg time per op : %.2f μs\n", float64(totalCost*1000)/float64(total))
 		fmt.Printf("QPS             : %d\n", total*1000/int(totalCost))
@@ -165,6 +214,8 @@ func (s *ConcurrencyTest) OnInit() error {
 		}
 
 		/*
+			emmmm,这是个悲伤的故事,电脑百兆带宽,跑满了,所以qps最大只有这么多了
+
 			cpu: AMD Ryzen 7 2700 Eight-Core Processor
 
 			call:

@@ -100,7 +100,6 @@ func (rc *grpcSender) SendRequestAndRelease(_ inf.IRpcDispatcher, envelope inf.I
 }
 
 func (rc *grpcSender) SendResponse(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
 	return rc.send(envelope)
 }
 

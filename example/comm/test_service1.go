@@ -139,7 +139,7 @@ func (s *Service1) OnInit() error {
 		s.GetLogger().Debugf("==========================================13")
 		if _, err := s.Select(rpc.WithServiceName(ServiceNameTest3), rpc.WithServiceId("1")).AsyncCall(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{
 			Params: []interface{}{1, 2, "a"},
-		}, func(params []interface{}, data interface{}, err error) {
+		}, func(data interface{}, err error, params ...interface{}) {
 			if err != nil {
 				log.SysLogger.Errorf("AsyncCall Service3.RPCSum response failed, err:%v", err)
 				return

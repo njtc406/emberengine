@@ -7,6 +7,7 @@ package monitor
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"sync"
 	"sync/atomic"
 
@@ -61,10 +62,12 @@ func (rm *RpcMonitor) listen() {
 			if t == nil {
 				continue
 			}
-			//name := t.GetName()
-			//log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", name)
-			t.Do()
-			//log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", name)
+			asynclib.Go(func() {
+				//name := t.GetName()
+				//log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", name)
+				t.Do()
+				//log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", name)
+			})
 		case <-rm.closed:
 			return
 		}

@@ -6,7 +6,6 @@ package asynclib
 import (
 	"fmt"
 	"github.com/panjf2000/ants/v2"
-	"runtime"
 )
 
 // antsPool 协程池
@@ -14,7 +13,7 @@ var antsPool *ants.Pool
 
 func InitAntsPool(size int) {
 	if antsPool == nil && size > 0 {
-		antsPool = NewAntsPool(runtime.NumCPU()*size, ants.WithPreAlloc(true))
+		antsPool = NewAntsPool(size, ants.WithPreAlloc(true))
 	}
 }
 
