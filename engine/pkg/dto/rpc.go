@@ -18,20 +18,20 @@ type AsyncCallParams struct {
 	Params []interface{}
 }
 
-type Header map[string]string
+type Headers map[string]string
 
-func (header Header) Get(key string) string {
+func (header Headers) Get(key string) string {
 	if v, ok := header[key]; ok {
 		return v
 	}
 	return ""
 }
 
-func (header Header) Set(key string, value string) {
+func (header Headers) Set(key string, value string) {
 	header[key] = value
 }
 
-func (header Header) Keys() []string {
+func (header Headers) Keys() []string {
 	keys := make([]string, 0, len(header))
 	for k := range header {
 		keys = append(keys, k)
@@ -39,12 +39,12 @@ func (header Header) Keys() []string {
 	return keys
 }
 
-func (header Header) Length() int {
+func (header Headers) Length() int {
 	return len(header)
 }
 
 // ToMap 将Header转换为map,生成新的map
-func (header Header) ToMap() map[string]string {
+func (header Headers) ToMap() map[string]string {
 	mp := make(map[string]string)
 	for k, v := range header {
 		mp[k] = v
@@ -52,7 +52,7 @@ func (header Header) ToMap() map[string]string {
 	return mp
 }
 
-func (header Header) ToFields() logrus.Fields {
+func (header Headers) ToFields() logrus.Fields {
 	f := make(logrus.Fields, len(header))
 	for k, v := range header {
 		f[k] = v

@@ -172,7 +172,7 @@ func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serv
 	e := &actor.Event{
 		EventType: eventType,
 		Data: &actor.EventData{
-			Header:  emberctx.GetHeader(ctx),
+			Header:  emberctx.ToHeaders(ctx),
 			RawData: rawData,
 		},
 		ServerId:   serverId,

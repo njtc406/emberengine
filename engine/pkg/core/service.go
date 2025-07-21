@@ -51,8 +51,8 @@ type Service struct {
 
 	profiler *profiler.Profiler // 性能监控
 
-	userEventHandlers map[int32]eventHandler
-	sysEventHandlers  map[int32]eventHandler
+	userEventHandlers map[int32]EventHandler
+	sysEventHandlers  map[int32]EventHandler
 
 	userMsgHooks []MsgHookFun
 	sysMsgHooks  []MsgHookFun

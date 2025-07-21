@@ -15,36 +15,36 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
-// 定义事件处理函数类型
-type eventHandler func(ev inf.IEvent, open bool, analyzer *profiler.Analyzer)
+// EventHandler 定义事件处理函数类型
+type EventHandler func(ev inf.IEvent, open bool, analyzer *profiler.Analyzer)
 
 // 初始化事件处理器
 func (s *Service) initEventHandlers() {
-	s.userEventHandlers = make(map[int32]eventHandler)
-	s.sysEventHandlers = make(map[int32]eventHandler)
+	s.userEventHandlers = make(map[int32]EventHandler)
+	s.sysEventHandlers = make(map[int32]EventHandler)
 
 	// 注册系统事件处理器
-	s.registerSystemHandler(event.ServiceSuspended, s.handleServiceSuspended)
-	s.registerSystemHandler(event.ServiceResumed, s.handleServiceResumed)
-	s.registerSystemHandler(event.SysEventServiceClose, s.handleServiceClose)
-	s.registerSystemHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
-	s.registerSystemHandler(event.ServiceGlobalEventTrigger, s.handleSystemGlobalEvent)
-	s.registerSystemHandler(event.RpcMsg, s.handleSystemRpcMsg)
+	s.RegisterSystemHandler(event.ServiceSuspended, s.handleServiceSuspended)
+	s.RegisterSystemHandler(event.ServiceResumed, s.handleServiceResumed)
+	s.RegisterSystemHandler(event.SysEventServiceClose, s.handleServiceClose)
+	s.RegisterSystemHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
+	s.RegisterSystemHandler(event.ServiceGlobalEventTrigger, s.handleSystemGlobalEvent)
+	s.RegisterSystemHandler(event.RpcMsg, s.handleSystemRpcMsg)
 
 	// 注册各种用户事件处理器
-	s.registerUserHandler(event.RpcMsg, s.handleUserRpcMsg)
-	s.registerUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
-	s.registerUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
-	s.registerUserHandler(event.ServiceGlobalEventTrigger, s.handleUserGlobalEvent)
+	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
+	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
+	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
+	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleUserGlobalEvent)
 }
 
-// 注册事件处理器
-func (s *Service) registerUserHandler(tp int32, handler eventHandler) {
+// RegisterUserHandler 注册事件处理器
+func (s *Service) RegisterUserHandler(tp int32, handler EventHandler) {
 	s.userEventHandlers[tp] = handler
 }
 
-// 注册系统消息处理器
-func (s *Service) registerSystemHandler(tp int32, handler eventHandler) {
+// RegisterSystemHandler 注册系统消息处理器
+func (s *Service) RegisterSystemHandler(tp int32, handler EventHandler) {
 	s.sysEventHandlers[tp] = handler
 }
 

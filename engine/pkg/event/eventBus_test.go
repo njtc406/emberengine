@@ -1,13 +1,12 @@
 package event
 
 import (
-	"context"
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"sync"
 	"testing"
 	"time"
@@ -60,13 +59,9 @@ func TestEventBus(t *testing.T) {
 		//nil,
 	)
 	defer eb.Stop()
-	header := dto.Header{
-		"traceId":     "123",
-		"DispatchKey": "111",
-		"Priority":    "0",
-	}
-	ctx := context.Background()
-	ctx = emberctx.AddHeaders(ctx, header)
+	ctx := xcontext.New(nil)
+	ctx.SetHeader(def.DefaultDispatcherKey, "111")
+	ctx.SetHeader(def.DefaultPriorityKey, def.PriorityUser)
 
 	service1 := &testService{}
 	service2 := &testService{}

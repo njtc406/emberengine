@@ -12,7 +12,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/njtc406/emberengine/engine/pkg/xcontext"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"github.com/njtc406/emberengine/example/msg"
 	"time"
 )

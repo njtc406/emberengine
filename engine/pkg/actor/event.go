@@ -8,7 +8,7 @@ package actor
 import (
 	"context"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"google.golang.org/protobuf/proto"
 	"strconv"
 	"time"
@@ -68,22 +68,38 @@ func (e *Event) Value(key interface{}) interface{} {
 	return nil
 }
 
-func (e *Event) SetHeaders(headers map[string]string) {
+func (e *Event) SetHeaders(headers map[string]any) {
 
 }
+
+func (e *Event) SetHeadersWithMap(headers map[string]string) {
+
+}
+
 func (e *Event) SetHeader(key string, value any) {
 
 }
-func (e *Event) GetHeader(key string) string {
+func (e *Event) GetHeader(key string) any {
 	return e.Data.Header[key]
 }
-func (e *Event) GetHeaders() map[string]string {
-	return e.Data.Header
+func (e *Event) GetHeaders() map[string]any {
+	headers := make(map[string]any)
+	for k, v := range e.Data.Header {
+		headers[k] = v
+	}
+	return headers
 }
 func (e *Event) GetContext() context.Context {
-	ctx := emberctx.NewCtx(context.Background())
-	return emberctx.WithHeader(ctx, e.Data.Header)
+	ctx := xcontext.New(nil)
+	for k, v := range e.Data.Header {
+		ctx.SetHeader(k, v)
+	}
+	return ctx
 }
 func (e *Event) GetTranceId() string {
 	return e.Data.Header[def.DefaultTraceIdKey]
+}
+
+func (e *Event) ToHeaders() map[string]string {
+	return e.Data.Header
 }

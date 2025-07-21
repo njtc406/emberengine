@@ -7,16 +7,13 @@ package msgenvelope
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/xcontext"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"golang.org/x/net/context"
-	"strconv"
 	"sync"
 )
 
@@ -80,17 +77,6 @@ func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 
 //--------------------------------get------------------------------------
 
-func (e *MsgEnvelope) GetType() int32 {
-	tp := e.GetHeader(def.DefaultTypeKey)
-	if tp != "" {
-		tpInt, err := strconv.Atoi(tp)
-		if err == nil {
-			return int32(tpInt)
-		}
-	}
-	return event.RpcMsg
-}
-
 func (e *MsgEnvelope) GetMeta() inf.IEnvelopeMeta {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
@@ -140,7 +126,7 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	msg.Request = nil
 	msg.Response = nil
 	msg.Err = e.data.GetErrStr()
-	msg.MessageHeader = e.GetHeaders()
+	msg.MessageHeader = e.ToHeaders()
 	msg.Reply = e.data.IsReply()
 	msg.ReqId = e.meta.GetReqId()
 	msg.NeedResp = e.data.NeedResponse()

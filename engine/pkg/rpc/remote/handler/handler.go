@@ -97,7 +97,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 
 		// 构建消息
 		envelope := msgenvelope.NewMsgEnvelope(nil)
-		envelope.SetHeaders(req.MessageHeader)
+		envelope.SetHeadersWithMap(req.MessageHeader)
 
 		data := msgenvelope.NewData()
 		data.SetMethod(req.Method)

@@ -11,12 +11,15 @@ type IContext interface {
 	context.Context
 	IReset
 
-	SetHeaders(headers map[string]string)
+	GetContext() context.Context
+
+	SetHeaders(headers map[string]any)
+	SetHeadersWithMap(headers map[string]string)
 	SetHeader(key string, value any)
 
-	GetHeader(key string) string
-	GetHeaders() map[string]string
-	GetContext() context.Context
+	GetHeader(key string) any
+	GetHeaders() map[string]any
+	ToHeaders() map[string]string
 
 	GetTranceId() string
 	GetDispatcherKey() string

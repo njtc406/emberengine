@@ -3,7 +3,7 @@ package event
 import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/xcontext"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"sync/atomic"
 )
 
