@@ -40,6 +40,7 @@ type IServiceHandler interface {
 	IsPrivate() bool
 	IsPrimarySecondaryMode() bool
 	PoolStats() []string
+	GetRpcHandler() IRpcHandler
 }
 
 type IIdentifiable interface {

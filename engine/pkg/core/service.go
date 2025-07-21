@@ -428,6 +428,10 @@ func (s *Service) GetServiceName() string {
 	return s.name
 }
 
+func (s *Service) GetRpcHandler() inf.IRpcHandler {
+	return s.IRpcHandler
+}
+
 func (s *Service) EscalateFailure(reason interface{}, evt inf.IEvent) {
 	s.logger.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
 }
