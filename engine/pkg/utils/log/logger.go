@@ -177,6 +177,8 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 
 	var wCloser io.WriteCloser
 	var writer io.Writer
+	// TODO 这里应该是配置writer的名字,然后做个注册,根据名字去获取对应的writer,不然使用者无法扩展这里
+	// TODO 还可以增加一个远程日志模式,跟异步一样,只是日志会通过接口写入远程服务器
 	if conf.AsyncMode != nil && conf.AsyncMode.Enable {
 		// 开启了异步模式,使用异步writer代替同步writer
 		w := NewAsyncWriter(

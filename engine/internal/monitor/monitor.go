@@ -75,6 +75,7 @@ func (rm *RpcMonitor) listen() {
 }
 
 func (rm *RpcMonitor) GenSeq() uint64 {
+	// TODO 这个可能需要存库,否则重启的时候会有冲突的风险
 	return atomic.AddUint64(&rm.seed, 1)
 }
 
