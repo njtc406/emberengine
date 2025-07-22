@@ -97,6 +97,7 @@ func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
 		DSN:                     dsn,
 		DontSupportRenameColumn: true,
 		//SkipInitializeWithVersion: false, // 根据数据库版本自动配置
+
 	}), &gorm.Config{
 		Logger:      slowLogger,
 		PrepareStmt: true, // 开启预处理语句

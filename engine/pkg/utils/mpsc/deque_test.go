@@ -324,3 +324,112 @@ func BenchmarkPushPopActor(b *testing.B) {
 		})
 	}
 }
+
+const (
+	testCount   = 1000000
+	warmupCount = 10000
+	producerNum = 4
+	consumerNum = 4
+	channelSize = 1024
+)
+
+func BenchmarkLockFreeQueue(b *testing.B) {
+	q := New[int]()
+	var wg sync.WaitGroup
+	wg.Add(producerNum + consumerNum)
+
+	b.ResetTimer()
+	for i := 0; i < producerNum; i++ {
+		go func() {
+			defer wg.Done()
+			for n := 0; n < b.N/producerNum; n++ {
+				q.Push(n)
+			}
+		}()
+	}
+
+	for i := 0; i < consumerNum; i++ {
+		go func() {
+			defer wg.Done()
+			for n := 0; n < b.N/consumerNum; n++ {
+				q.Pop()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+/*
+goos: windows
+goarch: amd64
+pkg: github.com/njtc406/emberengine/engine/pkg/utils/mpsc
+cpu: AMD Ryzen 7 2700 Eight-Core Processor
+BenchmarkLockFreeQueue
+BenchmarkLockFreeQueue-16        7177578               167.2 ns/op
+PASS
+*/
+
+func BenchmarkChannel(b *testing.B) {
+	ch := make(chan int, channelSize)
+	var wg sync.WaitGroup
+	wg.Add(producerNum + consumerNum)
+
+	b.ResetTimer()
+	for i := 0; i < producerNum; i++ {
+		go func() {
+			defer wg.Done()
+			for n := 0; n < b.N/producerNum; n++ {
+				ch <- n
+			}
+		}()
+	}
+
+	for i := 0; i < consumerNum; i++ {
+		go func() {
+			defer wg.Done()
+			for n := 0; n < b.N/consumerNum; n++ {
+				<-ch
+			}
+		}()
+	}
+	wg.Wait()
+	close(ch)
+}
+
+/*
+goos: windows
+goarch: amd64
+pkg: github.com/njtc406/emberengine/engine/pkg/utils/mpsc
+cpu: AMD Ryzen 7 2700 Eight-Core Processor
+BenchmarkChannel
+BenchmarkChannel-16      3479059               354.5 ns/op
+PASS
+*/
+
+// BenchmarkChannel_MPSC 对比 Go channel 的多生产者单消费者性能
+func BenchmarkChannel_MPSC(b *testing.B) {
+	ch := make(chan int, 1024)
+	var wg sync.WaitGroup
+	producers := 4 // 生产者数量
+	wg.Add(producers)
+
+	b.ResetTimer()
+
+	// 启动多个生产者
+	for p := 0; p < producers; p++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < b.N/producers; i++ {
+				ch <- i
+			}
+		}()
+	}
+
+	// 单个消费者
+	for i := 0; i < b.N; i++ {
+		v := <-ch
+		_ = v
+	}
+
+	wg.Wait()
+}

@@ -210,3 +210,7 @@ func (m *Module) reset() {
 func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
 }
+
+func (m *Module) GetLogger() log.ILogger {
+	return m.logger
+}

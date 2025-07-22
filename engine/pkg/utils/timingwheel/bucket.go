@@ -67,7 +67,7 @@ type Timer struct {
 	cancel     int32                // 0未取消 1取消
 	task       TimerCallback        // 任务
 	taskArgs   []interface{}        // 任务参数
-	c          chan ITimer          // service直接触发通道
+	c          chan ITimer          // timer触发通道(后面看下能不能使用mpsc来替换channel,效率可能会更高一点,后面做一下channel和mpsc的性能对比)
 	loop       func()               // 循环执行
 	asyncTask  func(...interface{}) // 异步任务
 	scheduler  *TaskScheduler       // 任务调度器

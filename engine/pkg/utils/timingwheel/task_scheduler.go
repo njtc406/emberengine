@@ -15,14 +15,17 @@ import (
 type ITimerScheduler interface {
 	AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer
+	// AfterAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
 	AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer
 
 	TickerFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer
+	// TickerAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
 	TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer
 
 	CronFuncWithStorage(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	CronFunc(spec string, name string, f TimerCallback, args ...interface{}) *Timer
+	// CronAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
 	CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *Timer
 
 	CancelTimer(taskId uint64) bool

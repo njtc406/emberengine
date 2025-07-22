@@ -56,8 +56,6 @@ type Service struct {
 
 	userMsgHooks []MsgHookFun
 	sysMsgHooks  []MsgHookFun
-
-	logger log.ILogger
 }
 
 func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
