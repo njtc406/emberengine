@@ -71,7 +71,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 }
 
 func (s *ConcurrencyTest) OnInit() error {
-	s.OpenConcurrent(1000, 1000000)
+	s.OpenConcurrent(1000, 1000000) // 开启并发组件
 
 	//total := 100_000
 	total := 100000
@@ -464,8 +464,8 @@ func (s *ConcurrencyTest) OnInit() error {
 					Concurrency Num : 500
 					Test type       : call
 					Total time      : 1266 ms
-					Avg time per op : 12.66 μs
-					QPS             : 78988
+					Avg time per op : 12.66 μs //快了大概一倍
+					QPS             : 78988 // 提升了7倍左右
 					P50 latency     : 6005 μs
 					P90 latency     : 8507 μs
 					P99 latency     : 11510 μs
@@ -496,8 +496,8 @@ func (s *ConcurrencyTest) OnInit() error {
 					Concurrency Num : 500
 					Test type       : asyncCall
 					Total time      : 481 ms
-					Avg time per op : 4.81 μs
-					QPS             : 207900
+					Avg time per op : 4.81 μs // 这个基本上就是双方同时send的耗时
+					QPS             : 207900  // 比单纯的send差不多2分之一左右
 					P50 latency     : 593027 μs
 					P90 latency     : 709610 μs
 					P99 latency     : 722622 μs

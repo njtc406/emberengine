@@ -37,7 +37,7 @@ func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, ser
 }
 
 func IsRetired(pid *PID) bool {
-	return atomic.LoadInt32(&pid.State) == def.ServiceStatusRetired
+	return atomic.LoadInt32(&pid.State) == def.ServiceStatusRetired // TODO 状态需要重新定,需要区分服务状态和节点状态,节点状态的退休是不再参与负载均衡那种,服务退休就是不再接收新信息
 }
 
 func (pid *PID) SetMaster(master bool) {

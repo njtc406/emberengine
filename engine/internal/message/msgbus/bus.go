@@ -8,6 +8,7 @@ package msgbus
 import (
 	"context"
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
 	"time"
@@ -64,6 +65,10 @@ func ReleaseMessageBus(mb *MessageBus) {
 
 func GetMessageBusPoolStats() *pool.Stats {
 	return busPool.Stats()
+}
+
+func (mb *MessageBus) GetReceiverPid() *actor.PID {
+	return mb.receiver.GetPid()
 }
 
 func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {

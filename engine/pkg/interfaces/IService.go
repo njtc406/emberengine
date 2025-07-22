@@ -21,6 +21,7 @@ type IService interface {
 	IEventChannel
 	IProfiler
 	ILogger
+	IRpcHandler
 }
 
 // ILifecycle 服务生命周期
