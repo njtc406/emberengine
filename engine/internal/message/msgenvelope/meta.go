@@ -22,7 +22,7 @@ var metaPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *Meta) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *Meta) {
+	pool.WithUnRef(func(t *Meta) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *Meta) {

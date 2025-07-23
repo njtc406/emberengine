@@ -67,12 +67,48 @@ func ToString(val any) string {
 
 // ToIntT 转换为T类型
 func ToIntT[T constraints.Integer](val any) T {
-	switch val.(type) {
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		return T(val)
-	case string:
-		v, _ := strconv.ParseInt(val.(string), 10, 64)
+	switch v := val.(type) {
+	case int:
 		return T(v)
+	case int8:
+		return T(v)
+	case int16:
+		return T(v)
+	case int32:
+		return T(v)
+	case int64:
+		return T(v)
+	case uint:
+		return T(v)
+	case uint8:
+		return T(v)
+	case uint16:
+		return T(v)
+	case uint32:
+		return T(v)
+	case uint64:
+		return T(v)
+	case float32:
+		return T(v)
+	case float64:
+		return T(v)
+	case string:
+		if v == "" {
+			return 0
+		}
+		// 尝试先解析为int64，如果失败再尝试uint64
+		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return T(i)
+		}
+		if u, err := strconv.ParseUint(v, 10, 64); err == nil {
+			return T(u)
+		}
+		return 0
+	case bool:
+		if v {
+			return 1
+		}
+		return 0
 	default:
 		return 0
 	}

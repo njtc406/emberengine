@@ -25,7 +25,7 @@ var msgEnvelopePool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *MsgEnvelope) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *MsgEnvelope) {
+	pool.WithUnRef(func(t *MsgEnvelope) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *MsgEnvelope) {

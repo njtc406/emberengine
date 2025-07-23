@@ -104,7 +104,7 @@ ServiceConf:
           # 日志切分周期(默认24h)
           RotationTime: 24h
           AsyncMode:
-            # 开启异步模式(默认不开启,内部调试时可以关闭)
+            # 开启异步模式(默认开启)
             Enable: true
             Config:
               # 刷新间隔(默认1s)

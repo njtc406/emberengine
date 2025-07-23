@@ -43,7 +43,7 @@ var busPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *MessageBus) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *MessageBus) {
+	pool.WithUnRef(func(t *MessageBus) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(mb *MessageBus) {

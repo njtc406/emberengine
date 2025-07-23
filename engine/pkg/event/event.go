@@ -48,7 +48,7 @@ var eventPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *Event) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *Event) {
+	pool.WithUnRef(func(t *Event) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *Event) {

@@ -17,6 +17,9 @@ import (
 
 // TODO 这部分独立出来做成工具,包括node的配置,都注册进来,这样可以支持多种格式配置
 
+// TODO gpt给了新的方式,需要修改一下这个文件,把所有的yaml文件做成模版文件,由env来传递具体的配置参数
+// 远程的部分也是一样,相当于把模版文件放在了远程而已,下载下来之后，使用本地的env来初始化配置
+
 var (
 	runtimeViper = viper.New()
 	clusterViper = viper.New()

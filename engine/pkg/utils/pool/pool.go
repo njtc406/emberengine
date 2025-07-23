@@ -36,7 +36,7 @@ func WithRef[T any](f func(T)) Option[T] {
 	}
 }
 
-func WithUnref[T any](f func(T)) Option[T] {
+func WithUnRef[T any](f func(T)) Option[T] {
 	return func(p *SyncPoolWrapper[T]) {
 		p.unrefFunc = f
 	}

@@ -51,7 +51,7 @@ var timerPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *Timer) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *Timer) {
+	pool.WithUnRef(func(t *Timer) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *Timer) {
@@ -67,7 +67,7 @@ var cronPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *Cron) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *Cron) {
+	pool.WithUnRef(func(t *Cron) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *Cron) {
@@ -83,7 +83,7 @@ var tickerPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *Ticker) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *Ticker) {
+	pool.WithUnRef(func(t *Ticker) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *Ticker) {

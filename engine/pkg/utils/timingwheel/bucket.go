@@ -28,7 +28,7 @@ var timerPool = pool.NewSyncPoolWrapper(
 	pool.WithRef(func(t *Timer) {
 		t.Ref()
 	}),
-	pool.WithUnref(func(t *Timer) {
+	pool.WithUnRef(func(t *Timer) {
 		t.UnRef()
 	}),
 	pool.WithReset(func(t *Timer) {
