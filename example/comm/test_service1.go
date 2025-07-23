@@ -170,17 +170,17 @@ func (s *Service1) OnInit() error {
 	})
 
 	//cast test
-	s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) {
-		log.SysLogger.Debugf("================================>>>")
-		// 1. 让node2开启多线程,然后调用10次cast
-		for i := 0; i < 10; i++ {
-			s.SelectByServiceType(1, "test", "Service3").Send(ctx, "RPCTest2", nil)
-		}
-		s.GetLogger().Debugf("==========================================17")
-		// 2. 让node2开启单线程,然后调用1次cast
-		s.SelectSameServerByServiceType("test", "Service3").Send(ctx, "RPCTest2", nil)
-		s.GetLogger().Debugf("==========================================18")
-	})
+	//s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) {
+	//	log.SysLogger.Debugf("================================>>>")
+	//	// 1. 让node2开启多线程,然后调用10次cast
+	//	for i := 0; i < 10; i++ {
+	//		s.SelectByServiceType(1, "test", "Service3").Send(ctx, "RPCTest2", nil)
+	//	}
+	//	s.GetLogger().Debugf("==========================================17")
+	//	// 2. 让node2开启单线程,然后调用1次cast
+	//	s.SelectSameServerByServiceType("test", "Service3").Send(ctx, "RPCTest2", nil)
+	//	s.GetLogger().Debugf("==========================================18")
+	//})
 
 	// other test
 	//s.AfterFunc(time.Second*7, "other test", func(timer *timingwheel.Timer, args ...interface{}) {

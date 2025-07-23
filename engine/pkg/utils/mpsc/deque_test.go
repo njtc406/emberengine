@@ -367,6 +367,14 @@ cpu: AMD Ryzen 7 2700 Eight-Core Processor
 BenchmarkLockFreeQueue
 BenchmarkLockFreeQueue-16        7177578               167.2 ns/op
 PASS
+
+goos: windows
+goarch: amd64
+pkg: github.com/njtc406/emberengine/engine/pkg/utils/mpsc
+cpu: AMD Ryzen 7 5700X 8-Core Processor
+BenchmarkLockFreeQueue
+BenchmarkLockFreeQueue-16       11102998               113.7 ns/op
+PASS
 */
 
 func BenchmarkChannel(b *testing.B) {
@@ -403,6 +411,14 @@ pkg: github.com/njtc406/emberengine/engine/pkg/utils/mpsc
 cpu: AMD Ryzen 7 2700 Eight-Core Processor
 BenchmarkChannel
 BenchmarkChannel-16      3479059               354.5 ns/op
+PASS
+
+goos: windows
+goarch: amd64
+pkg: github.com/njtc406/emberengine/engine/pkg/utils/mpsc
+cpu: AMD Ryzen 7 5700X 8-Core Processor
+BenchmarkChannel
+BenchmarkChannel-16     11522229               105.3 ns/op
 PASS
 */
 
