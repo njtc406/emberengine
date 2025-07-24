@@ -10,6 +10,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"sync"
 	"sync/atomic"
 
@@ -18,7 +19,31 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/network/processor"
 )
 
+type PackMsg struct {
+	Id   int32
+	Data interface{}
+}
+
+func (p *PackMsg) Reset() {
+	p.Id = 0
+	p.Data = nil
+}
+
+func (p *PackMsg) Release() {
+	msgPool.Put(p)
+}
+
 type WSPackType int8
+
+var msgPool = pool.NewSyncPoolWrapper(
+	func() *PackMsg {
+		return &PackMsg{}
+	},
+	pool.NewStatsRecorder("websocket_msg_pool"),
+	pool.WithReset(func(p *PackMsg) {
+		p.Reset()
+	}),
+)
 
 const (
 	WPTConnected WSPackType = iota
@@ -26,6 +51,7 @@ const (
 	WPTPack
 	WPTUnknownPack
 	WPTReady
+	WPTWriteErr
 )
 
 type WSPack struct {
@@ -59,6 +85,7 @@ func (m *ClientMgr) OnInit() error {
 	return nil
 }
 
+// TODO 这一整块可能都需要重新考虑一下
 func (m *ClientMgr) wsEventHandler(e inf.IEvent) {
 	pack := e.(*event.Event).Data.(*WSPack)
 	switch pack.Type {
@@ -69,10 +96,11 @@ func (m *ClientMgr) wsEventHandler(e inf.IEvent) {
 	case WPTDisConnected:
 		// 断开连接
 		m.IRawProcessor.DisConnectedRoute(pack.SessionId, pack.ClientId)
-		m.delClientByRoleId(pack.ClientId)
 		m.delClientBySessionId(pack.SessionId)
+		// TODO 通知router,玩家已断开
 	case WPTReady:
 		m.bindingClient(pack.Data.(*Client))
+		// TODO 通知router,玩家已就绪
 	case WPTUnknownPack:
 		// 未知消息
 		m.IRawProcessor.UnknownMsgRoute(pack.SessionId, pack.ClientId, pack.Data)
@@ -127,7 +155,10 @@ func (m *ClientMgr) addClient(sessionId int64, client *Client) {
 func (m *ClientMgr) delClientBySessionId(sessionId int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	client := m.clients[sessionId]
+	client.Close()
 	delete(m.clients, sessionId)
+	delete(m.roleIdMap, client.roleId)
 }
 
 func (m *ClientMgr) delClientByRoleId(roleId string) {
@@ -136,6 +167,9 @@ func (m *ClientMgr) delClientByRoleId(roleId string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	client := m.roleIdMap[roleId]
+	client.Close()
+	delete(m.clients, client.sessionId)
 	delete(m.roleIdMap, roleId)
 }
 
@@ -170,11 +204,43 @@ func (m *ClientMgr) GenSessionId() int64 {
 }
 
 func (m *ClientMgr) CastMsgToClient(id int32, msg interface{}) {
+	var delList []int64
+	defer func() {
+		for _, sessionId := range delList {
+			m.delClientBySessionId(sessionId)
+		}
+	}()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, client := range m.clients {
-		if err := client.SendMsg(id, msg); err != nil {
+	for sessionId, client := range m.clients {
+		pack := msgPool.Get()
+		pack.Id = id
+		pack.Data = msg
+		if err := client.SendMsg(pack); err != nil {
+			// 发送失败, 删除该client
+			delList = append(delList, sessionId)
 			log.SysLogger.Errorf("CastMsgToClient:send msg error: %s", err)
 		}
 	}
+}
+
+func (m *ClientMgr) RpcSendMsgToClient(roleId string, id int32, msg interface{}) error {
+	var err error
+	defer func() {
+		if err != nil {
+			m.delClientByRoleId(roleId)
+		}
+	}()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if client, ok := m.roleIdMap[roleId]; ok {
+		pack := msgPool.Get()
+		pack.Id = id
+		pack.Data = msg
+		if err = client.SendMsg(pack); err != nil {
+			log.SysLogger.Errorf("RpcSendMsgToClient:send msg error: %s", err)
+			return err
+		}
+	}
+	return nil
 }

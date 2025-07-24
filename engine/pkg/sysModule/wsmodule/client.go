@@ -6,11 +6,9 @@
 package wsmodule
 
 import (
-	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +36,8 @@ type Client struct {
 	sessionId int64
 	roleId    string
 	conn      *network.WSConn // 连接
+
+	msgCh chan *PackMsg
 }
 
 func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
@@ -45,6 +45,7 @@ func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
 		mgr:       mgr,
 		conn:      conn,
 		sessionId: mgr.GenSessionId(),
+		msgCh:     make(chan *PackMsg, 1024),
 	}
 	c.status.Store(upGrade)
 	return c
@@ -99,11 +100,9 @@ func (c *Client) listen() {
 
 		c.msgCnt++
 
-		ctx := context.Background()
-		// 链路追踪
-		emberctx.AddHeader(ctx, def.DefaultTraceIdKey, fmt.Sprintf("%s->%s", c.mgr.GetService().GetPid().GetServiceUid(), uuid.NewString()))
+		ctx := xcontext.New(nil)
 		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
-		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, c.roleId)
+		ctx.SetHeader(def.DefaultDispatcherKey, c.roleId)
 
 		c.mgr.NotifyEvent(&event.Event{
 			Type: event.SysEventWebSocket,
@@ -116,6 +115,34 @@ func (c *Client) listen() {
 			},
 		})
 	}
+}
+
+func (c *Client) writeLoop() {
+	defer c.wg.Done()
+	for c.IsRunning() {
+		select {
+		case msg := <-c.msgCh:
+			data, err := c.mgr.Marshal(msg.Id, msg.Data)
+			if err != nil {
+				c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d marshal error: %s", c.roleId, msg.Id, err)
+				continue
+			}
+			err = c.conn.WriteMsg(data)
+			if err != nil {
+				// TODO 这里看要不要处理一下这个错误,是直接踢掉玩家还是怎么,按理说是需要保证玩家收到每条消息的,如果没收到某个消息,可能造成状态不一致
+				c.mgr.NotifyEvent(&event.Event{
+					Type: event.SysEventWebSocket,
+					Data: &WSPack{
+						Type:      WPTWriteErr,
+						ClientId:  c.roleId,
+						SessionId: c.sessionId,
+					},
+				})
+				c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d write error: %s", c.roleId, msg.Id, err)
+			}
+		}
+	}
+
 }
 
 // Close 关闭连接(所有外部想要断开这个客户端,都是用这个接口)
@@ -178,15 +205,17 @@ func (c *Client) isClosed() bool {
 	return c.status.Load() == closed
 }
 
-func (c *Client) SendMsg(id int32, msg interface{}) error {
+func (c *Client) SendMsg(msg *PackMsg) error {
 	if c.isClosed() {
 		return nil
 	}
-	data, err := c.mgr.Marshal(id, msg)
-	if err != nil {
-		return err
+	select {
+	case c.msgCh <- msg:
+	default:
+		msg.Release()
+		return fmt.Errorf("client msg chan is full")
 	}
-	return c.conn.WriteMsg(data)
+	return nil
 }
 
 func (c *Client) checkAuth(_ *timingwheel.Timer, _ ...interface{}) {

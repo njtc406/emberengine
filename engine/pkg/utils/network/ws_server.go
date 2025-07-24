@@ -70,6 +70,8 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handler.conns[conn] = struct{}{}
 	handler.mutexConns.Unlock()
 
+	// TODO 验签
+
 	wsConn := NewWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType)
 	agent := handler.newAgent(wsConn)
 	if agent == nil {
