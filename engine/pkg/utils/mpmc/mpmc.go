@@ -7,6 +7,7 @@ package mpmc
 
 import (
 	"math/bits"
+	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -75,71 +76,153 @@ func roundUpToPowerOfTwo(v int64) int64 {
 // 如果队列满了则返回 false，否则返回 true。
 func (q *Queue[T]) Push(item T) bool {
 	var pos, seq, dif int64
-	var backoff uint32 = 1 // 初始退避 1 微秒
+	var spin int           // 冲突计数
+	const maxSpin = 10     // 忙等最大次数
+	const maxBackoff = 256 // 最大退避时间（微秒）
 	var cell *slot[T]
+
 	for {
 		pos = atomic.LoadInt64(&q.tail)
-		// 在循环中给 cell 赋值
 		cell = &q.buffer[pos&q.mask]
 		seq = atomic.LoadInt64(&cell.sequence)
 		dif = seq - pos
+
 		if dif == 0 {
 			if atomic.CompareAndSwapInt64(&q.tail, pos, pos+1) {
-				break // 跳出循环，此时 cell 仍然指向最后一次迭代的槽
+				break // 成功抢到位置
 			}
 		} else if dif < 0 {
-			return false
+			return false // 队列满了
 		} else {
-			if backoff < maxBackoff {
-				backoff *= 2
+			if spin < maxSpin {
+				spin++
+				runtime.Gosched() // 先忙等
+			} else {
+				backoff := 1 << (spin - maxSpin)
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				time.Sleep(time.Microsecond * time.Duration(backoff))
+				spin++
 			}
-			time.Sleep(time.Microsecond * time.Duration(backoff))
-			//runtime.Gosched()
 		}
 	}
-	// 循环结束后，我们仍然可以使用 cell，因为它是在循环外声明的
+
 	cell.value = item
 	atomic.StoreInt64(&cell.sequence, pos+1)
 	return true
 }
 
+//func (q *Queue[T]) Push(item T) bool {
+//	var pos, seq, dif int64
+//	var backoff uint32 = 1 // 初始退避 1 微秒
+//	var cell *slot[T]
+//	for {
+//		pos = atomic.LoadInt64(&q.tail)
+//		// 在循环中给 cell 赋值
+//		cell = &q.buffer[pos&q.mask]
+//		seq = atomic.LoadInt64(&cell.sequence)
+//		dif = seq - pos
+//		if dif == 0 {
+//			if atomic.CompareAndSwapInt64(&q.tail, pos, pos+1) {
+//				break // 跳出循环，此时 cell 仍然指向最后一次迭代的槽
+//			}
+//		} else if dif < 0 {
+//			return false
+//		} else {
+//			if backoff < maxBackoff {
+//				backoff *= 2
+//			}
+//			time.Sleep(time.Microsecond * time.Duration(backoff))
+//			//runtime.Gosched()
+//		}
+//	}
+//	// 循环结束后，我们仍然可以使用 cell，因为它是在循环外声明的
+//	cell.value = item
+//	atomic.StoreInt64(&cell.sequence, pos+1)
+//	return true
+//}
+
 // Pop 出队操作 并发安全
 // 如果队列为空，则返回零值和 false；否则返回出队的数据和 true。
 func (q *Queue[T]) Pop() (T, bool) {
 	var pos, seq, dif int64
-	var backoff uint32 = 1
+	var spin int
+	const maxSpin = 10
+	const maxBackoff = 256
+	var zero T
 
 	for {
 		pos = atomic.LoadInt64(&q.head)
 		cell := &q.buffer[pos&q.mask]
 		seq = atomic.LoadInt64(&cell.sequence)
-		// 对于消费者，槽有数据时应满足：cell.sequence == pos+1
 		dif = seq - (pos + 1)
+
 		if dif == 0 {
-			// 尝试CAS更新 head
 			if atomic.CompareAndSwapInt64(&q.head, pos, pos+1) {
 				break
 			}
 		} else if dif < 0 {
 			// 队列为空
-			var zero T
 			return zero, false
 		} else {
-			// 使用指数退避来减少忙等开销
-			if backoff < maxBackoff {
-				backoff *= 2
+			// 忙等 + 指数退避
+			if spin < maxSpin {
+				spin++
+				runtime.Gosched()
+			} else {
+				backoff := 1 << (spin - maxSpin)
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				time.Sleep(time.Microsecond * time.Duration(backoff))
+				spin++
 			}
-			time.Sleep(time.Microsecond * time.Duration(backoff))
-
-			//runtime.Gosched()
 		}
 	}
-	// 读取槽中的数据
-	ret := q.buffer[pos&q.mask].value
-	// 更新槽的序号为 pos + q.size，以便后续生产者写入时判断该槽可用
-	atomic.StoreInt64(&q.buffer[pos&q.mask].sequence, pos+q.mask+1)
+
+	// 成功获取 cell，读取数据并设置新的 sequence 值
+	cell := &q.buffer[pos&q.mask]
+	ret := cell.value
+	atomic.StoreInt64(&cell.sequence, pos+q.mask+1)
 	return ret, true
 }
+
+//func (q *Queue[T]) Pop() (T, bool) {
+//	var pos, seq, dif int64
+//	var backoff uint32 = 1
+//
+//	for {
+//		pos = atomic.LoadInt64(&q.head)
+//		cell := &q.buffer[pos&q.mask]
+//		seq = atomic.LoadInt64(&cell.sequence)
+//		// 对于消费者，槽有数据时应满足：cell.sequence == pos+1
+//		dif = seq - (pos + 1)
+//		if dif == 0 {
+//			// 尝试CAS更新 head
+//			if atomic.CompareAndSwapInt64(&q.head, pos, pos+1) {
+//				break
+//			}
+//		} else if dif < 0 {
+//			// 队列为空
+//			var zero T
+//			return zero, false
+//		} else {
+//			// 使用指数退避来减少忙等开销
+//			if backoff < maxBackoff {
+//				backoff *= 2
+//			}
+//			time.Sleep(time.Microsecond * time.Duration(backoff))
+//
+//			//runtime.Gosched()
+//		}
+//	}
+//	// 读取槽中的数据
+//	ret := q.buffer[pos&q.mask].value
+//	// 更新槽的序号为 pos + q.size，以便后续生产者写入时判断该槽可用
+//	atomic.StoreInt64(&q.buffer[pos&q.mask].sequence, pos+q.mask+1)
+//	return ret, true
+//}
 
 // Len 返回队列当前大小（大致值，因为在并发情况下可能不精确）
 func (q *Queue[T]) Len() int {
