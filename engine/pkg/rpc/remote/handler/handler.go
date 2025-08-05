@@ -65,26 +65,15 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			return err
 		} else {
 			// 已经超时,丢弃返回
-			fields := make(map[string]interface{})
-			if req.MessageHeader != nil {
-				for k, v := range req.MessageHeader {
-					fields[k] = v
-				}
-			}
-
-			log.SysLogger.WithFields(fields).Warnf("rpc call timeout, envelope not found: %s", req.String())
+			log.SysLogger.Warnf("rpc call timeout, envelope not found: %s", req.String())
 			return nil
 		}
 	} else {
 		// 检查重复
-		if dedup.GetRpcReqDuplicator().Seen(req.ReqId) {
-			fields := make(map[string]interface{})
-			if req.MessageHeader != nil {
-				for k, v := range req.MessageHeader {
-					fields[k] = v
-				}
-			}
-			log.SysLogger.WithFields(fields).Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
+		senderServiceUid := req.GetSenderPid().GetServiceUid()
+		// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
+		if dedup.GetDeDuplicator().Seen(senderServiceUid, req.ReqId) {
+			log.SysLogger.Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
 			return nil
 		}
 
@@ -122,7 +111,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			return err
 		}
 
-		dedup.GetRpcReqDuplicator().MarkDone(req.ReqId)
+		dedup.GetDeDuplicator().MarkDone(senderServiceUid, req.ReqId)
 
 		return nil
 	}

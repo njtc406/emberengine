@@ -105,8 +105,6 @@ const NatsDefaultShardCount = 16
 
 const NatsDefaultTopic = "rpc.node.%s"
 
-const DefaultReqDuplicatorTTL = 1 * time.Second
-
 const (
 	DefaultTraceIdKey    = "sys.traceId"
 	DefaultDispatcherKey = "sys.dispatchKey"
@@ -117,4 +115,11 @@ const (
 const (
 	ProtoBuf int32 = iota
 	Json
+)
+
+const (
+	DeDuplicatorTypeTTL = "ttl"
+	DeDuplicatorTypeLRU = "lru"
+
+	DefaultDeDuplicatorTTL = time.Second
 )
