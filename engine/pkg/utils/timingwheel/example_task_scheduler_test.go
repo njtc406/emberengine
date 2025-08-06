@@ -41,7 +41,7 @@ func Example_scheduleTimer() {
 	go func() {
 		for {
 			select {
-			case job := <-dp.C:
+			case job := <-dp.GetTimerCbChannel():
 				fmt.Println("job:", job)
 				job.Do()
 				fmt.Println("sub time:", time.Now().Sub(beginTime))

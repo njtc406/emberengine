@@ -19,6 +19,41 @@ NodeConf:
   MonitorTimerSize: 10000
   # 定时器桶数量(决定锁的粒度)
   MonitorBucketSize: 20
+  EventBusConf:
+    # 全局事件前缀
+    GlobalPrefix: "ember.global"
+    # 服务器事件前缀
+    ServerPrefix: "ember.server"
+    # 主服务事件前缀
+    MasterPrefix: "ember.master"
+    # 从服务事件前缀
+    SlavePrefix: "ember.slave"
+    # 节点事件前缀
+    NodePrefix: "ember.node"
+    # 分片数量
+    ShardCount: 1000
+    # 事件nats的地址配置
+    NatsConf:
+      EndPoints:
+      UserName:
+      Password:
+      Token:
+      Secure:
+      Cert:
+      CertKey:
+      CAs:
+      MaxReconnects:
+      ReconnectWait:
+      Timeout:
+      PingInterval:
+      PingMaxOutstanding:
+      ReconnectBufSize:
+  # 去重器配置
+  DeDuplicatorConf:
+    DeDuplicatorType: "ttl"
+    DeDuplicatorTTL: 1s
+    DeDuplicatorCleanTTL: 3s
+    DeDuplicatorSize: 10000
 
 ClusterConf:
   ETCDConf:

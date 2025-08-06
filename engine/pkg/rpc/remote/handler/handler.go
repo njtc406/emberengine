@@ -111,8 +111,6 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			return err
 		}
 
-		dedup.GetDeDuplicator().MarkDone(senderServiceUid, req.ReqId)
-
 		return nil
 	}
 }

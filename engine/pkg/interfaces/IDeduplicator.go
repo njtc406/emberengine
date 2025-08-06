@@ -7,5 +7,4 @@ package interfaces
 
 type IDeDuplicator interface {
 	Seen(serviceUid string, id uint64) bool
-	MarkDone(serviceUid string, id uint64)
 }

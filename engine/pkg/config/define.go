@@ -21,16 +21,16 @@ type conf struct {
 }
 
 type NodeConf struct {
-	NodeId            string        `binding:""`         // 节点ID(目前这个没用,节点id是节点启动的时候自动生成的)
-	SystemStatus      string        `binding:"required"` // 系统状态(debug/release)
-	PVCPath           string        `binding:"required"` // 数据持久化目录(默认./data)
-	PVPath            string        `binding:"required"` // 缓存目录(默认./run)
-	ProfilerInterval  time.Duration `binding:""`         // 性能分析间隔(默认0,不开启)
-	AntsPoolSize      int           `binding:"required"` // 线程池大小
-	MonitorTimerSize  int           `binding:""`         // 定时器数量(用于监控rpc调用的timer)(默认10000)
-	MonitorBucketSize int           `binding:""`         // 定时器桶数量(默认20)
-	EventBusConf      *EventBusConf `binding:""`         // nats配置
-	RpcDuplicatorTTL  time.Duration `binding:""`
+	NodeId            string            `binding:""`         // 节点ID(目前这个没用,节点id是节点启动的时候自动生成的)
+	SystemStatus      string            `binding:"required"` // 系统状态(debug/release)
+	PVCPath           string            `binding:"required"` // 数据持久化目录(默认./data)
+	PVPath            string            `binding:"required"` // 缓存目录(默认./run)
+	ProfilerInterval  time.Duration     `binding:""`         // 性能分析间隔(默认0,不开启)
+	AntsPoolSize      int               `binding:"required"` // 线程池大小
+	MonitorTimerSize  int               `binding:""`         // 定时器数量(用于监控rpc调用的timer)(默认10000)
+	MonitorBucketSize int               `binding:""`         // 定时器桶数量(默认20)
+	EventBusConf      *EventBusConf     `binding:""`         // nats配置
+	DeDuplicatorConf  *DeDuplicatorConf `binding:""`         // deDuplicator配置
 }
 
 type ClusterConf struct {
@@ -151,4 +151,11 @@ type WorkerStrategyConfig struct {
 	Name   string                  `binding:""` // 策略名称
 	Params map[string]interface{}  `binding:""` // 策略参数,如果是复合策略,需要固定给一个map["mode"]="all/any"
 	Subs   []*WorkerStrategyConfig `binding:""` // 子策略，复合策略才有
+}
+
+type DeDuplicatorConf struct {
+	DeDuplicatorType     string        `binding:""` // 去重处理器类型(ttl和lru)
+	DeDuplicatorTTL      time.Duration `binding:""`
+	DeDuplicatorCleanTTL time.Duration `binding:""`
+	DeDuplicatorSize     int           `binding:""`
 }
