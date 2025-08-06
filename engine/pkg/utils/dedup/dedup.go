@@ -3,6 +3,7 @@ package dedup
 import (
 	"fmt"
 	"github.com/bluele/gcache"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"sync"
@@ -39,27 +40,32 @@ func WithSize(size int) Option {
 	}
 }
 
-func Init(tp string, options ...Option) {
+func Init(conf *config.DeDuplicatorConf) {
 	if duplicator != nil {
 		return
 	}
 
-	option := &DeDuplicatorOption{}
-	for _, op := range options {
-		op(option)
+	if conf == nil {
+		conf = &config.DeDuplicatorConf{}
 	}
 
-	duplicator = new(tp, option)
+	option := &DeDuplicatorOption{
+		TTL:      conf.DeDuplicatorTTL,
+		CleanTTL: conf.DeDuplicatorCleanTTL,
+		Size:     conf.DeDuplicatorSize,
+	}
+
+	duplicator = newDeDuplicator(conf.DeDuplicatorType, option)
 }
 
 func GetDeDuplicator() inf.IDeDuplicator {
 	if duplicator == nil {
-		duplicator = new(def.DeDuplicatorTypeTTL, &DeDuplicatorOption{})
+		duplicator = newDeDuplicator(def.DeDuplicatorTypeTTL, &DeDuplicatorOption{})
 	}
 	return duplicator
 }
 
-func new(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
+func newDeDuplicator(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
 	if option == nil {
 		option = &DeDuplicatorOption{}
 	}

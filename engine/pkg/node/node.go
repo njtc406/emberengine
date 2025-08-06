@@ -119,12 +119,7 @@ func Start(opts ...StartOption) {
 	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
 
 	// 初始化rpc请求去重缓存器
-	dedup.Init(
-		config.Conf.NodeConf.DeDuplicatorConf.DeDuplicatorType,
-		dedup.WithCleanTTL(config.Conf.NodeConf.DeDuplicatorConf.DeDuplicatorCleanTTL),
-		dedup.WithSize(config.Conf.NodeConf.DeDuplicatorConf.DeDuplicatorSize),
-		dedup.WithTTL(config.Conf.NodeConf.DeDuplicatorConf.DeDuplicatorTTL),
-	)
+	dedup.Init(config.Conf.NodeConf.DeDuplicatorConf)
 	// 初始化等待队列,并启动监听
 	monitor.GetRpcMonitor().Init().Start()
 
