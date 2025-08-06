@@ -62,7 +62,7 @@ func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
 	}
 
 	tp := ev.GetType()
-	//s.logger.WithContext(ev.GetContext()).Debugf("service[%s] receive system event[%d]", s.GetName(), tp)
+	//s.logger.WithContext(ev.GetContext()).Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>service[%s] receive system event[%d]", s.GetName(), tp)
 
 	var analyzer *profiler.Analyzer
 	open := s.profiler != nil
@@ -113,7 +113,7 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 	}
 
 	tp := ev.GetType()
-	//s.logger.WithContext(ev.GetContext()).Debugf("service[%s] receive user event[%d]", s.GetName(), tp)
+	//s.logger.WithContext(ev.GetContext()).Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>service[%s] receive user event[%d]", s.GetName(), tp)
 
 	var analyzer *profiler.Analyzer
 	open := s.profiler != nil

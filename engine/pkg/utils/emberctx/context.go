@@ -90,7 +90,7 @@ func AddHeaders(ctx context.Context, newHeaders map[string]any) context.Context 
 func GetHeaderValue(ctx context.Context, key string) any {
 	headers := getHeader(ctx)
 	if headers == nil {
-		return ""
+		return nil
 	}
 	return headers[key]
 }

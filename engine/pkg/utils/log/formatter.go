@@ -126,7 +126,7 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 
 	if entry.Context != nil {
-		header := emberctx.GetHeader(entry.Context)
+		header := emberctx.ToHeaders(entry.Context)
 		if header != nil {
 			b.WriteString(" [")
 			var keys []string

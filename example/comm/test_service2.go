@@ -11,7 +11,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"time"
 )
 
 type Service2TestModule struct {
@@ -54,8 +53,8 @@ func (s *Service2) OnRelease() {
 }
 
 func (s *Service2) APITest2() {
-	time.Sleep(time.Second * 6) // 模拟耗时操作
-	log.SysLogger.Debugf("call %s func APITest2", s.GetName())
+	//time.Sleep(time.Second * 6) // 模拟耗时操作
+	log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>call %s func APITest2", s.GetName())
 }
 
 //func (s *Service2) APISum(a, b int) int {

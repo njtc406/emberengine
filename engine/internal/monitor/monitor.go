@@ -88,10 +88,11 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 		if !elp.IsRef() {
 			return
 		}
+		reqId := elp.GetMeta().GetReqId()
 		rm.locker.Lock()
 		// 直接删除
-		_, ok := rm.waitMap[tm.GetTimerId()]
-		delete(rm.waitMap, tm.GetTimerId())
+		_, ok := rm.waitMap[reqId]
+		delete(rm.waitMap, reqId)
 		rm.locker.Unlock()
 		if !ok {
 			// 已经在其他地方被移除了,不再执行后续的超时

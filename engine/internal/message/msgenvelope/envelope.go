@@ -7,11 +7,14 @@ package msgenvelope
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"golang.org/x/net/context"
 	"sync"
@@ -87,6 +90,21 @@ func (e *MsgEnvelope) GetData() inf.IEnvelopeData {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.data
+}
+
+func (e *MsgEnvelope) GetType() int32 {
+	tp := e.GetHeader(def.DefaultTypeKey)
+
+	tpV, ok := tp.(int32)
+	if ok {
+		return tpV
+	} else {
+		tpS, ok := tp.(string)
+		if ok {
+			return util.ToIntT[int32](tpS)
+		}
+	}
+	return event.RpcMsg
 }
 
 //-----------------------------Option-----------------------------------
