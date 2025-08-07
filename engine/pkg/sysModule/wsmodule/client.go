@@ -6,8 +6,10 @@
 package wsmodule
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"sync"
 	"sync/atomic"
@@ -35,9 +37,8 @@ type Client struct {
 
 	sessionId int64
 	roleId    string
-	conn      *network.WSConn // 连接
-
-	msgCh chan *PackMsg
+	conn      *network.WSConn       // 连接
+	msgCh     *mpsc.Queue[*PackMsg] // 发送队列
 }
 
 func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
@@ -45,7 +46,7 @@ func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
 		mgr:       mgr,
 		conn:      conn,
 		sessionId: mgr.GenSessionId(),
-		msgCh:     make(chan *PackMsg, 1024),
+		msgCh:     mpsc.New[*PackMsg](),
 	}
 	c.status.Store(upGrade)
 	return c
@@ -54,6 +55,7 @@ func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
 func (c *Client) Run() {
 	c.wg.Add(1)
 	go c.listen()
+	// 连接事件
 	c.mgr.NotifyEvent(&event.Event{
 		Type: event.SysEventWebSocket,
 		Data: &WSPack{
@@ -74,6 +76,14 @@ func (c *Client) listen() {
 		msg, err := c.conn.ReadMsg()
 		if err != nil {
 			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
+			c.mgr.NotifyEvent(&event.Event{
+				Type: event.SysEventWebSocket,
+				Data: &WSPack{
+					Type:      WPTDisConnected,
+					SessionId: c.sessionId,
+					Data:      c,
+				},
+			})
 			return
 		}
 
@@ -104,30 +114,29 @@ func (c *Client) listen() {
 		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
 		ctx.SetHeader(def.DefaultDispatcherKey, c.roleId)
 
-		c.mgr.NotifyEvent(&event.Event{
-			Type: event.SysEventWebSocket,
-			Data: &WSPack{
-				Type:      WPTPack,
-				ClientId:  c.roleId,
-				SessionId: c.sessionId,
-				Data:      info,
-				Ctx:       ctx,
-			},
-		})
+		if err := c.mgr.IRawProcessor.MsgRoute(pack.Ctx, pack.SessionId, pack.ClientId, pack.Data); err != nil {
+			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
+		}
 	}
 }
 
 func (c *Client) writeLoop() {
 	defer c.wg.Done()
+	var backoff = 1
+	var maxBackoff = 4
 	for c.IsRunning() {
-		select {
-		case msg := <-c.msgCh:
-			data, err := c.mgr.Marshal(msg.Id, msg.Data)
-			if err != nil {
-				c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d marshal error: %s", c.roleId, msg.Id, err)
-				continue
+		if !c.msgCh.Empty() {
+			msgs := c.msgCh.BatchPop(50) // TODO 这个需要配置
+			buffer := bytes.Buffer{}
+			for _, msg := range msgs {
+				data, err := c.mgr.Marshal(msg.Id, msg.Data)
+				if err != nil {
+					c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d marshal error: %s", c.roleId, msg.Id, err)
+					continue
+				}
 			}
-			err = c.conn.WriteMsg(data)
+
+			err := c.conn.WriteMsg(buffer.Bytes())
 			if err != nil {
 				// TODO 这里看要不要处理一下这个错误,是直接踢掉玩家还是怎么,按理说是需要保证玩家收到每条消息的,如果没收到某个消息,可能造成状态不一致
 				c.mgr.NotifyEvent(&event.Event{
@@ -140,6 +149,12 @@ func (c *Client) writeLoop() {
 				})
 				c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d write error: %s", c.roleId, msg.Id, err)
 			}
+		} else {
+			// 使用指数退避来减少忙等开销
+			if backoff < maxBackoff {
+				backoff *= 2
+			}
+			time.Sleep(time.Microsecond * time.Duration(backoff))
 		}
 	}
 

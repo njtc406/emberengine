@@ -19,6 +19,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/network/processor"
 )
 
+// TODO 这里面所有的固定逻辑都需要改为注入,因为需要把整个gate抽为一个基础服务,然后不同类型的gate需要自己注入自己的hook函数
+
 type PackMsg struct {
 	Id   int32
 	Data interface{}
@@ -48,7 +50,6 @@ var msgPool = pool.NewSyncPoolWrapper(
 const (
 	WPTConnected WSPackType = iota
 	WPTDisConnected
-	WPTPack
 	WPTUnknownPack
 	WPTReady
 	WPTWriteErr
@@ -104,10 +105,6 @@ func (m *ClientMgr) wsEventHandler(e inf.IEvent) {
 	case WPTUnknownPack:
 		// 未知消息
 		m.IRawProcessor.UnknownMsgRoute(pack.SessionId, pack.ClientId, pack.Data)
-	case WPTPack:
-		if err := m.IRawProcessor.MsgRoute(pack.Ctx, pack.SessionId, pack.ClientId, pack.Data); err != nil {
-			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
-		}
 	}
 }
 

@@ -72,6 +72,32 @@ func (q *Queue[T]) Pop() (T, bool) {
 	return q._nil, false
 }
 
+func (q *Queue[T]) BatchPop(n int) []T {
+	if n <= 0 {
+		return nil
+	}
+
+	var results []T
+	for i := 0; i < n; i++ {
+		tail := q.tail
+		next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next)))) // acquire
+		if next == nil {
+			break
+		}
+
+		q.tail = next
+		v := next.val
+		tail.val = q._nil
+		tail.next = nil
+		q.pool.Put(tail)
+
+		results = append(results, v)
+		atomic.AddInt64(&q.len, -1)
+	}
+
+	return results
+}
+
 // Empty returns true if the queue is empty
 //
 // Empty must be called from a single, consumer goroutine
