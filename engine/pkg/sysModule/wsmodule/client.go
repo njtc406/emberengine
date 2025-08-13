@@ -114,7 +114,7 @@ func (c *Client) listen() {
 		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
 		ctx.SetHeader(def.DefaultDispatcherKey, c.roleId)
 
-		if err := c.mgr.IRawProcessor.MsgRoute(pack.Ctx, pack.SessionId, pack.ClientId, pack.Data); err != nil {
+		if err := c.mgr.IRawProcessor.MsgRoute(ctx, c.sessionId, c.roleId, pack.Data); err != nil {
 			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
 		}
 	}
