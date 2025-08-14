@@ -6,9 +6,8 @@
 package config
 
 import (
-	"crypto/tls"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/viper"
-	"time"
 )
 
 type GateService struct {
@@ -20,16 +19,9 @@ type GateService struct {
 }
 
 type WSServerConf struct {
-	Addr            string `binding:"required"`
-	Router          string `binding:"required"`
-	MaxConnNum      int
-	PendingWriteNum int
-	MaxMsgLen       uint32
-	HTTPTimeout     time.Duration
-	LittleEndian    bool //是否小端序(默认使用小端序)
-	TLS             *tls.Config
-	CertFile        string
-	KeyFile         string
+	Router       string `binding:"required"`
+	LittleEndian bool   //是否小端序(默认使用小端序)
+	HttpConf     *httpx.Conf
 }
 
 type HttpServerConf struct {

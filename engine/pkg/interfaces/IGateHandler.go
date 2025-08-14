@@ -15,7 +15,7 @@ type IConn interface {
 }
 
 type IAdapterHandler interface {
-	OnConnect(c IConn)
+	OnConnect(c IConn) error
 	OnMessage(c IConn, msg []byte)
 	OnClose(c IConn)
 }

@@ -8,21 +8,27 @@ package ws
 import (
 	"context"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	glbConfig "github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/sysService/gate/config"
 	"github.com/njtc406/emberengine/engine/pkg/sysService/gate/protocol_adapter/connx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"net/http"
 )
 
 type WebSocketAdapter struct {
-	server  *http.Server
+	server  *httpx.GinServer
 	handler inf.IAdapterHandler
 	svc     inf.IService
 }
 
 func NewWebSocketAdapter() *WebSocketAdapter {
-	return &WebSocketAdapter{}
+	return &WebSocketAdapter{
+		server: httpx.NewGinServer(),
+	}
 }
 
 func (w *WebSocketAdapter) SetHandler(h inf.IAdapterHandler) {
@@ -35,54 +41,47 @@ func (w *WebSocketAdapter) ListenAndServe(svc inf.IService, conf interface{}) er
 	if !ok {
 		return fmt.Errorf("invalid websocket configuration")
 	}
-	upGrader := websocket.Upgrader{}
 
-	// TODO 这里再考虑下使用哪种server,应该可以使用gin来做这个,之后万一有其他需求,支持起来可能会更好一点
-	mux := http.NewServeMux()
+	if err := w.server.Init(svc.GetLogger(), glbConfig.GetStatus(), cfg.HttpConf); err != nil {
+		return err
+	}
+	pool := router_center.NewGroupHandlerPool()
+	pool.RegisterGroupHandler(cfg.Router, w.router)
+	w.server.SetRouter(pool)
+	w.server.WithMiddleware(w.Auth)
+	w.server.Start()
+	return nil
+}
 
-	mux.HandleFunc(cfg.Router, func(rw http.ResponseWriter, req *http.Request) {
-		conn, err := upGrader.Upgrade(rw, req, nil)
+func (w *WebSocketAdapter) router(rg *gin.RouterGroup) {
+	upGrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true // 允许跨域
+		},
+	}
+	rg.GET("", func(gc *gin.Context) {
+		c, err := upGrader.Upgrade(gc.Writer, gc.Request, nil)
 		if err != nil {
+			gc.String(http.StatusBadRequest, "upgrade failed: %v", err)
 			return
 		}
 
-		c := connx.NewWSConn(conn) // 实现 Conn 接口
-		w.handler.OnConnect(c)
+		conn := connx.NewWSConn(c)
+		if err = w.handler.OnConnect(conn); err != nil {
+			gc.String(http.StatusBadRequest, "connect failed: %v", err)
+			_ = c.Close()
+			return
+		}
 
-		// TODO 这里要修改,变为注入
-		go func() {
-			defer func() {
-				w.handler.OnClose(c)
-				c.Close()
-			}()
-			for {
-				_, msg, err := conn.ReadMessage()
-				if err != nil {
-					return
-				}
-				w.handler.OnMessage(c, msg)
-			}
-		}()
+		conn.Send()
+
 	})
+}
 
-	// TODO 配置
-	w.server = &http.Server{
-		Addr:                         cfg.Addr,
-		Handler:                      mux,
-		DisableGeneralOptionsHandler: false,
-		TLSConfig:                    cfg.TLS,
-		ReadTimeout:                  0,
-		ReadHeaderTimeout:            0,
-		WriteTimeout:                 0,
-		IdleTimeout:                  0,
-		MaxHeaderBytes:               0,
-	}
+func (w *WebSocketAdapter) Auth(c *gin.Context) {
 
-	if cfg.TLS != nil {
-		return w.server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile)
-	} else {
-		return w.server.ListenAndServe()
-	}
 }
 
 func (w *WebSocketAdapter) Shutdown(ctx context.Context) error {
