@@ -141,7 +141,7 @@ func (gs *GinServer) logFormatter(p gin.LogFormatterParams) string {
 
 func (gs *GinServer) Start() {
 	gs.wg.Add(1)
-	go gs.run()
+	gs.run()
 }
 
 func (gs *GinServer) run() {

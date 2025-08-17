@@ -22,7 +22,7 @@ import (
 
 type Worker struct {
 	workerId      int
-	closed        bool
+	closed        atomic.Bool
 	pool          *WorkerPool
 	wg            sync.WaitGroup
 	userMailbox   queue[inf.IEvent] // 用户消息
@@ -101,7 +101,7 @@ func (w *Worker) run() {
 
 	var backoff = 1
 	var maxBackoff = 4
-	for !w.closed {
+	for !w.closed.Load() {
 		// 优先处理系统消息
 		if e, ok = w.systemMailbox.Pop(); ok {
 			w.safeExec(w.pool.invoker.InvokeSystemMessage, e)
@@ -127,7 +127,9 @@ func (w *Worker) run() {
 
 func (w *Worker) stop() {
 	//log.SysLogger.Debugf("worker %d process userCount:%d  sysCount:%d", w.workerId, w.userCount.Load(), w.sysCount.Load())
-	w.closed = true
+	if w.closed.Swap(true) {
+		return
+	}
 	w.wg.Wait()
 	w.userMailbox = nil
 	w.systemMailbox = nil

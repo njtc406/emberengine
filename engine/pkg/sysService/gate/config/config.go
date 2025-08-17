@@ -20,32 +20,32 @@ type GateService struct {
 
 type WSServerConf struct {
 	Router       string `binding:"required"`
-	LittleEndian bool   //是否小端序(默认使用小端序)
+	LittleEndian bool   //是否小端序
 	HttpConf     *httpx.Conf
 }
 
 type HttpServerConf struct {
 	Addr         string
-	LittleEndian bool //是否小端序(默认使用小端序)
+	LittleEndian bool //是否小端序
 }
 
 type TcpServerConf struct {
 	Addr         string
-	LittleEndian bool //是否小端序(默认使用小端序)
+	LittleEndian bool //是否小端序
 }
 
 type UdpServerConf struct {
 	Addr         string
-	LittleEndian bool //是否小端序(默认使用小端序)
+	LittleEndian bool //是否小端序
 }
 
 func SetChatServiceConfDefault(parser *viper.Viper) {
 	parser.SetDefault("Type", "ws") // 默认使用websocket
 	parser.SetDefault("WSServerConf", &WSServerConf{
-		Addr:            "0.0.0.0:130",
-		MaxConnNum:      5,
-		PendingWriteNum: 1000,
-		MaxMsgLen:       1024,
-		HTTPTimeout:     60,
+		Router:       "/ws",
+		LittleEndian: false,
+		HttpConf: &httpx.Conf{
+			Addr: ":8080",
+		},
 	})
 }

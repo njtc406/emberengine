@@ -20,9 +20,9 @@ import (
 )
 
 type WebSocketAdapter struct {
-	server  *httpx.GinServer
-	handler inf.IAdapterHandler
-	svc     inf.IService
+	server     *httpx.GinServer
+	svc        inf.IService
+	sessionMgr inf.ISessionManager
 }
 
 func NewWebSocketAdapter() *WebSocketAdapter {
@@ -31,8 +31,12 @@ func NewWebSocketAdapter() *WebSocketAdapter {
 	}
 }
 
-func (w *WebSocketAdapter) SetHandler(h inf.IAdapterHandler) {
-	w.handler = h
+func (w *WebSocketAdapter) SetSessionMgr(sessionMgr inf.ISessionManager) {
+	w.sessionMgr = sessionMgr
+}
+
+func (w *WebSocketAdapter) GetSessionMgr() inf.ISessionManager {
+	return w.sessionMgr
 }
 
 func (w *WebSocketAdapter) ListenAndServe(svc inf.IService, conf interface{}) error {
@@ -61,29 +65,25 @@ func (w *WebSocketAdapter) router(rg *gin.RouterGroup) {
 			return true // 允许跨域
 		},
 	}
+
 	rg.GET("", func(gc *gin.Context) {
 		c, err := upGrader.Upgrade(gc.Writer, gc.Request, nil)
 		if err != nil {
 			gc.String(http.StatusBadRequest, "upgrade failed: %v", err)
 			return
 		}
-
+		// 鉴权在中间件的时候就已经执行了,所以这里可以直接等同于连接成功,开始正常执行逻辑
+		uid := gc.GetString("uid")
 		conn := connx.NewWSConn(c)
-		if err = w.handler.OnConnect(conn); err != nil {
-			gc.String(http.StatusBadRequest, "connect failed: %v", err)
-			_ = c.Close()
-			return
-		}
-
-		conn.Send()
-
+		w.sessionMgr.Bind(uid, conn)
 	})
 }
 
 func (w *WebSocketAdapter) Auth(c *gin.Context) {
-
+	// TODO 鉴权
 }
 
 func (w *WebSocketAdapter) Shutdown(ctx context.Context) error {
-	return w.server.Shutdown(ctx)
+	w.server.Stop()
+	return nil
 }

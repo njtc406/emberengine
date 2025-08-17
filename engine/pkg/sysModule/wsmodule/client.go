@@ -5,241 +5,225 @@
 // @Update  yr  2024/1/21 上午10:33
 package wsmodule
 
-import (
-	"bytes"
-	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"sync"
-	"sync/atomic"
-	"time"
-
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/network"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-)
-
-const (
-	upGrade = iota
-	running
-	closed
-)
-
-type Client struct {
-	mgr    *ClientMgr
-	status atomic.Int32
-	wg     sync.WaitGroup
-
-	msgCnt  uint64
-	timerId uint64
-
-	sessionId int64
-	roleId    string
-	conn      *network.WSConn       // 连接
-	msgCh     *mpsc.Queue[*PackMsg] // 发送队列
-}
-
-func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
-	c := &Client{
-		mgr:       mgr,
-		conn:      conn,
-		sessionId: mgr.GenSessionId(),
-		msgCh:     mpsc.New[*PackMsg](),
-	}
-	c.status.Store(upGrade)
-	return c
-}
-
-func (c *Client) Run() {
-	c.wg.Add(1)
-	go c.listen()
-	// 连接事件
-	c.mgr.NotifyEvent(&event.Event{
-		Type: event.SysEventWebSocket,
-		Data: &WSPack{
-			Type:      WPTConnected,
-			SessionId: c.sessionId,
-			Data:      c,
-		},
-	})
-	// 启动一个定时器,在10秒后检查是否绑定了roleId,如果没有绑定,则通知客户端断开连接
-	// TODO (这个具体时间之后根据需求调整)
-	c.timerId, _ = c.mgr.AfterFuncWithStorage(time.Second*10, "gate_client_check_auth", c.checkAuth)
-	c.wg.Wait()
-}
-
-func (c *Client) listen() {
-	defer c.wg.Done()
-	for {
-		msg, err := c.conn.ReadMsg()
-		if err != nil {
-			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
-			c.mgr.NotifyEvent(&event.Event{
-				Type: event.SysEventWebSocket,
-				Data: &WSPack{
-					Type:      WPTDisConnected,
-					SessionId: c.sessionId,
-					Data:      c,
-				},
-			})
-			return
-		}
-
-		// 消息解析(这里只是最外层的解析)
-		info, err := c.mgr.Unmarshal(msg)
-		if err != nil {
-			log.SysLogger.Errorf("Client receive msg error: %s", err)
-			c.mgr.NotifyEvent(&event.Event{
-				Type: event.SysEventWebSocket,
-				Data: &WSPack{
-					Type:      WPTUnknownPack,
-					ClientId:  c.roleId,
-					SessionId: c.sessionId,
-					Data:      msg,
-				},
-			})
-			continue
-		}
-
-		if c.msgCnt > 0 && !c.IsRunning() {
-			// 在接收了auth消息之后,如果没有绑定角色,则不处理后续消息
-			continue
-		}
-
-		c.msgCnt++
-
-		ctx := xcontext.New(nil)
-		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
-		ctx.SetHeader(def.DefaultDispatcherKey, c.roleId)
-
-		if err := c.mgr.IRawProcessor.MsgRoute(ctx, c.sessionId, c.roleId, pack.Data); err != nil {
-			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
-		}
-	}
-}
-
-func (c *Client) writeLoop() {
-	defer c.wg.Done()
-	var backoff = 1
-	var maxBackoff = 4
-	for c.IsRunning() {
-		if !c.msgCh.Empty() {
-			msgs := c.msgCh.BatchPop(50) // TODO 这个需要配置
-			buffer := bytes.Buffer{}
-			for _, msg := range msgs {
-				data, err := c.mgr.Marshal(msg.Id, msg.Data)
-				if err != nil {
-					c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d marshal error: %s", c.roleId, msg.Id, err)
-					continue
-				}
-			}
-
-			err := c.conn.WriteMsg(buffer.Bytes())
-			if err != nil {
-				// TODO 这里看要不要处理一下这个错误,是直接踢掉玩家还是怎么,按理说是需要保证玩家收到每条消息的,如果没收到某个消息,可能造成状态不一致
-				c.mgr.NotifyEvent(&event.Event{
-					Type: event.SysEventWebSocket,
-					Data: &WSPack{
-						Type:      WPTWriteErr,
-						ClientId:  c.roleId,
-						SessionId: c.sessionId,
-					},
-				})
-				c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d write error: %s", c.roleId, msg.Id, err)
-			}
-		} else {
-			// 使用指数退避来减少忙等开销
-			if backoff < maxBackoff {
-				backoff *= 2
-			}
-			time.Sleep(time.Microsecond * time.Duration(backoff))
-		}
-	}
-
-}
-
-// Close 关闭连接(所有外部想要断开这个客户端,都是用这个接口)
-func (c *Client) Close() {
-	if c.status.Load() == closed {
-		return
-	}
-	c.status.Store(closed)
-	if c.mgr.CancelTimer(atomic.LoadUint64(&c.timerId)) {
-		atomic.StoreUint64(&c.timerId, 0)
-	}
-	if c.conn == nil {
-		return
-	}
-	c.conn.Close()
-}
-
-func (c *Client) OnClose() {
-	// 这个事件放在这是为了保证只调用一次
-	c.mgr.NotifyEvent(&event.Event{
-		Type: event.SysEventWebSocket,
-		Data: &WSPack{
-			Type:      WPTDisConnected,
-			SessionId: c.sessionId,
-			ClientId:  c.roleId,
-		},
-	})
-
-	// 在run返回之后,底层会自动关闭连接,这里只需要置空变量
-	c.conn = nil
-	c.roleId = ""
-	c.sessionId = 0
-}
-
-func (c *Client) BindRole(roleId string) {
-	// 移除timer
-	if c.mgr.CancelTimer(atomic.LoadUint64(&c.timerId)) {
-		atomic.StoreUint64(&c.timerId, 0)
-	}
-
-	c.roleId = roleId
-	// 绑定玩家数据才算运行中
-	c.status.Store(running)
-	c.mgr.NotifyEvent(&event.Event{
-		Type: event.SysEventWebSocket,
-		Data: &WSPack{
-			Type:      WPTReady,
-			SessionId: c.sessionId,
-			ClientId:  roleId,
-			Data:      c,
-		},
-	})
-}
-
-func (c *Client) IsRunning() bool {
-	return c.status.Load() == running
-}
-
-func (c *Client) isClosed() bool {
-	return c.status.Load() == closed
-}
-
-func (c *Client) SendMsg(msg *PackMsg) error {
-	if c.isClosed() {
-		return nil
-	}
-	select {
-	case c.msgCh <- msg:
-	default:
-		msg.Release()
-		return fmt.Errorf("client msg chan is full")
-	}
-	return nil
-}
-
-func (c *Client) checkAuth(_ *timingwheel.Timer, _ ...interface{}) {
-	if c.roleId == "" {
-		atomic.StoreUint64(&c.timerId, 0)
-		c.Close()
-	}
-}
-
-func (c *Client) GetClientIp() string {
-	return c.conn.RemoteAddr().String()
-}
+//const (
+//	upGrade = iota
+//	running
+//	closed
+//)
+//
+//type Client struct {
+//	mgr    *ClientMgr
+//	status atomic.Int32
+//	wg     sync.WaitGroup
+//
+//	msgCnt  uint64
+//	timerId uint64
+//
+//	sessionId int64
+//	roleId    string
+//	conn      *network.WSConn       // 连接
+//	msgCh     *mpsc.Queue[*PackMsg] // 发送队列
+//}
+//
+//func newClient(mgr *ClientMgr, conn *network.WSConn) *Client {
+//	c := &Client{
+//		mgr:       mgr,
+//		conn:      conn,
+//		sessionId: mgr.GenSessionId(),
+//		msgCh:     mpsc.New[*PackMsg](),
+//	}
+//	c.status.Store(upGrade)
+//	return c
+//}
+//
+//func (c *Client) Run() {
+//	c.wg.Add(1)
+//	go c.listen()
+//	// 连接事件
+//	c.mgr.NotifyEvent(&event.Event{
+//		Type: event.SysEventWebSocket,
+//		Data: &WSPack{
+//			Type:      WPTConnected,
+//			SessionId: c.sessionId,
+//			Data:      c,
+//		},
+//	})
+//	// 启动一个定时器,在10秒后检查是否绑定了roleId,如果没有绑定,则通知客户端断开连接
+//	// TODO (这个具体时间之后根据需求调整)
+//	c.timerId, _ = c.mgr.AfterFuncWithStorage(time.Second*10, "gate_client_check_auth", c.checkAuth)
+//	c.wg.Wait()
+//}
+//
+//func (c *Client) listen() {
+//	defer c.wg.Done()
+//	for {
+//		msg, err := c.conn.ReadMsg()
+//		if err != nil {
+//			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
+//			c.mgr.NotifyEvent(&event.Event{
+//				Type: event.SysEventWebSocket,
+//				Data: &WSPack{
+//					Type:      WPTDisConnected,
+//					SessionId: c.sessionId,
+//					Data:      c,
+//				},
+//			})
+//			return
+//		}
+//
+//		// 消息解析(这里只是最外层的解析)
+//		info, err := c.mgr.Unmarshal(msg)
+//		if err != nil {
+//			log.SysLogger.Errorf("Client receive msg error: %s", err)
+//			c.mgr.NotifyEvent(&event.Event{
+//				Type: event.SysEventWebSocket,
+//				Data: &WSPack{
+//					Type:      WPTUnknownPack,
+//					ClientId:  c.roleId,
+//					SessionId: c.sessionId,
+//					Data:      msg,
+//				},
+//			})
+//			continue
+//		}
+//
+//		if c.msgCnt > 0 && !c.IsRunning() {
+//			// 在接收了auth消息之后,如果没有绑定角色,则不处理后续消息
+//			continue
+//		}
+//
+//		c.msgCnt++
+//
+//		ctx := xcontext.New(nil)
+//		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
+//		ctx.SetHeader(def.DefaultDispatcherKey, c.roleId)
+//
+//		if err := c.mgr.IRawProcessor.MsgRoute(ctx, c.sessionId, c.roleId, pack.Data); err != nil {
+//			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
+//		}
+//	}
+//}
+//
+//func (c *Client) writeLoop() {
+//	defer c.wg.Done()
+//	var backoff = 1
+//	var maxBackoff = 4
+//	for c.IsRunning() {
+//		if !c.msgCh.Empty() {
+//			msgs := c.msgCh.BatchPop(50) // TODO 这个需要配置
+//			buffer := bytes.Buffer{}
+//			for _, msg := range msgs {
+//				data, err := c.mgr.Marshal(msg.Id, msg.Data)
+//				if err != nil {
+//					c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d marshal error: %s", c.roleId, msg.Id, err)
+//					continue
+//				}
+//			}
+//
+//			err := c.conn.WriteMsg(buffer.Bytes())
+//			if err != nil {
+//				// TODO 这里看要不要处理一下这个错误,是直接踢掉玩家还是怎么,按理说是需要保证玩家收到每条消息的,如果没收到某个消息,可能造成状态不一致
+//				c.mgr.NotifyEvent(&event.Event{
+//					Type: event.SysEventWebSocket,
+//					Data: &WSPack{
+//						Type:      WPTWriteErr,
+//						ClientId:  c.roleId,
+//						SessionId: c.sessionId,
+//					},
+//				})
+//				c.mgr.GetLogger().Errorf("writeLoop:role[%s] msg:%d write error: %s", c.roleId, msg.Id, err)
+//			}
+//		} else {
+//			// 使用指数退避来减少忙等开销
+//			if backoff < maxBackoff {
+//				backoff *= 2
+//			}
+//			time.Sleep(time.Microsecond * time.Duration(backoff))
+//		}
+//	}
+//
+//}
+//
+//// Close 关闭连接(所有外部想要断开这个客户端,都是用这个接口)
+//func (c *Client) Close() {
+//	if c.status.Load() == closed {
+//		return
+//	}
+//	c.status.Store(closed)
+//	if c.mgr.CancelTimer(atomic.LoadUint64(&c.timerId)) {
+//		atomic.StoreUint64(&c.timerId, 0)
+//	}
+//	if c.conn == nil {
+//		return
+//	}
+//	c.conn.Close()
+//}
+//
+//func (c *Client) OnClose() {
+//	// 这个事件放在这是为了保证只调用一次
+//	c.mgr.NotifyEvent(&event.Event{
+//		Type: event.SysEventWebSocket,
+//		Data: &WSPack{
+//			Type:      WPTDisConnected,
+//			SessionId: c.sessionId,
+//			ClientId:  c.roleId,
+//		},
+//	})
+//
+//	// 在run返回之后,底层会自动关闭连接,这里只需要置空变量
+//	c.conn = nil
+//	c.roleId = ""
+//	c.sessionId = 0
+//}
+//
+//func (c *Client) BindRole(roleId string) {
+//	// 移除timer
+//	if c.mgr.CancelTimer(atomic.LoadUint64(&c.timerId)) {
+//		atomic.StoreUint64(&c.timerId, 0)
+//	}
+//
+//	c.roleId = roleId
+//	// 绑定玩家数据才算运行中
+//	c.status.Store(running)
+//	c.mgr.NotifyEvent(&event.Event{
+//		Type: event.SysEventWebSocket,
+//		Data: &WSPack{
+//			Type:      WPTReady,
+//			SessionId: c.sessionId,
+//			ClientId:  roleId,
+//			Data:      c,
+//		},
+//	})
+//}
+//
+//func (c *Client) IsRunning() bool {
+//	return c.status.Load() == running
+//}
+//
+//func (c *Client) isClosed() bool {
+//	return c.status.Load() == closed
+//}
+//
+//func (c *Client) SendMsg(msg *PackMsg) error {
+//	if c.isClosed() {
+//		return nil
+//	}
+//	select {
+//	case c.msgCh <- msg:
+//	default:
+//		msg.Release()
+//		return fmt.Errorf("client msg chan is full")
+//	}
+//	return nil
+//}
+//
+//func (c *Client) checkAuth(_ *timingwheel.Timer, _ ...interface{}) {
+//	if c.roleId == "" {
+//		atomic.StoreUint64(&c.timerId, 0)
+//		c.Close()
+//	}
+//}
+//
+//func (c *Client) GetClientIp() string {
+//	return c.conn.RemoteAddr().String()
+//}

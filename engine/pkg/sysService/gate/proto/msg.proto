@@ -1,0 +1,25 @@
+syntax = "proto3";
+package proto;
+option go_package = ".;proto";
+
+message Message {
+  uint64 SessionId = 1;
+  string Uid = 2;
+  int32 Id = 3;
+  bytes Data = 4;
+  map<string, string> Meta = 5;
+  repeated string Uids = 6;
+}
+
+message KickReq {
+  string Uid = 1;
+  uint64 SessionId = 2;
+}
+
+message GetClientIpReq {
+  string Uid = 1;
+}
+
+message GetClientIpResp {
+  string Ip = 1;
+}

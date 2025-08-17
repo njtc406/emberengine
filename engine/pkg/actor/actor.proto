@@ -1,0 +1,53 @@
+syntax = "proto3";
+package actor;
+option go_package = ".;actor";
+
+message PID {
+  string Address = 1;         // 服务地址
+  string Name = 2;            // 服务名称
+  string ServiceType = 3;     // 服务类型
+  string ServiceId = 4;      // 同类型服务内唯一标识
+  int32 State = 5;            // 服务状态(0: 正常, 1: 退休)
+  int32 ServerId = 6;         // 服务ID
+  int64 Version = 7;          // 服务版本号
+  string RpcType = 8;         // rpc类型(默认使用rpcx)
+  string NodeUid = 9;         // 节点唯一标识(这个主要是用来区分本地服务用的)
+  bool IsMaster = 10;         // 是否是主服务(主从)
+  string ServiceUid = 11;     // 服务实例唯一id
+}
+
+message Message {
+  int32 TypeId                        = 1; // 消息类型ID
+  string TypeName                     = 2; // 消息类型名称
+  PID SenderPid                       = 3; // 发送者
+  PID ReceiverPid                     = 4; // 接收者
+  string Method                       = 5; // 调用方法
+  bytes  Request                      = 6; // 方法参数
+  bytes  Response                     = 7; // 方法返回值
+  string Err                          = 8; // 错误信息
+  map<string, string>   MessageHeader = 9; // 消息头(额外信息)
+  bool Reply                          = 10; // 是否是回复
+  uint64 ReqId                        = 11; // 请求ID
+  bool NeedResp                       = 12; // 是否需要回复
+  int32 CompressType                  = 13; // 压缩类型(0无压缩)
+}
+
+service GrpcListener {
+  rpc RPCCall(Message) returns (RpcCallResponse) ;
+}
+
+message RpcCallResponse{
+}
+
+message Event {
+  int32 EventType = 1; // 事件类型
+  EventData Data = 2; // 事件数据
+  int32 ServerId = 3; // 服务器ID
+  string TraceId = 4; // 链路追踪ID
+  string ServiceUid = 5; // 服务实例唯一id
+}
+
+message EventData {
+  map<string, string> Header = 1;
+  bytes RawData = 2;
+}

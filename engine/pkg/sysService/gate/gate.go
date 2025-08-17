@@ -17,7 +17,6 @@ type Gate struct {
 	core.Service
 
 	adapter inf.IProtocolAdapter
-	handler inf.IAdapterHandler
 }
 
 func (g *Gate) getConf() *config.GateService {
@@ -47,10 +46,6 @@ func (g *Gate) OnStart() error {
 		default:
 			return nil
 		}
-		if g.handler == nil {
-			return fmt.Errorf("adapter handler not found")
-		}
-		g.adapter.SetHandler(g.handler)
 		go func() {
 			if err := g.adapter.ListenAndServe(g, sConf); err != nil {
 				g.GetLogger().Warnf("listen and serve error: %v", err)
@@ -72,6 +67,6 @@ func (g *Gate) SetProtocolAdapter(adapter inf.IProtocolAdapter) {
 	g.adapter = adapter
 }
 
-func (g *Gate) SetGateHandler(handler inf.IAdapterHandler) {
-	g.handler = handler
+func (g *Gate) GetProtocolAdapter() inf.IProtocolAdapter {
+	return g.adapter
 }
