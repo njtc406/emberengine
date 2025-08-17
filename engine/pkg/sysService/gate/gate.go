@@ -14,7 +14,7 @@ import (
 )
 
 type Gate struct {
-	core.Service
+	core.Service // TODO 好像可以改为module？
 
 	adapter inf.IProtocolAdapter
 }
