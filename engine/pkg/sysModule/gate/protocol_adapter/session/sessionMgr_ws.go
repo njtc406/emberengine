@@ -44,7 +44,7 @@ func (m *WebSocketManager) Bind(uid string, conn inf.IConn) {
 	// 先查找一下是否已经绑定了
 	if oldSessionId, ok := m.uidMap.Load(uid); ok {
 		// TODO 这里可能需要给客户端发送一个消息,所以需要一个hook
-		go m.Kick(oldSessionId) // 异步踢掉旧的session
+		go m.Kick(oldSessionId, "old conn") // 异步踢掉旧的session
 	}
 
 	sessionId := m.genSessionID()
@@ -77,7 +77,9 @@ func (m *WebSocketManager) closeSession(session inf.ISession, reason string) {
 	}
 	m.uidMap.CompareAndDelete(uid, sessionId)
 
-	m.handler.OnDisconnect(session)
+	// TODO 先发送关闭消息(应该需要直接在gate层处理消息的下发,然后异步通知业务连接断开)
+	m.handler.OnDisconnect(session, reason)
+
 	session.Close()
 	_ = session.GetConn().Close()
 
@@ -96,7 +98,7 @@ func (m *WebSocketManager) listen(session inf.ISession) {
 	}
 }
 
-func (m *WebSocketManager) Kick(sessionID uint64) {
+func (m *WebSocketManager) Kick(sessionID uint64, reason string) {
 	if session, ok := m.sessions.Load(sessionID); ok {
 		m.closeSession(session, "kick by sessionId")
 	}

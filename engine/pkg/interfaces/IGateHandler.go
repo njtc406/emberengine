@@ -16,7 +16,7 @@ type IConn interface {
 
 type IAdapterHandler interface {
 	OnConnect(s ISession) error
-	OnDisconnect(s ISession)
+	OnDisconnect(s ISession, reason string)
 	OnMessage(s ISession, msg []byte)
 	OnClose(s ISession)
 	GetProcessor() IMessageProcessor
@@ -24,7 +24,7 @@ type IAdapterHandler interface {
 
 type IProtocolAdapter interface {
 	// 启动监听
-	ListenAndServe(svc IService, config interface{}) error
+	ListenAndServe(md IModule, config interface{}) error
 	// 关闭
 	Shutdown(ctx context.Context) error
 
@@ -34,7 +34,7 @@ type IProtocolAdapter interface {
 
 type ISessionManager interface {
 	Bind(uid string, conn IConn)          // 绑定新连接
-	Kick(sessionID uint64)                // 断开连接
+	Kick(sessionID uint64, reason string) // 断开连接
 	KickByUid(uid string)                 // 根据uid断开
 	KickAll()                             // 断开所有连接
 	Broadcast(msg []byte)                 // 广播

@@ -9,32 +9,31 @@ import (
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/sysService/gate/config"
+	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 type Gate struct {
-	core.Service // TODO 好像可以改为module？
+	core.Module // TODO 好像可以改为module？
 
 	adapter inf.IProtocolAdapter
 }
 
-func (g *Gate) getConf() *config.GateService {
-	return g.GetServiceCfg().(*config.GateService)
+func NewGate() *Gate {
+	return &Gate{}
 }
 
 func (g *Gate) OnInit() error {
 	return nil
 }
 
-func (g *Gate) OnStart() error {
+func (g *Gate) Start(conf *config.GateService) error {
 	if g.adapter != nil {
-		conf := g.getConf()
 		if conf == nil {
 			return fmt.Errorf("gate service conf error")
 		}
 		var sConf interface{}
-		switch g.getConf().Type {
+		switch conf.Type {
 		case "ws":
 			sConf = conf.WSServerConf
 		case "http":

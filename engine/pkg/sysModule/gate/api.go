@@ -7,7 +7,7 @@ package gate
 
 import (
 	"fmt"
-	gate_proto "github.com/njtc406/emberengine/engine/pkg/sysService/gate/proto"
+	gate_proto "github.com/njtc406/emberengine/engine/pkg/sysModule/gate/proto"
 )
 
 func (g *Gate) RpcSendMsgToClientBySessionId(msg *gate_proto.Message) error {
@@ -88,7 +88,7 @@ func (g *Gate) RpcKick(req *gate_proto.KickReq) error {
 	if req.SessionId == 0 {
 		return fmt.Errorf("sessionId is empty")
 	}
-	g.adapter.GetSessionMgr().Kick(req.SessionId)
+	g.adapter.GetSessionMgr().Kick(req.SessionId, req.Reason)
 	return nil
 }
 

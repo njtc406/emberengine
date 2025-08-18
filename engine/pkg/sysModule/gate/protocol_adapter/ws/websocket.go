@@ -12,8 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 	glbConfig "github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/sysService/gate/config"
-	"github.com/njtc406/emberengine/engine/pkg/sysService/gate/protocol_adapter/connx"
+	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config"
+	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/protocol_adapter/connx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"net/http"
@@ -21,7 +21,7 @@ import (
 
 type WebSocketAdapter struct {
 	server     *httpx.GinServer
-	svc        inf.IService
+	md         inf.IModule
 	sessionMgr inf.ISessionManager
 }
 
@@ -39,14 +39,14 @@ func (w *WebSocketAdapter) GetSessionMgr() inf.ISessionManager {
 	return w.sessionMgr
 }
 
-func (w *WebSocketAdapter) ListenAndServe(svc inf.IService, conf interface{}) error {
-	w.svc = svc
+func (w *WebSocketAdapter) ListenAndServe(md inf.IModule, conf interface{}) error {
+	w.md = md
 	cfg, ok := conf.(*config.WSServerConf)
 	if !ok {
 		return fmt.Errorf("invalid websocket configuration")
 	}
 
-	if err := w.server.Init(svc.GetLogger(), glbConfig.GetStatus(), cfg.HttpConf); err != nil {
+	if err := w.server.Init(md.GetService().GetLogger(), glbConfig.GetStatus(), cfg.HttpConf); err != nil {
 		return err
 	}
 	pool := router_center.NewGroupHandlerPool()
