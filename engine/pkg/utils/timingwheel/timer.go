@@ -34,5 +34,6 @@ func Start(interval time.Duration, wheelSize int64) {
 func Stop() {
 	if tw != nil {
 		tw.Stop()
+		tw = nil
 	}
 }

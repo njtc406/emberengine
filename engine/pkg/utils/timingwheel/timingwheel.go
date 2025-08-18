@@ -2,6 +2,7 @@ package timingwheel
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -112,6 +113,12 @@ func (tw *TimingWheel) add(t *Timer) bool {
 // addOrRun inserts the timer t into the current timing wheel, or run the
 // timer's task if it has already expired.
 func (tw *TimingWheel) addOrRun(t *Timer) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.SysLogger.Errorf("addOrRun panic, task_name:%s, err:%v", t.name, r)
+			releaseTimer(t)
+		}
+	}()
 	if !tw.add(t) {
 		if t.asyncTask != nil {
 			go func() {
