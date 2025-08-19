@@ -16,7 +16,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/protocol_adapter/connx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
+	"github.com/njtc406/emberengine/engine/pkg/utils/jwtx"
 	"net/http"
+	"strings"
 )
 
 type WebSocketAdapter struct {
@@ -67,20 +69,44 @@ func (w *WebSocketAdapter) router(rg *gin.RouterGroup) {
 	}
 
 	rg.GET("", func(gc *gin.Context) {
+		// 鉴权在中间件的时候就已经执行了,所以这里可以直接等同于连接成功,开始正常执行逻辑
+		uid := gc.GetInt64("uid")
+		if uid <= 0 {
+			gc.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid uid"})
+			return
+		}
+
 		c, err := upGrader.Upgrade(gc.Writer, gc.Request, nil)
 		if err != nil {
 			gc.String(http.StatusBadRequest, "upgrade failed: %v", err)
 			return
 		}
-		// 鉴权在中间件的时候就已经执行了,所以这里可以直接等同于连接成功,开始正常执行逻辑
-		uid := gc.GetString("uid")
+
 		conn := connx.NewWSConn(c)
 		w.sessionMgr.Bind(uid, conn)
 	})
 }
 
 func (w *WebSocketAdapter) Auth(c *gin.Context) {
-	// TODO 鉴权
+	authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization header"})
+		return
+	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	tokenString = strings.TrimSpace(tokenString)
+
+	claims, err := jwtx.ParseJwtToken(tokenString)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Set("uid", claims.UserID)
+
+	// 认证成功，继续执行下一个中间件或路由处理函数
+	c.Next()
 }
 
 func (w *WebSocketAdapter) Shutdown(ctx context.Context) error {

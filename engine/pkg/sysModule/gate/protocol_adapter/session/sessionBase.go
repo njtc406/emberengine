@@ -18,7 +18,7 @@ type BaseSession struct {
 	id           uint64
 	conn         inf.IConn
 	closed       atomic.Bool
-	uid          string
+	uid          int64
 	wg           sync.WaitGroup
 	msgCh        *mpsc.Queue[[]byte]
 	sendStrategy int // 发送策略(1批量发送 2单条发送)
@@ -35,7 +35,7 @@ func (s *BaseSession) Close() {
 
 func (s *BaseSession) IsClosed() bool { return s.closed.Load() }
 
-func (s *BaseSession) GetUid() string { return s.uid }
+func (s *BaseSession) GetUid() int64 { return s.uid }
 
 func (s *BaseSession) Send(data []byte) {
 	s.msgCh.Push(data)

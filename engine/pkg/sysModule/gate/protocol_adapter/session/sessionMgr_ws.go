@@ -18,7 +18,7 @@ type WebSocketManager struct {
 	seed       atomic.Uint64
 	shareLocks *shardedlock.ShardedRWLock
 	sessions   syncx.Map[uint64, inf.ISession]
-	uidMap     syncx.Map[string, uint64]
+	uidMap     syncx.Map[int64, uint64] // 这是直接使用uid作为玩家索引,如果需要使用roleId做,自行实现
 }
 
 func NewWebSocketManager() *WebSocketManager {
@@ -39,7 +39,7 @@ func (m *WebSocketManager) genSessionID() uint64 {
 	return m.seed.Add(1)
 }
 
-func (m *WebSocketManager) Bind(uid string, conn inf.IConn) {
+func (m *WebSocketManager) Bind(uid int64, conn inf.IConn) {
 	m.shareLocks.Lock(uid)
 	// 先查找一下是否已经绑定了
 	if oldSessionId, ok := m.uidMap.Load(uid); ok {
@@ -104,7 +104,7 @@ func (m *WebSocketManager) Kick(sessionID uint64, reason string) {
 	}
 }
 
-func (m *WebSocketManager) KickByUid(uid string) {
+func (m *WebSocketManager) KickByUid(uid int64) {
 	if sessionId, ok := m.uidMap.Load(uid); ok {
 		session, ok := m.sessions.Load(sessionId)
 		if ok {
@@ -134,7 +134,7 @@ func (m *WebSocketManager) GetSession(sessionID uint64) inf.ISession {
 	return nil
 }
 
-func (m *WebSocketManager) GetSessionByUid(uid string) inf.ISession {
+func (m *WebSocketManager) GetSessionByUid(uid int64) inf.ISession {
 	sessionId, ok := m.uidMap.Load(uid)
 	if !ok {
 		return nil

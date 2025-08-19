@@ -33,19 +33,19 @@ type IProtocolAdapter interface {
 }
 
 type ISessionManager interface {
-	Bind(uid string, conn IConn)          // 绑定新连接
+	Bind(uid int64, conn IConn)           // 绑定新连接
 	Kick(sessionID uint64, reason string) // 断开连接
-	KickByUid(uid string)                 // 根据uid断开
+	KickByUid(uid int64)                  // 根据uid断开
 	KickAll()                             // 断开所有连接
 	Broadcast(msg []byte)                 // 广播
 	GetSession(sessionID uint64) ISession // 查询会话
-	GetSessionByUid(uid string) ISession  // 查询会话
+	GetSessionByUid(uid int64) ISession   // 查询会话
 	SetHandler(handler IAdapterHandler)
 	GetHandler() IAdapterHandler
 }
 
 type ISession interface {
-	GetUid() string
+	GetUid() int64
 	GetSessionId() uint64
 	GetConn() IConn
 	Close()
