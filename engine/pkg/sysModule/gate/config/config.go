@@ -11,22 +11,17 @@ import (
 )
 
 type GateService struct {
-	Type           string          `binding:"required,oneof=ws http tcp udp"`
-	WSServerConf   *WSServerConf   `binding:""`
-	HttpServerConf *HttpServerConf `binding:""`
-	TcpServerConf  *TcpServerConf  `binding:""`
-	UdpServerConf  *UdpServerConf  `binding:""`
+	Type           string         `binding:"required,oneof=ws http tcp udp"`
+	WSServerConf   *WSServerConf  `binding:""`
+	HttpServerConf *httpx.Conf    `binding:""`
+	TcpServerConf  *TcpServerConf `binding:""`
+	UdpServerConf  *UdpServerConf `binding:""`
 }
 
 type WSServerConf struct {
 	Router       string `binding:"required"`
 	LittleEndian bool   //是否小端序
 	HttpConf     *httpx.Conf
-}
-
-type HttpServerConf struct {
-	Addr         string
-	LittleEndian bool //是否小端序
 }
 
 type TcpServerConf struct {

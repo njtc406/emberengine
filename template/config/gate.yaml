@@ -1,0 +1,23 @@
+# github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config
+
+# 连接类型
+Type: ws
+
+# 网关服配置
+WSServerConf:
+  Router: "/ember/ws"
+  LittleEndian: false
+  HttpConf:
+    # 监听地址
+    Addr: :4444
+    ReadHeaderTimeout: 10s
+    IdleTimeout: 30s
+    CachePath: ./cache
+    ResourceRootPath:
+    HttpDir:
+    StaticDir:
+    Account:
+      root:pwd
+    CAFile:
+      CertFile: ./cert/server.pem
+      KeyFile: ./cert/server.key

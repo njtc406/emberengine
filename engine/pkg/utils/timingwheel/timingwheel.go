@@ -69,12 +69,13 @@ func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqu
 // add inserts the timer t into the current timing wheel.
 func (tw *TimingWheel) add(t *Timer) bool {
 	currentTime := atomic.LoadInt64(&tw.currentTime)
-	if t.expiration < currentTime+tw.tick {
+	expire := t.GetExpiration()
+	if expire < currentTime+tw.tick {
 		// Already expired
 		return false
-	} else if t.expiration < currentTime+tw.interval {
+	} else if expire < currentTime+tw.interval {
 		// Put it into its own bucket
-		virtualID := t.expiration / tw.tick
+		virtualID := expire / tw.tick
 		b := tw.buckets[virtualID%tw.wheelSize]
 		b.Add(t)
 
@@ -208,13 +209,13 @@ func (tw *TimingWheel) Stop() {
 // It returns a Timer that can be used to cancel the call using its Stop method.
 func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
 	t := createTimer()
-	t.expiration = timeToMs(timelib.Now().Add(d))
+	t.SetExpiration(timeToMs(timelib.Now().Add(d)))
 	for _, opt := range options {
 		opt(t)
 	}
 
 	if t.timerId <= 0 {
-		t.timerId = tw.genTimerId()
+		t.SetTimerId(tw.genTimerId())
 	}
 
 	tw.addOrRun(t)
@@ -257,17 +258,17 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 		return
 	}
 
-	if t.timerId <= 0 {
-		t.timerId = tw.genTimerId()
+	if t.GetTimerId() <= 0 {
+		t.SetTimerId(tw.genTimerId())
 	}
-	t.expiration = timeToMs(expiration)
+	t.SetExpiration(timeToMs(expiration))
 	t.loop = func() {
 		if !t.isActive() {
 			return
 		}
-		expiration := t.Next(msToTime(t.expiration))
+		expiration := t.Next(msToTime(t.GetExpiration()))
 		if !expiration.IsZero() {
-			t.expiration = timeToMs(expiration)
+			t.SetExpiration(timeToMs(expiration))
 			tw.addOrRun(t)
 		}
 	}
