@@ -77,7 +77,7 @@ func (g *Gate) RpcBroadcast(msg *gate_proto.Message) error {
 }
 
 func (g *Gate) RpcKickByUid(req *gate_proto.KickReq) error {
-	if req.Uid == "" {
+	if req.Uid <= 0 {
 		return fmt.Errorf("uid is empty")
 	}
 	g.adapter.GetSessionMgr().KickByUid(req.Uid)
