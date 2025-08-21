@@ -5,4 +5,6 @@
 // @Update  yr  2025/2/11
 package def
 
-type MethodCallFunc func(req interface{}) (interface{}, error)
+import "context"
+
+type MethodCallFunc func(ctx context.Context, req interface{}) (interface{}, error)

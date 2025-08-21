@@ -44,6 +44,7 @@ var (
 	ErrPrimarySecondNotSupported       = errors.New("primary second not supported")              // 不支持主从
 	ErrSelectEmptyResult               = errors.New("select empty result")                       // 查询结果为空
 	ErrEnvelopeNotFound                = errors.New("envelope not found")                        // 找不到 envelope
+	ErrCantFoundRouter                 = errors.New("cant found router")                         // 未找到路由
 )
 
 //type RpcErr string

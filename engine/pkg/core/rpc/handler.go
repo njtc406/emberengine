@@ -6,6 +6,7 @@
 package rpc
 
 import (
+	"context"
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -146,6 +147,22 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 		in = append(in, method.Type.In(i))
 	}
 
+	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	hasCtx := false
+
+	if len(in) > 1 && in[1] == ctxType {
+		hasCtx = true
+		// 剔除 ctx：保留 receiver(in[0])，去掉 in[1]，其余顺延
+		in = append([]reflect.Type{in[0]}, in[2:]...)
+	} else {
+		// 如果 ctx 出现在其他位置，认为非法
+		for idx := 2; idx < len(in); idx++ {
+			if in[idx] == ctxType {
+				return fmt.Errorf("%s invalid signature: context.Context must be the first parameter after receiver", method.Name)
+			}
+		}
+	}
+
 	var outs []reflect.Type
 	var multiOut int
 	for i := 0; i < method.Type.NumOut(); i++ {
@@ -168,17 +185,34 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 
 	name := method.Name
 	// 预编译调用闭包，避免每次调用都走反射的全流程
-	h.mgr.AddMethodFunc(name, compileCallFunc(reflect.ValueOf(h.IModule), name, method.Func, in, outs, multiOut > 1, method.Type.IsVariadic()))
+	h.mgr.AddMethodFunc(
+		name,
+		compileCallFunc(
+			reflect.ValueOf(h.IModule),
+			name,
+			method.Func,
+			in,
+			outs,
+			multiOut > 1,
+			method.Type.IsVariadic(),
+			hasCtx, // 新增：告诉闭包是否需要自动注入 ctx
+		),
+	)
+
 	h.methods = append(h.methods, name)
 	log.SysLogger.Debugf("service[%s] method[%s] register success", h.GetModuleName(), name)
 	return nil
 }
 
 // compileCallFunc 预编译调用闭包
-func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value, in, outs []reflect.Type, multiOut, isVariadic bool) func(req interface{}) (interface{}, error) {
+func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value, in, outs []reflect.Type, multiOut, isVariadic bool, hasCtx bool) func(ctx context.Context, req interface{}) (interface{}, error) {
 	paramCount := len(in)
-	return func(req interface{}) (interface{}, error) {
+	return func(ctx context.Context, req interface{}) (interface{}, error) {
 		params := []reflect.Value{owner}
+
+		if hasCtx {
+			params = append(params, reflect.ValueOf(ctx))
+		}
 
 		// 处理参数
 		if isVariadic {
@@ -274,19 +308,25 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 	data := envelope.GetData()
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.Errorf("service[%s] handle message from caller: %s panic: %v\n trace:%s",
-				h.GetModuleName(), meta.GetSenderPid().String(), r, debug.Stack())
+			log.SysLogger.WithContext(envelope.GetContext()).
+				WithField("service", h.GetService().GetName()).
+				WithField("module", h.GetModuleName()).
+				WithField("caller", meta.GetSenderPid().String()).
+				WithField("method", data.GetMethod()).
+				WithField("error", r).
+				Error("handle request err")
 			data.SetResponse(nil)
 			data.SetError(def.ErrHandleMessagePanic)
 		}
 		h.doResponse(envelope)
 	}()
+
 	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {
 		data.SetError(def.ErrMethodNotFound)
 		return
 	}
-	resp, err := call(data.GetRequest())
+	resp, err := call(envelope.GetContext(), data.GetRequest())
 	if err != nil {
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("method call failed:%v", err)
 		data.SetError(err)
