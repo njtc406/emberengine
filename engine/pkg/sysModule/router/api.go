@@ -6,25 +6,44 @@
 package router
 
 import (
+	"errors"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/redis/go-redis/v9"
 )
 
 // TODO 看要不要使用事务来存, 看最后的数据一致性要求, 如果允许短暂不一致就不需要
+
+func buildKey(rid string, method string) string {
+	return "prefix.router" + rid + "." + method
+}
 
 func (r *Router) ApiGetUserRouter(rid string, method string) (string, error) {
 	var url string
 	v, ok := r.routerMap.Get(rid + method)
 	if !ok {
+		// TODO 缓存未命中,记录统计
 		// 从缓存中获取
-		if err := r.Select(rpc.WithServiceName("DBService"), rpc.WithServerId(r.GetService().GetServerId())).
-			Call(nil, "ApiRedisGetString", "prefix.router"+rid+"."+method, &url); err != nil {
+		key := buildKey(rid, method)
+		if err := r.Select(
+			rpc.WithServiceName("DBService"),
+			rpc.WithServerId(r.GetService().GetServerId()),
+		).Call(
+			nil,
+			"ApiRedisGetString",
+			key,
+			&url,
+		); err != nil {
+			if errors.Is(err, redis.ErrClosed) {
+				return "", def.RouterNotFound
+			}
 			r.GetLogger().Errorf("get user router failed, err:%v", err)
 		}
 		if url == "" {
-			return "", def.ErrCantFoundRouter
+			return "", def.RouterNotFound
 		}
-		r.routerMap.SetDefault(rid+method, url)
+		r.routerMap.SetDefault(key, url)
 	} else {
 		url = v.(string)
 	}
@@ -32,11 +51,30 @@ func (r *Router) ApiGetUserRouter(rid string, method string) (string, error) {
 }
 
 func (r *Router) ApiSetUserRouter(rid string, method string, url string) error {
+	key := buildKey(rid, method)
 	if err := r.Select(rpc.WithServiceName("DBService"), rpc.WithServerId(r.GetService().GetServerId())).
-		Call(nil, "ApiRedisSetString", "prefix.router"+rid+"."+method, url); err != nil {
+		Call(nil, "ApiRedisSetString", key, url); err != nil {
 		r.GetLogger().Errorf("set user router failed, err:%v", err)
 		return err
 	}
-	r.routerMap.SetDefault(rid+method, url)
+	r.routerMap.SetDefault(key, url)
+	// TODO 通知所有router模块缓存更新
+	return nil
+}
+
+func (r *Router) ApiCleanRouter(rid string) error {
+	ctx := xcontext.New(nil)
+	if err := r.Select(
+		rpc.WithServiceName("DBService"),
+		rpc.WithServerId(r.GetService().GetServerId()),
+	).Call(nil, "ApiRedisDel", "prefix.router"+rid, nil); err != nil {
+		r.GetLogger().WithContext(ctx).WithFields(map[string]interface{}{
+			"rid": rid,
+		}).Errorf("clean user router failed, err:%v", err)
+		return err
+	}
+	r.routerMap.Delete(rid)
+
+	// TODO 通知所有router模块缓存更新
 	return nil
 }
