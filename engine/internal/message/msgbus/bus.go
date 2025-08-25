@@ -227,12 +227,29 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 // Call 同步调用服务
 func (mb *MessageBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		return mb.err
+	}
 	data := msgenvelope.NewData()
 	data.SetMethod(method)
 	data.SetRequest(in)
 	data.SetResponse(nil) // 容错
 	data.SetNeedResponse(true)
 	return mb.call(ctx, data, out)
+}
+
+func (mb *MessageBus) CallWithOpt(opts ...dto.BusOptionBuilder) error {
+	defer ReleaseMessageBus(mb)
+	option := &dto.BusOption{}
+	for _, opt := range opts {
+		opt(option)
+	}
+	data := msgenvelope.NewData()
+	data.SetMethod(option.Method)
+	data.SetRequest(option.In)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+	return mb.call(option.Ctx, data, option.Out)
 }
 
 func (mb *MessageBus) callDirect(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {
@@ -309,6 +326,33 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 	return mb.asyncCall(ctx, data, param, callbacks...)
 }
 
+func (mb *MessageBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
+	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return nil, mb.err
+	}
+
+	option := &dto.BusOption{}
+	for _, opt := range opts {
+		opt(option)
+	}
+	if mb.sender == nil || mb.receiver == nil {
+		return nil, fmt.Errorf("sender or receiver is nil")
+	}
+	if len(option.Callbacks) == 0 {
+		return nil, def.ErrCallbacksIsEmpty
+	}
+
+	data := msgenvelope.NewData()
+	data.SetMethod(option.Method)
+	data.SetRequest(option.In)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+
+	return mb.asyncCall(option.Ctx, data, option.CallbackParams, option.Callbacks...)
+}
+
 func (mb *MessageBus) asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	defer ReleaseMessageBus(mb)
 	if mb.err != nil {
@@ -342,6 +386,41 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	data := msgenvelope.NewData()
 	data.SetMethod(method)
 	data.SetRequest(in)
+	data.SetResponse(nil)
+	data.SetNeedResponse(false)
+	envelope.SetData(data)
+
+	meta := msgenvelope.NewMeta()
+	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
+	meta.SetReceiverPid(mb.receiver.GetPid())
+	meta.SetDispatcher(mb.sender)
+	envelope.SetMeta(meta)
+
+	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
+	return mb.receiver.SendRequestAndRelease(envelope)
+}
+
+func (mb *MessageBus) SendWithOpt(opts ...dto.BusOptionBuilder) error {
+	defer ReleaseMessageBus(mb)
+	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
+		return mb.err
+	}
+	if mb.receiver == nil {
+		return fmt.Errorf("receiver is nil")
+	}
+
+	option := &dto.BusOption{}
+	for _, opt := range opts {
+		opt(option)
+	}
+
+	// 创建请求
+	envelope := msgenvelope.NewMsgEnvelope(option.Ctx)
+
+	data := msgenvelope.NewData()
+	data.SetMethod(option.Method)
+	data.SetRequest(option.In)
 	data.SetResponse(nil)
 	data.SetNeedResponse(false)
 	envelope.SetData(data)

@@ -5,7 +5,10 @@
 // @Update  yr  2024/11/8
 package dto
 
-import "github.com/njtc406/logrus"
+import (
+	"context"
+	"github.com/njtc406/logrus"
+)
 
 // CancelRpc 异步调用时的取消函数,可用于取消回调(请注意,一旦调用发送后是无法取消的,只能取消回调)
 type CancelRpc func()
@@ -61,3 +64,35 @@ func (header Headers) ToFields() logrus.Fields {
 }
 
 type RPCResponse struct{}
+
+type BusOption struct {
+	Ctx            context.Context
+	Method         string
+	In             interface{}
+	Out            interface{}
+	Callbacks      []CompletionFunc
+	CallbackParams *AsyncCallParams
+}
+
+type BusOptionBuilder func(option *BusOption)
+
+func WithContext(ctx context.Context) BusOptionBuilder {
+	return func(opt *BusOption) { opt.Ctx = ctx }
+}
+func WithMethod(method string) BusOptionBuilder {
+	return func(opt *BusOption) { opt.Method = method }
+}
+func WithIn(in interface{}) BusOptionBuilder {
+	return func(opt *BusOption) { opt.In = in }
+}
+func WithOut(out interface{}) BusOptionBuilder {
+	return func(opt *BusOption) { opt.Out = out }
+}
+
+func WithCallbacks(callbacks ...CompletionFunc) BusOptionBuilder {
+	return func(opt *BusOption) { opt.Callbacks = callbacks }
+}
+
+func WithCallbackParams(params *AsyncCallParams) BusOptionBuilder {
+	return func(opt *BusOption) { opt.CallbackParams = params }
+}

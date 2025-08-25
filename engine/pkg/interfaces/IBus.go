@@ -15,14 +15,18 @@ import (
 type IBus interface {
 	// Call 同步调用服务
 	Call(ctx context.Context, method string, in, out interface{}) error
+	//CallWithOpt(opts ...dto.BusOptionBuilder) error
 
 	// AsyncCall 异步调用服务
 	AsyncCall(ctx context.Context, method string, in interface{}, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
+	//AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc, error)
 
 	// Send 无返回调用
 	Send(ctx context.Context, method string, in interface{}) error
+	//SendWithOpt(opts ...dto.BusOptionBuilder) error
 
-	// TODO 在这里单独加一个filter, 用于过滤, selector那边就不用搞那么多函数了,只需要一个select就够了
-	// TODO 同时IBus可能需要增加一个可复用的接口,就是当使用了call之后,之前select出来的这些IBus不会被释放,
+	// TODO IBus可能需要增加一个可复用的接口,就是当使用了call之后,之前select出来的这些IBus不会被释放,
 	// 后续可以接着call、send什么的,节约资源,但是需要提供一个手动释放的接口
+	// 考虑直接做成参数
+	// BusOptionBuilder这个考虑一下要不要增加这个
 }
