@@ -29,7 +29,7 @@ type ISelector interface {
 	// TODO 暂时这么写,后续把条件做成query条件
 
 	// 只用于搜索从服务
-	SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string) IBus
+	SelectSlavers(sender *actor.PID, options ...SelectParamBuilder) IBus
 
 	//Select 选择服务
 	Select(sender *actor.PID, options ...SelectParamBuilder) IBus
