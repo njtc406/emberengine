@@ -118,15 +118,15 @@ func (s *MasterSlaverTest) becomeMaster(e inf.IEvent) {
 
 func (s *MasterSlaverTest) selectSelfSlavers() inf.IBus {
 	return s.SelectSlavers(
-		rpc.WithServiceName(s.GetName()),
-		rpc.WithServiceId(s.GetPid().GetServiceId()),
+		rpc.WithName(s.GetName()),
+		rpc.WithSid(s.GetPid().GetServiceId()),
 		rpc.WithServerId(s.GetServerId()))
 }
 
 func (s *MasterSlaverTest) selectSelfMaster() inf.IBus {
 	return s.Select(
-		rpc.WithServiceName(s.GetName()),
-		rpc.WithServiceId(s.GetPid().GetServiceId()),
+		rpc.WithName(s.GetName()),
+		rpc.WithSid(s.GetPid().GetServiceId()),
 		rpc.WithServerId(s.GetServerId()))
 }
 

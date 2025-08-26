@@ -12,19 +12,19 @@ func WithServerId(serverId int32) inf.SelectParamBuilder {
 	}
 }
 
-func WithServiceId(serviceId string) inf.SelectParamBuilder {
+func WithSid(serviceId string) inf.SelectParamBuilder {
 	return func(param *inf.SelectParam) {
 		param.ServiceId = &serviceId
 	}
 }
 
-func WithServiceName(serviceName string) inf.SelectParamBuilder {
+func WithName(serviceName string) inf.SelectParamBuilder {
 	return func(param *inf.SelectParam) {
 		param.ServiceName = &serviceName
 	}
 }
 
-func WithServiceType(serviceType string) inf.SelectParamBuilder {
+func WithType(serviceType string) inf.SelectParamBuilder {
 	return func(param *inf.SelectParam) {
 		param.ServiceType = &serviceType
 	}

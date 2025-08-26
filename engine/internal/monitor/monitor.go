@@ -170,3 +170,16 @@ func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {
 		rm.Remove(seqId)
 	}
 }
+
+func (rm *RpcMonitor) NewMultiCancel(seqIds ...uint64) dto.CancelRpc {
+	return func() {
+		rm.locker.Lock()
+		defer rm.locker.Unlock()
+		for _, seqId := range seqIds {
+			if seqId == 0 {
+				continue
+			}
+			_ = rm.remove(seqId)
+		}
+	}
+}

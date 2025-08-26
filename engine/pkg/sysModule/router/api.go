@@ -27,7 +27,7 @@ func (r *Router) ApiGetUserRouter(rid string, method string) (string, error) {
 		// 从缓存中获取
 		key := buildKey(rid, method)
 		if err := r.Select(
-			rpc.WithServiceName("DBService"),
+			rpc.WithName("DBService"),
 			rpc.WithServerId(r.GetService().GetServerId()),
 		).Call(
 			nil,
@@ -52,7 +52,7 @@ func (r *Router) ApiGetUserRouter(rid string, method string) (string, error) {
 
 func (r *Router) ApiSetUserRouter(rid string, method string, url string) error {
 	key := buildKey(rid, method)
-	if err := r.Select(rpc.WithServiceName("DBService"), rpc.WithServerId(r.GetService().GetServerId())).
+	if err := r.Select(rpc.WithName("DBService"), rpc.WithServerId(r.GetService().GetServerId())).
 		Call(nil, "ApiRedisSetString", key, url); err != nil {
 		r.GetLogger().Errorf("set user router failed, err:%v", err)
 		return err
@@ -65,7 +65,7 @@ func (r *Router) ApiSetUserRouter(rid string, method string, url string) error {
 func (r *Router) ApiCleanRouter(rid string) error {
 	ctx := xcontext.New(nil)
 	if err := r.Select(
-		rpc.WithServiceName("DBService"),
+		rpc.WithName("DBService"),
 		rpc.WithServerId(r.GetService().GetServerId()),
 	).Call(nil, "ApiRedisDel", "prefix.router"+rid, nil); err != nil {
 		r.GetLogger().WithContext(ctx).WithFields(map[string]interface{}{

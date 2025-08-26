@@ -81,7 +81,7 @@ func (s *Service2) APIMultiRet() (int, string, error) {
 
 func (s *Service2) APICallback() {
 	log.SysLogger.Debugf("call %s func APICallback", s.GetName())
-	if err := s.Select(rpc.WithServiceName(ServiceNameTest1)).Send(context.Background(), "APITest1", nil); err != nil {
+	if err := s.Select(rpc.WithName(ServiceNameTest1)).Send(context.Background(), "APITest1", nil); err != nil {
 		log.SysLogger.Errorf("call Service1.APITest1 failed, err:%v", err)
 	}
 }

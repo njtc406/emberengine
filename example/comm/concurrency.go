@@ -50,8 +50,8 @@ func (s *ConcurrencyTest) OnInit1() error {
 		for i := 0; i < concurrentNum; i++ {
 
 			s.AsyncDo("concurrency", func() error {
-				return s.Select(rpc.WithServiceName(ServiceName2)).Call(nil, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, nil)
-				//return s.Select(rpc.WithServiceName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
+				return s.Select(rpc.WithName(ServiceName2)).Call(nil, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, nil)
+				//return s.Select(rpc.WithName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
 			}, func(err error) {
 				count.Add(1)
 				//log.SysLogger.Debugf("call ConcurrencyTest1.APISum cost:%d ms, count:%d", timelib.Now().Sub(startTime), count.Load())
@@ -115,11 +115,11 @@ func (s *ConcurrencyTest) OnInit() error {
 						ctx.SetHeader(def.DefaultDispatcherKey, uuid.NewString())
 
 						if testType == "send" {
-							err = s.Select(rpc.WithServiceName(ServiceName2)).Send(ctx, "RpcEmptyFun", nil)
+							err = s.Select(rpc.WithName(ServiceName2)).Send(ctx, "RpcEmptyFun", nil)
 						} else if testType == "asyncCall" {
 							ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 							defer cancel()
-							_, err = s.Select(rpc.WithServiceName(ServiceName2)).AsyncCall(ctx, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{Params: []interface{}{start, idx}}, func(data interface{}, err error, params ...interface{}) {
+							_, err = s.Select(rpc.WithName(ServiceName2)).AsyncCall(ctx, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{Params: []interface{}{start, idx}}, func(data interface{}, err error, params ...interface{}) {
 								if err != nil {
 									log.SysLogger.Errorf("call error: %v", err)
 									return
@@ -146,7 +146,7 @@ func (s *ConcurrencyTest) OnInit() error {
 							return
 						} else {
 							var result msg.Msg_Test_Resp
-							err = s.Select(rpc.WithServiceName(ServiceName2)).Call(ctx, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &result)
+							err = s.Select(rpc.WithName(ServiceName2)).Call(ctx, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, &result)
 						}
 
 						if err != nil {

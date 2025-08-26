@@ -72,6 +72,25 @@ type BusOption struct {
 	Out            interface{}
 	Callbacks      []CompletionFunc
 	CallbackParams *AsyncCallParams
+	NotRecycle     bool // 不回收bus
+}
+
+func (o *BusOption) Reset() {
+	o.Ctx = nil
+	o.Method = ""
+	o.In = nil
+	o.Out = nil
+	o.Callbacks = nil
+	o.CallbackParams = nil
+	o.NotRecycle = false
+}
+
+func NewBusOption(builders ...BusOptionBuilder) *BusOption {
+	option := &BusOption{}
+	for _, builder := range builders {
+		builder(option)
+	}
+	return option
 }
 
 type BusOptionBuilder func(option *BusOption)
@@ -95,4 +114,8 @@ func WithCallbacks(callbacks ...CompletionFunc) BusOptionBuilder {
 
 func WithCallbackParams(params *AsyncCallParams) BusOptionBuilder {
 	return func(opt *BusOption) { opt.CallbackParams = params }
+}
+
+func WithNotRecycle() BusOptionBuilder {
+	return func(opt *BusOption) { opt.NotRecycle = true }
 }

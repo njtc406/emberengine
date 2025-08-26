@@ -224,10 +224,22 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	return nil
 }
 
+func (mb *MessageBus) callWithCtl(ctx context.Context, data inf.IEnvelopeData, out interface{}, recycle bool) error {
+	if recycle {
+		defer ReleaseMessageBus(mb)
+	}
+
+	if mb.err != nil {
+		return mb.err
+	}
+
+	return mb.call(ctx, data, out)
+}
+
 // Call 同步调用服务
 func (mb *MessageBus) Call(ctx context.Context, method string, in, out interface{}) error {
-	defer ReleaseMessageBus(mb)
 	if mb.err != nil {
+		// 这里可能是从MultiBus中产生的
 		return mb.err
 	}
 	data := msgenvelope.NewData()
@@ -235,21 +247,17 @@ func (mb *MessageBus) Call(ctx context.Context, method string, in, out interface
 	data.SetRequest(in)
 	data.SetResponse(nil) // 容错
 	data.SetNeedResponse(true)
-	return mb.call(ctx, data, out)
+	return mb.callWithCtl(ctx, data, out, true) // 默认需要回收
 }
 
 func (mb *MessageBus) CallWithOpt(opts ...dto.BusOptionBuilder) error {
-	defer ReleaseMessageBus(mb)
-	option := &dto.BusOption{}
-	for _, opt := range opts {
-		opt(option)
-	}
+	option := dto.NewBusOption(opts...)
 	data := msgenvelope.NewData()
 	data.SetMethod(option.Method)
 	data.SetRequest(option.In)
 	data.SetResponse(nil) // 容错
 	data.SetNeedResponse(true)
-	return mb.call(option.Ctx, data, option.Out)
+	return mb.callWithCtl(option.Ctx, data, option.Out, !option.NotRecycle)
 }
 
 func (mb *MessageBus) callDirect(ctx context.Context, data inf.IEnvelopeData, out interface{}) error {
@@ -257,7 +265,15 @@ func (mb *MessageBus) callDirect(ctx context.Context, data inf.IEnvelopeData, ou
 	return mb.call(ctx, data, out)
 }
 
-func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+func (mb *MessageBus) asyncCallWithCancel(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+	reqId, err := mb.asyncCall(ctx, data, param, callbacks...)
+	if err != nil {
+		return dto.EmptyCancelRpc, err
+	}
+	return monitor.GetRpcMonitor().NewCancel(reqId), nil
+}
+
+func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error) {
 	var timeout time.Duration
 	if ctx != nil {
 		deadline, ok := ctx.Deadline()
@@ -297,15 +313,17 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, par
 		mt.Remove(meta.GetReqId())
 		envelope.Release()
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
-		return nil, def.ErrRPCCallFailed
+		return 0, def.ErrRPCCallFailed
 	}
 
-	return mt.NewCancel(meta.GetReqId()), nil
+	return meta.GetReqId(), nil
 }
 
-// AsyncCall 异步调用服务
-func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
-	defer ReleaseMessageBus(mb)
+func (mb *MessageBus) asyncCallWithCtl(ctx context.Context, data inf.IEnvelopeData, recycle bool, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+	if recycle {
+		defer ReleaseMessageBus(mb)
+	}
+
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
 		return nil, mb.err
@@ -317,53 +335,44 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 		return nil, def.ErrCallbacksIsEmpty
 	}
 
+	return mb.asyncCallWithCancel(ctx, data, param, callbacks...)
+}
+
+// AsyncCall 异步调用服务
+func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	data := msgenvelope.NewData()
 	data.SetMethod(method)
 	data.SetRequest(in)
 	data.SetResponse(nil) // 容错
 	data.SetNeedResponse(true)
-
-	return mb.asyncCall(ctx, data, param, callbacks...)
+	return mb.asyncCallWithCtl(ctx, data, true, param, callbacks...)
 }
 
 func (mb *MessageBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
-	defer ReleaseMessageBus(mb)
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
 		return nil, mb.err
 	}
-
-	option := &dto.BusOption{}
-	for _, opt := range opts {
-		opt(option)
-	}
-	if mb.sender == nil || mb.receiver == nil {
-		return nil, fmt.Errorf("sender or receiver is nil")
-	}
-	if len(option.Callbacks) == 0 {
-		return nil, def.ErrCallbacksIsEmpty
-	}
-
+	option := dto.NewBusOption(opts...)
 	data := msgenvelope.NewData()
 	data.SetMethod(option.Method)
 	data.SetRequest(option.In)
 	data.SetResponse(nil) // 容错
 	data.SetNeedResponse(true)
-
-	return mb.asyncCall(option.Ctx, data, option.CallbackParams, option.Callbacks...)
+	return mb.asyncCallWithCtl(option.Ctx, data, !option.NotRecycle, option.CallbackParams, option.Callbacks...)
 }
 
-func (mb *MessageBus) asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
+func (mb *MessageBus) asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, recycle bool, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error) {
 	defer ReleaseMessageBus(mb)
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
-		return nil, mb.err
+		return 0, mb.err
 	}
 	if mb.sender == nil || mb.receiver == nil {
-		return nil, fmt.Errorf("sender or receiver is nil")
+		return 0, fmt.Errorf("sender or receiver is nil")
 	}
 	if len(callbacks) == 0 {
-		return nil, def.ErrCallbacksIsEmpty
+		return 0, def.ErrCallbacksIsEmpty
 	}
 
 	return mb.asyncCall(ctx, data, param, callbacks...)
@@ -410,10 +419,7 @@ func (mb *MessageBus) SendWithOpt(opts ...dto.BusOptionBuilder) error {
 		return fmt.Errorf("receiver is nil")
 	}
 
-	option := &dto.BusOption{}
-	for _, opt := range opts {
-		opt(option)
-	}
+	option := dto.NewBusOption(opts...)
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope(option.Ctx)
@@ -459,10 +465,15 @@ func (mb *MessageBus) sendDirect(ctx context.Context, data inf.IEnvelopeData) er
 	return mb.receiver.SendRequestAndRelease(envelope)
 }
 
+func (mb *MessageBus) Release() {
+	ReleaseMessageBus(mb)
+}
+
 type internalBus interface {
 	inf.IBus
 	callDirect(ctx context.Context, data inf.IEnvelopeData, out interface{}) error
-	asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
+	callWithCtl(ctx context.Context, data inf.IEnvelopeData, out interface{}, recycle bool) error
+	asyncCallDirect(ctx context.Context, data inf.IEnvelopeData, recycle bool, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error)
 	sendDirect(ctx context.Context, data inf.IEnvelopeData) error
 }
 
@@ -475,16 +486,44 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 		return def.ErrSelectEmptyResult
 	}
 
-	if len(m) > 1 {
-		// 释放所有节点
-		for _, bus := range m {
-			ReleaseMessageBus(bus.(*MessageBus))
+	data := msgenvelope.NewData()
+	data.SetMethod(method)
+	data.SetRequest(in)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+
+	var errs []error
+	for _, bus := range m {
+		if err := bus.callWithCtl(ctx, data, out, true); err != nil { // TODO 这里会有问题，如果使用同一个out接收返回值,可能后面的会覆盖前面的数据
+			errs = append(errs, err) // TODO 这里后续再看要不要break,暂时先收集所有错误,可能需要做成参数
+		} else {
+			return nil // 找到一个就返回
 		}
-		return fmt.Errorf("only one node can be called at a time, now got %v", len(m))
+	}
+	return errorlib.CombineErr(errs...)
+}
+
+func (m MultiBus) CallWithOpt(opts ...dto.BusOptionBuilder) error {
+	option := dto.NewBusOption(opts...)
+	if len(m) == 0 {
+		log.SysLogger.Warnf("===========select empty service to call %s", option.Method)
+		return def.ErrSelectEmptyResult
 	}
 
-	// call只允许调用一个节点
-	return m[0].Call(ctx, method, in, out)
+	data := msgenvelope.NewData()
+	data.SetMethod(option.Method)
+	data.SetRequest(option.In)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+
+	var errs []error
+	for _, bus := range m {
+		if err := bus.callWithCtl(option.Ctx, data, option.Out, true); err != nil { // TODO 这里会有问题，如果使用同一个out接收返回值,可能后面的会覆盖前面的数据
+			errs = append(errs, err) // TODO 这里后续再看要不要break,暂时先收集所有错误,可能需要做成参数
+		}
+
+	}
+	return errorlib.CombineErr(errs...)
 }
 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
@@ -492,16 +531,49 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", method)
 		return nil, def.ErrSelectEmptyResult
 	}
-	if len(m) > 1 {
-		// 释放所有节点
-		for _, bus := range m {
-			ReleaseMessageBus(bus.(*MessageBus))
+	data := msgenvelope.NewData()
+	data.SetMethod(method)
+	data.SetRequest(in)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+
+	var errs []error
+	var reqIds []uint64
+	for _, bus := range m {
+		if reqId, err := bus.asyncCallDirect(ctx, data, true, param, callbacks...); err != nil {
+			errs = append(errs, err)
+		} else {
+			reqIds = append(reqIds, reqId)
 		}
-		return dto.EmptyCancelRpc, fmt.Errorf("only one node can be called at a time, now got %v", len(m))
 	}
-	// call只允许调用一个节点
-	return m[0].AsyncCall(ctx, method, in, param, callbacks...)
+	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
+
+func (m MultiBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
+	option := dto.NewBusOption(opts...)
+	if len(m) == 0 {
+		log.SysLogger.Warnf("===========select empty service to async call %s", option.Method)
+		return dto.EmptyCancelRpc, def.ErrSelectEmptyResult
+	}
+	data := msgenvelope.NewData()
+	data.SetMethod(option.Method)
+	data.SetRequest(option.In)
+	data.SetResponse(nil) // 容错
+	data.SetNeedResponse(true)
+
+	var errs []error
+	var reqIds []uint64
+	for _, bus := range m {
+		if reqId, err := bus.asyncCallDirect(option.Ctx, data, !option.NotRecycle, option.CallbackParams, option.Callbacks...); err != nil {
+			errs = append(errs, err)
+		} else {
+			reqIds = append(reqIds, reqId)
+		}
+	}
+	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+}
+
+// TODO send这里需要考虑一下所有的都公用一个ctx会不会有什么问题
 
 func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error {
 	if len(m) == 0 {
@@ -522,4 +594,26 @@ func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error
 	}
 
 	return errorlib.CombineErr(errs...)
+}
+
+func (m MultiBus) SendWithOpt(opts ...dto.BusOptionBuilder) error {
+	option := dto.NewBusOption(opts...)
+	var errs []error
+	envelopeData := msgenvelope.NewData()
+	envelopeData.SetMethod(option.Method)
+	envelopeData.SetRequest(option.In)
+	envelopeData.SetResponse(nil)
+	envelopeData.SetNeedResponse(false)
+	for _, bus := range m {
+		if err := bus.sendDirect(option.Ctx, envelopeData); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errorlib.CombineErr(errs...)
+}
+
+func (m MultiBus) Release() {
+	for _, bus := range m {
+		ReleaseMessageBus(bus.(*MessageBus))
+	}
 }
