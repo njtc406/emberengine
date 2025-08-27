@@ -15,6 +15,7 @@ var (
 	ErrSysEventChannelIsFull           = errors.New("sys event channel is full")                 // 系统事件通道已满
 	ErrMailboxNotRunning               = errors.New("mailbox not running")                       // 邮箱未运行
 	ErrMailboxWorkerIsFull             = errors.New("mailbox worker is full")                    // 邮箱工作线程已满
+	ErrWorkerClosed                    = errors.New("worker is closed")                          // Worker已关闭
 	ErrRPCCallTimeout                  = errors.New("rpc call timeout")                          // RPC 调用超时
 	ErrServiceNotFound                 = errors.New("service not found")                         // 服务未找到
 	ErrServiceIsRunning                = errors.New("service is running")                        // 服务正在运行

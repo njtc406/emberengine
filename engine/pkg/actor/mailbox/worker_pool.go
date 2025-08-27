@@ -7,14 +7,15 @@ package mailbox
 
 import (
 	"context"
+	"sync"
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
 	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"sync"
-	"time"
 )
 
 type Scaler interface {
@@ -29,17 +30,18 @@ type queue[T any] interface {
 }
 
 type WorkerPool struct {
-	conf        config.WorkerConf
-	mu          sync.RWMutex
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	workers     map[int]*Worker
-	ring        *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
-	invoker     inf.IMessageInvoker      // 消息处理器
-	middlewares []inf.IMailboxMiddleware // 中间件
-	profiler    *profiler.Profiler       // 性能分析
-	autoScaler  Scaler                   // 自动扩容器
+	conf         config.WorkerConf
+	workerConfig *WorkerConfig // Worker配置参数
+	mu           sync.RWMutex
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	workers      map[int]*Worker
+	ring         *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
+	invoker      inf.IMessageInvoker      // 消息处理器
+	middlewares  []inf.IMailboxMiddleware // 中间件
+	profiler     *profiler.Profiler       // 性能分析
+	autoScaler   Scaler                   // 自动扩容器
 }
 
 func fixConf(conf *config.WorkerConf) *config.WorkerConf {
@@ -74,13 +76,14 @@ func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlew
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
-		conf:        *conf,
-		workers:     make(map[int]*Worker, conf.WorkerNum),
-		invoker:     invoker,
-		ring:        hashring.NewHashRing[int](conf.VirtualWorkerRate),
-		middlewares: middlewares,
-		ctx:         ctx,
-		cancel:      cancel,
+		conf:         *conf,
+		workerConfig: DefaultWorkerConfig(), // 初始化为默认配置
+		workers:      make(map[int]*Worker, conf.WorkerNum),
+		invoker:      invoker,
+		ring:         hashring.NewHashRing[int](conf.VirtualWorkerRate),
+		middlewares:  middlewares,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 
@@ -88,7 +91,7 @@ func (p *WorkerPool) Start() {
 	log.SysLogger.Debugf("Starting service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
 	p.mu.Lock()
 	for i := 0; i < p.conf.WorkerNum; i++ {
-		worker := newWorker(p, i)
+		worker := newWorker(p, i, p.workerConfig) // 使用配置的workerConfig
 		p.workers[i] = worker
 		worker.Start()
 		// 将 worker 加入到哈希环中（这里每个都加进入,但是单线程时可能不会使用）
@@ -107,6 +110,14 @@ func (p *WorkerPool) Start() {
 	}
 
 	log.SysLogger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
+}
+
+// SetWorkerConfig 设置Worker配置参数（必须在Start之前调用）
+func (p *WorkerPool) SetWorkerConfig(config *WorkerConfig) {
+	if config == nil {
+		config = DefaultWorkerConfig()
+	}
+	p.workerConfig = config
 }
 
 func (p *WorkerPool) Stop() {
@@ -174,7 +185,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 		if newSize < p.conf.MaxWorkerNum {
 			// 增加 workers
 			for i := p.conf.WorkerNum; i < newSize; i++ {
-				worker := newWorker(p, i)
+				worker := newWorker(p, i, p.workerConfig) // 使用配置的workerConfig
 				p.workers[i] = worker
 				worker.Start()
 				p.ring.Add(i)
@@ -242,4 +253,42 @@ func (p *WorkerPool) autoScaleWorkers() {
 			}
 		}
 	}
+}
+
+// ======== 多级优先级配置辅助函数 ========
+
+// CreateMultiLevelConfig 创建多级优先级配置的辅助函数
+func CreateMultiLevelConfig(strategy ScheduleStrategy, priorities []PriorityConfig) *WorkerConfig {
+	return &WorkerConfig{
+		HighPriBatch: 16, // 向后兼容
+		LowPriBatch:  8,  // 向后兼容
+		MultiLevel: &MultiLevelConfig{
+			Enabled:    true,
+			Priorities: priorities,
+			Strategy:   strategy,
+		},
+	}
+}
+
+// CreateDefaultMultiLevelConfig 创建默认的多级优先级配置
+func CreateDefaultMultiLevelConfig() *WorkerConfig {
+	priorities := []PriorityConfig{
+		{Level: PriorityUrgent, BatchSize: 32, Weight: 8},    // 紧急：批量32，权重8
+		{Level: PriorityHigh, BatchSize: 24, Weight: 6},      // 高：批量24，权重6
+		{Level: PriorityNormal, BatchSize: 16, Weight: 4},    // 普通：批量16，权重4
+		{Level: PriorityLow, BatchSize: 12, Weight: 3},       // 低：批量12，权重3
+		{Level: PriorityBatch, BatchSize: 8, Weight: 2},      // 批量：批量8，权重2
+		{Level: PriorityBackground, BatchSize: 4, Weight: 1}, // 后台：批量4，权重1
+	}
+	return CreateMultiLevelConfig(StrategyWeighted, priorities)
+}
+
+// CreateAbsolutePriorityConfig 创建绝对优先级配置
+func CreateAbsolutePriorityConfig(priorities []PriorityConfig) *WorkerConfig {
+	return CreateMultiLevelConfig(StrategyAbsolute, priorities)
+}
+
+// CreateFairnessPriorityConfig 创建防饥饿优先级配置
+func CreateFairnessPriorityConfig(priorities []PriorityConfig) *WorkerConfig {
+	return CreateMultiLevelConfig(StrategyFairness, priorities)
 }
