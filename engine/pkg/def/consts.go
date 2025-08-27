@@ -123,3 +123,25 @@ const (
 
 	DefaultDeDuplicatorTTL = time.Second
 )
+
+// Priority 优先级级别类型
+type Priority int
+
+// 预定义的优先级常量（数值越小优先级越高）
+const (
+	PriorityUrgent     Priority = -2 // 紧急优先级
+	PriorityHigh       Priority = -1 // 高优先级
+	PriorityNormal     Priority = 0  // 普通优先级
+	PriorityLow        Priority = 1  // 低优先级
+	PriorityBatch      Priority = 2  // 批量处理优先级
+	PriorityBackground Priority = 3  // 后台优先级
+)
+
+// ScheduleStrategy 调度策略
+type ScheduleStrategy string
+
+const (
+	StrategyAbsolute ScheduleStrategy = "absolute" // 绝对优先策略
+	StrategyWeighted ScheduleStrategy = "weighted" // 加权轮询策略
+	StrategyFairness ScheduleStrategy = "fairness" // 防饥饿策略
+)

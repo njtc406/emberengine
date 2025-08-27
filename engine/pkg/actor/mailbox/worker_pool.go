@@ -258,7 +258,7 @@ func (p *WorkerPool) autoScaleWorkers() {
 // ======== 多级优先级配置辅助函数 ========
 
 // CreateMultiLevelConfig 创建多级优先级配置的辅助函数
-func CreateMultiLevelConfig(strategy ScheduleStrategy, priorities []PriorityConfig) *WorkerConfig {
+func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorities []PriorityConfig) *WorkerConfig {
 	return &WorkerConfig{
 		HighPriBatch: 16, // 向后兼容
 		LowPriBatch:  8,  // 向后兼容
@@ -273,22 +273,22 @@ func CreateMultiLevelConfig(strategy ScheduleStrategy, priorities []PriorityConf
 // CreateDefaultMultiLevelConfig 创建默认的多级优先级配置
 func CreateDefaultMultiLevelConfig() *WorkerConfig {
 	priorities := []PriorityConfig{
-		{Level: PriorityUrgent, BatchSize: 32, Weight: 8},    // 紧急：批量32，权重8
-		{Level: PriorityHigh, BatchSize: 24, Weight: 6},      // 高：批量24，权重6
-		{Level: PriorityNormal, BatchSize: 16, Weight: 4},    // 普通：批量16，权重4
-		{Level: PriorityLow, BatchSize: 12, Weight: 3},       // 低：批量12，权重3
-		{Level: PriorityBatch, BatchSize: 8, Weight: 2},      // 批量：批量8，权重2
-		{Level: PriorityBackground, BatchSize: 4, Weight: 1}, // 后台：批量4，权重1
+		{Level: def.PriorityUrgent, BatchSize: 32, Weight: 8},    // 紧急：批量32，权重8
+		{Level: def.PriorityHigh, BatchSize: 24, Weight: 6},      // 高：批量24，权重6
+		{Level: def.PriorityNormal, BatchSize: 16, Weight: 4},    // 普通：批量16，权重4
+		{Level: def.PriorityLow, BatchSize: 12, Weight: 3},       // 低：批量12，权重3
+		{Level: def.PriorityBatch, BatchSize: 8, Weight: 2},      // 批量：批量8，权重2
+		{Level: def.PriorityBackground, BatchSize: 4, Weight: 1}, // 后台：批量4，权重1
 	}
-	return CreateMultiLevelConfig(StrategyWeighted, priorities)
+	return CreateMultiLevelConfig(def.StrategyWeighted, priorities)
 }
 
 // CreateAbsolutePriorityConfig 创建绝对优先级配置
 func CreateAbsolutePriorityConfig(priorities []PriorityConfig) *WorkerConfig {
-	return CreateMultiLevelConfig(StrategyAbsolute, priorities)
+	return CreateMultiLevelConfig(def.StrategyAbsolute, priorities)
 }
 
 // CreateFairnessPriorityConfig 创建防饥饿优先级配置
 func CreateFairnessPriorityConfig(priorities []PriorityConfig) *WorkerConfig {
-	return CreateMultiLevelConfig(StrategyFairness, priorities)
+	return CreateMultiLevelConfig(def.StrategyFairness, priorities)
 }
