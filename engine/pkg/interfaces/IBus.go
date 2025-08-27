@@ -16,6 +16,8 @@ type IBus interface {
 	// Call 同步调用服务
 	Call(ctx context.Context, method string, in, out interface{}) error
 	CallWithOpt(opts ...dto.BusOptionBuilder) error
+	// TODO 这个接口后续来实现
+	//CallAll(ctx context.Context, method string, in interface{}, out []interface{}) error
 
 	// AsyncCall 异步调用服务
 	AsyncCall(ctx context.Context, method string, in interface{}, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error)
@@ -32,3 +34,25 @@ type IBus interface {
 
 	Release()
 }
+
+/*
+统一一下风格
+Call(ctx, method, in, out)
+CallWithOption(opts ...BusOptionBuilder)
+
+AsyncCall(ctx, method, in, params, callbacks...)
+AsyncCallWithOption(opts ...BusOptionBuilder)
+
+Send(ctx, method, in)
+SendWithOption(opts ...BusOptionBuilder)
+
+internal的接口
+doCall(ctx, data, out) error
+doCallWithRecycle(ctx, data, out, recycle bool) error
+
+doAsyncCall(ctx, data, param, callbacks...) (uint64, error)
+doAsyncCallWithRecycle(ctx, data, recycle bool, param, callbacks...) (uint64, error)
+
+doSend(ctx, data) error
+doSendWithRecycle(ctx, data, recycle bool) error
+*/

@@ -1,11 +1,11 @@
 package dedup
 
 import (
-	"fmt"
 	"github.com/bluele/gcache"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"strconv"
 	"sync"
 	"time"
 
@@ -80,7 +80,8 @@ func newDeDuplicator(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
 }
 
 func reqIdKey(serviceUid string, id uint64) string {
-	return fmt.Sprintf("rpc_%s_reqid_%d", serviceUid, id)
+	//return fmt.Sprintf("rpc_%s_reqid_%d", serviceUid, id)
+	return "rpc_" + serviceUid + "_reqid_" + strconv.FormatUint(id, 10)
 }
 
 // TTLDeDuplicator 用于识别重复 ReqId，防止重复处理

@@ -46,7 +46,7 @@ func (w *Worker) submitUserEvent(e inf.IEvent) error {
 	}
 	w.userCount.Add(1)
 	if !w.userMailbox.Push(e) {
-		return nil //def.ErrEventChannelIsFull
+		return def.ErrEventChannelIsFull
 	}
 	return nil
 }
