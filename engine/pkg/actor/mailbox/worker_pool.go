@@ -25,6 +25,7 @@ type Scaler interface {
 type queue[T any] interface {
 	Push(T) bool
 	Pop() (T, bool)
+	BatchPop(int) []T
 	Empty() bool
 	Len() int
 }
@@ -165,12 +166,8 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 		log.SysLogger.WithContext(evt.GetContext()).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
 		return def.ErrMailboxWorkerIsFull
 	}
-	switch evt.GetPriority() {
-	case def.PrioritySys:
-		return worker.submitSysEvent(evt)
-	default:
-		return worker.submitUserEvent(evt)
-	}
+
+	return worker.SubmitEvent(evt)
 }
 
 func (p *WorkerPool) resizeWorkers(newSize int) {
@@ -260,8 +257,6 @@ func (p *WorkerPool) autoScaleWorkers() {
 // CreateMultiLevelConfig 创建多级优先级配置的辅助函数
 func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorities []PriorityConfig) *WorkerConfig {
 	return &WorkerConfig{
-		HighPriBatch: 16, // 向后兼容
-		LowPriBatch:  8,  // 向后兼容
 		MultiLevel: &MultiLevelConfig{
 			Enabled:    true,
 			Priorities: priorities,
