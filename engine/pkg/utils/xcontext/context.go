@@ -109,17 +109,17 @@ func (x *XContext) GetDispatcherKey() string {
 	return key
 }
 
-func (x *XContext) GetPriority() int32 {
-	priority, ok := emberctx.GetHeaderValue(x.Context, def.DefaultPriorityKey).(int32)
+func (x *XContext) GetPriority() def.Priority {
+	priority, ok := emberctx.GetHeaderValue(x.Context, def.DefaultPriorityKey).(def.Priority)
 	if ok {
 		return priority
 	} else {
 		priority, ok := emberctx.GetHeaderValue(x.Context, def.DefaultPriorityKey).(string)
 		if ok {
-			return util.ToIntT[int32](priority)
+			return util.ToIntT[def.Priority](priority)
 		}
 	}
-	return def.PriorityUser
+	return def.PriorityNormal
 }
 
 func (x *XContext) GetType() int32 {

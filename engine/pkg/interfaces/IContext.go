@@ -5,7 +5,10 @@
 // 最后更新:  yr  2025/7/13 0013 22:08
 package interfaces
 
-import "context"
+import (
+	"context"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+)
 
 type IContext interface {
 	context.Context
@@ -23,6 +26,6 @@ type IContext interface {
 
 	GetTranceId() string
 	GetDispatcherKey() string
-	GetPriority() int32
+	GetPriority() def.Priority
 	GetType() int32
 }

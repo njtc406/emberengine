@@ -255,11 +255,11 @@ func (p *WorkerPool) autoScaleWorkers() {
 // ======== 多级优先级配置辅助函数 ========
 
 // CreateMultiLevelConfig 创建多级优先级配置的辅助函数
-func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorities []PriorityConfig) *WorkerConfig {
+func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorityMap map[def.Priority]PriorityConfig) *WorkerConfig {
 	return &WorkerConfig{
 		MultiLevel: &MultiLevelConfig{
 			Enabled:    true,
-			Priorities: priorities,
+			Priorities: priorityMap,
 			Strategy:   strategy,
 		},
 	}
@@ -267,23 +267,23 @@ func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorities []Priority
 
 // CreateDefaultMultiLevelConfig 创建默认的多级优先级配置
 func CreateDefaultMultiLevelConfig() *WorkerConfig {
-	priorities := []PriorityConfig{
-		{Level: def.PriorityUrgent, BatchSize: 32, Weight: 8},    // 紧急：批量32，权重8
-		{Level: def.PriorityHigh, BatchSize: 24, Weight: 6},      // 高：批量24，权重6
-		{Level: def.PriorityNormal, BatchSize: 16, Weight: 4},    // 普通：批量16，权重4
-		{Level: def.PriorityLow, BatchSize: 12, Weight: 3},       // 低：批量12，权重3
-		{Level: def.PriorityBatch, BatchSize: 8, Weight: 2},      // 批量：批量8，权重2
-		{Level: def.PriorityBackground, BatchSize: 4, Weight: 1}, // 后台：批量4，权重1
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityUrgent:     {BatchSize: 32, Weight: 8}, // 紧急：批量32，权重8
+		def.PriorityHigh:       {BatchSize: 24, Weight: 6}, // 高：批量24，权重6
+		def.PriorityNormal:     {BatchSize: 16, Weight: 4}, // 普通：批量16，权重4
+		def.PriorityLow:        {BatchSize: 12, Weight: 3}, // 低：批量12，权重3
+		def.PriorityBatch:      {BatchSize: 8, Weight: 2},  // 批量：批量8，权重2
+		def.PriorityBackground: {BatchSize: 4, Weight: 1},  // 后台：批量4，权重1
 	}
-	return CreateMultiLevelConfig(def.StrategyWeighted, priorities)
+	return CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
 }
 
 // CreateAbsolutePriorityConfig 创建绝对优先级配置
-func CreateAbsolutePriorityConfig(priorities []PriorityConfig) *WorkerConfig {
-	return CreateMultiLevelConfig(def.StrategyAbsolute, priorities)
+func CreateAbsolutePriorityConfig(priorityMap map[def.Priority]PriorityConfig) *WorkerConfig {
+	return CreateMultiLevelConfig(def.StrategyAbsolute, priorityMap)
 }
 
 // CreateFairnessPriorityConfig 创建防饥饿优先级配置
-func CreateFairnessPriorityConfig(priorities []PriorityConfig) *WorkerConfig {
-	return CreateMultiLevelConfig(def.StrategyFairness, priorities)
+func CreateFairnessPriorityConfig(priorityMap map[def.Priority]PriorityConfig) *WorkerConfig {
+	return CreateMultiLevelConfig(def.StrategyFairness, priorityMap)
 }

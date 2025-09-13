@@ -6,8 +6,9 @@
 package mailbox
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
 // PriorityConfig 单个优先级配置
@@ -292,9 +293,10 @@ func (ps *PriorityScheduler) fairnessPriority(available []def.Priority) def.Prio
 }
 
 // resetCountersIfNeeded 检查并重置计数器（防止溢出）
+// 优化：提高阈值和使用更安全的重置策略
 func (ps *PriorityScheduler) resetCountersIfNeeded() {
-	// 检查是否有计数器超过阈值
-	const resetThreshold = 1e9
+	// 检查是否有计数器超过阈值（提高阈值以减少重置频率）
+	const resetThreshold = 1e10 // 从1e9提高到1e10
 	maxCounter := 0
 
 	for _, counter := range ps.counters {
@@ -305,8 +307,17 @@ func (ps *PriorityScheduler) resetCountersIfNeeded() {
 
 	// 如果最大计数器超过阈值，就统一归一化
 	if maxCounter > resetThreshold {
+		// 使用更安全的重置策略：找到最小值，然后所有计数器减去最小值
+		minCounter := maxCounter
+		for _, counter := range ps.counters {
+			if counter < minCounter {
+				minCounter = counter
+			}
+		}
+
+		// 所有计数器减去最小值，保持相对比例
 		for p := range ps.counters {
-			ps.counters[p] = ps.counters[p] / 2
+			ps.counters[p] = ps.counters[p] - minCounter
 		}
 	}
 }

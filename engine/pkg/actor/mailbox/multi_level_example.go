@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -15,16 +16,16 @@ import (
 // ExampleBasicMultiLevel 基础多级优先级队列示例
 func ExampleBasicMultiLevel() {
 	// 1. 创建自定义多级优先级配置
-	priorities := []PriorityConfig{
-		{Level: PriorityUrgent, BatchSize: 50, Weight: 10},   // 紧急任务：大批量，高权重
-		{Level: PriorityHigh, BatchSize: 30, Weight: 7},      // 高优先级：中批量，中高权重
-		{Level: PriorityNormal, BatchSize: 20, Weight: 5},    // 普通任务：标准批量
-		{Level: PriorityLow, BatchSize: 10, Weight: 3},       // 低优先级：小批量
-		{Level: PriorityBackground, BatchSize: 5, Weight: 1}, // 后台任务：最小批量
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityUrgent:     {BatchSize: 50, Weight: 10}, // 紧急任务：大批量，高权重
+		def.PriorityHigh:       {BatchSize: 30, Weight: 7},  // 高优先级：中批量，中高权重
+		def.PriorityNormal:     {BatchSize: 20, Weight: 5},  // 普通任务：标准批量
+		def.PriorityLow:        {BatchSize: 10, Weight: 3},  // 低优先级：小批量
+		def.PriorityBackground: {BatchSize: 5, Weight: 1},   // 后台任务：最小批量
 	}
 
 	// 2. 创建使用加权轮询策略的配置
-	workerConfig := CreateMultiLevelConfig(StrategyWeighted, priorities)
+	workerConfig := CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
 
 	// 3. 创建WorkerPool并应用配置
 	conf := &config.WorkerConf{
@@ -71,14 +72,14 @@ func ExampleDefaultMultiLevel() {
 // ExampleAbsolutePriority 绝对优先级策略示例
 func ExampleAbsolutePriority() {
 	// 1. 创建绝对优先级配置（高优先级完全阻塞低优先级）
-	priorities := []PriorityConfig{
-		{Level: PriorityUrgent, BatchSize: 100}, // 紧急任务：大批量处理
-		{Level: PriorityHigh, BatchSize: 50},    // 高优先级：中批量处理
-		{Level: PriorityNormal, BatchSize: 20},  // 普通任务：标准批量
-		{Level: PriorityLow, BatchSize: 10},     // 低优先级：小批量处理
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityUrgent: {BatchSize: 100}, // 紧急任务：大批量处理
+		def.PriorityHigh:   {BatchSize: 50},  // 高优先级：中批量处理
+		def.PriorityNormal: {BatchSize: 20},  // 普通任务：标准批量
+		def.PriorityLow:    {BatchSize: 10},  // 低优先级：小批量处理
 	}
 
-	workerConfig := CreateAbsolutePriorityConfig(priorities)
+	workerConfig := CreateAbsolutePriorityConfig(priorityMap)
 
 	// 其余设置同上...
 	_ = workerConfig // 示例中避免未使用变量警告
@@ -87,14 +88,14 @@ func ExampleAbsolutePriority() {
 // ExampleFairnessPriority 防饥饿策略示例
 func ExampleFairnessPriority() {
 	// 1. 创建防饥饿配置（确保每个优先级都有处理机会）
-	priorities := []PriorityConfig{
-		{Level: PriorityHigh, BatchSize: 30},   // 高优先级
-		{Level: PriorityNormal, BatchSize: 20}, // 普通任务
-		{Level: PriorityLow, BatchSize: 15},    // 低优先级
-		{Level: PriorityBatch, BatchSize: 10},  // 批量处理
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityHigh:   {BatchSize: 30}, // 高优先级
+		def.PriorityNormal: {BatchSize: 20}, // 普通任务
+		def.PriorityLow:    {BatchSize: 15}, // 低优先级
+		def.PriorityBatch:  {BatchSize: 10}, // 批量处理
 	}
 
-	workerConfig := CreateFairnessPriorityConfig(priorities)
+	workerConfig := CreateFairnessPriorityConfig(priorityMap)
 
 	// 其余设置同上...
 	_ = workerConfig // 示例中避免未使用变量警告
@@ -126,35 +127,35 @@ func ExampleMigrationFromLegacy() {
 
 // RecommendedConfigForGameServer 游戏服务器推荐配置
 func RecommendedConfigForGameServer() *WorkerConfig {
-	priorities := []PriorityConfig{
-		{Level: PriorityUrgent, BatchSize: 100, Weight: 20},   // 系统关键消息：100/批次，高权重
-		{Level: PriorityHigh, BatchSize: 50, Weight: 10},      // 战斗相关：50/批次，中高权重
-		{Level: PriorityNormal, BatchSize: 30, Weight: 6},     // 玩家操作：30/批次，正常权重
-		{Level: PriorityLow, BatchSize: 20, Weight: 3},        // 聊天消息：20/批次，低权重
-		{Level: PriorityBackground, BatchSize: 10, Weight: 1}, // 数据统计：10/批次，最低权重
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityUrgent:     {BatchSize: 100, Weight: 20}, // 系统关键消息：100/批次，高权重
+		def.PriorityHigh:       {BatchSize: 50, Weight: 10},  // 战斗相关：50/批次，中高权重
+		def.PriorityNormal:     {BatchSize: 30, Weight: 6},   // 玩家操作：30/批次，正常权重
+		def.PriorityLow:        {BatchSize: 20, Weight: 3},   // 聊天消息：20/批次，低权重
+		def.PriorityBackground: {BatchSize: 10, Weight: 1},   // 数据统计：10/批次，最低权重
 	}
-	return CreateMultiLevelConfig(StrategyWeighted, priorities)
+	return CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
 }
 
 // RecommendedConfigForWebServer Web服务器推荐配置
 func RecommendedConfigForWebServer() *WorkerConfig {
-	priorities := []PriorityConfig{
-		{Level: PriorityUrgent, BatchSize: 50, Weight: 15}, // API限流：50/批次
-		{Level: PriorityHigh, BatchSize: 40, Weight: 10},   // 用户请求：40/批次
-		{Level: PriorityNormal, BatchSize: 30, Weight: 6},  // 后台任务：30/批次
-		{Level: PriorityLow, BatchSize: 20, Weight: 3},     // 日志处理：20/批次
-		{Level: PriorityBatch, BatchSize: 100, Weight: 1},  // 批量数据：100/批次，但低权重
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityUrgent: {BatchSize: 50, Weight: 15}, // API限流：50/批次
+		def.PriorityHigh:   {BatchSize: 40, Weight: 10}, // 用户请求：40/批次
+		def.PriorityNormal: {BatchSize: 30, Weight: 6},  // 后台任务：30/批次
+		def.PriorityLow:    {BatchSize: 20, Weight: 3},  // 日志处理：20/批次
+		def.PriorityBatch:  {BatchSize: 100, Weight: 1}, // 批量数据：100/批次，但低权重
 	}
-	return CreateMultiLevelConfig(StrategyWeighted, priorities)
+	return CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
 }
 
 // RecommendedConfigForRealtime 实时系统推荐配置
 func RecommendedConfigForRealtime() *WorkerConfig {
-	priorities := []PriorityConfig{
-		{Level: PriorityUrgent, BatchSize: 1},  // 实时消息：单个处理，绝对优先
-		{Level: PriorityHigh, BatchSize: 5},    // 高优先级：小批量
-		{Level: PriorityNormal, BatchSize: 10}, // 普通消息：标准批量
-		{Level: PriorityLow, BatchSize: 20},    // 低优先级：大批量补偿
+	priorityMap := map[def.Priority]PriorityConfig{
+		def.PriorityUrgent: {BatchSize: 1},  // 实时消息：单个处理，绝对优先
+		def.PriorityHigh:   {BatchSize: 5},  // 高优先级：小批量
+		def.PriorityNormal: {BatchSize: 10}, // 普通消息：标准批量
+		def.PriorityLow:    {BatchSize: 20}, // 低优先级：大批量补偿
 	}
-	return CreateAbsolutePriorityConfig(priorities) // 使用绝对优先策略
+	return CreateAbsolutePriorityConfig(priorityMap) // 使用绝对优先策略
 }

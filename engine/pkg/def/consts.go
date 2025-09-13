@@ -125,7 +125,7 @@ const (
 )
 
 // Priority 优先级级别类型
-type Priority int
+type Priority int32
 
 // 预定义的优先级常量（数值越小优先级越高）
 const (
