@@ -118,7 +118,7 @@ func (s *CPUBasedStrategy) ShouldScaleUp(workers []*Worker) bool {
 
 	avgLoad := 0
 	for _, w := range workers {
-		avgLoad += w.userMailbox.Len()
+		avgLoad += w.GetMsgLen()
 	}
 	avgLoad /= len(workers)
 
@@ -136,7 +136,7 @@ func (s *CPUBasedStrategy) ShouldScaleDown(workers []*Worker, min int) bool {
 
 	idleCount := 0
 	for _, w := range workers {
-		if w.userMailbox.Len() == 0 && w.systemMailbox.Len() == 0 {
+		if w.GetMsgLen() == 0 {
 			idleCount++
 		}
 	}

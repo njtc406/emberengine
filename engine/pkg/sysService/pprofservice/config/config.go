@@ -6,17 +6,17 @@
 package config
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/httpmodule"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/viper"
 	"time"
 )
 
 type PprofConf struct {
-	PprofConf *httpmodule.Conf `binding:"required"`
+	PprofConf *httpx.Conf `binding:"required"`
 }
 
 func SetPprofConfDefault(parser *viper.Viper) {
-	parser.SetDefault("PprofConf", &httpmodule.Conf{
+	parser.SetDefault("PprofConf", &httpx.Conf{
 		Addr:              "0.0.0.0:99",
 		ReadHeaderTimeout: time.Second * 10,
 		IdleTimeout:       time.Second * 30,
@@ -24,7 +24,6 @@ func SetPprofConfDefault(parser *viper.Viper) {
 		ResourceRootPath:  "",
 		HttpDir:           "",
 		StaticDir:         "",
-		Auth:              false,
 		Account:           nil,
 	})
 }

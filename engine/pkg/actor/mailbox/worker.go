@@ -12,6 +12,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -46,6 +47,33 @@ type Worker struct {
 
 	// 内存复用优化
 	availablePrioritiesPool sync.Pool // 用于复用 availablePriorities 切片
+
+	// 时间片公平调度机制（防止低优先级饿死）
+	timeSliceTracker    map[def.Priority]*timeSliceInfo // 每个优先级的时间片信息
+	lastLowPriorityTime atomic.Int64                    // 上次处理低优先级消息的时间（纳秒）
+	fairnessThresholdNs int64                           // 公平性阈值（纳秒）
+}
+
+// timeSliceInfo 时间片信息
+type timeSliceInfo struct {
+	lastProcessedTime atomic.Int64 // 上次处理时间（纳秒）
+	processedCount    atomic.Int64 // 在当前时间片内处理的消息数
+	timeSliceBudget   int64        // 时间片预算（纳秒）
+}
+
+// calculateTimeSliceBudget 根据优先级计算时间片预算（纳秒）
+func (w *Worker) calculateTimeSliceBudget(priority def.Priority) int64 {
+	// 根据优先级分配不同的时间片：优先级越高，时间片越大
+	switch {
+	case priority <= def.PriorityHigh: // 高优先级
+		return 50_000_000 // 50ms
+	case priority == def.PriorityNormal: // 普通优先级
+		return 30_000_000 // 30ms
+	case priority == def.PriorityLow: // 低优先级
+		return 20_000_000 // 20ms
+	default: // 后台优先级
+		return 10_000_000 // 10ms
+	}
 }
 
 func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *Worker {
@@ -54,12 +82,14 @@ func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *Worker {
 	}
 
 	w := &Worker{
-		workerId:           id,
-		config:             config,
-		pool:               pool,
-		priorityQueues:     make(map[def.Priority]queue[inf.IEvent]),
-		priorityBatchSizes: make(map[def.Priority]int),
-		nonEmptyQueues:     make(map[def.Priority]struct{}),
+		workerId:            id,
+		config:              config,
+		pool:                pool,
+		priorityQueues:      make(map[def.Priority]queue[inf.IEvent]),
+		priorityBatchSizes:  make(map[def.Priority]int),
+		nonEmptyQueues:      make(map[def.Priority]struct{}),
+		timeSliceTracker:    make(map[def.Priority]*timeSliceInfo),
+		fairnessThresholdNs: 100_000_000, // 默认100ms公平性阈值
 	}
 	w.cond = sync.NewCond(&w.mutex)
 
@@ -91,6 +121,12 @@ func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *Worker {
 		w.priorityBatchSizes[lv] = pc.BatchSize
 		totalBatchSize += pc.BatchSize
 		w.sortedPriorities = append(w.sortedPriorities, lv)
+
+		// 初始化时间片信息（根据优先级高低分配不同的时间片）
+		timeSliceBudgetNs := w.calculateTimeSliceBudget(lv)
+		w.timeSliceTracker[lv] = &timeSliceInfo{
+			timeSliceBudget: timeSliceBudgetNs,
+		}
 	}
 
 	// 预排序优先级列表（数值越小优先级越高）
@@ -115,7 +151,7 @@ func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *Worker {
 
 // SubmitEvent 提交事件（优化版：简化信号逻辑并添加非空队列跟踪）
 func (w *Worker) SubmitEvent(e inf.IEvent) error {
-	// 检查Worker是否已关闭
+	// 检查Worker是否已关闭（双重检查）
 	if w.closed.Load() {
 		return def.ErrWorkerClosed
 	}
@@ -127,6 +163,11 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 		return fmt.Errorf("invalid priority: %d", priority)
 	}
 
+	// 再次检查Worker状态（关键：在获取队列后再次检查）
+	if w.closed.Load() {
+		return def.ErrWorkerClosed
+	}
+
 	// 提交消息到对应的优先级队列
 	wasEmpty := que.Empty()
 	que.Push(e)
@@ -134,13 +175,35 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 	// 如果队列从空变为非空，添加到非空队列集合
 	if wasEmpty {
 		w.nonEmptyMutex.Lock()
-		w.nonEmptyQueues[priority] = struct{}{}
+		// 三重检查：确保Worker未关闭且队列确实非空
+		if !w.closed.Load() && que.Len() > 0 {
+			w.nonEmptyQueues[priority] = struct{}{}
+		}
 		w.nonEmptyMutex.Unlock()
 	}
 
-	// 简化信号逻辑：直接发送信号，由 signalNewMessageSafely 保证不重复
-	w.signalNewMessageSafely()
+	// 最后检查：只有在Worker未关闭时才发送信号
+	if !w.closed.Load() {
+		w.signalNewMessageSafely()
+	}
 	return nil
+}
+
+// GetWorkerId 获取Worker的ID
+func (w *Worker) GetWorkerId() int {
+	return w.workerId
+}
+
+// SubmitEventWithPriority 提交指定优先级的事件
+func (w *Worker) SubmitEventWithPriority(e inf.IEvent, priority def.Priority) error {
+	// 设置事件的优先级
+	xctx, ok := e.(interface{ SetHeader(string, any) })
+	if ok {
+		xctx.SetHeader(def.DefaultPriorityKey, priority)
+	}
+
+	// 使用现有的SubmitEvent方法处理
+	return w.SubmitEvent(e)
 }
 
 func (w *Worker) Start() {
@@ -170,8 +233,8 @@ func (w *Worker) run() {
 		// 阻塞等待新消息通知
 		w.waitForNewMessages()
 
-		// 被唤醒后处理所有可用消息
-		for {
+		// 被唤醒后处理所有可用消息（但先检查是否关闭）
+		for !w.closed.Load() {
 			processedAny := w.processAvailableMessages()
 			if !processedAny {
 				break // 没有更多消息，回到等待状态
@@ -183,10 +246,12 @@ func (w *Worker) run() {
 
 func (w *Worker) stop() {
 	//log.SysLogger.Debugf("worker %d process lowPriCount:%d  highPriCount:%d", w.workerId, w.lowPriCount.Load(), w.highPriCount.Load())
+	// 首先设置关闭标志，阻止新的 SubmitEvent
 	if w.closed.Swap(true) {
-		return
+		return // 已经关闭过了
 	}
-	// 使用条件变量唤醒worker
+
+	// 使用条件变量唤醒worker（但不会处理新消息）
 	w.signalNewMessage()
 	w.wg.Wait()
 
@@ -274,16 +339,29 @@ func (w *Worker) processAvailableMessages() bool {
 	}()
 
 	// 优化：优先从非空队列集合中收集，避免全量扫描
+	var emptyPriorities []def.Priority // 延迟清理列表
 	w.nonEmptyMutex.RLock()
 	for priority := range w.nonEmptyQueues {
 		if w.priorityQueues[priority].Len() > 0 {
 			availablePriorities = append(availablePriorities, priority)
 		} else {
-			// 队列已空，从非空集合中移除（延迟删除）
-			delete(w.nonEmptyQueues, priority)
+			// 队列已空，记录到延迟清理列表
+			emptyPriorities = append(emptyPriorities, priority)
 		}
 	}
 	w.nonEmptyMutex.RUnlock()
+
+	// 安全地清理空队列（在写锁下）
+	if len(emptyPriorities) > 0 {
+		w.nonEmptyMutex.Lock()
+		for _, priority := range emptyPriorities {
+			// 双重检查：再次确认队列为空才删除
+			if w.priorityQueues[priority].Len() == 0 {
+				delete(w.nonEmptyQueues, priority)
+			}
+		}
+		w.nonEmptyMutex.Unlock()
+	}
 
 	// 如果没有非空队列，返回
 	if len(availablePriorities) == 0 {
@@ -293,10 +371,11 @@ func (w *Worker) processAvailableMessages() bool {
 	// 按照预排序的优先级列表进行排序（高效版本）
 	w.sortAvailablePriorities(availablePriorities)
 
-	// 公平化调度,在总批次限制内轮流处理不同优先级
+	// 公平化调度升级：在总批次限制内轮流处理不同优先级，结合时间片机制
+	currentTime := time.Now().UnixNano()
 	for totalProcessed < maxBatchTotal && len(availablePriorities) > 0 {
-		// 使用改进的调度器进行两阶段选择
-		selectedPriority := w.scheduler.NextPriorityWithOrdering(availablePriorities)
+		// 检查是否需要强制处理低优先级消息（防止饿死）
+		selectedPriority := w.selectPriorityWithFairness(availablePriorities, currentTime)
 		if selectedPriority == -1 {
 			break
 		}
@@ -325,8 +404,9 @@ func (w *Worker) processAvailableMessages() bool {
 			}
 		}
 
-		// 更新总处理计数
+		// 更新总处理计数和时间片信息
 		totalProcessed += processedCount
+		w.updateTimeSliceInfo(selectedPriority, currentTime, int64(processedCount))
 
 		// 如果这次没有处理任何消息，退出循环
 		if processedCount == 0 {
@@ -345,29 +425,28 @@ func (w *Worker) getBatchSizeForPriority(priority def.Priority) int {
 	return 8 // 默认值
 }
 
-// sortAvailablePriorities 高效排序可用优先级（基于预排序列表）
+// sortAvailablePriorities 高效排序可用优先级（优化版：避免内存分配）
 func (w *Worker) sortAvailablePriorities(available []def.Priority) {
-	// 使用基于预排序列表的排序算法，复杂度O(n)
+	// 使用基于预排序列表的排序算法，复杂度O(n)，无内存分配
 	if len(available) <= 1 {
 		return
 	}
 
-	// 构建可用优先级的集合
-	availableSet := make(map[def.Priority]bool, len(available))
-	for _, p := range available {
-		availableSet[p] = true
-	}
-
-	// 按预排序列表重新排列
-	result := available[:0] // 重用切片
-	for _, p := range w.sortedPriorities {
-		if availableSet[p] {
-			result = append(result, p)
+	// 原地排序：遍历预排序列表，将匹配的优先级依次放置到available前面
+	writeIndex := 0
+	for _, sortedPriority := range w.sortedPriorities {
+		// 在available中查找匹配的优先级
+		for readIndex := writeIndex; readIndex < len(available); readIndex++ {
+			if available[readIndex] == sortedPriority {
+				// 找到匹配，交换到writeIndex位置
+				if readIndex != writeIndex {
+					available[writeIndex], available[readIndex] = available[readIndex], available[writeIndex]
+				}
+				writeIndex++
+				break
+			}
 		}
 	}
-
-	// 复制回原切片
-	copy(available, result)
 }
 
 // removeFromAvailable 从可用列表中移除指定优先级
@@ -387,13 +466,13 @@ func (w *Worker) removeFromAvailable(available *[]def.Priority, priority def.Pri
 func (w *Worker) safeExecMultiLevel(e inf.IEvent, priority def.Priority) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.Errorf("exec multi-level def.Priority event error (def.Priority=%d): %v\ntrace:%s", priority, r, debug.Stack())
+			log.SysLogger.WithContext(e.GetContext()).Errorf("exec multi-level def.Priority event error (def.Priority=%d): %v\ntrace:%s", priority, r, debug.Stack())
 
 			// 双重保护：EscalateFailure 可能也会 panic
 			func() {
 				defer func() {
 					if r2 := recover(); r2 != nil {
-						log.SysLogger.Errorf("EscalateFailure also panicked: %v", r2)
+						log.SysLogger.WithContext(e.GetContext()).Errorf("EscalateFailure also panicked: %v", r2)
 					}
 				}()
 				w.pool.invoker.EscalateFailure(r, e)
@@ -450,14 +529,28 @@ func (w *Worker) GetTotalQueueLen() int {
 	return w.GetMsgLen()
 }
 
-// GetPriorityStatistics 获取优先级统计信息（新增）
-func (w *Worker) GetPriorityStatistics() map[def.Priority]map[string]int64 {
-	stats := make(map[def.Priority]map[string]int64)
+// GetPriorityStatistics 获取优先级统计信息（增强版）
+func (w *Worker) GetPriorityStatistics() map[def.Priority]map[string]interface{} {
+	stats := make(map[def.Priority]map[string]interface{})
 	for priority, que := range w.priorityQueues {
-		stats[priority] = map[string]int64{
+		priorityStats := map[string]interface{}{
 			"queue_length": int64(que.Len()),
 			"batch_size":   int64(w.getBatchSizeForPriority(priority)),
 		}
+
+		// 添加时间片相关统计
+		if timeSlice, exists := w.timeSliceTracker[priority]; exists {
+			priorityStats["time_slice_budget_ns"] = timeSlice.timeSliceBudget
+			priorityStats["last_processed_time"] = timeSlice.lastProcessedTime.Load()
+			priorityStats["processed_count"] = timeSlice.processedCount.Load()
+			currentTime := time.Now().UnixNano()
+			lastTime := timeSlice.lastProcessedTime.Load()
+			if lastTime > 0 {
+				priorityStats["time_since_last_processed_ms"] = (currentTime - lastTime) / 1_000_000
+			}
+		}
+
+		stats[priority] = priorityStats
 	}
 	return stats
 }
@@ -472,5 +565,139 @@ func (w *Worker) GetSchedulerStatistics() map[string]interface{} {
 		"priorities":        len(w.scheduler.priorities),
 		"total_batch_limit": w.totalBatchLimit,
 		"sorted_priorities": w.sortedPriorities,
+	}
+}
+
+// selectPriorityWithFairness 基于公平性和时间片选择优先级
+func (w *Worker) selectPriorityWithFairness(availablePriorities []def.Priority, currentTime int64) def.Priority {
+	// 检查是否需要强制处理低优先级消息（防止饿死）
+	lastLowPriorityTime := w.lastLowPriorityTime.Load()
+	if lastLowPriorityTime > 0 && (currentTime-lastLowPriorityTime) > w.fairnessThresholdNs {
+		// 超过公平性阈值，强制选择低优先级消息
+		for _, priority := range availablePriorities {
+			if priority >= def.PriorityLow {
+				w.lastLowPriorityTime.Store(currentTime)
+				return priority
+			}
+		}
+	}
+
+	// 正常调度：使用时间片机制选择优先级
+	return w.selectPriorityByTimeSlice(availablePriorities, currentTime)
+}
+
+// selectPriorityByTimeSlice 基于时间片机制选择优先级
+func (w *Worker) selectPriorityByTimeSlice(availablePriorities []def.Priority, currentTime int64) def.Priority {
+	// 优先使用调度器的正常选择
+	schedulerSelected := w.scheduler.NextPriorityWithOrdering(availablePriorities)
+	if schedulerSelected == -1 {
+		return -1
+	}
+
+	// 检查选中的优先级是否超过时间片限制
+	timeSlice, exists := w.timeSliceTracker[schedulerSelected]
+	if !exists {
+		return schedulerSelected
+	}
+
+	lastProcessedTime := timeSlice.lastProcessedTime.Load()
+	if lastProcessedTime == 0 || (currentTime-lastProcessedTime) > timeSlice.timeSliceBudget {
+		// 时间片已过期或是第一次处理，可以处理
+		return schedulerSelected
+	}
+
+	// 时间片未过期，尝试选择其他优先级
+	for _, priority := range availablePriorities {
+		if priority == schedulerSelected {
+			continue
+		}
+		timeSlice, exists := w.timeSliceTracker[priority]
+		if !exists {
+			return priority
+		}
+		lastProcessedTime := timeSlice.lastProcessedTime.Load()
+		if lastProcessedTime == 0 || (currentTime-lastProcessedTime) > timeSlice.timeSliceBudget {
+			return priority
+		}
+	}
+
+	// 所有优先级都在时间片内，返回调度器选择的优先级
+	return schedulerSelected
+}
+
+// updateTimeSliceInfo 更新时间片信息
+func (w *Worker) updateTimeSliceInfo(priority def.Priority, currentTime int64, processedCount int64) {
+	timeSlice, exists := w.timeSliceTracker[priority]
+	if !exists {
+		return
+	}
+
+	timeSlice.lastProcessedTime.Store(currentTime)
+	timeSlice.processedCount.Add(processedCount)
+
+	// 如果处理的是低优先级消息，更新全局记录
+	if priority >= def.PriorityLow {
+		w.lastLowPriorityTime.Store(currentTime)
+	}
+}
+
+// GetFairnessStatistics 获取公平性统计信息
+func (w *Worker) GetFairnessStatistics() map[string]interface{} {
+	currentTime := time.Now().UnixNano()
+	lastLowPriorityTime := w.lastLowPriorityTime.Load()
+
+	stats := map[string]interface{}{
+		"fairness_threshold_ms":  w.fairnessThresholdNs / 1_000_000,
+		"last_low_priority_time": lastLowPriorityTime,
+	}
+
+	if lastLowPriorityTime > 0 {
+		stats["time_since_last_low_priority_ms"] = (currentTime - lastLowPriorityTime) / 1_000_000
+		stats["is_starvation_risk"] = (currentTime - lastLowPriorityTime) > w.fairnessThresholdNs
+	} else {
+		stats["time_since_last_low_priority_ms"] = 0
+		stats["is_starvation_risk"] = false
+	}
+
+	return stats
+}
+
+// GetWorkerHealthStatus 获取Worker健康状态
+func (w *Worker) GetWorkerHealthStatus() map[string]interface{} {
+	totalQueueLength := w.GetTotalQueueLen()
+	pendingSignals := w.pendingSignals.Load()
+	currentTime := time.Now().UnixNano()
+
+	status := map[string]interface{}{
+		"worker_id":          w.workerId,
+		"is_closed":          w.closed.Load(),
+		"total_queue_length": totalQueueLength,
+		"pending_signals":    pendingSignals,
+		"current_time_ns":    currentTime,
+		"total_batch_limit":  w.totalBatchLimit,
+	}
+
+	// 添加非空队列信息
+	w.nonEmptyMutex.RLock()
+	nonEmptyCount := len(w.nonEmptyQueues)
+	nonEmptyPriorities := make([]def.Priority, 0, nonEmptyCount)
+	for priority := range w.nonEmptyQueues {
+		nonEmptyPriorities = append(nonEmptyPriorities, priority)
+	}
+	w.nonEmptyMutex.RUnlock()
+
+	status["non_empty_queue_count"] = nonEmptyCount
+	status["non_empty_priorities"] = nonEmptyPriorities
+
+	return status
+}
+
+// GetDetailedStatistics 获取详细的综合统计信息
+func (w *Worker) GetDetailedStatistics() map[string]interface{} {
+	return map[string]interface{}{
+		"priority_statistics":  w.GetPriorityStatistics(),
+		"scheduler_statistics": w.GetSchedulerStatistics(),
+		"fairness_statistics":  w.GetFairnessStatistics(),
+		"health_status":        w.GetWorkerHealthStatus(),
 	}
 }

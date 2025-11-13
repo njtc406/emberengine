@@ -27,9 +27,9 @@ const hashSalt = "ember_salt_key_y_w"
 
 func hashEvent(key string) int {
 	if key == "" {
-		return 1
+		return 0
 	}
-	return int(xxhash.Sum64String(key)) // 用 64-bit 更好分布
+	return int(xxhash.Sum64String(key)) //64-bit分布更均匀
 }
 
 // HashRing 表示一个带虚拟节点的一致性哈希环。
@@ -95,10 +95,15 @@ func (h *HashRing[T]) Get(hashKey string) (T, bool) {
 		return zero, false
 	}
 	hash := hashEvent(hashKey)
-	// 二分查找第一个 >= hash 的虚拟节点
-	idx := sort.Search(len(h.nodes), func(i int) bool {
-		return h.nodes[i] >= hash
-	})
+	var idx int
+	if hash == 0 {
+		idx = 0
+	} else {
+		// 二分查找第一个 >= hash 的虚拟节点
+		idx = sort.Search(len(h.nodes), func(i int) bool {
+			return h.nodes[i] >= hash
+		})
+	}
 	if idx == len(h.nodes) {
 		idx = 0
 	}

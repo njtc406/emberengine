@@ -22,16 +22,16 @@ func (e *Event) GetDispatcherKey() string {
 	return e.Data.Header[def.DefaultDispatcherKey]
 }
 
-func (e *Event) GetPriority() int32 {
+func (e *Event) GetPriority() def.Priority {
 	priority := e.Data.Header[def.DefaultPriorityKey]
 	if priority != "" {
 		priorityInt, err := strconv.Atoi(priority)
 		if err == nil {
-			return int32(priorityInt)
+			return def.Priority(priorityInt)
 		}
 	}
 
-	return def.PriorityUser
+	return def.PriorityNormal
 }
 
 func (e *Event) Marshal() ([]byte, error) {
