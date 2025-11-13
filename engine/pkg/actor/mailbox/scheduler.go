@@ -32,6 +32,7 @@ type WorkerConfig struct {
 
 func newDefaultPriorityMap() map[def.Priority]PriorityConfig {
 	return map[def.Priority]PriorityConfig{
+		def.PrioritySys:    {BatchSize: 64, Weight: 20},
 		def.PriorityUrgent: {BatchSize: 32, Weight: 10},
 		def.PriorityHigh:   {BatchSize: 16, Weight: 5},
 		def.PriorityNormal: {BatchSize: 8, Weight: 3},

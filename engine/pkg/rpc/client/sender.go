@@ -9,6 +9,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
 	"sync"
 )
 
@@ -37,9 +38,30 @@ var senderHandlerMap map[string]map[string]inf.IRpcSender
 
 func init() {
 	senderHandlerMap = make(map[string]map[string]inf.IRpcSender)
+
+	// 初始化连接池管理器
+	poolMgr := pool.GetGlobalPoolManager()
+
+	// 注册RPC创建器到连接池管理器
+	for rpcType, creator := range senderMap {
+		if rpcType != def.RpcTypeLocal { // 本地类型不需要连接池
+			poolMgr.RegisterCreator(rpcType, pool.SenderCreator(creator))
+		}
+	}
 }
 
 func getSenderHandler(addr string, tp string) inf.IRpcSender {
+	// 对于本地类型，使用原有逻辑
+	if tp == def.RpcTypeLocal {
+		return getOriginalSenderHandler(addr, tp)
+	}
+
+	// 对于远程类型，优先使用增强的连接池发送器
+	return NewEnhancedSender(addr, tp)
+}
+
+// getOriginalSenderHandler 原有的获取发送器逻辑（用于本地类型）
+func getOriginalSenderHandler(addr string, tp string) inf.IRpcSender {
 	lock.RLock()
 	if tps, ok := senderHandlerMap[addr]; ok {
 		if handler, ok := tps[tp]; ok {
@@ -78,11 +100,15 @@ func addSenderHandler(addr, tp string) inf.IRpcSender {
 }
 
 func Close() {
+	// 关闭原有的发送器
 	for _, tps := range senderHandlerMap {
 		for _, handler := range tps {
 			handler.Close()
 		}
 	}
+
+	// 关闭连接池管理器
+	pool.GetGlobalPoolManager().Close()
 }
 
 type Dispatcher struct {

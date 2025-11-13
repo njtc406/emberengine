@@ -31,6 +31,10 @@ type IMailbox interface {
 	Stop()
 	Suspend() bool
 	Resume() bool
+	// 注意：由于循环导入问题，我们不能直接引用WorkerConfig类型
+	// SetWorkerConfig和GetWorkerConfig方法将在具体实现中定义
+	SetWorkerConfig(config interface{})
+	GetWorkerConfig() interface{}
 }
 
 //type IDispatcher interface {

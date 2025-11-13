@@ -22,7 +22,20 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+// EventMetrics 事件指标统计
+type EventMetrics struct {
+	TotalPublished   int64 `json:"total_published"`
+	TotalDelivered   int64 `json:"total_delivered"`
+	TotalThrottled   int64 `json:"total_throttled"`
+	TotalBatched     int64 `json:"total_batched"`
+	AvgDeliveryTime  int64 `json:"avg_delivery_time_ns"`
+	PeakEventRate    int64 `json:"peak_event_rate"`
+	CurrentEventRate int64 `json:"current_event_rate"`
+	LastEventTime    int64 `json:"last_event_time"`
+}
 
 var bus *Bus
 
@@ -41,6 +54,14 @@ type Bus struct {
 	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
 	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
+
+	// 新增的事件分类和限流系统
+	eventRegistry   *EventRegistry           // 事件注册表
+	throttleManager *ThrottleManager         // 限流管理器
+	eventBuffer     map[int32][]*actor.Event // 事件缓冲区 (按类型批处理)
+	bufferMutex     sync.RWMutex             // 缓冲区锁
+	batchTicker     *time.Ticker             // 批处理定时器
+	metrics         *EventMetrics            // 事件指标
 }
 
 func GetEventBus() *Bus {
@@ -102,6 +123,16 @@ func switchOpts(conf *config.NatsConf) []nats.Option {
 }
 
 func (eb *Bus) Init(conf *config.EventBusConf) {
+	// 初始化事件分类和限流系统
+	eb.eventRegistry = NewEventRegistry()
+	eb.throttleManager = NewThrottleManager(eb.eventRegistry)
+	eb.eventBuffer = make(map[int32][]*actor.Event)
+	eb.metrics = &EventMetrics{}
+
+	// 启动批处理定时器 (每100ms处理一次缓冲)
+	eb.batchTicker = time.NewTicker(100 * time.Millisecond)
+	go eb.processBatchedEvents()
+
 	if conf != nil && conf.NatsConf != nil && len(conf.NatsConf.EndPoints) != 0 {
 		opts := switchOpts(conf.NatsConf)
 
@@ -139,6 +170,64 @@ func (eb *Bus) Stop() {
 		eb.nc.Close()
 		eb.nc = nil
 	}
+
+	// 停止批处理定时器
+	if eb.batchTicker != nil {
+		eb.batchTicker.Stop()
+	}
+
+	// 处理剩余的缓冲事件
+	eb.flushAllBuffers()
+}
+
+// processBatchedEvents 处理批量事件
+func (eb *Bus) processBatchedEvents() {
+	for range eb.batchTicker.C {
+		eb.flushAllBuffers()
+	}
+}
+
+// flushAllBuffers 刷新所有缓冲区
+func (eb *Bus) flushAllBuffers() {
+	eb.bufferMutex.Lock()
+	defer eb.bufferMutex.Unlock()
+
+	for eventType, events := range eb.eventBuffer {
+		if len(events) > 0 {
+			eb.flushEventBatch(eventType, events)
+			delete(eb.eventBuffer, eventType)
+		}
+	}
+}
+
+// flushEventBatch 刷新指定类型的事件批量
+func (eb *Bus) flushEventBatch(eventType int32, events []*actor.Event) {
+	if len(events) == 0 {
+		return
+	}
+
+	classification := eb.eventRegistry.GetClassification(eventType)
+
+	// 按照事件范围选择批量处理策略
+	switch classification.Scope {
+	case ScopeGlobal:
+		for _, event := range events {
+			eb.publishGlobal(event)
+		}
+	case ScopeCluster, ScopeRegion, ScopeNode:
+		for _, event := range events {
+			eb.publishServer(event)
+		}
+	default:
+		// 本地事件直接处理
+		for _, event := range events {
+			eb.publishGlobal(event) // 默认作为全局事件处理
+		}
+	}
+
+	// 更新指标
+	atomic.AddInt64(&eb.metrics.TotalBatched, int64(len(events)))
+	atomic.AddInt64(&eb.metrics.TotalDelivered, int64(len(events)))
 }
 
 func (eb *Bus) addSub(key string, sub *nats.Subscription) {
@@ -194,23 +283,79 @@ func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 	return e, nil
 }
 
-// PublishGlobal 发布全局事件
+// PublishGlobal 发布全局事件(带限流和批处理)
 func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
+	// 1. 检查限流
+	if !eb.throttleManager.Allow(eventType) {
+		atomic.AddInt64(&eb.metrics.TotalThrottled, 1)
+		log.SysLogger.Warnf("Event type %d throttled", eventType)
+		return fmt.Errorf("event type %d throttled", eventType)
+	}
+
+	// 2. 封装事件
 	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
+
+	// 3. 获取事件分类信息
+	classification := eb.eventRegistry.GetClassification(eventType)
+
+	// 4. 根据分类决定处理策略
+	if classification.BatchSize > 1 &&
+		(classification.Category == CategoryMetrics ||
+			classification.Category == CategoryStatistics ||
+			classification.Category == CategoryBusinessBatch) {
+		// 需要批处理的事件
+		return eb.addToBatch(eventType, e)
+	} else {
+		// 立即处理的事件
+		return eb.publishImmediately(e)
+	}
+}
+
+// addToBatch 添加到批处理缓冲区
+func (eb *Bus) addToBatch(eventType int32, event *actor.Event) error {
+	eb.bufferMutex.Lock()
+	defer eb.bufferMutex.Unlock()
+
+	if eb.eventBuffer[eventType] == nil {
+		eb.eventBuffer[eventType] = make([]*actor.Event, 0)
+	}
+
+	eb.eventBuffer[eventType] = append(eb.eventBuffer[eventType], event)
+	atomic.AddInt64(&eb.metrics.TotalPublished, 1)
+
+	// 检查是否达到批量大小限制
+	classification := eb.eventRegistry.GetClassification(eventType)
+	if len(eb.eventBuffer[eventType]) >= classification.BatchSize {
+		// 立即刷新该类型的批量
+		events := eb.eventBuffer[eventType]
+		delete(eb.eventBuffer, eventType)
+
+		// 在新的goroutine中处理，避免阻塞
+		go eb.flushEventBatch(eventType, events)
+	}
+
+	return nil
+}
+
+// publishImmediately 立即发布事件
+func (eb *Bus) publishImmediately(event *actor.Event) error {
+	atomic.AddInt64(&eb.metrics.TotalPublished, 1)
+	atomic.StoreInt64(&eb.metrics.LastEventTime, time.Now().UnixNano())
+
 	if eb.isNatsEnabled() {
 		// 发到nats
-		eventData, err := e.Marshal()
+		eventData, err := event.Marshal()
 		if err != nil {
 			return err
 		}
 
-		return eb.nc.Publish(eb.genKey(eb.globalPrefix, eventType), eventData)
+		return eb.nc.Publish(eb.genKey(eb.globalPrefix, event.EventType), eventData)
 	} else {
 		// 没有使用nats,那么直接触发本地事件
-		eb.publishGlobal(e)
+		eb.publishGlobal(event)
 		return nil
 	}
 }
@@ -415,4 +560,47 @@ func (eb *Bus) UnSubscribeServer(eventType int32, svc inf.IListener) {
 	if needUnListen {
 		eb.unSubscribe(key)
 	}
+}
+
+// === 新增的管理和监控方法 ===
+
+// GetEventMetrics 获取事件指标
+func (eb *Bus) GetEventMetrics() *EventMetrics {
+	return &EventMetrics{
+		TotalPublished:   atomic.LoadInt64(&eb.metrics.TotalPublished),
+		TotalDelivered:   atomic.LoadInt64(&eb.metrics.TotalDelivered),
+		TotalThrottled:   atomic.LoadInt64(&eb.metrics.TotalThrottled),
+		TotalBatched:     atomic.LoadInt64(&eb.metrics.TotalBatched),
+		AvgDeliveryTime:  atomic.LoadInt64(&eb.metrics.AvgDeliveryTime),
+		PeakEventRate:    atomic.LoadInt64(&eb.metrics.PeakEventRate),
+		CurrentEventRate: atomic.LoadInt64(&eb.metrics.CurrentEventRate),
+		LastEventTime:    atomic.LoadInt64(&eb.metrics.LastEventTime),
+	}
+}
+
+// GetThrottleStats 获取限流统计
+func (eb *Bus) GetThrottleStats() map[int32]*LimiterStats {
+	return eb.throttleManager.GetAllStats()
+}
+
+// RegisterCustomEventType 注册自定义事件类型
+func (eb *Bus) RegisterCustomEventType(classification *EventClassification) {
+	eb.eventRegistry.RegisterClassification(classification)
+}
+
+// ResetThrottle 重置指定事件类型的限流器
+func (eb *Bus) ResetThrottle(eventType int32) {
+	eb.throttleManager.Reset(eventType)
+}
+
+// GetBufferedEventCount 获取缓冲区中的事件数量
+func (eb *Bus) GetBufferedEventCount() map[int32]int {
+	eb.bufferMutex.RLock()
+	defer eb.bufferMutex.RUnlock()
+
+	counts := make(map[int32]int)
+	for eventType, events := range eb.eventBuffer {
+		counts[eventType] = len(events)
+	}
+	return counts
 }

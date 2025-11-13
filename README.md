@@ -147,8 +147,8 @@ err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).Send(ctx, "APIT
 ---
 
 ## 🛠 TODO
-
-
+* 将rpc拆分为独立项目,方便其他项目使用
+* 移动internal中的代码到pkg目录下
 ---
 
 ## 🤝 贡献指南

@@ -58,15 +58,30 @@ pool.SetWorkerConfig(workerConfig)
 ### 3. 自定义多级配置
 ```go
 // 自定义优先级配置
-priorities := []PriorityConfig{
-    {Level: PriorityUrgent, BatchSize: 50, Weight: 10},
-    {Level: PriorityHigh, BatchSize: 30, Weight: 7},
-    {Level: PriorityNormal, BatchSize: 20, Weight: 5},
-    {Level: PriorityLow, BatchSize: 10, Weight: 3},
+priorityMap := map[def.Priority]PriorityConfig{
+    def.PriorityUrgent:     {BatchSize: 50, Weight: 10},
+    def.PriorityHigh:       {BatchSize: 30, Weight: 7},
+    def.PriorityNormal:     {BatchSize: 20, Weight: 5},
+    def.PriorityLow:        {BatchSize: 10, Weight: 3},
+    def.PriorityBackground: {BatchSize: 5, Weight: 1},
 }
 
-workerConfig := CreateMultiLevelConfig(StrategyWeighted, priorities)
+workerConfig := CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
 pool.SetWorkerConfig(workerConfig)
+```
+
+### 4. 快捷创建方法
+```go
+// 使用新的快捷方法创建多级邮箱
+mailbox := NewDefaultMultiLevelMailbox(conf, invoker)
+
+// 或者使用自定义配置创建
+priorityMap := map[def.Priority]PriorityConfig{
+    def.PriorityUrgent: {BatchSize: 100, Weight: 20},
+    def.PriorityHigh:   {BatchSize: 50, Weight: 10},
+    def.PriorityNormal: {BatchSize: 30, Weight: 6},
+}
+mailbox := NewMultiLevelMailbox(conf, invoker, def.StrategyWeighted, priorityMap)
 ```
 
 ## 📝 使用示例
@@ -100,46 +115,59 @@ worker.submitLowPriEvent(event)  // 自动映射到PriorityLow
 worker.SubmitEventWithPriority(event, PriorityHigh) // 回退到submitHighPriEvent
 ```
 
+### 直接邮箱创建
+```go
+// 创建多级优先级邮箱
+conf := &config.WorkerConf{
+    WorkerNum: 4,
+}
+mailbox := NewDefaultMultiLevelMailbox(conf, invoker)
+mailbox.Start()
+
+// 使用邮箱
+mailbox.PostMessage(event)
+```
+
 ## 🎯 业务场景配置建议
 
 ### 游戏服务器配置
 ```go
 func RecommendedConfigForGameServer() *WorkerConfig {
-    priorities := []PriorityConfig{
+    priorityMap := map[def.Priority]PriorityConfig{
         {Level: PriorityUrgent, BatchSize: 100, Weight: 20}, // 系统关键消息
         {Level: PriorityHigh, BatchSize: 50, Weight: 10},    // 战斗相关
         {Level: PriorityNormal, BatchSize: 30, Weight: 6},   // 玩家操作
         {Level: PriorityLow, BatchSize: 20, Weight: 3},      // 聊天消息
         {Level: PriorityBackground, BatchSize: 10, Weight: 1}, // 数据统计
     }
-    return CreateMultiLevelConfig(StrategyWeighted, priorities)
+    return CreateMultiLevelConfig(StrategyWeighted, priorityMap)
 }
 ```
 
 ### Web服务器配置
 ```go
 func RecommendedConfigForWebServer() *WorkerConfig {
-    priorities := []PriorityConfig{
+    priorityMap := map[def.Priority]PriorityConfig{
         {Level: PriorityUrgent, BatchSize: 50, Weight: 15}, // API限流
         {Level: PriorityHigh, BatchSize: 40, Weight: 10},   // 用户请求
         {Level: PriorityNormal, BatchSize: 30, Weight: 6},  // 后台任务
         {Level: PriorityLow, BatchSize: 20, Weight: 3},     // 日志处理
         {Level: PriorityBatch, BatchSize: 100, Weight: 1},  // 批量数据
     }
-    return CreateMultiLevelConfig(StrategyWeighted, priorities)
+    return CreateMultiLevelConfig(StrategyWeighted, priorityMap)
 }
 ```
 
 ### 实时系统配置
 ```go
 func RecommendedConfigForRealtime() *WorkerConfig {
-    priorities := []PriorityConfig{
+    priorityMap := map[def.Priority]PriorityConfig{
         {Level: PriorityUrgent, BatchSize: 1},   // 实时消息：单个处理
         {Level: PriorityHigh, BatchSize: 5},     // 高优先级：小批量
         {Level: PriorityNormal, BatchSize: 10},  // 普通消息：标准批量
         {Level: PriorityLow, BatchSize: 20},     // 低优先级：大批量补偿
     }
-    return CreateAbsolutePriorityConfig(priorities) // 绝对优先策略
+    return CreateAbsolutePriorityConfig(priorityMap) // 绝对优先策略
 }
 ```
 

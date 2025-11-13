@@ -24,7 +24,7 @@ func NewDefaultMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, mid
 }
 
 func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
-	if e.GetPriority() != def.PrioritySys && m.isSuspended() {
+	if e.GetPriority() > def.PrioritySys && m.isSuspended() {
 		return def.ErrMailboxNotRunning
 	}
 	// TODO 可以在这里加入限流和熔断等等中间件的判断
@@ -49,4 +49,38 @@ func (m *defaultMailbox) Start() {
 
 func (m *defaultMailbox) Stop() {
 	m.workerPool.Stop()
+}
+
+// SetWorkerConfig 设置Worker配置参数（必须在Start之前调用）
+func (m *defaultMailbox) SetWorkerConfig(config interface{}) {
+	if workerConfig, ok := config.(*WorkerConfig); ok {
+		m.workerPool.SetWorkerConfig(workerConfig)
+	}
+}
+
+// GetWorkerConfig 获取Worker配置参数
+func (m *defaultMailbox) GetWorkerConfig() interface{} {
+	return m.workerPool.GetWorkerConfig()
+}
+
+// NewMultiLevelMailbox 创建一个多优先级邮箱
+func NewMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, strategy def.ScheduleStrategy, priorityMap map[def.Priority]PriorityConfig, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
+	mailbox := NewDefaultMailbox(conf, invoker, middlewares...)
+
+	// 创建多级配置
+	workerConfig := CreateMultiLevelConfig(strategy, priorityMap)
+	mailbox.SetWorkerConfig(workerConfig)
+
+	return mailbox
+}
+
+// NewDefaultMultiLevelMailbox 创建一个默认的多优先级邮箱
+func NewDefaultMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
+	mailbox := NewDefaultMailbox(conf, invoker, middlewares...)
+
+	// 使用默认的多级配置
+	workerConfig := CreateDefaultMultiLevelConfig()
+	mailbox.SetWorkerConfig(workerConfig)
+
+	return mailbox
 }

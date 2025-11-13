@@ -104,7 +104,7 @@ func (x *XContext) GetTranceId() string {
 func (x *XContext) GetDispatcherKey() string {
 	key, ok := emberctx.GetHeaderValue(x.Context, def.DefaultDispatcherKey).(string)
 	if !ok || key == "" {
-		key = def.PriorityUserStr
+		key = def.PriorityNormalStr
 	}
 	return key
 }
