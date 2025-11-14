@@ -7,18 +7,21 @@ package timingwheel
 
 import (
 	"container/list"
+	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 )
 
 type ITimer interface {
-	Do()
+	Do() error
 	GetName() string
 	GetTimerId() uint64
 }
@@ -55,25 +58,20 @@ func GetTimerPoolStats() *pool.Stats {
 }
 
 type TimerOption func(t *Timer)
-type TimerCallback func(timer *Timer, args ...interface{})
+type TimerCallback func(timer *Timer, args ...interface{}) error
 
 // Timer represents a single event. When the Timer expires, the given
 // task will be executed.
 type Timer struct {
 	dto.DataRef
 	Scheduler
-	timerId    uint64               // 任务唯一id
-	name       string               // 任务名称
-	expiration atomic.Int64         // in milliseconds 任务到期时间
-	interval   time.Duration        // 间隔时间 > 0 表示循环执行
-	spec       string               // cron表达式
-	cancel     atomic.Bool          // 任务是否已经取消
-	task       TimerCallback        // 任务
-	taskArgs   []interface{}        // 任务参数
-	c          chan ITimer          // timer触发通道(后面看下能不能使用mpsc来替换channel,效率可能会更高一点,后面做一下channel和mpsc的性能对比)
-	loop       func()               // 循环执行
-	asyncTask  func(...interface{}) // 异步任务
-	scheduler  *TaskScheduler       // 任务调度器
+	timerId    uint64         // 任务唯一id
+	generation atomic.Uint64  // Timer版本号，每次从池中获取时递增，用于防止ABA问题
+	snapGen    atomic.Uint64  // 快照版本号，在addOrRun中冻结，用于验证
+	expiration atomic.Int64   // in milliseconds 任务到期时间
+	cancel     atomic.Bool    // 任务是否已经取消
+	executing  atomic.Bool    // 标记是否正在执行
+	execWg     sync.WaitGroup // 等待执行完成
 
 	// The bucket that holds the list to which this timer's element belongs.
 	//
@@ -83,15 +81,32 @@ type Timer struct {
 
 	// The timer's element.
 	element *list.Element
+
+	// 以下字段需要在Timer创建初始化时设置，执行期间只读，因此是并发安全的
+	name      string               // 任务名称
+	interval  time.Duration        // 间隔时间 > 0 表示循环执行
+	spec      string               // cron表达式
+	task      TimerCallback        // 任务
+	taskArgs  []interface{}        // 任务参数
+	c         chan ITimer          // timer触发通道
+	loop      func()               // 循环执行
+	asyncTask func(...interface{}) // 异步任务
 }
 
 func (t *Timer) Reset() {
+	// 等待执行完成（使用WaitGroup，避免忙等待）
+	t.execWg.Wait()
+
+	// 递增版本号，使得旧的引用失效
+	t.generation.Add(1)
+
 	t.name = ""
 	t.timerId = 0
 	t.expiration.Store(0)
 	t.interval = 0
 	t.spec = ""
 	t.cancel.Store(false)
+	t.executing.Store(false)
 	t.task = nil
 	t.taskArgs = nil
 	t.c = nil
@@ -130,13 +145,15 @@ func (t *Timer) setBucket(b *bucket) {
 // Stop prevents the Timer from firing. It returns true if the call
 // stops the timer, false if the timer has already expired or been stopped.
 //
-// If the timer t has already expired and the t.task has been started in its own
-// goroutine; Stop does not wait for t.task to complete before returning. If the caller
-// needs to know whether t.task is completed, it must coordinate with t.task explicitly.
+// Stop will wait for any ongoing task execution to complete before returning.
 func (t *Timer) Stop() bool {
 	if !t.IsRef() || !t.cancel.CompareAndSwap(false, true) {
 		return false
 	}
+
+	// 等待正在执行的任务完成（使用WaitGroup，避免忙等待）
+	t.execWg.Wait()
+
 	stopped := false
 	for b := t.getBucket(); b != nil; b = t.getBucket() {
 		// If b.Remove is called just after the timing wheel's goroutine has:
@@ -155,26 +172,41 @@ func (t *Timer) isActive() bool {
 	return !t.cancel.Load()
 }
 
-func (t *Timer) Do() {
-	if t.isActive() {
-		if t.task != nil {
-			t.task(t, t.taskArgs...)
-		}
+func (t *Timer) Do() error {
+	// 检查是否正在执行
+	if !t.executing.CompareAndSwap(false, true) {
+		// 已经在执行中，不应该发生
+		return def.ErrRepeatExecute
+	}
+	// 标记正在执行，使用WaitGroup追踪，确保执行完成后释放
+	t.execWg.Add(1)
+	defer func() {
+		t.executing.Store(false)
+		t.execWg.Done()
+	}()
 
-		if t.loop == nil {
-			// 不是循环任务,释放任务
-			// 如果有关联了任务调度器,则移除调度器上的记录
-			if t.scheduler != nil {
-				_ = t.scheduler.remove(t.timerId)
-			}
-
-			// 释放任务
-			releaseTimer(t)
-		}
-		return
+	// 对比锁定版本和当前版本，防止ABA问题
+	if t.snapGen.Load() != t.generation.Load() {
+		// 版本号不匹配，说明Timer已被回收并复用
+		return def.ErrTimerReuse
 	}
 
-	releaseTimer(t)
+	if !t.isActive() {
+		// 任务已被取消
+		releaseTimer(t)
+		return nil
+	}
+	var err error
+	defer func() {
+		if r := recover(); r != nil {
+			// 记录日志
+			err = fmt.Errorf("task %s panic: %v", t.name, r)
+		}
+	}()
+
+	// 开始执行回调任务
+	err = t.task(t, t.taskArgs...)
+	return err
 }
 
 func (t *Timer) Next(tm time.Time) time.Time {
@@ -228,8 +260,4 @@ func (t *Timer) SetC(c chan ITimer) {
 
 func (t *Timer) SetAsyncTask(f func(...interface{})) {
 	t.asyncTask = f
-}
-
-func (t *Timer) SetScheduler(scheduler *TaskScheduler) {
-	t.scheduler = scheduler
 }

@@ -2,7 +2,7 @@ package timingwheel
 
 import (
 	"errors"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -120,16 +120,26 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 			releaseTimer(t)
 		}
 	}()
+
 	if !tw.add(t) {
+		// 任务已经过期，立即执行
+		// 在执行前冻结snapGen，防止ABA问题
+		t.snapGen.Store(t.generation.Load())
+
 		if t.asyncTask != nil {
+			// 安全地读取asyncTask和taskArgs（初始化后只读）
+			asyncTask := t.asyncTask
+			taskArgs := t.taskArgs
+			loop := t.loop
+
 			go func() {
 				defer func() {
 					if err := recover(); err != nil {
 						//log.SysLogger.Errorf("task panic, taskId:%d, err:%v", t.timerId, err)
 					}
 				}()
-				t.asyncTask(t.taskArgs...)
-				if t.loop == nil {
+				asyncTask(taskArgs...)
+				if loop == nil {
 					// 释放任务
 					releaseTimer(t)
 				}

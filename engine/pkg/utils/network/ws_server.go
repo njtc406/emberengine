@@ -2,13 +2,13 @@ package network
 
 import (
 	"crypto/tls"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 type WSServer struct {

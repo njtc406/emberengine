@@ -13,8 +13,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -44,7 +44,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 	concurrentNum := 100000
 	wg.Add(concurrentNum)
 	var startTime time.Time
-	_ = s.AfterFunc(time.Second, "test", func(timer *timingwheel.Timer, args ...interface{}) {
+	_ = s.AfterFunc(time.Second, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
 		// 使用协程不断调用
 		startTime = timelib.Now()
 		for i := 0; i < concurrentNum; i++ {
@@ -58,6 +58,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 				wg.Done()
 			})
 		}
+		return nil
 	})
 
 	go func() {
@@ -95,7 +96,7 @@ func (s *ConcurrencyTest) OnInit() error {
 
 	sema := make(chan struct{}, concurrency)
 
-	_ = s.AfterFunc(time.Second*1, "test", func(timer *timingwheel.Timer, args ...interface{}) {
+	_ = s.AfterFunc(time.Second*1, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
 		startTime = timelib.Now()
 
 		go func() {
@@ -164,6 +165,7 @@ func (s *ConcurrencyTest) OnInit() error {
 
 			}
 		}()
+		return nil
 	})
 
 	go func() {

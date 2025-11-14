@@ -7,7 +7,23 @@ import (
 )
 
 func TestInfo(t *testing.T) {
-	logger, err := NewDefaultLogger("./", "test", time.Hour*24*7, time.Hour*24, DebugLevelStr, true, false, true, true)
+	logger, err := NewDefaultLogger("./", &LoggerConf{
+		Path:  "log",
+		Name:  "xx.log",
+		Level: "info",
+		AsyncMode: &AsyncMode{
+			Enable: true,
+			Config: &AsyncWriterConfig{
+				BufferSize:    1024,
+				FlushInterval: time.Second,
+			},
+		},
+		Caller:       true,
+		FullCaller:   true,
+		Color:        false,
+		MaxAge:       time.Hour * 24 * 15,
+		RotationTime: time.Hour * 24,
+	}, true)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -38,7 +54,23 @@ func TestInfo(t *testing.T) {
 }
 
 func BenchmarkName(b *testing.B) {
-	logger, err := NewDefaultLogger("/dev/", "null", time.Hour*24*7, time.Hour*24, WarnLevelStr, true, false, true, false)
+	logger, err := NewDefaultLogger("./", &LoggerConf{
+		Path:  "log",
+		Name:  "xx.log",
+		Level: "info",
+		AsyncMode: &AsyncMode{
+			Enable: true,
+			Config: &AsyncWriterConfig{
+				BufferSize:    1024,
+				FlushInterval: time.Second,
+			},
+		},
+		Caller:       true,
+		FullCaller:   true,
+		Color:        false,
+		MaxAge:       time.Hour * 24 * 15,
+		RotationTime: time.Hour * 24,
+	}, true)
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -17,8 +17,9 @@ func (s *EveryScheduler) Next(prev time.Time) time.Time {
 
 var signCh = make(chan os.Signal, 1)
 
-func printTask(t *timingwheel.Timer, args ...interface{}) {
+func printTask(t *timingwheel.Timer, args ...interface{}) error {
 	fmt.Println(">>>>>>>>>>>>>task:", t.GetName())
+	return nil
 }
 
 func Example_scheduleTimer() {

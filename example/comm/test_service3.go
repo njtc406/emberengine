@@ -7,7 +7,7 @@ package comm
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/example/msg"
 )
 

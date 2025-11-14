@@ -6,9 +6,9 @@
 package client
 
 import (
-	"github.com/njtc406/emberengine/engine/internal/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"sync/atomic"
 )
 

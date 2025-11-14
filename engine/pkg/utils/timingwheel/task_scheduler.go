@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// ITimerScheduler 定时器调度器接口
 type ITimerScheduler interface {
 	AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer
@@ -38,6 +39,7 @@ var (
 	defaultSeed uint64 = 10000
 )
 
+// TimerBucket 定时器桶，用于存储和管理定时器任务
 type TimerBucket struct {
 	sync.Mutex
 	tasks map[uint64]*Timer
@@ -69,11 +71,14 @@ func (b *TimerBucket) remove(timerId uint64) *Timer {
 type TaskScheduler struct {
 	closed int32
 	shards []*TimerBucket
-
-	c chan ITimer
+	c      chan ITimer
+	tw     *TimingWheel // 关联的timingwheel实例
 }
 
-func NewTaskScheduler(chanSize, bucketSize int) ITimerScheduler {
+// NewTaskScheduler 创建一个新的任务调度器
+// chanSize: 回调通道大小
+// bucketSize: 桶数量，用于分片存储任务以提高并发性能
+func NewTaskScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler {
 	if chanSize <= 0 {
 		chanSize = 100000
 	}
@@ -89,6 +94,7 @@ func NewTaskScheduler(chanSize, bucketSize int) ITimerScheduler {
 	return &TaskScheduler{
 		shards: shards,
 		c:      make(chan ITimer, chanSize),
+		tw:     t,
 	}
 }
 
@@ -132,14 +138,20 @@ func (scheduler *TaskScheduler) GetTimerCbChannel() chan ITimer {
 
 // AfterFuncWithStorage 延时任务(任务会被保存下来)
 func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return 0, fmt.Errorf("timing wheel is not initialized")
+	}
+
 	// 创建task
 	tm := tw.AfterFunc(d, func(t *Timer) {
 		t.name = name
 		t.task = f
 		t.taskArgs = args
 		t.c = scheduler.c
-		t.scheduler = scheduler
 	})
+
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("after task add failed")
@@ -150,6 +162,12 @@ func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name strin
 
 // AfterFunc 添加任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return nil
+	}
+
 	// 创建task
 	return tw.AfterFunc(d, func(t *Timer) {
 		t.name = name
@@ -161,6 +179,12 @@ func (scheduler *TaskScheduler) AfterFunc(d time.Duration, name string, f TimerC
 
 // AfterAsyncFunc 异步执行任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return nil
+	}
+
 	// 创建task
 	return tw.AfterFunc(d, func(t *Timer) {
 		t.name = name
@@ -172,6 +196,12 @@ func (scheduler *TaskScheduler) AfterAsyncFunc(d time.Duration, name string, f f
 
 // TickerFuncWithStorage 循环任务(任务会被保存下来)
 func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return 0, fmt.Errorf("timing wheel is not initialized")
+	}
+
 	// 创建task
 	tm := tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
@@ -179,11 +209,11 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name stri
 		t.task = f
 		t.taskArgs = args
 		t.c = scheduler.c
-		t.scheduler = scheduler
 	})
 	if tm == nil {
 		return 0, fmt.Errorf("ticker task create failed")
 	}
+
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("ticker task add failed")
@@ -194,6 +224,12 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name stri
 
 // TickerFunc 循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return nil
+	}
+
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
@@ -206,6 +242,12 @@ func (scheduler *TaskScheduler) TickerFunc(d time.Duration, name string, f Timer
 
 // TickerAsyncFunc 异步循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return nil
+	}
+
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
@@ -222,6 +264,12 @@ func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, name string, f 
 // 示例: 0 */1 * * * 每分钟执行一次
 // 示例: @every 5s 每5秒执行一次
 func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return 0, fmt.Errorf("timing wheel is not initialized")
+	}
+
 	// 创建task
 	tm := tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
@@ -229,11 +277,11 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f 
 		t.task = f
 		t.taskArgs = args
 		t.c = scheduler.c
-		t.scheduler = scheduler
 	})
 	if tm == nil {
 		return 0, fmt.Errorf("cron task create failed")
 	}
+
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("cron task add failed")
@@ -243,6 +291,12 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f 
 }
 
 func (scheduler *TaskScheduler) CronFunc(spec string, name string, f TimerCallback, args ...interface{}) *Timer {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return nil
+	}
+
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
@@ -255,6 +309,12 @@ func (scheduler *TaskScheduler) CronFunc(spec string, name string, f TimerCallba
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *Timer {
+	// 获取关联的timingwheel实例
+	tw := scheduler.tw
+	if tw == nil {
+		return nil
+	}
+
 	// 创建task
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name

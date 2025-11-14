@@ -8,8 +8,8 @@ package interfaces
 import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // IService 服务接口

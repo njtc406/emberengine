@@ -8,12 +8,12 @@ package pool
 import (
 	"context"
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // ConnectionState 连接状态

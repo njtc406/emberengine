@@ -7,7 +7,7 @@ package session
 
 import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 	"sync"
 	"sync/atomic"

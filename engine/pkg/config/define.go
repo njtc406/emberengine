@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/viper"
 	"time"
 )

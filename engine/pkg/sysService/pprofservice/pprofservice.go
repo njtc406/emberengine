@@ -7,6 +7,7 @@ package pprofservice
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"net/http"
 	_ "net/http/pprof"
@@ -17,7 +18,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/sysModule/httpmodule"
 	"github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice/config"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 func init() {

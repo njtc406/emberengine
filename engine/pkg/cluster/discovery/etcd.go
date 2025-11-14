@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/connectivity"
@@ -13,7 +14,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 const (

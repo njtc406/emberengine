@@ -7,9 +7,10 @@ package core
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
+	log2 "github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"path"
 	"reflect"
@@ -25,7 +26,6 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
@@ -153,20 +153,20 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	// 初始化日志
 	if serviceInitConf.LogConf.Enable {
-		logger, err := log.NewDefaultLogger(path.Join(serviceInitConf.LogConf.Config.Path, serviceInitConf.LogConf.Config.Name), serviceInitConf.LogConf.Config, config.IsDebug())
+		logger, err := log2.NewDefaultLogger(path.Join(serviceInitConf.LogConf.Config.Path, serviceInitConf.LogConf.Config.Name), serviceInitConf.LogConf.Config, config.IsDebug())
 		if err != nil {
-			log.SysLogger.Panicf("service[%s] init logger error: %s", s.GetName(), err)
+			log2.SysLogger.Panicf("service[%s] init logger error: %s", s.GetName(), err)
 		} else {
 			s.logger = logger
 		}
 	} else {
 		// 使用系统日志
-		s.logger = log.SysLogger
+		s.logger = log2.SysLogger
 	}
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
-	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
+	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
 	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s)
 
@@ -438,7 +438,7 @@ func (s *Service) IsPrivate() bool {
 	return s.methodMgr.IsPrivate()
 }
 
-func (s *Service) GetLogger() log.ILogger {
+func (s *Service) GetLogger() log2.ILogger {
 	return s.logger
 }
 

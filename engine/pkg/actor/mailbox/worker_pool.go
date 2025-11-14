@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"context"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 type Scaler interface {

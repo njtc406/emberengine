@@ -94,19 +94,19 @@ ServiceConf:
         DynamicWorkerScaling: false
         # 虚拟线程比例
         VirtualWorkerRate: 10
-    - ClassName: PprofService
-      ServiceName: PprofService
-      Type: test
-      ServerId: 1
-      TimerConf:
-        TimerSize: 1000
-        TimerBucketSize: 100
-      WorkerConf:
-        UserMailboxSize: 102400
-        SystemMailboxSize: 16
-        WorkerNum: 1
-        DynamicWorkerScaling: false
-        VirtualWorkerRate: 10
+#    - ClassName: PprofService
+#      ServiceName: PprofService
+#      Type: test
+#      ServerId: 1
+#      TimerConf:
+#        TimerSize: 1000
+#        TimerBucketSize: 100
+#      WorkerConf:
+#        UserMailboxSize: 102400
+#        SystemMailboxSize: 16
+#        WorkerNum: 1
+#        DynamicWorkerScaling: false
+#        VirtualWorkerRate: 10
 
 
 

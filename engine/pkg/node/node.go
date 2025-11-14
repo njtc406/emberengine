@@ -7,6 +7,8 @@ package node
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"github.com/njtc406/emberengine/engine/pkg/utils/title"
 	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
@@ -16,12 +18,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/internal/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pid"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
@@ -151,11 +151,12 @@ func Start(opts ...StartOption) {
 	}
 
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
-	timingwheel.Stop()
+
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()
 	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
+	timingwheel.Stop()
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
 	title.GracefulExit(time.Since(startTime), param.Version)

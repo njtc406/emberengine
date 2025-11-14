@@ -7,10 +7,10 @@ package pool
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // SenderCreator 发送器创建函数类型

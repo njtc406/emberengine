@@ -234,6 +234,7 @@ func (s *Service) handleTimerCallback(ev inf.IEvent, open bool, analyzer *profil
 	if open {
 		analyzer = s.profiler.Push(fmt.Sprintf("[USER_TIME_CB] name:%s", t.GetName()))
 	}
+	// Timer.Do()内部已经有版本验证，防止ABA问题
 	t.Do()
 }
 

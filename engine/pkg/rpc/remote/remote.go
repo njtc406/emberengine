@@ -8,8 +8,8 @@ package remote
 import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 func NewRemote() *Remote {
