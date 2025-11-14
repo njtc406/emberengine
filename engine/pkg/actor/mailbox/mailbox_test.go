@@ -61,8 +61,8 @@ func TestNewDefaultMultiLevelMailbox(t *testing.T) {
 	}
 
 	// 不启动邮箱，因为测试环境中没有完整的日志系统
-	// mailbox.Start()
-	// mailbox.Stop()
+	//mailbox.Start()
+	//mailbox.Stop()
 }
 
 // TestNewMultiLevelMailbox 测试创建自定义多级邮箱

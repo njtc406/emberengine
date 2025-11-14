@@ -8,8 +8,8 @@ package concurrent
 import (
 	"fmt"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/panjf2000/ants/v2"
 )
 

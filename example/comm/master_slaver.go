@@ -260,7 +260,7 @@ func (s *MasterSlaverTest) RpcSyncLog(req *msg.TestLog) error {
 	return nil
 }
 
-func (s *MasterSlaverTest) tick(timer *timingwheel.Timer, args ...interface{}) {
+func (s *MasterSlaverTest) tick(timer *timingwheel.Timer, args ...interface{}) error {
 	opt := util.RandN[int32](4)     // 产生一个0-3的操作
 	param := util.RandN[int32](100) // 随机产生一个参数
 
@@ -284,12 +284,14 @@ func (s *MasterSlaverTest) tick(timer *timingwheel.Timer, args ...interface{}) {
 	}
 
 	// TODO 如果有任何需要操作其他的东西,都只有主服务可以进行后续,从服务只做数据更新
+	return nil
 }
 
-func (s *MasterSlaverTest) saveAllData(timer *timingwheel.Timer, args ...interface{}) {
+func (s *MasterSlaverTest) saveAllData(timer *timingwheel.Timer, args ...interface{}) error {
 	// 定时做完整数据镜像,并清空log
 
 	s.logs = s.logs[:0]
+	return nil
 }
 
 func (s *MasterSlaverTest) option(opt, param int32) {

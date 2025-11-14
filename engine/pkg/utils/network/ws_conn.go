@@ -2,11 +2,11 @@ package network
 
 import (
 	"errors"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"net"
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 type WebsocketConnSet map[*websocket.Conn]struct{}

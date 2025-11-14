@@ -1,11 +1,11 @@
 package network
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 type WSClient struct {

@@ -6,11 +6,10 @@
 package pool
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // CircuitBreakerState 熔断器状态

@@ -1,7 +1,7 @@
 package monitor
 
 import (
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"testing"
 	"time"
 )

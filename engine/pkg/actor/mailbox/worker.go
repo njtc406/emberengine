@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"reflect"
 	"runtime/debug"
 	"sort"
@@ -17,7 +18,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
 

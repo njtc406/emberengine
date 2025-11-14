@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"os"
 	"path"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/njtc406/emberengine/engine/pkg/config/remote"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/validate"
 	"github.com/njtc406/viper"
 )

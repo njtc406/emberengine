@@ -13,8 +13,9 @@ func genD(i int) time.Duration {
 
 var dp = timingwheel.NewTaskScheduler(10000000, 1)
 
-func printTask1(t *timingwheel.Timer, args ...interface{}) {
+func printTask1(t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+	return nil
 }
 
 func BenchmarkTimingWheel_StartStop(b *testing.B) {

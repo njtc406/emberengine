@@ -46,6 +46,8 @@ var (
 	ErrSelectEmptyResult               = errors.New("select empty result")                       // 查询结果为空
 	ErrEnvelopeNotFound                = errors.New("envelope not found")                        // 找不到 envelope
 	RouterNotFound                     = errors.New("router not found")                          // 未找到路由
+	ErrRepeatExecute                   = errors.New("repeat execute")                            // 重复执行
+	ErrTimerReuse                      = errors.New("timer reuse")                               // 定时器复用
 )
 
 //type RpcErr string

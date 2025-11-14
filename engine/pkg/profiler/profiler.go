@@ -3,10 +3,9 @@ package profiler
 import (
 	"container/list"
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
-
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 )
 
 // DefaultMaxOvertime 最大超时时间，一般可以认为是死锁或者死循环，或者极差的性能问题

@@ -6,12 +6,12 @@
 package gr
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"net"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"google.golang.org/grpc"
 )
 

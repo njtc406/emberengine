@@ -7,6 +7,7 @@ package monitor
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"sync"
 	"sync/atomic"
@@ -14,7 +15,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
@@ -83,10 +83,10 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 	rm.locker.Lock()
 	defer rm.locker.Unlock()
 
-	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) {
+	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
 		elp := args[0].(inf.IEnvelope)
-		if !elp.IsRef() {
-			return
+		if !elp.IsRef() || elp.GetMeta().GetTimerId() != tm.GetTimerId() {
+			return nil
 		}
 		reqId := elp.GetMeta().GetReqId()
 		rm.locker.Lock()
@@ -96,17 +96,18 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 		rm.locker.Unlock()
 		if !ok {
 			// 已经在其他地方被移除了,不再执行后续的超时
-			return
+			return nil
 		}
 
 		if elp == nil || !elp.IsRef() {
 			log.SysLogger.WithContext(elp.GetContext()).Errorf("call seq is not find,seq:%d", tm.GetTimerId())
-			return
+			return nil
 		}
 
 		log.SysLogger.WithContext(elp.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s", int64(elp.GetMeta().GetTimeout().Seconds()), envelope.GetData().GetMethod())
 		// 调用超时,执行超时回调
 		rm.callTimeout(elp)
+		return nil
 	}, envelope)
 	if err != nil {
 		log.SysLogger.WithContext(envelope.GetContext()).Errorf("add monitor failed,error:%s", err)

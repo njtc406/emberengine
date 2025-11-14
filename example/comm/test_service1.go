@@ -9,7 +9,7 @@ import (
 	"context"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"time"
@@ -32,7 +32,7 @@ func (s *Service1) OnInit() error {
 	var ctx context.Context
 
 	// method test demo
-	s.AfterFunc(time.Second, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) {
+	s.AfterFunc(time.Second, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) error {
 		//startTime := timelib.GetTime()
 		// 调用Service2.APITest2
 		ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*10)
@@ -58,8 +58,9 @@ func (s *Service1) OnInit() error {
 		}
 		s.GetLogger().WithContext(ctx).Debugf("==========================================4444")
 		//log.SysLogger.Debugf("call Service2.APITest2 cost:%d", timelib.Since(startTime).Microseconds())
+		return nil
 	})
-	//s.AfterFunc(time.Second*2, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*2, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APITest2 带返回参数
 	//	var out int
 	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APISum", []interface{}{1, 2}, &out); err != nil {
@@ -67,9 +68,10 @@ func (s *Service1) OnInit() error {
 	//	}
 	//	s.GetLogger().Debugf("==========================================5555")
 	//	log.SysLogger.Debugf("call Service2.APISum out:%d", out)
+	//	return nil
 	//})
 	//
-	//s.AfterFunc(time.Second*3, "method test demo2", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*3, "method test demo2", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APITest2 不同类型入参
 	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintParams", []interface{}{1, "2"}, nil); err != nil {
 	//		log.SysLogger.Errorf("call Service2.APIPrintParams failed, err:%v", err)
@@ -80,16 +82,18 @@ func (s *Service1) OnInit() error {
 	//		log.SysLogger.Errorf("call Service2.APIPrintParams failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================777777777")
+	//	return nil
 	//})
-	//s.AfterFunc(time.Second*4, "method test demo3", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*4, "method test demo3", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APITest2 可变参数
 	//	type abc struct{ a, b int }
 	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintIndefiniteParams", []interface{}{1, "2", abc{1, 2}, "ddddd"}, nil); err != nil {
 	//		log.SysLogger.Errorf("call Service2.APIPrintIndefiniteParams failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================888888888")
+	//	return nil
 	//})
-	//s.AfterFunc(time.Second*5, "method test demo4", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*5, "method test demo4", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APITest2 多返回值
 	//	var out int
 	//	var out2 string
@@ -98,20 +102,22 @@ func (s *Service1) OnInit() error {
 	//	}
 	//	s.GetLogger().Debugf("==========================================99999999999")
 	//	log.SysLogger.Debugf("call Service2.APIMultiRet out:%d, out2:%s", out, out2)
+	//	return nil
 	//})
 	//
-	//s.AfterFunc(time.Second*6, "method test demo5", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*6, "method test demo5", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APICallback 两个service相互调用(请注意,如果是相互调用,只能是非阻塞类型的调用!!!不然会发生死锁!!!)
 	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Send(ctx, "APICallback", nil); err != nil {
 	//		log.SysLogger.Errorf("call Service2.APICallback failed, err:%v", err)
 	//	}
 	//
 	//	s.GetLogger().Debugf("==========================================10")
+	//	return nil
 	//})
 	//
 	////rpc test demo
 	//
-	//s.AfterFunc(time.Second*7, "rpc test demo", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*7, "rpc test demo", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	//if err := s.Select(rpc.WithName(ServiceName3), rpc.WithSid("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
 	//	//	log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
 	//	//}
@@ -124,8 +130,9 @@ func (s *Service1) OnInit() error {
 	//	//if err := s.Select(rpc.WithName(ServiceName3), rpc.WithSid("1")).Send(ctx, "RPCTest2", nil); err != nil {
 	//	//	log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
 	//	//}
+	//	return nil
 	//})
-	//s.AfterFunc(time.Second*8, "rpc test demo1", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*8, "rpc test demo1", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	out := &msg.Msg_Test_Resp{}
 	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, out); err != nil {
 	//		log.SysLogger.Errorf("call Service3.RPCSum failed, err:%v", err)
@@ -165,10 +172,11 @@ func (s *Service1) OnInit() error {
 	//		log.SysLogger.Errorf("call Service3.RpcTestWithError failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================16")
+	//	return nil
 	//})
 	//
 	////cast test
-	////s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) {
+	////s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
 	////	log.SysLogger.Debugf("================================>>>")
 	////	// 1. 让node2开启多线程,然后调用10次cast
 	////	for i := 0; i < 10; i++ {
@@ -178,15 +186,17 @@ func (s *Service1) OnInit() error {
 	////	// 2. 让node2开启单线程,然后调用1次cast
 	////	s.SelectSameServerByServiceType("test", "Service3").Send(ctx, "RPCTest2", nil)
 	////	s.GetLogger().Debugf("==========================================18")
+	////	return nil
 	////})
 	//
 	//// other test
-	////s.AfterFunc(time.Second*7, "other test", func(timer *timingwheel.Timer, args ...interface{}) {
+	////s.AfterFunc(time.Second*7, "other test", func(timer *timingwheel.Timer, args ...interface{}) error {
 	////	// TODO 测试各种类型的筛选器
+	////	return nil
 	////})
 	//
 	//// 测试各种参数情况
-	//s.AfterFunc(time.Second*10, "test2", func(timer *timingwheel.Timer, args ...interface{}) {
+	//s.AfterFunc(time.Second*10, "test2", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	var out int
 	//	// 1. 固定参数->全部参数 (正常调用)
 	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIWithFixedParams", []interface{}{1, 2}, &out); err != nil {
@@ -304,6 +314,7 @@ func (s *Service1) OnInit() error {
 	//	s.GetLogger().Debugf("==========================================34")
 	//	// 输出 1, 1
 	//	log.SysLogger.Debugf("call Service2.APIWithMultiResults 4 out1:%d, out2:%d", out1, out2)
+	//	return nil
 	//})
 
 	return nil

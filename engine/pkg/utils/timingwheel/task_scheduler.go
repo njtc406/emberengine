@@ -132,7 +132,7 @@ func (scheduler *TaskScheduler) GetTimerCbChannel() chan ITimer {
 
 // AfterFuncWithStorage 延时任务(任务会被保存下来)
 func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
-	// 创建task
+	// 创建task，在options中设置所有字段，确保在加入时间轮前初始化完成
 	tm := tw.AfterFunc(d, func(t *Timer) {
 		t.name = name
 		t.task = f
@@ -140,6 +140,7 @@ func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name strin
 		t.c = scheduler.c
 		t.scheduler = scheduler
 	})
+
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("after task add failed")
@@ -150,7 +151,7 @@ func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name strin
 
 // AfterFunc 添加任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	return tw.AfterFunc(d, func(t *Timer) {
 		t.name = name
 		t.task = f
@@ -161,7 +162,7 @@ func (scheduler *TaskScheduler) AfterFunc(d time.Duration, name string, f TimerC
 
 // AfterAsyncFunc 异步执行任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	return tw.AfterFunc(d, func(t *Timer) {
 		t.name = name
 		t.asyncTask = f
@@ -172,7 +173,7 @@ func (scheduler *TaskScheduler) AfterAsyncFunc(d time.Duration, name string, f f
 
 // TickerFuncWithStorage 循环任务(任务会被保存下来)
 func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	tm := tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
 		t.interval = d
@@ -184,6 +185,7 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name stri
 	if tm == nil {
 		return 0, fmt.Errorf("ticker task create failed")
 	}
+
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("ticker task add failed")
@@ -194,7 +196,7 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name stri
 
 // TickerFunc 循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) *Timer {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
 		t.interval = d
@@ -206,7 +208,7 @@ func (scheduler *TaskScheduler) TickerFunc(d time.Duration, name string, f Timer
 
 // TickerAsyncFunc 异步循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) *Timer {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
 		t.interval = d
@@ -222,7 +224,7 @@ func (scheduler *TaskScheduler) TickerAsyncFunc(d time.Duration, name string, f 
 // 示例: 0 */1 * * * 每分钟执行一次
 // 示例: @every 5s 每5秒执行一次
 func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	tm := tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
 		t.spec = spec
@@ -234,6 +236,7 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f 
 	if tm == nil {
 		return 0, fmt.Errorf("cron task create failed")
 	}
+
 	// 加入任务
 	if !scheduler.add(tm) {
 		return 0, fmt.Errorf("cron task add failed")
@@ -243,7 +246,7 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f 
 }
 
 func (scheduler *TaskScheduler) CronFunc(spec string, name string, f TimerCallback, args ...interface{}) *Timer {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
 		t.spec = spec
@@ -255,7 +258,7 @@ func (scheduler *TaskScheduler) CronFunc(spec string, name string, f TimerCallba
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
 func (scheduler *TaskScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) *Timer {
-	// 创建task
+	// 创建task，在options中设置所有字段
 	return tw.ScheduleFunc(func(t *Timer) {
 		t.name = name
 		t.spec = spec
