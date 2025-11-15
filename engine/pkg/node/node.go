@@ -151,11 +151,12 @@ func Start(opts ...StartOption) {
 	}
 
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
-	timingwheel.Stop()
+
 	services.StopAll()
 	cluster.GetCluster().Close()
 	monitor.GetRpcMonitor().Stop()
 	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
+	timingwheel.Stop()
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
 	title.GracefulExit(time.Since(startTime), param.Version)

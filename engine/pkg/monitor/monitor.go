@@ -39,7 +39,7 @@ func GetRpcMonitor() *RpcMonitor {
 func (rm *RpcMonitor) Init() inf.IMonitor {
 	rm.closed = make(chan struct{})
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.sd = timingwheel.NewTaskScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize)
+	rm.sd = timingwheel.NewTaskScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize, timingwheel.GetTimingWheel())
 	return rm
 }
 

@@ -166,7 +166,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
-	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize)
+	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
 	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s)
 

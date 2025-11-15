@@ -42,3 +42,9 @@ func Stop() {
 		tw = nil
 	}
 }
+
+func GetTimingWheel() *TimingWheel {
+	twMutex.Lock()
+	defer twMutex.Unlock()
+	return tw
+}
