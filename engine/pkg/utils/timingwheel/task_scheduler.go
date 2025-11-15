@@ -150,7 +150,6 @@ func (scheduler *TaskScheduler) AfterFuncWithStorage(d time.Duration, name strin
 		t.task = f
 		t.taskArgs = args
 		t.c = scheduler.c
-		t.scheduler = scheduler
 	})
 
 	// 加入任务
@@ -210,7 +209,6 @@ func (scheduler *TaskScheduler) TickerFuncWithStorage(d time.Duration, name stri
 		t.task = f
 		t.taskArgs = args
 		t.c = scheduler.c
-		t.scheduler = scheduler
 	})
 	if tm == nil {
 		return 0, fmt.Errorf("ticker task create failed")
@@ -279,7 +277,6 @@ func (scheduler *TaskScheduler) CronFuncWithStorage(spec string, name string, f 
 		t.task = f
 		t.taskArgs = args
 		t.c = scheduler.c
-		t.scheduler = scheduler
 	})
 	if tm == nil {
 		return 0, fmt.Errorf("cron task create failed")

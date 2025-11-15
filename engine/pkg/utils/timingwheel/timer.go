@@ -91,7 +91,6 @@ type Timer struct {
 	c         chan ITimer          // timer触发通道
 	loop      func()               // 循环执行
 	asyncTask func(...interface{}) // 异步任务
-	scheduler *TaskScheduler       // 任务调度器
 }
 
 func (t *Timer) Reset() {
@@ -113,7 +112,6 @@ func (t *Timer) Reset() {
 	t.c = nil
 	t.loop = nil
 	t.asyncTask = nil
-	t.scheduler = nil
 	t.b = nil
 	t.element = nil
 }
@@ -262,8 +260,4 @@ func (t *Timer) SetC(c chan ITimer) {
 
 func (t *Timer) SetAsyncTask(f func(...interface{})) {
 	t.asyncTask = f
-}
-
-func (t *Timer) SetScheduler(scheduler *TaskScheduler) {
-	t.scheduler = scheduler
 }
