@@ -20,18 +20,14 @@ type EventHandler func(ev inf.IEvent, open bool, analyzer *profiler.Analyzer)
 
 // 初始化事件处理器
 func (s *Service) initEventHandlers() {
-	s.userEventHandlers = make(map[int32]EventHandler)
-	s.sysEventHandlers = make(map[int32]EventHandler)
-
-	// 注册系统事件处理器
-	s.RegisterSystemHandler(event.ServiceSuspended, s.handleServiceSuspended)
-	s.RegisterSystemHandler(event.ServiceResumed, s.handleServiceResumed)
-	s.RegisterSystemHandler(event.SysEventServiceClose, s.handleServiceClose)
-	s.RegisterSystemHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
-	s.RegisterSystemHandler(event.ServiceGlobalEventTrigger, s.handleSystemGlobalEvent)
-	s.RegisterSystemHandler(event.RpcMsg, s.handleSystemRpcMsg)
-
-	// 注册各种用户事件处理器
+	s.eventHandlers = make(map[int32]EventHandler)
+	// 注册事件处理器
+	s.RegisterUserHandler(event.ServiceSuspended, s.handleServiceSuspended)
+	s.RegisterUserHandler(event.ServiceResumed, s.handleServiceResumed)
+	s.RegisterUserHandler(event.SysEventServiceClose, s.handleServiceClose)
+	s.RegisterUserHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
+	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleSystemGlobalEvent)
+	s.RegisterUserHandler(event.RpcMsg, s.handleSystemRpcMsg)
 	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
 	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
 	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
@@ -40,66 +36,11 @@ func (s *Service) initEventHandlers() {
 
 // RegisterUserHandler 注册事件处理器
 func (s *Service) RegisterUserHandler(tp int32, handler EventHandler) {
-	s.userEventHandlers[tp] = handler
+	s.eventHandlers[tp] = handler
 }
 
-// RegisterSystemHandler 注册系统消息处理器
-func (s *Service) RegisterSystemHandler(tp int32, handler EventHandler) {
-	s.sysEventHandlers[tp] = handler
-}
-
-// InvokeSystemMessage 处理系统事件(这个函数是在mailbox的线程中被调用的)
-func (s *Service) InvokeSystemMessage(ev inf.IEvent) {
-	if !ev.IsRef() {
-		return
-	}
-	defer ev.Release()
-
-	for _, hook := range s.sysMsgHooks {
-		if !hook(ev) {
-			break
-		}
-	}
-
-	tp := ev.GetType()
-	//s.logger.WithContext(ev.GetContext()).Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>service[%s] receive system event[%d]", s.GetName(), tp)
-
-	var analyzer *profiler.Analyzer
-	open := s.profiler != nil
-
-	defer func() {
-		if analyzer != nil {
-			analyzer.Pop()
-		}
-	}()
-
-	// 查找注册的处理器
-	if handler, ok := s.sysEventHandlers[tp]; ok {
-		// 对于需要安全执行的处理器，在外层包装safeExec
-		if tp == event.ServiceGlobalEventTrigger || tp == event.RpcMsg {
-			s.safeExec(func() {
-				if open {
-					analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", tp))
-				}
-				handler(ev, open, analyzer)
-			})
-		} else {
-			if open {
-				analyzer = s.profiler.Push(fmt.Sprintf("[SYS_MSG] type:%d", tp))
-			}
-			handler(ev, open, analyzer)
-		}
-	} else {
-		// 默认处理器
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_OTHER_EVENT] type:%d", tp))
-		}
-		s.eventProcessor.EventHandler(ev)
-	}
-}
-
-// InvokeUserMessage 处理用户事件(这个函数是在mailbox的线程中被调用的)
-func (s *Service) InvokeUserMessage(ev inf.IEvent) {
+// InvokeMessage 处理事件(这个函数是在mailbox的线程中被调用的)
+func (s *Service) InvokeMessage(ev inf.IEvent) {
 	if !ev.IsRef() {
 		// 前面的超时之后导致后面的已经被丢弃
 		return
@@ -124,15 +65,18 @@ func (s *Service) InvokeUserMessage(ev inf.IEvent) {
 	}()
 
 	// 查找注册的处理器
-	if handler, ok := s.userEventHandlers[tp]; ok {
+	if handler, ok := s.eventHandlers[tp]; ok {
 		s.safeExec(func() {
+			if open {
+				analyzer = s.profiler.Push(fmt.Sprintf("[EVENT] type:%d", tp))
+			}
 			handler(ev, open, analyzer)
 		})
 	} else {
 		// 默认处理器
 		s.safeExec(func() {
 			if open {
-				analyzer = s.profiler.Push(fmt.Sprintf("[USER_OTHER_EVENT] type:%d", tp))
+				analyzer = s.profiler.Push(fmt.Sprintf("[OTHER_EVENT] type:%d", tp))
 			}
 			s.eventProcessor.EventHandler(ev)
 		})

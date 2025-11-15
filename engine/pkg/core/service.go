@@ -6,10 +6,11 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
-	log2 "github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"path"
@@ -51,8 +52,7 @@ type Service struct {
 
 	profiler *profiler.Profiler // 性能监控
 
-	userEventHandlers map[int32]EventHandler
-	sysEventHandlers  map[int32]EventHandler
+	eventHandlers map[int32]EventHandler
 
 	userMsgHooks []MsgHookFun
 	sysMsgHooks  []MsgHookFun
@@ -153,22 +153,22 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	// 初始化日志
 	if serviceInitConf.LogConf.Enable {
-		logger, err := log2.NewDefaultLogger(path.Join(serviceInitConf.LogConf.Config.Path, serviceInitConf.LogConf.Config.Name), serviceInitConf.LogConf.Config, config.IsDebug())
+		logger, err := log.NewDefaultLogger(path.Join(serviceInitConf.LogConf.Config.Path, serviceInitConf.LogConf.Config.Name), serviceInitConf.LogConf.Config, config.IsDebug())
 		if err != nil {
-			log2.SysLogger.Panicf("service[%s] init logger error: %s", s.GetName(), err)
+			log.SysLogger.Panicf("service[%s] init logger error: %s", s.GetName(), err)
 		} else {
 			s.logger = logger
 		}
 	} else {
 		// 使用系统日志
-		s.logger = log2.SysLogger
+		s.logger = log.SysLogger
 	}
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
-	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s)
+	s.mailbox = mailbox.NewDefaultMultiLevelMailbox(serviceInitConf.WorkerConf, s)
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)
@@ -438,8 +438,12 @@ func (s *Service) IsPrivate() bool {
 	return s.methodMgr.IsPrivate()
 }
 
-func (s *Service) GetLogger() log2.ILogger {
+func (s *Service) GetLogger() log.ILogger {
 	return s.logger
+}
+
+func (s *Service) LoggerWithCtx(ctx context.Context) *log.Entry {
+	return s.logger.WithContext(ctx)
 }
 
 func (s *Service) IsPrimarySecondaryMode() bool {

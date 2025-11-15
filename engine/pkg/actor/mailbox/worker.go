@@ -149,7 +149,7 @@ func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *Worker {
 	return w
 }
 
-// SubmitEvent 提交事件（优化版：简化信号逻辑并添加非空队列跟踪）
+// SubmitEvent 提交事件（修复版：确保非空队列集合正确更新）
 func (w *Worker) SubmitEvent(e inf.IEvent) error {
 	// 检查Worker是否已关闭（双重检查）
 	if w.closed.Load() {
@@ -169,18 +169,15 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 	}
 
 	// 提交消息到对应的优先级队列
-	wasEmpty := que.Empty()
 	que.Push(e)
 
-	// 如果队列从空变为非空，添加到非空队列集合
-	if wasEmpty {
-		w.nonEmptyMutex.Lock()
-		// 三重检查：确保Worker未关闭且队列确实非空
-		if !w.closed.Load() && que.Len() > 0 {
-			w.nonEmptyQueues[priority] = struct{}{}
-		}
-		w.nonEmptyMutex.Unlock()
+	// 更新非空队列集合（修复：Push后直接检查队列是否非空）
+	w.nonEmptyMutex.Lock()
+	// 只要队列非空，就添加到非空集合
+	if !w.closed.Load() && que.Len() > 0 {
+		w.nonEmptyQueues[priority] = struct{}{}
 	}
+	w.nonEmptyMutex.Unlock()
 
 	// 最后检查：只有在Worker未关闭时才发送信号
 	if !w.closed.Load() {
@@ -228,7 +225,6 @@ func (w *Worker) run() {
 		}
 	}()
 
-	// 真正的事件驱动循环：等待→处理→等待
 	for !w.closed.Load() {
 		// 阻塞等待新消息通知
 		w.waitForNewMessages()
@@ -296,7 +292,7 @@ func (w *Worker) signalNewMessageSafely() {
 	}
 }
 
-// waitForNewMessages 使用原子计数器等待新消息（优化版：避免信号丢失）
+// waitForNewMessages 使用原子计数器等待新消息（修复版：避免信号丢失和死锁）
 func (w *Worker) waitForNewMessages() {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
@@ -306,17 +302,21 @@ func (w *Worker) waitForNewMessages() {
 		w.cond.Wait()
 	}
 
-	// 消耗一个信号（使用CAS保证原子性）
+	// 醒来后消耗一个信号（如果有的话）
+	// 使用循环CAS，但要确保不会死锁
 	for {
 		current := w.pendingSignals.Load()
 		if current <= 0 {
+			// 没有信号可消耗（可能被其他地方消耗或虚假唤醒），直接返回
 			break
 		}
-		// 尝试将信号计数减1，如果成功则退出
+		// 尝试将信号计数减1
 		if w.pendingSignals.CompareAndSwap(current, current-1) {
+			// 成功消耗一个信号
 			break
 		}
-		// CAS失败，重试
+		// CAS失败，说明有并发修改，重试
+		// 注意：重新检查current是否>0，避免无限循环
 	}
 }
 
@@ -485,16 +485,8 @@ func (w *Worker) safeExecMultiLevel(e inf.IEvent, priority def.Priority) {
 		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE-P%d ]%s", priority, reflect.TypeOf(e).String()))
 	}
 
-	// TODO 这里实际上不需要区分最后的invoker了，都是需要处理的消息,所以本身并没有不同,只是调度的优先级问题
-	// 根据优先级选择合适的调用方式
-	// 这里可以根据业务需要定制不同优先级的处理逻辑
-	if priority <= 0 {
-		// 高优先级消息使用系统消息处理器
-		w.pool.invoker.InvokeSystemMessage(e)
-	} else {
-		// 低优先级消息使用用户消息处理器
-		w.pool.invoker.InvokeUserMessage(e)
-	}
+	// 调用消息处理器
+	w.pool.invoker.InvokeMessage(e)
 
 	if analyzer != nil {
 		analyzer.Pop() // 记录分析日志

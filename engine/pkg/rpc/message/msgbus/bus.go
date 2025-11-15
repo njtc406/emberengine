@@ -518,7 +518,7 @@ func (m MultiBus) CallWithOpt(opts ...dto.BusOptionBuilder) error {
 
 	var errs []error
 	for _, bus := range m {
-		if err := bus.callWithCtl(option.Ctx, data, option.Out, true); err != nil { // TODO 这里会有问题，如果使用同一个out接收返回值,可能后面的会覆盖前面的数据
+		if err := bus.callWithCtl(option.Ctx, data, option.Out, !option.NotRecycle); err != nil { // TODO 这里会有问题，如果使用同一个out接收返回值,可能后面的会覆盖前面的数据
 			errs = append(errs, err) // TODO 这里后续再看要不要break,暂时先收集所有错误,可能需要做成参数
 		}
 
