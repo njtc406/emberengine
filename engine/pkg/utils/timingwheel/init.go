@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	tw         *TimingWheel
+	globTW     *TimingWheel
 	twMutex    sync.Mutex // 保护tw的并发访问
 	cronParser Parser
 )
@@ -25,26 +25,26 @@ func Start(interval time.Duration, wheelSize int64) {
 	twMutex.Lock()
 	defer twMutex.Unlock()
 
-	if tw != nil {
+	if globTW != nil {
 		return
 	}
 
-	tw = NewTimingWheel(interval, wheelSize)
-	tw.Start()
+	globTW = NewTimingWheel(interval, wheelSize)
+	globTW.Start()
 }
 
 func Stop() {
 	twMutex.Lock()
 	defer twMutex.Unlock()
 
-	if tw != nil {
-		tw.Stop()
-		tw = nil
+	if globTW != nil {
+		globTW.Stop()
+		globTW = nil
 	}
 }
 
 func GetTimingWheel() *TimingWheel {
 	twMutex.Lock()
 	defer twMutex.Unlock()
-	return tw
+	return globTW
 }

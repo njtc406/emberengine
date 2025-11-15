@@ -9,6 +9,7 @@ import (
 	"context"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -29,34 +30,56 @@ type Service1 struct {
 
 func (s *Service1) OnInit() error {
 
-	var ctx context.Context
+	//var ctx context.Context
 
 	// method test demo
 	s.AfterFunc(time.Second, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) error {
 		//startTime := timelib.GetTime()
 		// 调用Service2.APITest2
-		ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*10)
+		ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*1)
 		defer cancel()
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctxWithTimeout, "APITest2", nil, nil); err != nil {
-			s.GetLogger().WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+		// 获取消息总线
+		bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithServerId(1))
+		defer bus.Release()
+
+		// 发送消息
+		if err := bus.CallWithOpt(
+			dto.WithCtx(ctxWithTimeout),
+			dto.WithMethod("APITest2"),
+			dto.WithNotRecycle(),
+		); err != nil {
+			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
 		}
-		s.GetLogger().WithContext(ctxWithTimeout).Debugf("==========================================1111")
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APITest2", nil, nil); err != nil {
-			log.SysLogger.WithContext(ctx).Errorf("call Service2.APITest2 failed, err:%v", err)
-		}
-		s.GetLogger().Debugf("==========================================2222")
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Send(ctx, "APITest2", nil); err != nil {
-			log.SysLogger.WithContext(ctx).Errorf("loop call Service2.APITest2 failed, err:%v", err)
-		}
-		s.GetLogger().WithContext(ctx).Debugf("==========================================33333")
+		// TODO Call已经调试完成，还需要整理一下call的相关接口
+		//s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================1111")
+		//if err := bus.SendWithOpt(
+		//	dto.WithCtx(ctxWithTimeout),
+		//	dto.WithMethod("APITest2"),
+		//	dto.WithNotRecycle(),
+		//); err != nil {
+		//	s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+		//}
+		//s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================2222")
+		//if _, err := bus.AsyncCallWithOpt(
+		//	dto.WithCtx(ctxWithTimeout),
+		//	dto.WithMethod("APITest2"),
+		//	dto.WithNotRecycle(),
+		//); err != nil {
+		//	s.LoggerWithCtx(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
+		//}
+		//s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================33333")
 
 		// 循环call
 		for i := 0; i < 10; i++ {
-			if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APITest2", nil, nil); err != nil {
-				log.SysLogger.WithContext(ctx).Errorf("call Service2.APITest2 failed, err:%v", err)
+			if err := bus.CallWithOpt(
+				dto.WithCtx(ctxWithTimeout),
+				dto.WithMethod("APITest2"),
+				dto.WithNotRecycle(),
+			); err != nil {
+				s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
 			}
 		}
-		s.GetLogger().WithContext(ctx).Debugf("==========================================4444")
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================4444")
 		//log.SysLogger.Debugf("call Service2.APITest2 cost:%d", timelib.Since(startTime).Microseconds())
 		return nil
 	})

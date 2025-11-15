@@ -95,7 +95,7 @@ func NewBusOption(builders ...BusOptionBuilder) *BusOption {
 
 type BusOptionBuilder func(option *BusOption)
 
-func WithContext(ctx context.Context) BusOptionBuilder {
+func WithCtx(ctx context.Context) BusOptionBuilder {
 	return func(opt *BusOption) { opt.Ctx = ctx }
 }
 func WithMethod(method string) BusOptionBuilder {

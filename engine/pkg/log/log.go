@@ -18,6 +18,8 @@ type FormatFunction = logrus.LogFunction
 
 type HookFunction = logrus.Hook
 
+type Entry = logrus.Entry
+
 // These are the different logging levels. You can set the logging level to log
 // on your instance of rusLogger, obtained with `logrus.New()`.
 const (
