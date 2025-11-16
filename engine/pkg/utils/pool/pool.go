@@ -6,12 +6,28 @@
 package pool
 
 import (
+	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	_ "unsafe"
 )
 
 const cacheLineSize = 64
+
+var (
+	_ IPool[any] = (*SyncPoolWrapper[any])(nil)
+	// 统计记录器
+	poolStates = make(map[string]IStatsRecorder)
+)
+
+func GetPoolStats() string {
+	var stats []string
+	for _, recorder := range poolStates {
+		stats = append(stats, recorder.String())
+	}
+	return fmt.Sprintf("%s", strings.Join(stats, "\n"))
+}
 
 type SyncPoolWrapper[T any] struct {
 	pool      sync.Pool
@@ -63,6 +79,9 @@ func NewSyncPoolWrapper[T any](newFunc func() T, recorder IStatsRecorder, opts .
 	for _, opt := range opts {
 		opt(p)
 	}
+
+	// 注册统计记录器
+	poolStates[p.recorder.stats().Name] = p.recorder
 
 	return p
 }
@@ -189,6 +208,9 @@ func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecord
 	for _, opt := range options {
 		opt(p)
 	}
+
+	// 注册统计记录器
+	poolStates[p.recorder.stats().Name] = p.recorder
 	return p
 }
 

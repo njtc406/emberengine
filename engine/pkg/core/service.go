@@ -457,9 +457,7 @@ func (s *Service) PoolStats() []string {
 	stats = append(stats, msgenvelope.GetMsgEnvelopePoolStats().String())
 	stats = append(stats, timingwheel.GetTimerPoolStats().String())
 	stats = append(stats, event.GetEventPoolStats().String())
-	for _, one := range codec.Stats() {
-		stats = append(stats, one.String())
-	}
+	stats = append(stats, codec.Stats())
 
 	return stats
 }

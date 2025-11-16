@@ -7,10 +7,11 @@ package timingwheel
 
 import (
 	"container/list"
-	"fmt"
+	"errors"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
 	"runtime"
@@ -165,6 +166,9 @@ func (t *Timer) Stop() bool {
 		// Thus, here we re-get t's possibly new bucket (nil for case 1, or ab (non-nil) for case 2),
 		// and retry until the bucket becomes nil, which indicates that t has finally been removed.
 	}
+
+	releaseTimer(t)
+
 	return stopped
 }
 
@@ -172,41 +176,46 @@ func (t *Timer) isActive() bool {
 	return !t.cancel.Load()
 }
 
-func (t *Timer) Do() error {
+func (t *Timer) Do() (err error) {
 	// 检查是否正在执行
 	if !t.executing.CompareAndSwap(false, true) {
 		// 已经在执行中，不应该发生
-		return def.ErrRepeatExecute
+		err = def.ErrRepeatExecute
+		return
 	}
+
 	// 标记正在执行，使用WaitGroup追踪，确保执行完成后释放
 	t.execWg.Add(1)
 	defer func() {
 		t.executing.Store(false)
 		t.execWg.Done()
+		// 不是循环任务, 执行完成后停止（循环任务会在timingwheel的addorrun弹出时就重新添加）
+		if t.loop == nil && !errors.Is(err, def.ErrTimerReuse) { // timer被复用时不能停止
+			t.Stop()
+		}
 	}()
+
+	if !t.isActive() {
+		// 任务取消
+		return nil
+	}
 
 	// 对比锁定版本和当前版本，防止ABA问题
 	if t.snapGen.Load() != t.generation.Load() {
 		// 版本号不匹配，说明Timer已被回收并复用
-		return def.ErrTimerReuse
+		err = def.ErrTimerReuse
+		return
 	}
-
-	if !t.isActive() {
-		// 任务已被取消
-		releaseTimer(t)
-		return nil
-	}
-	var err error
-	defer func() {
-		if r := recover(); r != nil {
-			// 记录日志
-			err = fmt.Errorf("task %s panic: %v", t.name, r)
-		}
-	}()
 
 	// 开始执行回调任务
-	err = t.task(t, t.taskArgs...)
-	return err
+	err = safe.Do(func() error {
+		err := t.task(t, t.taskArgs...)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return
 }
 
 func (t *Timer) Next(tm time.Time) time.Time {

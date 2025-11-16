@@ -11,6 +11,7 @@ package title
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -35,6 +36,20 @@ func EchoTitle(version string) {
 }
 
 func GracefulExit(elapsed time.Duration, version string) {
+	// 打印各种pool的状态信息
+	fmt.Printf("%s══════════════ %s ═════════════════%s\n", cyan, translate.Translate("Pool Stats"), reset)
+	//fmt.Printf("%s\n", msgenvelope.GetMetaPoolStats().String())
+	//fmt.Printf("%s\n", msgbus.GetMessageBusPoolStats().String())
+	//fmt.Printf("%s\n", event.GetEventPoolStats().String())
+	//fmt.Printf("%s\n", msgenvelope.GetMetaPoolStats().String())
+	//fmt.Printf("%s\n", ws.GetPBRawPackInfoPoolStats().String())
+	//fmt.Printf("%s\n", timer.GetTimerPoolStats().String())
+	//fmt.Printf("%s\n", timer.GetCronPoolStats().String())
+	//fmt.Printf("%s\n", timer.GetTickerPoolStats().String())
+	//fmt.Printf("%s\n", codec.Stats())
+	//fmt.Printf("%s\n", msgenvelope.GetMsgPoolStats().String())
+	fmt.Println(pool.GetPoolStats())
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 

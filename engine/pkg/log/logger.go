@@ -52,7 +52,7 @@ type LoggerConf struct {
 	Path         string        `binding:""`                                              // 日志文件路径
 	Name         string        `binding:""`                                              // 日志文件名称
 	Level        string        `binding:"oneof=panic fatal error warn info debug trace"` // 日志写入级别 小于设置级别的类型都会被记录
-	AsyncMode    *AsyncMode    `binding:""`                                              // 是否异步写入
+	AsyncMode    *AsyncMode    `binding:""`                                              // 是否异步写入(默认开启)
 	Caller       bool          `binding:""`                                              // 是否打印调用者
 	FullCaller   bool          `binding:""`                                              // 是否打印完整调用者
 	Color        bool          `binding:""`                                              // 是否打印级别色彩
@@ -92,10 +92,13 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 			Name:  "",
 			Level: "info",
 			AsyncMode: &AsyncMode{
-				Enable: false,
-				Config: nil,
+				Enable: true,
+				Config: &AsyncWriterConfig{
+					BufferSize:    65536, // 64kb
+					FlushInterval: time.Second,
+				},
 			},
-			Caller:       false,
+			Caller:       true,
 			FullCaller:   false,
 			Color:        false,
 			MaxAge:       time.Hour * 24 * 15, // 默认15天
@@ -139,8 +142,11 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 		if len(filePath) == 0 {
 			filePath = "./" // 默认当前目录
 		}
-		if conf.RotationTime < time.Second*60 || conf.RotationTime > time.Hour*24 {
-			return nil, RotationTimeErr
+		if conf.RotationTime < time.Second*60 {
+			conf.RotationTime = time.Second * 60
+		}
+		if conf.RotationTime > time.Hour*24 {
+			conf.RotationTime = time.Hour * 24
 		}
 		pattern := "_%Y%m%d.log"
 		if conf.RotationTime < time.Minute*60 {

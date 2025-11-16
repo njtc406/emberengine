@@ -2,11 +2,12 @@ package timingwheel
 
 import (
 	"errors"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"fmt"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel/delayqueue"
 )
@@ -29,11 +30,14 @@ type TimingWheel struct {
 	overflowWheel unsafe.Pointer // type: *TimingWheel
 
 	exitC     chan struct{}
+	closed    *atomic.Bool
 	waitGroup waitGroupWrapper
+
+	logger log.ILogger
 }
 
 // NewTimingWheel creates an instance of TimingWheel with the given tick and wheelSize.
-func NewTimingWheel(tick time.Duration, wheelSize int64) *TimingWheel {
+func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILogger) *TimingWheel {
 	tickMs := int64(tick / time.Millisecond)
 	if tickMs <= 0 {
 		panic(errors.New("tick must be greater than or equal to 1ms"))
@@ -46,11 +50,13 @@ func NewTimingWheel(tick time.Duration, wheelSize int64) *TimingWheel {
 		wheelSize,
 		startMs,
 		delayqueue.New(int(wheelSize)),
+		logger,
+		new(atomic.Bool),
 	)
 }
 
 // newTimingWheel is an internal helper function that really creates an instance of TimingWheel.
-func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue) *TimingWheel {
+func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger log.ILogger, closed *atomic.Bool) *TimingWheel {
 	buckets := make([]*bucket, wheelSize)
 	for i := range buckets {
 		buckets[i] = newBucket()
@@ -63,11 +69,18 @@ func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqu
 		buckets:     buckets,
 		queue:       queue,
 		exitC:       make(chan struct{}),
+		logger:      logger,
+		closed:      closed,
 	}
 }
 
 // add inserts the timer t into the current timing wheel.
 func (tw *TimingWheel) add(t *Timer) bool {
+	// 如果timingwheel已关闭，不能添加任务
+	if tw.closed.Load() {
+		return false
+	}
+
 	currentTime := atomic.LoadInt64(&tw.currentTime)
 	expire := t.GetExpiration()
 	if expire < currentTime+tw.tick {
@@ -103,6 +116,8 @@ func (tw *TimingWheel) add(t *Timer) bool {
 					tw.wheelSize,
 					currentTime,
 					tw.queue,
+					tw.logger,
+					tw.closed,
 				)),
 			)
 			overflowWheel = atomic.LoadPointer(&tw.overflowWheel)
@@ -114,10 +129,18 @@ func (tw *TimingWheel) add(t *Timer) bool {
 // addOrRun inserts the timer t into the current timing wheel, or run the
 // timer's task if it has already expired.
 func (tw *TimingWheel) addOrRun(t *Timer) {
+	if tw.closed.Load() {
+		return
+	}
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.Errorf("addOrRun panic, task_name:%s, err:%v", t.name, r)
-			releaseTimer(t)
+			if tw.logger != nil {
+				tw.logger.Errorf("addOrRun panic, task_name:%s, err:%v", t.name, r)
+			} else {
+				fmt.Printf("addOrRun panic, task_name:%s, err:%v", t.name, r)
+			}
+
+			t.Stop()
 		}
 	}()
 
@@ -125,34 +148,46 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 		// 任务已经过期，立即执行
 		// 在执行前冻结snapGen，防止ABA问题
 		t.snapGen.Store(t.generation.Load())
+		taskArgs := t.taskArgs
+		loop := t.loop
 
 		if t.asyncTask != nil {
 			// 安全地读取asyncTask和taskArgs（初始化后只读）
 			asyncTask := t.asyncTask
-			taskArgs := t.taskArgs
-			loop := t.loop
 
 			go func() {
 				defer func() {
 					if err := recover(); err != nil {
-						//log.SysLogger.Errorf("task panic, taskId:%d, err:%v", t.timerId, err)
+						if tw.logger != nil {
+							tw.logger.Errorf("task panic, task_name:%s, err:%v", t.name, err)
+						} else {
+							fmt.Printf("task panic, task_name:%s, err:%v", t.name, err)
+						}
+					}
+					if loop == nil {
+						// 不是循环任务，释放
+						t.Stop()
 					}
 				}()
 				asyncTask(taskArgs...)
-				if loop == nil {
-					// 释放任务
-					releaseTimer(t)
-				}
 			}()
 		} else {
-			if t.task != nil {
-				// 这里几乎不会出现,如果出现,那么肯定是业务逻辑有问题,但是防止列表满导致任务丢失
+			task := t.task
+			if task != nil {
 				// 执行任务
 				select {
 				case t.c <- t:
 				default:
 					// 队列已满,本次不执行
-					//log.SysLogger.Errorf("task queue is full, task will not be executed, taskId:%d ")
+					if tw.logger != nil {
+						tw.logger.Errorf("task queue is full, task will not be executed, task_name:%s", t.name)
+					} else {
+						fmt.Printf("task queue is full, task will not be executed, task_name:%s", t.name)
+					}
+					if loop == nil {
+						// 不是循环任务，释放
+						t.Stop()
+					}
 				}
 			}
 		}
@@ -211,8 +246,15 @@ func (tw *TimingWheel) Start() {
 // not wait for the task to complete before returning. If the caller needs to
 // know whether the task is completed, it must coordinate with the task explicitly.
 func (tw *TimingWheel) Stop() {
+	if tw.closed.Swap(true) {
+		return
+	}
 	close(tw.exitC)
 	tw.waitGroup.Wait()
+}
+
+func (tw *TimingWheel) IsClosed() bool {
+	return tw.closed.Load()
 }
 
 // AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
@@ -264,7 +306,7 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 	expiration := t.Next(timelib.Now())
 	if expiration.IsZero() {
 		// No time is scheduled, return nil.
-		releaseTimer(t)
+		t.Stop()
 		return
 	}
 
@@ -273,6 +315,11 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 	}
 	t.SetExpiration(timeToMs(expiration))
 	t.loop = func() {
+		// 如果timingwheel已关闭，不能添加任务
+		if tw.closed.Load() {
+			t.Stop()
+			return
+		}
 		if !t.isActive() {
 			return
 		}

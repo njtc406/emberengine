@@ -152,8 +152,11 @@ func setDefaultValues() {
 		MaxAge:       time.Hour * 24 * 15,
 		RotationTime: time.Hour * 24,
 		AsyncMode: &log.AsyncMode{
-			Enable: false,
-			Config: nil,
+			Enable: true,
+			Config: &log.AsyncWriterConfig{
+				BufferSize:    65536, // 64kb
+				FlushInterval: time.Second,
+			},
 		},
 	})
 

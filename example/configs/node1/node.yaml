@@ -134,5 +134,5 @@ SystemLogger:
       # 刷新间隔
       FlushInterval: 1s
       # 缓冲区大小(满时会立即写入)
-      BufferSize: 1048576  # 1MB
+      BufferSize: 65536  # 64kb
 
