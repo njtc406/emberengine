@@ -34,7 +34,7 @@ func (sd *SerializedData) GetBytes() []byte {
 
 // 多规格 Byte 缓冲池（你可以根据业务实际调整大小）
 var bytePoolMgr = NewBytePoolManager([]int{
-	128 * 1024, 512 * 1024, 1024 * 1024, 2048 * 1024,
+	2 * 1024, 8 * 1024, 16 * 1024, 32 * 1024, 64 * 1024, 128 * 1024, 512 * 1024, 1024 * 1024, 2048 * 1024,
 })
 
 type BytePoolManager struct {

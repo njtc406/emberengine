@@ -19,6 +19,7 @@ type IStatsRecorder interface {
 	incOverflow()
 	incTotalAlloc()
 	stats() Stats
+	String() string
 }
 
 type nopStats struct{}
@@ -35,6 +36,9 @@ func (nopStats) incOverflow()    {}
 func (nopStats) incTotalAlloc()  {}
 func (nopStats) stats() Stats {
 	return Stats{}
+}
+func (nopStats) String() string {
+	return ""
 }
 
 type Stats struct {
@@ -55,8 +59,20 @@ type Stats struct {
 	MaxObservedSize int64 // 最大对象数(本地)
 }
 
+//func (s *Stats) String() string {
+//	return fmt.Sprintf("pool_name:	%s, hit:	%d, miss:	%d, current:	%d, total_alloc:	%d, max_observed:	%d, overflow:	%d", s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
+//}
+
 func (s *Stats) String() string {
-	return fmt.Sprintf("pool_name: %s, hit: %d, miss: %d, current: %d, total_alloc: %d, max_observed: %d, overflow: %d", s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
+	return fmt.Sprintf(`
+pool_name:    %-15s
+	hit:          %-8d
+	miss:         %-8d  
+	current:      %-8d
+	total_alloc:  %-8d
+	max_observed: %-8d
+	overflow:     %-8d`,
+		s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
 }
 
 func NewStatsRecorder(name string) IStatsRecorder {

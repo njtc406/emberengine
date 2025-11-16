@@ -111,7 +111,7 @@ func Start(opts ...StartOption) {
 	asynclib.InitAntsPool(config.Conf.NodeConf.AntsPoolSize)
 
 	// 启动timer(默认使用时间轮)
-	timingwheel.Start(time.Millisecond*10, 100)
+	timingwheel.Start(time.Millisecond*10, 100, log.SysLogger)
 
 	// 记录pid
 	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
@@ -151,12 +151,42 @@ func Start(opts ...StartOption) {
 
 	log.SysLogger.Info("==================>>begin stop modules<<==================")
 
+	// 调试提示：如果需要断点调试，可以在这里暂停
+	log.SysLogger.Debug("[DEBUG] Starting shutdown sequence...")
+	// 调试断点：取消注释下面这行来在此处强制停止（调试器会捕获panic）
+	//panic("DEBUG BREAKPOINT: shutdown sequence started")
+
+	// 执行关闭流程
+	shutdownSequence(startTime, param.Version)
+}
+
+// shutdownSequence 关闭序列 - 独立函数便于调试
+// 在这个函数的任何地方都可以正常设置断点
+func shutdownSequence(startTime time.Time, version string) {
+	log.SysLogger.Info("[1/6] Stopping all services...")
 	services.StopAll()
+	log.SysLogger.Info("[1/6] All services stopped")
+
+	log.SysLogger.Info("[2/6] Closing cluster...")
 	cluster.GetCluster().Close()
+	log.SysLogger.Info("[2/6] Cluster closed")
+
+	log.SysLogger.Info("[3/6] Stopping RPC monitor...")
 	monitor.GetRpcMonitor().Stop()
+	log.SysLogger.Info("[3/6] RPC monitor stopped")
+
+	log.SysLogger.Info("[4/6] Releasing async lib...")
 	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
+	log.SysLogger.Info("[4/6] Async lib released")
+
+	log.SysLogger.Info("[5/6] Stopping timing wheel...")
 	timingwheel.Stop()
-	log.SysLogger.Info("server stopped, program exited...")
+	log.SysLogger.Info("[5/6] Timing wheel stopped")
+
+	log.SysLogger.Info("[6/6] Closing logger...")
 	log.Close()
-	title.GracefulExit(time.Since(startTime), param.Version)
+
+	log.SysLogger.Info("server stopped, program exited...")
+	// 优雅退出
+	title.GracefulExit(time.Since(startTime), version)
 }

@@ -6,6 +6,7 @@
 package timingwheel
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
 )
@@ -21,7 +22,7 @@ func init() {
 	cronParser = NewParser(Second | Minute | Hour | Dom | Month | Dow | DowOptional | Descriptor)
 }
 
-func Start(interval time.Duration, wheelSize int64) {
+func Start(interval time.Duration, wheelSize int64, logger log.ILogger) {
 	twMutex.Lock()
 	defer twMutex.Unlock()
 
@@ -29,7 +30,7 @@ func Start(interval time.Duration, wheelSize int64) {
 		return
 	}
 
-	globTW = NewTimingWheel(interval, wheelSize)
+	globTW = NewTimingWheel(interval, wheelSize, logger)
 	globTW.Start()
 }
 

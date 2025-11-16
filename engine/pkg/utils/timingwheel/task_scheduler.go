@@ -292,7 +292,6 @@ func (scheduler *TaskScheduler) CancelTimer(taskId uint64) bool {
 		return true
 	}
 	ok := task.Stop()
-	releaseTimer(task)
 	return ok
 }
 

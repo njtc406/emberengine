@@ -8,7 +8,7 @@ package codec
 import (
 	"fmt"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"strings"
 )
 
 var codecs = map[int32]inf.ICodec{}
@@ -44,10 +44,15 @@ func Decode(tpy int32, typeName string, data []byte) (interface{}, error) {
 	return coder.Decode(typeName, data)
 }
 
-func Stats() []*pool.Stats {
-	var stats []*pool.Stats
+func Stats() string {
+	var stats []string
 	for _, coder := range codecs {
-		stats = append(stats, coder.Stats()...)
+		var content []string
+		for _, state := range coder.Stats() {
+			content = append(content, fmt.Sprintf("%s", state.String()))
+		}
+		str := fmt.Sprintf("%d: %s", coder.Type(), strings.Join(content, "\n"))
+		stats = append(stats, str)
 	}
-	return stats
+	return fmt.Sprintf("%v", stats)
 }

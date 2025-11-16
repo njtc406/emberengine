@@ -1,6 +1,7 @@
 package timingwheel_test
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"time"
 )
@@ -23,7 +24,11 @@ func Example_startTimer() {
 }
 
 func Example_stopTimer() {
-	tw := timingwheel.NewTimingWheel(time.Millisecond, 20)
+	logger, err := log.NewDefaultLogger("", nil, true)
+	if err != nil {
+		panic(err)
+	}
+	tw := timingwheel.NewTimingWheel(time.Millisecond, 20, logger)
 	tw.Start()
 	defer tw.Stop()
 

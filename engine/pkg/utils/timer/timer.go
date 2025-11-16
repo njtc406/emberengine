@@ -59,6 +59,16 @@ var timerPool = pool.NewSyncPoolWrapper(
 	}),
 )
 
+func GetTimerPoolStats() *pool.Stats {
+	return timerPool.Stats()
+}
+func GetCronPoolStats() *pool.Stats {
+	return cronPool.Stats()
+}
+func GetTickerPoolStats() *pool.Stats {
+	return tickerPool.Stats()
+}
+
 var cronPool = pool.NewSyncPoolWrapper(
 	func() *Cron {
 		return &Cron{}

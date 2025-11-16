@@ -1,6 +1,7 @@
 package timingwheel_test
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
-var dp = timingwheel.NewTaskScheduler(10000000, 1)
+var dp = timingwheel.NewTaskScheduler(10000000, 10, timingwheel.GetTimingWheel())
 
 func printTask1(t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
@@ -19,7 +20,11 @@ func printTask1(t *timingwheel.Timer, args ...interface{}) error {
 }
 
 func BenchmarkTimingWheel_StartStop(b *testing.B) {
-	timingwheel.Start(time.Millisecond, 20)
+	logger, err := log.NewDefaultLogger("", nil, true)
+	if err != nil {
+		b.Fatalf("Failed to create logger: %v", err)
+	}
+	timingwheel.Start(time.Millisecond, 20, logger)
 	defer timingwheel.Stop()
 
 	cases := []struct {

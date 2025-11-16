@@ -95,6 +95,10 @@ var pbPackPool = pool.NewSyncPoolWrapper(
 	}),
 )
 
+func GetPBRawPackInfoPoolStats() *pool.Stats {
+	return pbPackPool.Stats()
+}
+
 //var buffPool = pool.NewSyncPoolWrapper(
 //	func() *[]byte {
 //		buff := make([]byte, 2048*1024) // 消息最大2M

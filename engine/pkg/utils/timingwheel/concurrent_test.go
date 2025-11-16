@@ -2,6 +2,7 @@ package timingwheel
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,7 +11,11 @@ import (
 
 // TestConcurrentTimerStopAndExecute tests concurrent stop and execute
 func TestConcurrentTimerStopAndExecute(t *testing.T) {
-	Start(time.Millisecond, 20)
+	logger, err := log.NewDefaultLogger("", nil, true)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	Start(time.Millisecond, 20, logger)
 	defer Stop()
 
 	scheduler := NewTaskScheduler(1000, 10, GetTimingWheel())
@@ -70,7 +75,11 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 //
 // Solution: Use generation counter + Event.Header to pass version without allocation
 func TestTimerABAProblem(t *testing.T) {
-	Start(time.Millisecond, 20)
+	logger, err := log.NewDefaultLogger("", nil, true)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	Start(time.Millisecond, 20, logger)
 	defer Stop()
 
 	// Create two schedulers, simulating two services
