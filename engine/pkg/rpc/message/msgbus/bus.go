@@ -295,8 +295,11 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, par
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	meta.SetTimeout(timeout)
-	meta.SetCallbackParams(param.Params)
 	meta.SetCallback(callbacks)
+	if param != nil {
+		meta.SetCallbackParams(param.Params)
+	}
+
 	envelope.SetMeta(meta)
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)

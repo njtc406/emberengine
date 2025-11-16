@@ -35,7 +35,7 @@ func (s *Service1) OnInit() error {
 	s.AfterFunc(time.Second, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) error {
 		//startTime := timelib.GetTime()
 		// 调用Service2.APITest2
-		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second)
+		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1000)
 		defer cancel()
 		// 获取消息总线
 		bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithServerId(1))
