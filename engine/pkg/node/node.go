@@ -87,7 +87,6 @@ func WithExtra(extra map[any]any) StartOption {
 }
 
 func Start(opts ...StartOption) {
-
 	startTime := time.Now()
 	param := StartParam{}
 	for _, f := range opts {
