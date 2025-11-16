@@ -8,6 +8,7 @@ package pool
 import (
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	_ "unsafe"
@@ -23,7 +24,15 @@ var (
 
 func GetPoolStats() string {
 	var stats []string
-	for _, recorder := range poolStates {
+	// 根据名称排个序
+	var names []string
+	for name := range poolStates {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		recorder := poolStates[name]
 		stats = append(stats, recorder.String())
 	}
 	return fmt.Sprintf("%s", strings.Join(stats, "\n"))
