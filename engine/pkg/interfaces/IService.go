@@ -6,6 +6,7 @@
 package interfaces
 
 import (
+	"context"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -74,4 +75,5 @@ type IActor interface {
 
 type ILogger interface {
 	GetLogger() log.ILogger
+	LoggerWithCtx(ctx context.Context) *log.Entry
 }

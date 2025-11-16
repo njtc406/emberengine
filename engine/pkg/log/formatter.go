@@ -99,6 +99,27 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 	b.WriteString("] ")
 
+	if entry.Context != nil {
+		header := emberctx.ToHeaders(entry.Context)
+		if header != nil && len(header) > 0 {
+			b.WriteString("[")
+			// 对 keys 排序以保证输出顺序一致
+			keys := make([]string, 0, len(header))
+			for k := range header {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			// 按排序后的顺序输出
+			pairs := make([]string, 0, len(keys))
+			for _, k := range keys {
+				pairs = append(pairs, fmt.Sprintf("%s=%s", k, header[k]))
+			}
+			b.WriteString(strings.Join(pairs, ", "))
+			b.WriteString("] ")
+		}
+	}
+
 	// write caller
 	if !f.NoCaller {
 		if f.FullCaller {
@@ -106,8 +127,9 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 		} else {
 			f.writeSimpleCaller(b, entry)
 		}
-
 	}
+
+	b.WriteString(" >> ")
 
 	// write fields
 	if f.FieldsOrder == nil {
@@ -116,26 +138,13 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 		f.writeOrderedFields(b, entry)
 	}
 
-	b.WriteString(" ")
+	//b.WriteString(" ")
 
 	// write message
 	if f.TrimMessages {
 		b.WriteString(strings.TrimSpace(entry.Message))
 	} else {
 		b.WriteString(entry.Message)
-	}
-
-	if entry.Context != nil {
-		header := emberctx.ToHeaders(entry.Context)
-		if header != nil {
-			b.WriteString(" [")
-			var keys []string
-			for k, v := range header {
-				keys = append(keys, fmt.Sprintf("%s=%s", k, v))
-			}
-			b.WriteString(strings.Join(keys, ","))
-			b.WriteString("]")
-		}
 	}
 
 	b.WriteByte('\n')
@@ -179,7 +188,7 @@ func (f *Formatter) writeCaller(b *bytes.Buffer, entry *logrus.Entry) {
 		} else {
 			_, _ = fmt.Fprintf(
 				b,
-				"(file: %s:%d function: %s) >> ",
+				"(file: %s:%d function: %s)",
 				entry.Caller.File,
 				entry.Caller.Line,
 				entry.Caller.Function,
@@ -196,7 +205,7 @@ func (f *Formatter) writeSimpleCaller(b *bytes.Buffer, entry *logrus.Entry) {
 		} else {
 			_, _ = fmt.Fprintf(
 				b,
-				"%s:%d >> ",
+				"%s:%d",
 				entry.Caller.File,
 				entry.Caller.Line,
 			)

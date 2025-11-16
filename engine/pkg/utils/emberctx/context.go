@@ -101,7 +101,8 @@ func NewCtx(ctx context.Context, options ...Option) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if GetHeaderValue(ctx, def.DefaultTraceIdKey) == "" {
+	traceId := GetHeaderValue(ctx, def.DefaultTraceIdKey)
+	if traceId == nil || traceId == "" {
 		ctx = AddHeaders(ctx, map[string]any{
 			def.DefaultTraceIdKey: uuid.NewString(),
 		})
