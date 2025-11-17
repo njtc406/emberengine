@@ -8,6 +8,7 @@ package cluster
 import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
+	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -89,11 +90,8 @@ func (c *Cluster) run() {
 		select {
 		case ev := <-c.eventChannel:
 			if ev != nil {
-				switch ev.GetType() {
-				case event.SysEventETCDPut, event.SysEventETCDDel:
-					c.eventProcessor.EventHandler(ev)
-					ev.Release()
-				}
+				c.eventProcessor.EventHandler(ev)
+				ev.Release()
 			}
 		case <-c.closed:
 			log.SysLogger.Info("cluster closed")
