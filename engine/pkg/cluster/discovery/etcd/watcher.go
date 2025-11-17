@@ -1,32 +1,27 @@
-// Package discovery
-// @Title  title
-// @Description  desc
-// @Author  yr  2025/6/20
-// @Update  yr  2025/6/20
-package discovery
+package etcd
 
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/protobuf/encoding/protojson"
-	"path"
-	"runtime/debug"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type watcher struct {
-	svc       inf.IService
-	discovery *EtcdDiscovery
+	svc inf.IService
+	d   *EtcdDiscovery
 
-	leaseID  clientv3.LeaseID
+	leaseRef disc.LeaseRef
 	isMaster atomic.Bool
 	started  atomic.Bool
 
@@ -41,12 +36,7 @@ type watcher struct {
 
 func newWatcher(svc inf.IService, d *EtcdDiscovery) *watcher {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &watcher{
-		svc:       svc,
-		discovery: d,
-		ctx:       ctx,
-		cancel:    cancel,
-	}
+	return &watcher{svc: svc, d: d, ctx: ctx, cancel: cancel}
 }
 
 func (w *watcher) Start() error {
@@ -58,15 +48,14 @@ func (w *watcher) Start() error {
 	}
 	w.wg.Add(1)
 	go w.keepaliveLoop()
-
 	return w.electMaster()
 }
 
 func (w *watcher) Stop() {
 	if w.started.CompareAndSwap(true, false) {
 		w.cancel()
-		w.releaseLease()    // 先释放租约
-		w.stopWatchMaster() // 关闭master监听
+		w.releaseLease()
+		w.stopWatchMaster()
 		w.wg.Wait()
 	}
 }
@@ -75,17 +64,13 @@ func (w *watcher) Restart() {
 	go func() {
 		const maxBackoff = 30 * time.Second
 		const maxRetry = 5
-
-		// 循环尝试重启
 		for retryCount := 0; retryCount < maxRetry; retryCount++ {
 			w.Stop()
 			err := w.Start()
 			if err == nil {
 				return
 			}
-
 			log.SysLogger.Warnf("watcher start failed, retry %d/%d: %v", retryCount+1, maxRetry, err)
-
 			backoff := time.Duration(1<<retryCount) * time.Second
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -93,8 +78,6 @@ func (w *watcher) Restart() {
 			backoff += time.Duration(util.RandN(1000)) * time.Millisecond
 			time.Sleep(backoff)
 		}
-
-		// 超过最大重试次数，通知服务断开
 		log.SysLogger.Errorf("watcher start failed after %d retries", maxRetry)
 		evt := event.NewEvent()
 		evt.Type = event.ServiceDisconnected
@@ -105,39 +88,32 @@ func (w *watcher) Restart() {
 	}()
 }
 
-func (w *watcher) IsMaster() bool {
-	return w.isMaster.Load()
-}
+func (w *watcher) IsMaster() bool { return w.isMaster.Load() }
 
 func (w *watcher) initLease() error {
-	if !isEtcdClientConnected(w.discovery.client) {
+	if !w.d.provider.IsConnected() {
 		return fmt.Errorf("etcd client is not connected")
 	}
-	resp, err := w.discovery.client.Grant(context.Background(), w.discovery.conf.DiscoveryConf.TTL)
+	respRef, err := w.d.leaseMgr.Grant(w.d.conf.TTL)
 	if err != nil {
 		return fmt.Errorf("create lease failed: %w", err)
 	}
-	w.releaseLease() // 等新的租约申请成功,再释放老的租约,防止key抖动
-	w.leaseID = resp.ID
+	w.releaseLease()
+	w.leaseRef = respRef
 	return nil
 }
 
 func (w *watcher) releaseLease() {
-	if w.leaseID != 0 {
-		if !isEtcdClientConnected(w.discovery.client) {
-			return
-		}
-		_, _ = w.discovery.client.Revoke(context.Background(), w.leaseID)
-		w.leaseID = 0
+	if w.leaseRef != nil {
+		w.d.leaseMgr.Revoke(w.leaseRef)
+		w.leaseRef = nil
 	}
 }
 
 func (w *watcher) keepaliveLoop() {
 	defer w.wg.Done()
-
 	var retryCount int
 	const maxBackoff = 30 * time.Second
-
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -145,61 +121,44 @@ func (w *watcher) keepaliveLoop() {
 			return
 		default:
 			w.keepalive()
-
 			if !w.started.Load() {
 				return
 			}
-
 			if err := w.initLease(); err != nil {
 				log.SysLogger.Warnf("init pid[%s] lease error: %v", w.svc.GetPid().GetServiceUid(), err)
-
 				retryCount++
-				backoff := time.Duration(1<<retryCount) * time.Second // 2^retryCount
+				backoff := time.Duration(1<<retryCount) * time.Second
 				if backoff > maxBackoff {
 					backoff = maxBackoff
 				}
-				backoff += time.Duration(util.RandN(1000)) * time.Millisecond // 增加随机抖动
+				backoff += time.Duration(util.RandN(1000)) * time.Millisecond
 				time.Sleep(backoff)
 				continue
 			}
 			if err := w.electMaster(); err != nil {
 				log.SysLogger.Errorf("elect master error: %v", err)
 			} else {
-				retryCount = 0 // 成功后重置
+				retryCount = 0
 			}
 		}
 	}
 }
 
 func (w *watcher) keepalive() {
-	if w.leaseID <= 0 {
+	if w.leaseRef == nil {
 		return
 	}
-	if !isEtcdClientConnected(w.discovery.client) {
+	if !w.d.provider.IsConnected() {
 		return
 	}
-	kaRespCh, err := w.discovery.client.KeepAlive(w.ctx, w.leaseID)
-	if err != nil {
+	if err := w.d.leaseMgr.KeepAliveLoop(w.ctx, w.leaseRef); err != nil {
 		log.SysLogger.Errorf("etcd keepalive failed: %v", err)
 		return
-	}
-
-	for {
-		select {
-		case <-w.ctx.Done():
-			return
-		case kaResp, ok := <-kaRespCh:
-			if !ok || kaResp == nil {
-				log.SysLogger.Warn("keepalive channel closed")
-				return
-			}
-		}
 	}
 }
 
 func (w *watcher) electMaster() (err error) {
 	if !w.svc.IsPrimarySecondaryMode() {
-		// 单节点模式
 		w.isMaster.Store(true)
 		w.svc.GetPid().SetMaster(true)
 		if err = w.registerService(); err != nil {
@@ -208,52 +167,34 @@ func (w *watcher) electMaster() (err error) {
 		}
 		return
 	}
-
 	pid := w.svc.GetPid()
-	masterKey := path.Join(w.discovery.conf.DiscoveryConf.MasterPath, pid.GetServiceGroup()) // 使用分组key,主从是相同的
-
-	//log.SysLogger.Debugf("=======================try to elect master, masterKey: %s", masterKey)
-
+	masterKey := w.d.registry.MasterKey(pid.GetServiceGroup())
 	w.stopWatchMaster()
-
 	isMaster := w.IsMaster()
-
 	w.isMaster.Store(false)
 	pid.SetMaster(false)
-
 	if isMaster {
-		// 原来是主服务,现在降级
 		w.notifyService(event.ServiceLoseMaster, isMaster)
 	}
-
-	if !isEtcdClientConnected(w.discovery.client) {
+	if !w.d.provider.IsConnected() {
 		return fmt.Errorf("discovery registerService: etcd connect failed")
 	}
-
 	defer func() {
-		// pid发生变化,都需要重新注册
 		if err = w.registerService(); err != nil {
 			log.SysLogger.Errorf("register service to etcd failed: %v", err)
 		}
 	}()
-
-	txnResp, respErr := w.discovery.client.Txn(w.ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(masterKey), "=", 0)).
-		Then(clientv3.OpPut(masterKey, pid.GetServiceGroup(), clientv3.WithLease(w.leaseID))).
-		Commit()
+	succeeded, respErr := w.d.election.TryAcquireMaster(w.ctx, masterKey, pid.GetServiceGroup(), w.leaseRef)
 	if respErr != nil {
 		log.SysLogger.Errorf("master election txn error: %v", respErr)
 		goto Slave
 	}
-
-	if txnResp.Succeeded {
+	if succeeded {
 		w.isMaster.Store(true)
 		pid.SetMaster(true)
-		// 通知主状态
 		w.notifyService(event.ServiceBecomeMaster, isMaster)
 		return
 	}
-
 Slave:
 	w.watchMasterWg.Add(1)
 	go w.startWatchMaster(masterKey)
@@ -272,25 +213,18 @@ func (w *watcher) notifyService(evtType int32, oldStateIsMaster bool) {
 }
 
 func (w *watcher) registerService() error {
-	if !isEtcdClientConnected(w.discovery.client) {
+	if !w.d.provider.IsConnected() {
 		return fmt.Errorf("etcd client not connected")
 	}
 	pid := w.svc.GetPid()
-	servicePath := path.Join(w.discovery.conf.DiscoveryConf.Path, pid.GetServiceUid())
-	pidData, err := protojson.Marshal(pid)
-	if err != nil {
-		return fmt.Errorf("marshal pid failed: %w", err)
-	}
-	_, err = w.discovery.client.Put(w.ctx, servicePath, string(pidData), clientv3.WithLease(w.leaseID))
-	return err
+	return w.d.registry.RegisterService(w.ctx, pid, w.leaseRef)
 }
 
 func (w *watcher) startWatchMaster(masterKey string) {
 	defer w.watchMasterWg.Done()
 	ctx, cancel := context.WithCancel(w.ctx)
 	w.watchMasterCtx, w.watchMasterCancel = ctx, cancel
-	watchChan := w.discovery.watchKey(ctx, masterKey)
-
+	watchChan := w.d.provider.Watch(ctx, masterKey)
 	for {
 		select {
 		case <-w.watchMasterCtx.Done():
