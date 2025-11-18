@@ -136,12 +136,15 @@ func (e *EtcdDiscovery) isConnect() bool {
 }
 
 func (e *EtcdDiscovery) syncInitialState() {
+	log.SysLogger.Infof("syncing initial state from path: %s", e.conf.Path)
 	resp, err := e.provider.GetPrefix(e.ctx, e.conf.Path)
 	if err != nil {
 		log.SysLogger.Errorf("sync services failed: %v", err)
 		return
 	}
+	log.SysLogger.Infof("found %d existing services in etcd", len(resp.Kvs))
 	for _, kv := range resp.Kvs {
+		log.SysLogger.Debugf("syncing service: key=%s", string(kv.Key))
 		data := *kv
 		ent := event.NewEvent()
 		ent.Type = event.SysEventETCDPut
@@ -185,10 +188,12 @@ func (e *EtcdDiscovery) onUnregister(ev inf.IEvent) {
 }
 
 func (e *EtcdDiscovery) watchLoop() {
+	log.SysLogger.Infof("etcd watchLoop started, watching path: %s", e.conf.Path)
 	watchChan := e.provider.WatchPrefix(e.ctx, e.conf.Path)
 	for {
 		select {
 		case <-e.ctx.Done():
+			log.SysLogger.Info("etcd watchLoop stopped")
 			return
 		case resp := <-watchChan:
 			if err := resp.Err(); err != nil {
@@ -196,6 +201,7 @@ func (e *EtcdDiscovery) watchLoop() {
 				watchChan = e.provider.WatchPrefix(e.ctx, e.conf.Path)
 				continue
 			}
+			log.SysLogger.Debugf("etcd watch received %d events", len(resp.Events))
 			for _, ev := range resp.Events {
 				var evType int
 				switch ev.Type {
@@ -206,6 +212,7 @@ func (e *EtcdDiscovery) watchLoop() {
 				default:
 					continue
 				}
+				log.SysLogger.Debugf("etcd event: type=%v, key=%s", ev.Type, string(ev.Kv.Key))
 				data := *ev.Kv
 				ent := event.NewEvent()
 				ent.Type = int32(evType)
