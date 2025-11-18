@@ -84,7 +84,7 @@ func (em *EndpointManager) SetClusterMode(isClusterMode bool) {
 
 // updateServiceInfo 更新远程服务信息事件
 func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
-	//log.SysLogger.Debugf("endpoints receive update service event: %+v", e)
+	log.SysLogger.Debugf("endpoints receive update service event: %+v", e.GetType())
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
 	if kv.Value != nil {
@@ -95,11 +95,11 @@ func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
 		}
 
 		if pid.GetNodeUid() == em.nodeUid {
-			//log.SysLogger.Debugf("endpointmgr ignore -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
+			log.SysLogger.Debugf("endpointmgr ignore local service -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
 			// 本地服务,忽略
 			return
 		}
-		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr add remote service: %s", pid.String())
+		log.SysLogger.Infof("endpointmgr add remote service: %s, key: %s", pid.String(), string(kv.Key))
 		em.repository.Add(string(kv.Key), client.NewDispatcher(&pid, nil))
 	}
 }
@@ -113,7 +113,7 @@ func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
 	if kv.Key != nil {
-		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr remove remote service: %s", string(kv.Key))
+		log.SysLogger.Infof("endpointmgr remove remote service: %s", string(kv.Key))
 		em.repository.Remove(string(kv.Key))
 	} else {
 		log.SysLogger.Errorf("remove service error: key is nil")
