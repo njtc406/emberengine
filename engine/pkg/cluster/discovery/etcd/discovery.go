@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,7 +26,8 @@ const (
 
 // EtcdDiscovery 具体后端实现（保持统一接口编排）
 type EtcdDiscovery struct {
-	conf        *config.ClusterConf
+	conf        *config.DiscoveryConf
+	etcdConf    *config.ETCDConf
 	client      *clientv3.Client
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -55,7 +57,9 @@ func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf)
 		log.SysLogger.Debugf("etcd end points is empty")
 		return nil
 	}
-	e.conf = normalizeConf(conf)
+	e.etcdConf = conf.ETCDConf
+	log.SysLogger.Debugf("etcd discovery conf: %+v", e.etcdConf)
+	e.conf = normalizeConf(conf.DiscoveryConf)
 	e.proc = proc
 	e.handler = event.NewHandler()
 	e.handler.Init(proc)
@@ -65,6 +69,7 @@ func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf)
 	e.cancel = cancel
 
 	if err := e.connect(); err != nil {
+		log.SysLogger.Errorf("etcd discovery init failed: %v, endpoints: %v", err, conf.ETCDConf.Endpoints)
 		return err
 	}
 	e.initialized.Store(true)
@@ -131,7 +136,7 @@ func (e *EtcdDiscovery) isConnect() bool {
 }
 
 func (e *EtcdDiscovery) syncInitialState() {
-	resp, err := e.provider.GetPrefix(e.ctx, e.conf.DiscoveryConf.Path)
+	resp, err := e.provider.GetPrefix(e.ctx, e.conf.Path)
 	if err != nil {
 		log.SysLogger.Errorf("sync services failed: %v", err)
 		return
@@ -180,7 +185,7 @@ func (e *EtcdDiscovery) onUnregister(ev inf.IEvent) {
 }
 
 func (e *EtcdDiscovery) watchLoop() {
-	watchChan := e.provider.WatchPrefix(e.ctx, e.conf.DiscoveryConf.Path)
+	watchChan := e.provider.WatchPrefix(e.ctx, e.conf.Path)
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -188,7 +193,7 @@ func (e *EtcdDiscovery) watchLoop() {
 		case resp := <-watchChan:
 			if err := resp.Err(); err != nil {
 				log.SysLogger.Errorf("watch error: %v", err)
-				watchChan = e.provider.WatchPrefix(e.ctx, e.conf.DiscoveryConf.Path)
+				watchChan = e.provider.WatchPrefix(e.ctx, e.conf.Path)
 				continue
 			}
 			for _, ev := range resp.Events {
@@ -229,11 +234,22 @@ func (e *EtcdDiscovery) healthCheck() {
 }
 
 func (e *EtcdDiscovery) connect() error {
-	client, err := createEtcdClient(e.conf)
+	client, err := createEtcdClient(e.etcdConf)
 	if err != nil {
 		return err
 	}
 	e.client = client
+	// 验证连接是否真正建立
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = client.Get(ctx, "__health_check__")
+	if err != nil && err != context.DeadlineExceeded {
+		log.SysLogger.Warnf("etcd connection validation warning: %v", err)
+	}
+	// 检查连接状态
+	if !isEtcdClientConnected(client) {
+		return fmt.Errorf("etcd client not connected, endpoints: %v", e.etcdConf.Endpoints)
+	}
 	return nil
 }
 
@@ -254,25 +270,35 @@ func (e *EtcdDiscovery) reconnectAndRecover() {
 }
 
 // 工具
-func normalizeConf(conf *config.ClusterConf) *config.ClusterConf {
-	if conf.DiscoveryConf == nil {
-		conf.DiscoveryConf = &config.DiscoveryConf{Path: defaultPath, TTL: defaultTTL, MasterPath: defaultMasterKey}
+func normalizeConf(conf *config.DiscoveryConf) *config.DiscoveryConf {
+	if conf == nil {
+		conf = &config.DiscoveryConf{Path: defaultPath, TTL: defaultTTL, MasterPath: defaultMasterKey}
 	}
-	if conf.DiscoveryConf.TTL == 0 {
-		conf.DiscoveryConf.TTL = defaultTTL
+	if conf.TTL == 0 {
+		conf.TTL = defaultTTL
 	}
 	return conf
 }
 
-func createEtcdClient(conf *config.ClusterConf) (*clientv3.Client, error) {
-	cfg := clientv3.Config{Endpoints: conf.ETCDConf.Endpoints, DialTimeout: conf.ETCDConf.DialTimeout, Username: conf.ETCDConf.UserName, Password: conf.ETCDConf.Password}
+func createEtcdClient(conf *config.ETCDConf) (*clientv3.Client, error) {
+	// 确保 DialTimeout 有合理的默认值
+	dialTimeout := conf.DialTimeout
+	if dialTimeout == 0 {
+		dialTimeout = 3 * time.Second
+	}
+	cfg := clientv3.Config{
+		Endpoints:   conf.Endpoints,
+		DialTimeout: dialTimeout,
+		Username:    conf.UserName,
+		Password:    conf.Password,
+	}
 	var loggerCfg zap.Config
 	if config.IsDebug() {
 		loggerCfg = zap.NewDevelopmentConfig()
 	} else {
 		loggerCfg = zap.NewProductionConfig()
 	}
-	if conf.ETCDConf.NoLogger {
+	if conf.NoLogger {
 		cfg.Logger = zap.NewNop()
 	} else {
 		logger, err := loggerCfg.Build()

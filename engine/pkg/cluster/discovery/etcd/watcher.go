@@ -94,7 +94,7 @@ func (w *watcher) initLease() error {
 	if !w.d.provider.IsConnected() {
 		return fmt.Errorf("etcd client is not connected")
 	}
-	respRef, err := w.d.leaseMgr.Grant(int64(w.d.conf.DiscoveryConf.TTL))
+	respRef, err := w.d.leaseMgr.Grant(w.d.conf.TTL)
 	if err != nil {
 		return fmt.Errorf("create lease failed: %w", err)
 	}

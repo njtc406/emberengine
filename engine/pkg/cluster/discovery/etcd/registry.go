@@ -14,11 +14,11 @@ import (
 type etcdServiceRegistry struct{ d *EtcdDiscovery }
 
 func (r *etcdServiceRegistry) ServiceKey(pid *actor.PID) string {
-	return path.Join(r.d.conf.DiscoveryConf.Path, pid.GetServiceUid())
+	return path.Join(r.d.conf.Path, pid.GetServiceUid())
 }
 
 func (r *etcdServiceRegistry) MasterKey(group string) string {
-	return path.Join(r.d.conf.DiscoveryConf.MasterPath, group)
+	return path.Join(r.d.conf.MasterPath, group)
 }
 
 func (r *etcdServiceRegistry) RegisterService(ctx context.Context, pid *actor.PID, leaseRef disc.LeaseRef) error {

@@ -48,7 +48,7 @@ func (c *Cluster) Init() {
 	c.discovery = discovery.CreateDiscovery(config.Conf.ClusterConf.DiscoveryType)
 	if c.discovery != nil {
 		if err := c.discovery.Init(c.eventProcessor, config.Conf.ClusterConf); err != nil {
-			log.SysLogger.Fatalf("init discovery error:%v", err)
+			log.SysLogger.Fatalf("init discovery error: %v, conf: %+v", err, config.Conf.ClusterConf)
 		}
 	}
 
