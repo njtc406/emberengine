@@ -34,10 +34,6 @@ func NewMeta() inf.IEnvelopeMeta {
 	return metaPool.Get()
 }
 
-func GetMetaPoolStats() *pool.Stats {
-	return metaPool.Stats()
-}
-
 type Meta struct {
 	dto.DataRef
 	locker sync.RWMutex

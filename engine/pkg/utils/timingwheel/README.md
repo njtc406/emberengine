@@ -71,7 +71,7 @@ timer := scheduler.AfterFunc(time.Second*5, "myTimer",
     }, "arg1", "arg2")
 
 // 保存的定时器（返回ID，可通过ID取消）
-timerId, err := scheduler.AfterFuncWithStorage(time.Second*5, "myTimer",
+timerId, err := scheduler.AfterFunc(time.Second*5, "myTimer",
     func(t *timingwheel.Timer, args ...interface{}) {
         fmt.Println("Timer fired!")
     }, "arg1", "arg2")
@@ -87,7 +87,7 @@ timer := scheduler.TickerFunc(time.Second*5, "tickerTimer",
     })
 
 // 保存的循环定时器
-timerId, err := scheduler.TickerFuncWithStorage(time.Second*5, "tickerTimer",
+timerId, err := scheduler.TickerFunc(time.Second*5, "tickerTimer",
     func(t *timingwheel.Timer, args ...interface{}) {
         fmt.Println("Tick!")
     })
@@ -307,8 +307,7 @@ timingwheel.Start(time.Second, 60)
 ### 2. 及时取消不需要的定时器
 
 ```go
-// 使用WithStorage版本以便取消
-timerId, _ := scheduler.AfterFuncWithStorage(...)
+timerId, _ := scheduler.AfterFunc(...)
 defer scheduler.CancelTimer(timerId)
 ```
 

@@ -61,7 +61,3 @@ func NewEvent() *Event {
 	evt.XContext = xcontext.New(nil)
 	return evt
 }
-
-func GetEventPoolStats() *pool.Stats {
-	return eventPool.Stats()
-}

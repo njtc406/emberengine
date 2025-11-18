@@ -132,17 +132,6 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 	if tw.closed.Load() {
 		return
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			if tw.logger != nil {
-				tw.logger.Errorf("addOrRun panic, task_name:%s, err:%v", t.name, r)
-			} else {
-				fmt.Printf("addOrRun panic, task_name:%s, err:%v", t.name, r)
-			}
-
-			t.Stop()
-		}
-	}()
 
 	if !tw.add(t) {
 		// 任务已经过期，立即执行
@@ -166,7 +155,7 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 					}
 					if loop == nil {
 						// 不是循环任务，释放
-						t.Stop()
+						t.taskScheduler.CancelTimer(t.GetTimerId())
 					}
 				}()
 				asyncTask(taskArgs...)
@@ -176,7 +165,7 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 			if task != nil {
 				// 执行任务
 				select {
-				case t.c <- t:
+				case t.taskScheduler.GetTimerCbChannel() <- t:
 				default:
 					// 队列已满,本次不执行
 					if tw.logger != nil {
@@ -186,7 +175,7 @@ func (tw *TimingWheel) addOrRun(t *Timer) {
 					}
 					if loop == nil {
 						// 不是循环任务，释放
-						t.Stop()
+						t.taskScheduler.CancelTimer(t.GetTimerId())
 					}
 				}
 			}
@@ -259,19 +248,10 @@ func (tw *TimingWheel) IsClosed() bool {
 
 // AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
 // It returns a Timer that can be used to cancel the call using its Stop method.
-func (tw *TimingWheel) AfterFunc(d time.Duration, options ...TimerOption) *Timer {
-	t := createTimer()
+func (tw *TimingWheel) AfterFunc(d time.Duration, t *Timer) {
 	t.SetExpiration(timeToMs(timelib.Now().Add(d)))
-	for _, opt := range options {
-		opt(t)
-	}
-
-	if t.timerId <= 0 {
-		t.SetTimerId(tw.genTimerId())
-	}
 
 	tw.addOrRun(t)
-	return t
 }
 
 // Scheduler determines the execution plan of a task.
@@ -298,26 +278,17 @@ type Scheduler interface {
 // Afterwards, it will ask the next execution time each time f is about to
 // be executed, and f will be called at the next execution time if the time
 // is non-zero.
-func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
-	t = createTimer()
-	for _, opt := range options {
-		opt(t)
-	}
+func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
 	expiration := t.Next(timelib.Now())
 	if expiration.IsZero() {
-		// No time is scheduled, return nil.
-		t.Stop()
-		return
+		return fmt.Errorf("next time is zero")
 	}
 
-	if t.GetTimerId() <= 0 {
-		t.SetTimerId(tw.genTimerId())
-	}
 	t.SetExpiration(timeToMs(expiration))
 	t.loop = func() {
 		// 如果timingwheel已关闭，不能添加任务
 		if tw.closed.Load() {
-			t.Stop()
+			t.taskScheduler.CancelTimer(t.GetTimerId())
 			return
 		}
 		if !t.isActive() {
@@ -332,5 +303,5 @@ func (tw *TimingWheel) ScheduleFunc(options ...TimerOption) (t *Timer) {
 
 	tw.addOrRun(t)
 
-	return
+	return nil
 }

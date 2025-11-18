@@ -83,7 +83,7 @@ func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
 	rm.locker.Lock()
 	defer rm.locker.Unlock()
 
-	timerId, err := rm.sd.AfterFuncWithStorage(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
+	timerId, err := rm.sd.AfterFunc(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
 		elp := args[0].(inf.IEnvelope)
 		if !elp.IsRef() || elp.GetMeta().GetTimerId() != tm.GetTimerId() {
 			return nil
@@ -123,9 +123,7 @@ func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
 		return nil
 	}
 
-	if !rm.sd.CancelTimer(envelope.GetMeta().GetTimerId()) {
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("cancel monitor failed,seq:%d", seqId)
-	}
+	rm.sd.CancelTimer(envelope.GetMeta().GetTimerId())
 	delete(rm.waitMap, seqId)
 	return envelope
 }

@@ -50,7 +50,7 @@ package wsmodule
 //	})
 //	// 启动一个定时器,在10秒后检查是否绑定了roleId,如果没有绑定,则通知客户端断开连接
 //	// TODO (这个具体时间之后根据需求调整)
-//	c.timerId, _ = c.mgr.AfterFuncWithStorage(time.Second*10, "gate_client_check_auth", c.checkAuth)
+//	c.timerId, _ = c.mgr.AfterFunc(time.Second*10, "gate_client_check_auth", c.checkAuth)
 //	c.wg.Wait()
 //}
 //

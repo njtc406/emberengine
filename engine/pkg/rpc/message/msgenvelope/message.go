@@ -29,7 +29,3 @@ func NewMessage() *actor.Message {
 func ReleaseMessage(msg *actor.Message) {
 	msgPool.Put(msg)
 }
-
-func GetMsgPoolStats() *pool.Stats {
-	return msgPool.Stats()
-}

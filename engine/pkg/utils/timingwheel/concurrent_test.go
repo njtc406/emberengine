@@ -23,14 +23,17 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 	var stoppedCount atomic.Int32
 
 	// Create 100 timers
-	timers := make([]*Timer, 100)
+	timers := make([]uint64, 100)
 	for i := 0; i < 100; i++ {
-		tm := scheduler.AfterFunc(time.Millisecond*10, "test", func(timer *Timer, args ...interface{}) error {
+		tId, err := scheduler.AfterFunc(time.Millisecond*10, "test", func(timer *Timer, args ...interface{}) error {
 			executedCount.Add(1)
 			time.Sleep(time.Millisecond)
 			return nil
 		})
-		timers[i] = tm
+		if err != nil {
+			t.Fatalf("Failed to create timer: %v", err)
+		}
+		timers[i] = tId
 	}
 
 	// Stop 50 timers concurrently
@@ -40,9 +43,9 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			time.Sleep(time.Millisecond * 5)
-			if timers[idx].Stop() {
-				stoppedCount.Add(1)
-			}
+			scheduler.CancelTimer(timers[idx])
+			stoppedCount.Add(1)
+
 		}(i)
 	}
 
@@ -99,16 +102,18 @@ func TestTimerABAProblem(t *testing.T) {
 	// Service A: Register 100 Timers, immediately cancel half
 	for i := 0; i < 100; i++ {
 		name := fmt.Sprintf("taskA_%d", i)
-		tm := schedulerA.AfterFunc(time.Millisecond*5, name, func(timer *Timer, args ...interface{}) error {
+		tId, err := schedulerA.AfterFunc(time.Millisecond*5, name, func(timer *Timer, args ...interface{}) error {
 			executedByA.Add(1)
 			return nil
 		})
-		tm.c = chanA // Set to A's channel
+		if err != nil {
+			t.Fatalf("Failed to create timer: %v", err)
+		}
 
 		// Immediately cancel half, simulating cancellation under high load
 		if i%2 == 0 {
 			time.Sleep(time.Millisecond * 2)
-			schedulerA.CancelTimer(tm.timerId)
+			schedulerA.CancelTimer(tId)
 		}
 	}
 
@@ -118,11 +123,13 @@ func TestTimerABAProblem(t *testing.T) {
 	// Service B: Register 100 Timers (will reuse cancelled Timer objects)
 	for i := 0; i < 100; i++ {
 		name := fmt.Sprintf("taskB_%d", i)
-		tm := schedulerB.AfterFunc(time.Millisecond*50, name, func(timer *Timer, args ...interface{}) error {
+		_, err := schedulerB.AfterFunc(time.Millisecond*50, name, func(timer *Timer, args ...interface{}) error {
 			executedByB.Add(1)
 			return nil
 		})
-		tm.c = chanB // Set to B's channel
+		if err != nil {
+			t.Fatalf("Failed to create timer: %v", err)
+		}
 	}
 
 	// Simulate service A starting to process mailbox (Timer may already be reused)

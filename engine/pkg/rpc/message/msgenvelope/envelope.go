@@ -208,7 +208,3 @@ func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
 	ep.XContext = xcontext.New(ctx)
 	return ep
 }
-
-func GetMsgEnvelopePoolStats() *pool.Stats {
-	return msgEnvelopePool.Stats()
-}

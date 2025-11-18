@@ -10,7 +10,6 @@ import (
 	"errors"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
@@ -25,37 +24,6 @@ type ITimer interface {
 	Do() error
 	GetName() string
 	GetTimerId() uint64
-}
-
-var timerPool = pool.NewSyncPoolWrapper(
-	func() *Timer {
-		return &Timer{}
-	},
-	pool.NewStatsRecorder("timerPool"),
-	pool.WithRef(func(t *Timer) {
-		t.Ref()
-	}),
-	pool.WithUnRef(func(t *Timer) {
-		t.UnRef()
-	}),
-	pool.WithReset(func(t *Timer) {
-		t.Reset()
-	}),
-)
-
-func createTimer() *Timer {
-	return timerPool.Get()
-}
-
-func releaseTimer(t *Timer) {
-	if t.IsRef() {
-		// 可能会在多线程中被调用,所以做个判断
-		timerPool.Put(t)
-	}
-}
-
-func GetTimerPoolStats() *pool.Stats {
-	return timerPool.Stats()
 }
 
 type TimerOption func(t *Timer)
@@ -84,14 +52,14 @@ type Timer struct {
 	element *list.Element
 
 	// 以下字段需要在Timer创建初始化时设置，执行期间只读，因此是并发安全的
-	name      string               // 任务名称
-	interval  time.Duration        // 间隔时间 > 0 表示循环执行
-	spec      string               // cron表达式
-	task      TimerCallback        // 任务
-	taskArgs  []interface{}        // 任务参数
-	c         chan ITimer          // timer触发通道
-	loop      func()               // 循环执行
-	asyncTask func(...interface{}) // 异步任务
+	name          string               // 任务名称
+	interval      time.Duration        // 间隔时间 > 0 表示循环执行
+	spec          string               // cron表达式
+	task          TimerCallback        // 任务
+	taskArgs      []interface{}        // 任务参数
+	loop          func()               // 循环执行
+	asyncTask     func(...interface{}) // 异步任务
+	taskScheduler ITimerScheduler      // 任务调度器
 }
 
 func (t *Timer) Reset() {
@@ -110,7 +78,7 @@ func (t *Timer) Reset() {
 	t.executing.Store(false)
 	t.task = nil
 	t.taskArgs = nil
-	t.c = nil
+	t.taskScheduler = nil
 	t.loop = nil
 	t.asyncTask = nil
 	t.b = nil
@@ -147,7 +115,14 @@ func (t *Timer) setBucket(b *bucket) {
 // stops the timer, false if the timer has already expired or been stopped.
 //
 // Stop will wait for any ongoing task execution to complete before returning.
-func (t *Timer) Stop() bool {
+func (t *Timer) Stop() {
+	if t.taskScheduler == nil {
+		return
+	}
+	t.taskScheduler.CancelTimer(t.timerId)
+}
+
+func (t *Timer) stop() bool {
 	if !t.IsRef() || !t.cancel.CompareAndSwap(false, true) {
 		return false
 	}
@@ -166,8 +141,6 @@ func (t *Timer) Stop() bool {
 		// Thus, here we re-get t's possibly new bucket (nil for case 1, or ab (non-nil) for case 2),
 		// and retry until the bucket becomes nil, which indicates that t has finally been removed.
 	}
-
-	releaseTimer(t)
 
 	return stopped
 }
@@ -191,7 +164,7 @@ func (t *Timer) Do() (err error) {
 		t.execWg.Done()
 		// 不是循环任务, 执行完成后停止（循环任务会在timingwheel的addorrun弹出时就重新添加）
 		if t.loop == nil && !errors.Is(err, def.ErrTimerReuse) { // timer被复用时不能停止
-			t.Stop()
+			t.taskScheduler.CancelTimer(t.timerId)
 		}
 	}()
 
@@ -263,8 +236,8 @@ func (t *Timer) SetTaskArgs(args ...interface{}) {
 	t.taskArgs = args
 }
 
-func (t *Timer) SetC(c chan ITimer) {
-	t.c = c
+func (t *Timer) SetTaskScheduler(scheduler ITimerScheduler) {
+	t.taskScheduler = scheduler
 }
 
 func (t *Timer) SetAsyncTask(f func(...interface{})) {

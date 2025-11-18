@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/core"
@@ -23,7 +22,7 @@ type RedisModule struct {
 	client *redis.Client
 	// TODO redis需要支持集群模式
 	clusterClient *redis.ClusterClient
-	tm            *timingwheel.Timer
+	timerId       uint64
 }
 
 type Callback func(ctx context.Context, tx *redis.Client, args ...interface{}) (interface{}, error)
@@ -39,16 +38,20 @@ func (rm *RedisModule) Init(conf *redis.Options) {
 	if err := rm.checkConnect(); err != nil {
 		log.SysLogger.Panic(err)
 	}
-	rm.tm = rm.TickerAsyncFunc(time.Second*30, "redis health check", func(args ...interface{}) {
+	timerId, err := rm.TickerAsyncFunc(time.Second*30, "redis health check", func(args ...interface{}) {
 		if err := rm.checkConnect(); err != nil {
 			rm.reconnect()
 		}
 	})
+	if err != nil {
+		log.SysLogger.Panic(err)
+	}
+	rm.timerId = timerId
 }
 
 func (rm *RedisModule) OnRelease() {
-	if rm.tm != nil {
-		rm.tm.Stop()
+	if rm.timerId != 0 {
+		rm.CancelTimer(rm.timerId)
 	}
 	if rm.client != nil {
 		_ = rm.client.Close()
