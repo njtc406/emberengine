@@ -63,10 +63,6 @@ func ReleaseMessageBus(mb *MessageBus) {
 	busPool.Put(mb)
 }
 
-func GetMessageBusPoolStats() *pool.Stats {
-	return busPool.Stats()
-}
-
 func (mb *MessageBus) GetReceiverPid() *actor.PID {
 	return mb.receiver.GetPid()
 }

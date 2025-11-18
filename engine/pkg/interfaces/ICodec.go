@@ -5,8 +5,6 @@
 // 最后更新:  yr  2025/7/19 0019 18:50
 package interfaces
 
-import "github.com/njtc406/emberengine/engine/pkg/utils/pool"
-
 // IEncoder 编码器接口
 type IEncoder interface {
 	Encode(msg interface{}) ([]byte, string, error)
@@ -23,5 +21,4 @@ type IDecoder interface {
 type ICodec interface {
 	IEncoder
 	IDecoder
-	Stats() []*pool.Stats
 }

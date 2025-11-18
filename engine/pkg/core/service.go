@@ -11,8 +11,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"path"
 	"reflect"
 	"runtime/debug"
@@ -448,16 +446,4 @@ func (s *Service) LoggerWithCtx(ctx context.Context) *log.Entry {
 
 func (s *Service) IsPrimarySecondaryMode() bool {
 	return s.isPrimarySecondaryMode
-}
-
-func (s *Service) PoolStats() []string {
-	var stats []string
-	stats = append(stats, msgenvelope.GetMsgPoolStats().String())
-	stats = append(stats, msgenvelope.GetMetaPoolStats().String())
-	stats = append(stats, msgenvelope.GetMsgEnvelopePoolStats().String())
-	stats = append(stats, timingwheel.GetTimerPoolStats().String())
-	stats = append(stats, event.GetEventPoolStats().String())
-	stats = append(stats, codec.Stats())
-
-	return stats
 }

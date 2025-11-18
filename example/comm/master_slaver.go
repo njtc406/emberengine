@@ -46,12 +46,12 @@ const (
 type MasterSlaverTest struct {
 	core.Service
 
-	inited     atomic.Bool
-	a          *TestData
-	logs       []*Log
-	queueCache []*msg.TestLog // 用来缓存数据序列,防止在初始化之前就收到了同步数据
-	timer      *timingwheel.Timer
-	saveTimer  *timingwheel.Timer
+	inited        atomic.Bool
+	a             *TestData
+	logs          []*Log
+	queueCache    []*msg.TestLog // 用来缓存数据序列,防止在初始化之前就收到了同步数据
+	masterTimerId uint64
+	slaverTimerId uint64
 }
 
 func (s *MasterSlaverTest) OnInit() error {
@@ -71,14 +71,10 @@ func (s *MasterSlaverTest) OnStarted() error {
 }
 
 func (s *MasterSlaverTest) OnRelease() {
-	if s.timer != nil {
-		s.timer.Stop()
-		s.timer = nil
-	}
-	if s.saveTimer != nil {
-		s.saveTimer.Stop()
-		s.saveTimer = nil
-	}
+	s.CancelTimer(s.masterTimerId)
+	s.masterTimerId = 0
+	s.CancelTimer(s.slaverTimerId)
+	s.slaverTimerId = 0
 	// 保存数据
 }
 
@@ -102,8 +98,17 @@ func (s *MasterSlaverTest) becomeMaster(e inf.IEvent) {
 	s.inited.Store(true)
 
 	// 注册一个定时任务,模拟主服务数据操作
-	s.timer = s.TickerFunc(time.Second, "master tick", s.tick)
-	s.saveTimer = s.TickerFunc(time.Second*10, "save all data", s.saveAllData)
+	t1, err := s.TickerFunc(time.Second, "master tick", s.tick)
+	if err != nil {
+		s.GetLogger().Panicf("create master tick timer failed, err:%v", err)
+	}
+	s.masterTimerId = t1
+
+	t2, err := s.TickerFunc(time.Second*10, "save all data", s.saveAllData)
+	if err != nil {
+		s.GetLogger().Panicf("create save all data timer failed, err:%v", err)
+	}
+	s.slaverTimerId = t2
 
 	ctx := xcontext.New(nil)
 	ctx.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
@@ -134,14 +139,11 @@ func (s *MasterSlaverTest) becomeSlaver(e inf.IEvent) {
 	// 降级为从服务
 	// TODO 屏蔽所有数据操作,只允许使用主服务数据记录回放操作数据
 	// ...
-	if s.timer != nil {
-		s.timer.Stop()
-		s.timer = nil
-	}
-	if s.saveTimer != nil {
-		s.saveTimer.Stop()
-		s.saveTimer = nil
-	}
+	s.CancelTimer(s.masterTimerId)
+	s.masterTimerId = 0
+	s.CancelTimer(s.slaverTimerId)
+	s.slaverTimerId = 0
+
 	ctx := xcontext.New(nil)
 	ctx.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
 	// 从主服务同步一次完整数据
@@ -187,14 +189,10 @@ func (s *MasterSlaverTest) loseMaster(e inf.IEvent) {
 	// ...
 	s.inited.Store(false)
 
-	if s.timer != nil {
-		s.timer.Stop()
-		s.timer = nil
-	}
-	if s.saveTimer != nil {
-		s.saveTimer.Stop()
-		s.saveTimer = nil
-	}
+	s.CancelTimer(s.masterTimerId)
+	s.masterTimerId = 0
+	s.CancelTimer(s.slaverTimerId)
+	s.slaverTimerId = 0
 
 	// 存储全量数据,根据version判断是否需要写入
 	s.GetLogger().Debugf("lose master...")

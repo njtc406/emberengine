@@ -15,6 +15,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
+	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -44,7 +45,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 	concurrentNum := 100000
 	wg.Add(concurrentNum)
 	var startTime time.Time
-	_ = s.AfterFunc(time.Second, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
+	_, _ = s.AfterFunc(time.Second, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
 		// 使用协程不断调用
 		startTime = timelib.Now()
 		for i := 0; i < concurrentNum; i++ {
@@ -96,7 +97,7 @@ func (s *ConcurrencyTest) OnInit() error {
 
 	sema := make(chan struct{}, concurrency)
 
-	_ = s.AfterFunc(time.Second*1, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
+	_, _ = s.AfterFunc(time.Second*1, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
 		startTime = timelib.Now()
 
 		go func() {
@@ -215,9 +216,7 @@ func (s *ConcurrencyTest) OnInit() error {
 		//}
 
 		// 打印缓存池
-		for _, v := range s.PoolStats() {
-			fmt.Printf("%s\n", v)
-		}
+		fmt.Println(pool.GetPoolStats())
 
 		/*
 				emmmm,这是个悲伤的故事,电脑百兆带宽,跑满了,所以qps最大只有这么多了

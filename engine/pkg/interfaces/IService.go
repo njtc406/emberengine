@@ -41,7 +41,6 @@ type IServiceHandler interface {
 	GetMailbox() IMailbox
 	IsPrivate() bool
 	IsPrimarySecondaryMode() bool
-	PoolStats() []string
 	GetRpcHandler() IRpcHandler
 }
 
