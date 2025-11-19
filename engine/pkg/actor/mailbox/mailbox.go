@@ -24,7 +24,7 @@ func NewDefaultMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, mid
 }
 
 func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
-	if e.GetPriority() > def.PrioritySys && m.isSuspended() {
+	if e.GetPriority() > def.PriorityUrgent && m.isSuspended() {
 		return def.ErrMailboxNotRunning
 	}
 	// TODO 可以在这里加入限流和熔断等等中间件的判断

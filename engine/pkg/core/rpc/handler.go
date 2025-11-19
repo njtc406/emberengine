@@ -339,12 +339,12 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 	if !envelope.IsRef() {
 		return
 	}
-	meta := envelope.GetMeta()
+
 	data := envelope.GetData()
 	if data.NeedResponse() {
 		data.SetReply()
 		data.SetRequest(nil)
-
+		meta := envelope.GetMeta()
 		// 将receiver设置为sender,防止nats那里找不到对应的topic
 		sender := meta.GetSenderPid()
 		meta.SetReceiverPid(sender)
