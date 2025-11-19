@@ -168,20 +168,18 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 		return def.ErrWorkerClosed
 	}
 
+	// 空->非空边沿唤醒，降低等待时间
+	emptyBefore := que.Empty()
 	// 提交消息到对应的优先级队列
 	que.Push(e)
 
-	// 更新非空队列集合（修复：Push后直接检查队列是否非空）
-	w.nonEmptyMutex.Lock()
-	// 只要队列非空，就添加到非空集合
-	if !w.closed.Load() && que.Len() > 0 {
-		w.nonEmptyQueues[priority] = struct{}{}
-	}
-	w.nonEmptyMutex.Unlock()
-
 	// 最后检查：只有在Worker未关闭时才发送信号
 	if !w.closed.Load() {
-		w.signalNewMessageSafely()
+		if emptyBefore {
+			w.signalNewMessage() // 立即唤醒
+		} else {
+			w.signalNewMessageSafely() // 合并信号
+		}
 	}
 	return nil
 }
@@ -211,6 +209,12 @@ func (w *Worker) Start() {
 func (w *Worker) run() {
 	defer w.wg.Done()
 
+	// busy-wait 模式，接近旧版mailbox1路径（无条件变量）
+	if w.config != nil && w.config.WaitMode == "busy" {
+		w.runBusy()
+		return
+	}
+
 	var e inf.IEvent
 	var ok bool
 
@@ -236,6 +240,22 @@ func (w *Worker) run() {
 				break // 没有更多消息，回到等待状态
 			}
 			// 继续处理，直到没有消息为止
+		}
+	}
+}
+
+// runBusy 忙等处理循环（微睡眠退避），避免条件变量唤醒开销
+func (w *Worker) runBusy() {
+	backoff := 1
+	const maxBackoff = 8
+	for !w.closed.Load() {
+		if processed := w.processAvailableMessages(); !processed {
+			if backoff < maxBackoff {
+				backoff <<= 1
+			}
+			time.Sleep(time.Microsecond * time.Duration(backoff))
+		} else {
+			backoff = 1
 		}
 	}
 }
@@ -322,8 +342,6 @@ func (w *Worker) waitForNewMessages() {
 
 // processAvailableMessages 处理当前可用的消息（高性能优化版本）
 func (w *Worker) processAvailableMessages() bool {
-	var e inf.IEvent
-	var ok bool
 	processedAny := false
 	totalProcessed := 0
 
@@ -338,44 +356,61 @@ func (w *Worker) processAvailableMessages() bool {
 		w.availablePrioritiesPool.Put(availablePriorities[:0])
 	}()
 
-	// 优化：优先从非空队列集合中收集，避免全量扫描
-	var emptyPriorities []def.Priority // 延迟清理列表
-	w.nonEmptyMutex.RLock()
-	for priority := range w.nonEmptyQueues {
-		if w.priorityQueues[priority].Len() > 0 {
+	// 收集非空优先级（简单扫描，避免锁竞争）
+	for _, priority := range w.sortedPriorities {
+		if !w.priorityQueues[priority].Empty() {
 			availablePriorities = append(availablePriorities, priority)
-		} else {
-			// 队列已空，记录到延迟清理列表
-			emptyPriorities = append(emptyPriorities, priority)
 		}
 	}
-	w.nonEmptyMutex.RUnlock()
-
-	// 安全地清理空队列（在写锁下）
-	if len(emptyPriorities) > 0 {
-		w.nonEmptyMutex.Lock()
-		for _, priority := range emptyPriorities {
-			// 双重检查：再次确认队列为空才删除
-			if w.priorityQueues[priority].Len() == 0 {
-				delete(w.nonEmptyQueues, priority)
-			}
-		}
-		w.nonEmptyMutex.Unlock()
-	}
-
-	// 如果没有非空队列，返回
+	// 没有消息可处理
 	if len(availablePriorities) == 0 {
 		return false
 	}
-
-	// 按照预排序的优先级列表进行排序（高效版本）
-	w.sortAvailablePriorities(availablePriorities)
-
-	// 公平化调度升级：在总批次限制内轮流处理不同优先级，结合时间片机制
+	// 记录当前时间用于时间片统计
 	currentTime := time.Now().UnixNano()
+
+	// 如果只有一个非空优先级队列，走快路径，避免排序/策略选择
+	if len(availablePriorities) == 1 {
+		selectedPriority := availablePriorities[0]
+		que := w.priorityQueues[selectedPriority]
+		for totalProcessed < maxBatchTotal {
+			remainingBatch := maxBatchTotal - totalProcessed
+			processedCount := 0
+			// 在忙等模式下使用批量弹出以提升吞吐，否则逐条 Pop 以控制GC
+			if w.config != nil && w.config.WaitMode == "busy" {
+				batchLimit := w.priorityBatchSizes[selectedPriority]
+				if batchLimit > remainingBatch {
+					batchLimit = remainingBatch
+				}
+				batch := que.BatchPop(batchLimit)
+				for _, e := range batch {
+					w.safeExecMultiLevel(e, selectedPriority)
+					processedAny = true
+					processedCount++
+				}
+			} else {
+				// 使用逐条 Pop（避免 BatchPop 大切片分配导致 GC 抖动）
+				for i := 0; i < remainingBatch; i++ {
+					if e, ok := que.Pop(); ok {
+						w.safeExecMultiLevel(e, selectedPriority)
+						processedAny = true
+						processedCount++
+					} else {
+						break
+					}
+				}
+			}
+			totalProcessed += processedCount
+			w.updateTimeSliceInfo(selectedPriority, currentTime, int64(processedCount))
+			if processedCount == 0 || que.Empty() {
+				break
+			}
+		}
+		return processedAny
+	}
 	for totalProcessed < maxBatchTotal && len(availablePriorities) > 0 {
 		// 检查是否需要强制处理低优先级消息（防止饿死）
-		selectedPriority := w.selectPriorityWithFairness(availablePriorities, currentTime)
+		selectedPriority := w.scheduler.NextPriorityWithOrdering(availablePriorities)
 		if selectedPriority == -1 {
 			break
 		}
@@ -390,18 +425,17 @@ func (w *Worker) processAvailableMessages() bool {
 			batchSize = remainingBatch
 		}
 
-		// 批量处理该优先级的消息
+		// 批量处理该优先级的消息（使用BatchPop减少原子操作）
+		batch := que.BatchPop(batchSize)
 		processedCount := 0
-		for i := 0; i < batchSize; i++ {
-			if e, ok = que.Pop(); ok {
-				w.safeExecMultiLevel(e, selectedPriority)
-				processedAny = true
-				processedCount++
-			} else {
-				// 队列已空，从可用列表中移除
-				w.removeFromAvailable(&availablePriorities, selectedPriority)
-				break
-			}
+		for _, e := range batch {
+			w.safeExecMultiLevel(e, selectedPriority)
+			processedAny = true
+			processedCount++
+		}
+		// 队列可能已空，必要时从可用列表中移除
+		if processedCount < batchSize && que.Empty() {
+			w.removeFromAvailable(&availablePriorities, selectedPriority)
 		}
 
 		// 更新总处理计数和时间片信息
@@ -410,6 +444,8 @@ func (w *Worker) processAvailableMessages() bool {
 
 		// 如果这次没有处理任何消息，退出循环
 		if processedCount == 0 {
+			// 快路径：队列空了，移除并继续
+			w.removeFromAvailable(&availablePriorities, selectedPriority)
 			break
 		}
 	}

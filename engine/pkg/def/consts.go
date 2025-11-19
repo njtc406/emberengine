@@ -25,13 +25,13 @@ const (
 )
 
 const (
-	DefaultTimerSize         = 1024 // 默认定时器数量
-	DefaultTimerBucketSize   = 1024 // 默认bucket数量
-	DefaultUserMailboxSize   = 1024 // 默认事件队列数量
-	DefaultSysMailboxSize    = 16   // 默认系统事件队列数量
-	DefaultWorkerNum         = 1    // 默认协程数量
-	DefaultGoroutinePoolSize = 10   // 默认协程池大小
-	DefaultVirtualWorkerRate = 10   // 虚拟worker比率
+	DefaultTimerSize         = 1024   // 默认定时器数量
+	DefaultTimerBucketSize   = 1024   // 默认bucket数量
+	DefaultUserMailboxSize   = 102400 // 默认事件队列数量
+	DefaultSysMailboxSize    = 16     // 默认系统事件队列数量
+	DefaultWorkerNum         = 1000   // 默认协程数量
+	DefaultGoroutinePoolSize = 10     // 默认协程池大小
+	DefaultVirtualWorkerRate = 10     // 虚拟worker比率
 )
 
 const (
@@ -96,7 +96,7 @@ const (
 
 const NatsDefaultShardCount = 16
 
-const NatsDefaultTopic = "rpc.node.%s"
+const NatsDefaultTopic = "rpc.node."
 
 const (
 	DefaultTraceIdKey    = "sys.traceId"

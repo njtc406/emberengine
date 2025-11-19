@@ -6,7 +6,6 @@
 package client
 
 import (
-	"fmt"
 	"github.com/nats-io/nats.go"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -71,7 +70,7 @@ func (rc *natsSender) send(envelope inf.IEnvelope) error {
 		return def.ErrMsgSerializeFailed
 	}
 
-	return rc.conn.Publish(fmt.Sprintf(def.NatsDefaultTopic, envelope.GetMeta().GetReceiverPid().GetNodeUid()), data)
+	return rc.conn.Publish(def.NatsDefaultTopic+envelope.GetMeta().GetReceiverPid().GetNodeUid(), data)
 }
 
 func (rc *natsSender) SendRequest(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {

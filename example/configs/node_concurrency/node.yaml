@@ -3,13 +3,13 @@
 NodeConf:
   NodeId: 1
   # 系统状态(debug/release)
-  SystemStatus: debug
+  SystemStatus: release
   # 系统数据目录(持久化)
   PVCPath: ./example/data
   # 系统缓存目录
   PVPath: ./example/cache
   # 性能监控(0表示不开启监控)
-  ProfilerInterval: 10s
+  ProfilerInterval: 0s
   # 线程池大小 cpu_num*size
   AntsPoolSize: 10000
   # 定时器数量(用于监控rpc调用的timer)
@@ -72,24 +72,25 @@ ServiceConf:
         # 系统消息队列大小
         SystemMailboxSize: 16
         # 工作线程数量
-        WorkerNum: 1000
+        WorkerNum: 96
+        MaxWorkerNum: 128
         # 是否开启动态线程数调整
         DynamicWorkerScaling: false
         # 虚拟线程比例
-        VirtualWorkerRate: 100
-    - ClassName: PprofService
-      ServiceName: PprofService
-      Type: test
-      ServerId: 1
-      TimerConf:
-        TimerSize: 100000
-        TimerBucketSize: 10
-      WorkerConf:
-        UserMailboxSize: 102400
-        SystemMailboxSize: 16
-        WorkerNum: 1
-        DynamicWorkerScaling: false
-        VirtualWorkerRate: 10
+        VirtualWorkerRate: 20
+#    - ClassName: PprofService
+#      ServiceName: PprofService
+#      Type: test
+#      ServerId: 1
+#      TimerConf:
+#        TimerSize: 100000
+#        TimerBucketSize: 10
+#      WorkerConf:
+#        UserMailboxSize: 102400
+#        SystemMailboxSize: 16
+#        WorkerNum: 1
+#        DynamicWorkerScaling: false
+#        VirtualWorkerRate: 10
 
 
 
@@ -99,7 +100,7 @@ SystemLogger:
   # 日志文件名
   Name: "system-concurrency"
   # 日志级别
-  Level: debug
+  Level: info
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息

@@ -27,7 +27,7 @@ func (s *Service) initEventHandlers() {
 	s.RegisterUserHandler(event.SysEventServiceClose, s.handleServiceClose)
 	s.RegisterUserHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
 	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleSystemGlobalEvent)
-	s.RegisterUserHandler(event.RpcMsg, s.handleSystemRpcMsg)
+	//s.RegisterUserHandler(event.RpcMsg, s.handleSystemRpcMsg)
 	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
 	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
 	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
@@ -111,37 +111,6 @@ func (s *Service) handleSystemGlobalEvent(ev inf.IEvent, open bool, analyzer *pr
 		analyzer = s.profiler.Push(fmt.Sprintf("[SYS_GLB_EVENT] type:%d", t.GetType()))
 	}
 	s.globalEventProcessor.EventHandler(t)
-}
-
-func (s *Service) handleSystemRpcMsg(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
-	c := ev.(inf.IEnvelope)
-	if !c.IsRef() {
-		// 已经被释放了,可能是本地调用者取消或者超时
-		return
-	}
-
-	meta := c.GetMeta()
-	data := c.GetData()
-	if meta == nil || data == nil {
-		s.logger.WithContext(c.GetContext()).Errorf("service[%s] receive call error, meta or data is nil", s.GetName())
-		s.logger.WithContext(c.GetContext()).Errorf("meta: %v", meta)
-		s.logger.WithContext(c.GetContext()).Errorf("data: %v", data)
-		return
-	}
-
-	if data.IsReply() {
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_RESP] service:%s method:%s",
-				meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
-		}
-		s.HandleResponse(c)
-	} else {
-		if open {
-			analyzer = s.profiler.Push(fmt.Sprintf("[SYS_RPC_REQ] service:%s method:%s",
-				meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
-		}
-		s.HandleRequest(c)
-	}
 }
 
 // 具体的事件处理器实现

@@ -51,9 +51,9 @@ func fixConf(conf *config.WorkerConf) *config.WorkerConf {
 			DynamicWorkerScaling: false,
 			SystemMailboxSize:    16,
 			UserMailboxSize:      128,
-			VirtualWorkerRate:    100, // rate建议值稍微大一点,hash分布会更均匀
-			WorkerNum:            1,
-			MaxWorkerNum:         1,
+			VirtualWorkerRate:    20, // rate建议值稍微大一点,hash分布会更均匀
+			WorkerNum:            96,
+			MaxWorkerNum:         128,
 		}
 		return conf
 	}
@@ -273,15 +273,15 @@ func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorityMap map[def.P
 // CreateDefaultMultiLevelConfig 创建默认的多级优先级配置
 func CreateDefaultMultiLevelConfig() *WorkerConfig {
 	priorityMap := map[def.Priority]PriorityConfig{
-		def.PrioritySys:        {BatchSize: 64, Weight: 20}, // 系统：批量64，权重20
-		def.PriorityUrgent:     {BatchSize: 32, Weight: 8},  // 紧急：批量32，权重8
-		def.PriorityHigh:       {BatchSize: 24, Weight: 6},  // 高：批量24，权重6
-		def.PriorityNormal:     {BatchSize: 16, Weight: 4},  // 普通：批量16，权重4
-		def.PriorityLow:        {BatchSize: 12, Weight: 3},  // 低：批量12，权重3
-		def.PriorityBatch:      {BatchSize: 8, Weight: 2},   // 批量：批量8，权重2
-		def.PriorityBackground: {BatchSize: 4, Weight: 1},   // 后台：批量4，权重1
+		def.PrioritySys:        {BatchSize: 32, Weight: 20}, // 系统：批量32
+		def.PriorityUrgent:     {BatchSize: 16, Weight: 8},  // 紧急：批量16
+		def.PriorityHigh:       {BatchSize: 12, Weight: 6},  // 高：批量12
+		def.PriorityNormal:     {BatchSize: 8, Weight: 4},   // 普通：批量8
+		def.PriorityLow:        {BatchSize: 6, Weight: 3},   // 低：批量6
+		def.PriorityBatch:      {BatchSize: 4, Weight: 2},   // 批量：批量4
+		def.PriorityBackground: {BatchSize: 2, Weight: 1},   // 后台：批量2
 	}
-	return CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
+	return CreateMultiLevelConfig(def.StrategyAbsolute, priorityMap)
 }
 
 // CreateAbsolutePriorityConfig 创建绝对优先级配置

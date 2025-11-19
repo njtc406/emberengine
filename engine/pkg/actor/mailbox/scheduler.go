@@ -28,6 +28,8 @@ type MultiLevelConfig struct {
 type WorkerConfig struct {
 	// 多级队列配置（必需）
 	MultiLevel *MultiLevelConfig `json:"multi_level"`
+	// 等待模式：cond 或 busy（默认 busy 更接近旧版高吞吐路径）
+	WaitMode string `json:"wait_mode"`
 }
 
 func newDefaultPriorityMap() map[def.Priority]PriorityConfig {
@@ -53,6 +55,7 @@ func newDefaultMultiLevelConfig() *MultiLevelConfig {
 func DefaultWorkerConfig() *WorkerConfig {
 	return &WorkerConfig{
 		MultiLevel: newDefaultMultiLevelConfig(),
+		WaitMode:   "busy",
 	}
 }
 
@@ -94,10 +97,7 @@ func (ps *PriorityScheduler) NextPriorityWithOrdering(availablePriorities []def.
 	if ps == nil || len(availablePriorities) == 0 {
 		return -1
 	}
-
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
+	// 单线程 worker 内调用，无需加锁
 	switch ps.strategy {
 	case def.StrategyAbsolute:
 		// 绝对优先策略：直接选择最高优先级（数组第一个元素）
@@ -211,10 +211,7 @@ func (ps *PriorityScheduler) NextPriority(availablePriorities []def.Priority) de
 	if ps == nil || len(availablePriorities) == 0 {
 		return -1
 	}
-
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
+	// 单线程 worker 内调用，无需加锁
 	switch ps.strategy {
 	case def.StrategyAbsolute:
 		return ps.absolutePriority(availablePriorities)
