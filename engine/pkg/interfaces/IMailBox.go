@@ -5,6 +5,8 @@
 // @Update  yr  2025/2/8
 package interfaces
 
+import "github.com/njtc406/emberengine/engine/pkg/def"
+
 // IMailboxMiddleware 中间件
 type IMailboxMiddleware interface {
 	MailboxStarted()
@@ -30,10 +32,20 @@ type IMailbox interface {
 	Stop()
 	Suspend() bool
 	Resume() bool
-	// 注意：由于循环导入问题，我们不能直接引用WorkerConfig类型
-	// SetWorkerConfig和GetWorkerConfig方法将在具体实现中定义
-	SetWorkerConfig(config interface{})
-	GetWorkerConfig() interface{}
+}
+
+type IMailboxWorker interface {
+	Start()
+	Stop()
+	SubmitEvent(evt IEvent) error
+	GetWorkerId() int
+}
+
+type IMailboxStatistics interface {
+	GetPriorityQueueLen(priority def.Priority) int
+	GetTotalQueueLen() int
+	GetPriorityStatistics() map[def.Priority]int
+	GetSchedulerStatistics() map[string]interface{}
 }
 
 //type IDispatcher interface {

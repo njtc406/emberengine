@@ -102,10 +102,9 @@ type TimerConf struct {
 }
 
 type WorkerConf struct {
-	UserMailboxSize   int `binding:""` // 默认1024(最终值都是2的n次方,不足时向上取到最近的2的n次方)(修改为mpsc后这个暂时没用了)
-	SystemMailboxSize int `binding:""` // 默认16(最终值都是2的n次方,不足时向上取到最近的2的n次方)(修改为mpsc后这个暂时没用了)
-	WorkerNum         int `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
-	MaxWorkerNum      int `binding:""` // 最大工作线程数量(只有开启了动态worker扩展,这个值才会生效)
+	MailboxType  string `binding:""` // 邮箱类型(multilevel/simple,默认simple)
+	WorkerNum    int    `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
+	MaxWorkerNum int    `binding:""` // 最大工作线程数量(只有开启了动态worker扩展,这个值才会生效)
 
 	DynamicWorkerScaling bool                  `binding:""` // 动态worker扩展(默认false),如果开启则根据负载情况动态扩展线程池(请确保需要单线程的服务不开启这个标记)
 	VirtualWorkerRate    int                   `binding:""` // 虚拟线程倍率(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
@@ -113,6 +112,12 @@ type WorkerConf struct {
 	ShrinkFactor         float64               `binding:""` // 负载减少因子(默认0.5)(当负载小于最小负载时,则关闭多余的线程)
 	ResizeCoolDown       time.Duration         `binding:""` // 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
 	Strategy             *WorkerStrategyConfig `binding:""` // 扩容策略(在开启了动态扩展后生效)
+
+	// multilevel邮箱专用配置
+	MultiLevelConf *MultiLevelMailboxConf `binding:""` // 多优先级邮箱配置(仅当MailboxType=multilevel时生效)
+
+	// simple邮箱专用配置
+	SimpleConf *SimpleMailboxConf `binding:""` // 简单邮箱配置(仅当MailboxType=simple时生效)
 }
 
 type EventBusConf struct {
@@ -151,6 +156,17 @@ type WorkerStrategyConfig struct {
 	Name   string                  `binding:""` // 策略名称
 	Params map[string]interface{}  `binding:""` // 策略参数,如果是复合策略,需要固定给一个map["mode"]="all/any"
 	Subs   []*WorkerStrategyConfig `binding:""` // 子策略，复合策略才有
+}
+
+type MultiLevelMailboxConf struct {
+	WaitMode        string         `binding:""` // 等待模式: busy / cond (默认busy)
+	Strategy        string         `binding:""` // 调度策略: absolute / weighted / fair (默认absolute)
+	TotalBatchLimit int            `binding:""` // 总批次上限(默认128)
+	PriorityBatches map[string]int `binding:""` // 各优先级批量大小 {"sys":32, "urgent":16, "high":12, "normal":8}
+}
+
+type SimpleMailboxConf struct {
+	MaxBackoff int `binding:""` // 最大退避微秒数(默认4)
 }
 
 type DeDuplicatorConf struct {

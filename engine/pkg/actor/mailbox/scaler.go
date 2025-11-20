@@ -31,7 +31,7 @@ type AutoScaler struct {
 	Strategy       AutoScalerStrategy // 策略接口
 }
 
-func (s *AutoScaler) ShouldResize(current int, workers []*Worker) (int, string, bool) {
+func (s *AutoScaler) ShouldResize(current int, workers []*MultiWorker) (int, string, bool) {
 	now := time.Now()
 	if now.Sub(s.lastResizeTime) < s.ResizeCoolDown {
 		return 0, "", false

@@ -7,19 +7,19 @@ package mailbox
 
 import (
 	"context"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
 )
 
 type Scaler interface {
-	ShouldResize(current int, workers []*Worker) (newSize int, reason string, ok bool)
+	ShouldResize(current int, workers []*MultiWorker) (newSize int, reason string, ok bool)
 }
 
 type queue[T any] interface {
@@ -37,7 +37,7 @@ type WorkerPool struct {
 	wg           sync.WaitGroup
 	ctx          context.Context
 	cancel       context.CancelFunc
-	workers      map[int]*Worker
+	workers      map[int]*MultiWorker
 	ring         *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
 	invoker      inf.IMessageInvoker      // 消息处理器
 	middlewares  []inf.IMailboxMiddleware // 中间件
@@ -79,7 +79,7 @@ func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlew
 	return &WorkerPool{
 		conf:         *conf,
 		workerConfig: DefaultWorkerConfig(), // 初始化为默认配置
-		workers:      make(map[int]*Worker, conf.WorkerNum),
+		workers:      make(map[int]*MultiWorker, conf.WorkerNum),
 		invoker:      invoker,
 		ring:         hashring.NewHashRing[int](conf.VirtualWorkerRate),
 		middlewares:  middlewares,
@@ -147,7 +147,7 @@ func (p *WorkerPool) Stop() {
 
 func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
-	var worker *Worker
+	var worker *MultiWorker
 	var exists bool
 	var workerID int
 
@@ -242,7 +242,7 @@ func (p *WorkerPool) autoScaleWorkers() {
 				continue
 			}
 
-			workers := make([]*Worker, 0, len(p.workers))
+			workers := make([]*MultiWorker, 0, len(p.workers))
 			for _, w := range p.workers {
 				workers = append(workers, w)
 			}

@@ -64,23 +64,11 @@ func (m *defaultMailbox) GetWorkerConfig() interface{} {
 }
 
 // NewMultiLevelMailbox 创建一个多优先级邮箱
-func NewMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, strategy def.ScheduleStrategy, priorityMap map[def.Priority]PriorityConfig, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
-	mailbox := NewDefaultMailbox(conf, invoker, middlewares...)
-
-	// 创建多级配置
-	workerConfig := CreateMultiLevelConfig(strategy, priorityMap)
-	mailbox.SetWorkerConfig(workerConfig)
-
-	return mailbox
+func NewMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
+	return NewDefaultMailbox(conf, invoker, middlewares...)
 }
 
 // NewDefaultMultiLevelMailbox 创建一个默认的多优先级邮箱
 func NewDefaultMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
-	mailbox := NewDefaultMailbox(conf, invoker, middlewares...)
-
-	// 使用默认的多级配置
-	workerConfig := CreateDefaultMultiLevelConfig()
-	mailbox.SetWorkerConfig(workerConfig)
-
-	return mailbox
+	return NewDefaultMailbox(conf, invoker, middlewares...)
 }
