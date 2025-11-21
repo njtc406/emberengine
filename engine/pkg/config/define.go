@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/viper"
 	"time"
@@ -159,10 +160,16 @@ type WorkerStrategyConfig struct {
 }
 
 type MultiLevelMailboxConf struct {
-	WaitMode        string         `binding:""` // 等待模式: busy / cond (默认busy)
-	Strategy        string         `binding:""` // 调度策略: absolute / weighted / fair (默认absolute)
-	TotalBatchLimit int            `binding:""` // 总批次上限(默认128)
-	PriorityBatches map[string]int `binding:""` // 各优先级批量大小 {"sys":32, "urgent":16, "high":12, "normal":8}
+	WaitMode        string                           `binding:""` // 等待模式: busy / cond (默认busy)
+	Strategy        def.ScheduleStrategy             `binding:""` // 调度策略: absolute / weighted / fair (默认absolute)
+	TotalBatchLimit int                              `binding:""` // 总批次上限(默认128)
+	PriorityBatches map[def.Priority]*PriorityConfig `binding:""` // 各优先级批量大小 {"sys":32, "urgent":16, "high":12, "normal":8}
+}
+
+// PriorityConfig 单个优先级配置
+type PriorityConfig struct {
+	BatchSize int `json:"batch_size"` // 该级别批量处理大小
+	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
 }
 
 type SimpleMailboxConf struct {

@@ -5,11 +5,14 @@
 // @Update  yr  2025/4/24
 package mailbox
 
-import "github.com/njtc406/emberengine/engine/pkg/utils/util"
+import (
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/util"
+)
 
 type AutoScalerStrategy interface {
-	ShouldScaleUp(workers []*MultiWorker) bool
-	ShouldScaleDown(workers []*MultiWorker, min int) bool
+	ShouldScaleUp(workers []inf.IMailboxWorker) bool
+	ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool
 }
 
 // CompositeStrategy 组合自动扩容器
@@ -25,7 +28,7 @@ func newCompositeStrategy(strategies []AutoScalerStrategy, params map[string]int
 	}
 }
 
-func (c *CompositeStrategy) ShouldScaleUp(workers []*MultiWorker) bool {
+func (c *CompositeStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	if c.Mode == "all" {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleUp(workers) {
@@ -44,7 +47,7 @@ func (c *CompositeStrategy) ShouldScaleUp(workers []*MultiWorker) bool {
 	return false
 }
 
-func (c *CompositeStrategy) ShouldScaleDown(workers []*MultiWorker, min int) bool {
+func (c *CompositeStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
 	if c.Mode == "all" {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleDown(workers, min) {
@@ -73,7 +76,7 @@ func newDefaultStrategy(_ []AutoScalerStrategy, params map[string]interface{}) A
 	}
 }
 
-func (d *DefaultStrategy) ShouldScaleUp(workers []*MultiWorker) bool {
+func (d *DefaultStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	for _, w := range workers {
 		if w.GetMsgLen() > d.MaxLoadThreshold {
 			return true
@@ -82,7 +85,7 @@ func (d *DefaultStrategy) ShouldScaleUp(workers []*MultiWorker) bool {
 	return false
 }
 
-func (d *DefaultStrategy) ShouldScaleDown(workers []*MultiWorker, min int) bool {
+func (d *DefaultStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
 	if len(workers) <= min {
 		return false
 	}
@@ -111,7 +114,7 @@ func newCPUBasedStrategy(_ []AutoScalerStrategy, params map[string]interface{}) 
 	}
 }
 
-func (s *CPUBasedStrategy) ShouldScaleUp(workers []*MultiWorker) bool {
+func (s *CPUBasedStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	if s.GetCPULoad() < s.MaxLoadThreshold {
 		return false
 	}
@@ -125,7 +128,7 @@ func (s *CPUBasedStrategy) ShouldScaleUp(workers []*MultiWorker) bool {
 	return avgLoad > 10
 }
 
-func (s *CPUBasedStrategy) ShouldScaleDown(workers []*MultiWorker, min int) bool {
+func (s *CPUBasedStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
 	if len(workers) <= min {
 		return false
 	}

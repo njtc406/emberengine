@@ -67,13 +67,6 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 				TimerBucketSize: def.DefaultTimerBucketSize,
 			},
 			RpcType: def.RpcTypeGrpc,
-			WorkerConf: &config.WorkerConf{
-				UserMailboxSize:      def.DefaultUserMailboxSize,
-				SystemMailboxSize:    def.DefaultSysMailboxSize,
-				WorkerNum:            def.DefaultWorkerNum,
-				DynamicWorkerScaling: false,
-				VirtualWorkerRate:    def.DefaultVirtualWorkerRate,
-			},
 			LogConf: &config.ServiceLogConf{
 				Enable: false,
 				Config: nil,
@@ -110,31 +103,6 @@ func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.Servi
 		}
 	}
 
-	if serviceInitConf.WorkerConf == nil {
-		serviceInitConf.WorkerConf = &config.WorkerConf{
-			UserMailboxSize:      def.DefaultUserMailboxSize,
-			SystemMailboxSize:    def.DefaultSysMailboxSize,
-			WorkerNum:            def.DefaultWorkerNum,
-			DynamicWorkerScaling: false,
-			VirtualWorkerRate:    def.DefaultVirtualWorkerRate,
-		}
-	} else {
-		if serviceInitConf.WorkerConf.UserMailboxSize == 0 {
-			serviceInitConf.WorkerConf.UserMailboxSize = def.DefaultUserMailboxSize
-		}
-		if serviceInitConf.WorkerConf.SystemMailboxSize == 0 {
-			serviceInitConf.WorkerConf.SystemMailboxSize = def.DefaultSysMailboxSize
-		}
-
-		if serviceInitConf.WorkerConf.WorkerNum <= 0 {
-			serviceInitConf.WorkerConf.WorkerNum = def.DefaultWorkerNum
-		}
-
-		if serviceInitConf.WorkerConf.VirtualWorkerRate <= 0 {
-			serviceInitConf.WorkerConf.VirtualWorkerRate = def.DefaultVirtualWorkerRate
-		}
-	}
-
 	return serviceInitConf
 }
 
@@ -166,7 +134,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
-	s.mailbox = mailbox.NewDefaultMultiLevelMailbox(serviceInitConf.WorkerConf, s)
+	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s.logger, s)
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)

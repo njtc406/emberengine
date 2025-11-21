@@ -1,5 +1,5 @@
 // Package mailbox
-// @Title  服务的工作线程,接收并处理事件
+// @Title  双队列工作线程
 // @Description  desc
 // @Author  yr  2025/2/8
 // @Update  yr  2025/2/8
@@ -7,65 +7,69 @@ package mailbox
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 	"reflect"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 )
 
-type Worker struct {
+type SimpleWorker struct {
 	workerId      int
-	closed        bool
+	closed        atomic.Bool
 	pool          *WorkerPool
 	wg            sync.WaitGroup
 	userMailbox   queue[inf.IEvent] // 用户消息
 	systemMailbox queue[inf.IEvent] // 系统消息(高优先级)
-	userCount     atomic.Int64
-	sysCount      atomic.Int64
+	maxBackoff    int
 }
 
-func newDefaultWorker(pool *WorkerPool, id int) *Worker {
-	return &Worker{
-		workerId:      id,
+func (w *SimpleWorker) GetWorkerId() int {
+	return w.workerId
+}
+
+func newSimpleWorker(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker {
+	return &SimpleWorker{
+		workerId:      workerId,
 		pool:          pool,
 		userMailbox:   mpsc.New[inf.IEvent](),
 		systemMailbox: mpsc.New[inf.IEvent](),
+		maxBackoff:    conf.SimpleConf.MaxBackoff,
 	}
 }
 
-func (w *Worker) SubmitEvent(e inf.IEvent) error {
+func (w *SimpleWorker) SubmitEvent(e inf.IEvent) error {
 	if w.userMailbox == nil {
 		return def.ErrMailboxWorkerUserChannelNotInit
 	}
 
-	if e.GetPriority() > def.PriorityNormal {
-		w.sysCount.Add(1)
+	if e.GetPriority() < def.PriorityNormal {
 		if !w.systemMailbox.Push(e) {
-			return def.ErrSysEventChannelIsFull
+			return nil
 		}
 	} else {
-		w.userCount.Add(1)
 		if !w.userMailbox.Push(e) {
-			return nil //def.ErrEventChannelIsFull
+			return nil // mpsc队列无上限，不会满
 		}
 	}
 
 	return nil
 }
 
-func (w *Worker) Start() {
+func (w *SimpleWorker) Start() {
 	w.wg.Add(1)
 	go w.run()
 }
 
-func (w *Worker) run() {
+func (w *SimpleWorker) run() {
 	//log.SysLogger.Debugf("worker %d start", w.workerId)
 	defer w.wg.Done()
 
@@ -98,8 +102,7 @@ func (w *Worker) run() {
 	}()
 
 	var backoff = 1
-	var maxBackoff = 4
-	for !w.closed {
+	for !w.closed.Load() {
 		// 优先处理系统消息
 		if e, ok = w.systemMailbox.Pop(); ok {
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
@@ -113,7 +116,7 @@ func (w *Worker) run() {
 		}
 
 		// 使用指数退避来减少忙等开销
-		if backoff < maxBackoff {
+		if backoff < w.maxBackoff {
 			backoff *= 2
 		}
 		time.Sleep(time.Microsecond * time.Duration(backoff))
@@ -123,9 +126,11 @@ func (w *Worker) run() {
 	//log.SysLogger.Debugf("worker %d stopped", w.workerId)
 }
 
-func (w *Worker) stop() {
+func (w *SimpleWorker) Stop() {
 	//log.SysLogger.Debugf("worker %d process userCount:%d  sysCount:%d", w.workerId, w.userCount.Load(), w.sysCount.Load())
-	w.closed = true
+	if !w.closed.CompareAndSwap(false, true) {
+		return
+	}
 	w.wg.Wait()
 	w.userMailbox = nil
 	w.systemMailbox = nil
@@ -133,11 +138,18 @@ func (w *Worker) stop() {
 	w.workerId = 0
 }
 
-func (w *Worker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
+func (w *SimpleWorker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.SysLogger.Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
-			w.pool.invoker.EscalateFailure(r, e)
+			func() {
+				defer func() {
+					if r2 := recover(); r2 != nil {
+						log.SysLogger.Errorf("EscalateFailure also panicked: %v\ntrace:%s", r2, debug.Stack())
+					}
+				}()
+				w.pool.invoker.EscalateFailure(r, e)
+			}()
 		}
 	}()
 
@@ -156,9 +168,13 @@ func (w *Worker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 	}
 }
 
-func (w *Worker) GetMsgLen() int {
-	if w.userMailbox == nil {
-		return 0
+func (w *SimpleWorker) GetMsgLen() int {
+	var msgLen int
+	if w.userMailbox != nil {
+		msgLen += w.userMailbox.Len()
 	}
-	return w.userMailbox.Len()
+	if w.systemMailbox != nil {
+		msgLen += w.systemMailbox.Len()
+	}
+	return msgLen
 }

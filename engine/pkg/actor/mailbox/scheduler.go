@@ -6,34 +6,21 @@
 package mailbox
 
 import (
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
-// PriorityConfig 单个优先级配置
-type PriorityConfig struct {
-	BatchSize int `json:"batch_size"` // 该级别批量处理大小
-	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
-}
-
 // MultiLevelConfig 多级队列配置
 type MultiLevelConfig struct {
-	Enabled    bool                            `json:"enabled"`    // 是否启用多级队列
-	Priorities map[def.Priority]PriorityConfig `json:"priorities"` // 优先级配置列表
-	Strategy   def.ScheduleStrategy            `json:"strategy"`   // 调度策略
+	Enabled    bool                                    `json:"enabled"`    // 是否启用多级队列
+	Priorities map[def.Priority]*config.PriorityConfig `json:"priorities"` // 优先级配置列表
+	Strategy   def.ScheduleStrategy                    `json:"strategy"`   // 调度策略
 }
 
-// WorkerConfig Worker配置参数
-type WorkerConfig struct {
-	// 多级队列配置（必需）
-	MultiLevel *MultiLevelConfig `json:"multi_level"`
-	// 等待模式：cond 或 busy（默认 busy 更接近旧版高吞吐路径）
-	WaitMode string `json:"wait_mode"`
-}
-
-func newDefaultPriorityMap() map[def.Priority]PriorityConfig {
-	return map[def.Priority]PriorityConfig{
+func newDefaultPriorityMap() map[def.Priority]*config.PriorityConfig {
+	return map[def.Priority]*config.PriorityConfig{
 		def.PrioritySys:    {BatchSize: 64, Weight: 20},
 		def.PriorityUrgent: {BatchSize: 32, Weight: 10},
 		def.PriorityHigh:   {BatchSize: 16, Weight: 5},
@@ -52,37 +39,35 @@ func newDefaultMultiLevelConfig() *MultiLevelConfig {
 }
 
 // DefaultWorkerConfig 返回默认配置
-func DefaultWorkerConfig() *WorkerConfig {
-	return &WorkerConfig{
-		MultiLevel: newDefaultMultiLevelConfig(),
-		WaitMode:   "busy",
+func DefaultWorkerConfig() *config.MultiLevelMailboxConf {
+	return &config.MultiLevelMailboxConf{
+		WaitMode:        "busy",
+		Strategy:        def.StrategyAbsolute,
+		TotalBatchLimit: 32,
+		PriorityBatches: newDefaultPriorityMap(),
 	}
 }
 
 // PriorityScheduler 多级优先级调度器
 type PriorityScheduler struct {
 	strategy   def.ScheduleStrategy
-	priorities map[def.Priority]PriorityConfig
+	priorities map[def.Priority]*config.PriorityConfig
 	weights    map[def.Priority]int
 	counters   map[def.Priority]int // 用于加权轮询和防饥饿
 	mutex      sync.RWMutex
 }
 
 // NewPriorityScheduler 创建新的优先级调度器
-func NewPriorityScheduler(config *MultiLevelConfig) *PriorityScheduler {
-	if config == nil || !config.Enabled {
-		return nil
-	}
-
+func NewPriorityScheduler(conf *config.MultiLevelMailboxConf) *PriorityScheduler {
 	scheduler := &PriorityScheduler{
-		strategy:   config.Strategy,
-		priorities: config.Priorities,
+		strategy:   conf.Strategy,
+		priorities: conf.PriorityBatches,
 		weights:    make(map[def.Priority]int),
 		counters:   make(map[def.Priority]int),
 	}
 
 	// 初始化权重映射
-	for lv, pc := range config.Priorities {
+	for lv, pc := range conf.PriorityBatches {
 		scheduler.weights[lv] = pc.Weight
 		scheduler.counters[lv] = 0
 	}

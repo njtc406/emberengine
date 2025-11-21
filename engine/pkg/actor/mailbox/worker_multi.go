@@ -1,5 +1,5 @@
 // Package mailbox
-// @Title  服务的工作线程,接收并处理事件
+// @Title  多优先级队列工作线程
 // @Description  desc
 // @Author  yr  2025/2/8
 // @Update  yr  2025/2/8
@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"fmt"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"reflect"
 	"runtime/debug"
@@ -24,7 +25,7 @@ import (
 type MultiWorker struct {
 	workerId int
 	closed   atomic.Bool
-	config   *WorkerConfig
+	config   *config.MultiLevelMailboxConf
 	pool     *WorkerPool
 	wg       sync.WaitGroup
 
@@ -54,6 +55,17 @@ type MultiWorker struct {
 	fairnessThresholdNs int64                           // 公平性阈值（纳秒）
 }
 
+func (w *MultiWorker) Stop() {
+	// 标记为已关闭
+	w.closed.Store(true)
+
+	// 唤醒所有等待中的 goroutine
+	w.cond.Broadcast()
+
+	// 等待所有 goroutine 完成
+	w.wg.Wait()
+}
+
 // timeSliceInfo 时间片信息
 type timeSliceInfo struct {
 	lastProcessedTime atomic.Int64 // 上次处理时间（纳秒）
@@ -76,14 +88,14 @@ func (w *MultiWorker) calculateTimeSliceBudget(priority def.Priority) int64 {
 	}
 }
 
-func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *MultiWorker {
-	if config == nil {
-		config = DefaultWorkerConfig()
+func newMultiWorker(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker {
+	if conf.MultiLevelConf == nil {
+		conf.MultiLevelConf = DefaultWorkerConfig()
 	}
 
 	w := &MultiWorker{
-		workerId:            id,
-		config:              config,
+		workerId:            workerId,
+		config:              conf.MultiLevelConf,
 		pool:                pool,
 		priorityQueues:      make(map[def.Priority]queue[inf.IEvent]),
 		priorityBatchSizes:  make(map[def.Priority]int),
@@ -99,24 +111,11 @@ func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *MultiWorker {
 	}
 
 	// 初始化多级优先级系统（必须启用）
-	var prioritiesConfig map[def.Priority]PriorityConfig
-	if config.MultiLevel != nil && config.MultiLevel.Enabled {
-		w.scheduler = NewPriorityScheduler(config.MultiLevel)
-		prioritiesConfig = config.MultiLevel.Priorities
-	} else {
-		// 如果没有配置多级优先级，使用默认配置
-		defaultConfig := &MultiLevelConfig{
-			Enabled:    true,
-			Strategy:   def.StrategyAbsolute,
-			Priorities: newDefaultPriorityMap(),
-		}
-		w.scheduler = NewPriorityScheduler(defaultConfig)
-		prioritiesConfig = defaultConfig.Priorities
-	}
+	w.scheduler = NewPriorityScheduler(conf.MultiLevelConf)
 
 	// 为每个优先级创建队列并预计算优化数据
 	totalBatchSize := 0
-	for lv, pc := range prioritiesConfig {
+	for lv, pc := range conf.MultiLevelConf.PriorityBatches {
 		w.priorityQueues[lv] = mpsc.New[inf.IEvent]()
 		w.priorityBatchSizes[lv] = pc.BatchSize
 		totalBatchSize += pc.BatchSize

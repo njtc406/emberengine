@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 )
 
 type Scaler interface {
-	ShouldResize(current int, workers []*MultiWorker) (newSize int, reason string, ok bool)
+	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int, reason string, ok bool)
 }
 
 type queue[T any] interface {
@@ -31,68 +32,88 @@ type queue[T any] interface {
 }
 
 type WorkerPool struct {
-	conf         config.WorkerConf
-	workerConfig *WorkerConfig // Worker配置参数
-	mu           sync.RWMutex
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	workers      map[int]*MultiWorker
-	ring         *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
-	invoker      inf.IMessageInvoker      // 消息处理器
-	middlewares  []inf.IMailboxMiddleware // 中间件
-	profiler     *profiler.Profiler       // 性能分析
-	autoScaler   Scaler                   // 自动扩容器
+	conf        *config.WorkerConf
+	mu          sync.RWMutex
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
+	workers     map[int]inf.IMailboxWorker
+	ring        *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
+	invoker     inf.IMessageInvoker      // 消息处理器
+	middlewares []inf.IMailboxMiddleware // 中间件
+	profiler    *profiler.Profiler       // 性能分析
+	autoScaler  Scaler                   // 自动扩容器
+	logger      log.ILogger
 }
 
 func fixConf(conf *config.WorkerConf) *config.WorkerConf {
 	if conf == nil {
 		conf = &config.WorkerConf{
-			DynamicWorkerScaling: false,
-			SystemMailboxSize:    16,
-			UserMailboxSize:      128,
-			VirtualWorkerRate:    20, // rate建议值稍微大一点,hash分布会更均匀
-			WorkerNum:            96,
-			MaxWorkerNum:         128,
+			MailboxType:          "simple",
+			WorkerNum:            1,
+			MaxWorkerNum:         runtime.NumCPU(),
+			DynamicWorkerScaling: false,       // 默认不开启动态扩展
+			VirtualWorkerRate:    24,          // rate建议值稍微大一点,hash分布会更均匀
+			GrowthFactor:         0,           // 负载增长因子(默认1.5)(当负载大于最大负载时,则启动新的线程)
+			ShrinkFactor:         0,           // 负载减少因子(默认0.5)(当负载小于最小负载时,则关闭多余的线程)
+			ResizeCoolDown:       time.Second, // 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
+			Strategy:             nil,
+			MultiLevelConf:       nil,
+			SimpleConf: &config.SimpleMailboxConf{
+				MaxBackoff: 4, // 最大退避微秒数(默认4)
+			},
 		}
 		return conf
+	}
+
+	if conf.MailboxType == "" {
+		conf.MailboxType = "simple"
 	}
 
 	if conf.WorkerNum <= 0 {
 		conf.WorkerNum = 1
 	}
 	if conf.MaxWorkerNum <= 0 {
-		conf.MaxWorkerNum = 1
+		conf.MaxWorkerNum = runtime.NumCPU()
 	}
-	if conf.UserMailboxSize <= 0 {
-		conf.UserMailboxSize = 128
+	if conf.VirtualWorkerRate <= 0 {
+		conf.VirtualWorkerRate = 64
 	}
-	if conf.SystemMailboxSize <= 0 {
-		conf.SystemMailboxSize = 16
+	if conf.SimpleConf == nil {
+		conf.SimpleConf = &config.SimpleMailboxConf{
+			MaxBackoff: 4, // 最大退避微秒数(默认4)
+		}
+	} else {
+		if conf.SimpleConf.MaxBackoff <= 0 {
+			conf.SimpleConf.MaxBackoff = 4 // 最大退避微秒数(默认4)
+		}
 	}
 	return conf
 }
 
-func NewWorkerPool(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
+func NewWorkerPool(conf *config.WorkerConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
-		conf:         *conf,
-		workerConfig: DefaultWorkerConfig(), // 初始化为默认配置
-		workers:      make(map[int]*MultiWorker, conf.WorkerNum),
-		invoker:      invoker,
-		ring:         hashring.NewHashRing[int](conf.VirtualWorkerRate),
-		middlewares:  middlewares,
-		ctx:          ctx,
-		cancel:       cancel,
+		conf:        conf,
+		workers:     make(map[int]inf.IMailboxWorker, conf.WorkerNum),
+		invoker:     invoker,
+		ring:        hashring.NewHashRing[int](conf.VirtualWorkerRate),
+		middlewares: middlewares,
+		ctx:         ctx,
+		cancel:      cancel,
+		logger:      logger,
 	}
 }
 
 func (p *WorkerPool) Start() {
-	log.SysLogger.Debugf("Starting service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
+	p.logger.Debugf("Starting service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
 	p.mu.Lock()
 	for i := 0; i < p.conf.WorkerNum; i++ {
-		worker := newWorker(p, i, p.workerConfig) // 使用配置的workerConfig
+		worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
+		if worker == nil {
+			p.logger.Fatal("Failed to create worker")
+		}
 		p.workers[i] = worker
 		worker.Start()
 		// 将 worker 加入到哈希环中（这里每个都加进入,但是单线程时可能不会使用）
@@ -110,20 +131,7 @@ func (p *WorkerPool) Start() {
 		go p.autoScaleWorkers()
 	}
 
-	log.SysLogger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
-}
-
-// SetWorkerConfig 设置Worker配置参数（必须在Start之前调用）
-func (p *WorkerPool) SetWorkerConfig(config *WorkerConfig) {
-	if config == nil {
-		config = DefaultWorkerConfig()
-	}
-	p.workerConfig = config
-}
-
-// GetWorkerConfig 获取Worker配置参数
-func (p *WorkerPool) GetWorkerConfig() *WorkerConfig {
-	return p.workerConfig
+	p.logger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
 }
 
 func (p *WorkerPool) Stop() {
@@ -139,7 +147,7 @@ func (p *WorkerPool) Stop() {
 	}
 
 	for _, worker := range p.workers {
-		worker.stop()
+		worker.Stop()
 	}
 	p.ring.Clear()
 	p.workers = nil
@@ -147,7 +155,7 @@ func (p *WorkerPool) Stop() {
 
 func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
-	var worker *MultiWorker
+	var worker inf.IMailboxWorker
 	var exists bool
 	var workerID int
 
@@ -156,7 +164,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 		var ok bool
 		workerID, ok = p.ring.Get(evt.GetDispatcherKey())
 		if !ok {
-			log.SysLogger.WithContext(evt.GetContext()).Errorf("No worker available in hash ring")
+			p.logger.WithContext(evt.GetContext()).Errorf("No worker available in hash ring")
 			p.mu.RUnlock()
 			return def.ErrMailboxWorkerIsFull
 		}
@@ -168,7 +176,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	p.mu.RUnlock()
 
 	if !exists {
-		log.SysLogger.WithContext(evt.GetContext()).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
+		p.logger.WithContext(evt.GetContext()).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
 		return def.ErrMailboxWorkerIsFull
 	}
 
@@ -187,7 +195,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 		if newSize < p.conf.MaxWorkerNum {
 			// 增加 workers
 			for i := p.conf.WorkerNum; i < newSize; i++ {
-				worker := newWorker(p, i, p.workerConfig) // 使用配置的workerConfig
+				worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 				p.workers[i] = worker
 				worker.Start()
 				p.ring.Add(i)
@@ -197,7 +205,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 		// 减少 workers
 		for i := newSize; i < p.conf.WorkerNum; i++ {
 			if worker, exists := p.workers[i]; exists {
-				worker.stop()
+				worker.Stop()
 				delete(p.workers, i)
 				p.ring.Remove(i)
 			}
@@ -242,7 +250,7 @@ func (p *WorkerPool) autoScaleWorkers() {
 				continue
 			}
 
-			workers := make([]*MultiWorker, 0, len(p.workers))
+			workers := make([]inf.IMailboxWorker, 0, len(p.workers))
 			for _, w := range p.workers {
 				workers = append(workers, w)
 			}
@@ -250,46 +258,9 @@ func (p *WorkerPool) autoScaleWorkers() {
 			p.mu.RUnlock()
 
 			if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
-				log.SysLogger.Debugf("resizing from %d -> %d: %s", current, newSize, reason)
+				p.logger.Debugf("resizing from %d -> %d: %s", current, newSize, reason)
 				p.resizeWorkers(newSize)
 			}
 		}
 	}
-}
-
-// ======== 多级优先级配置辅助函数 ========
-
-// CreateMultiLevelConfig 创建多级优先级配置的辅助函数
-func CreateMultiLevelConfig(strategy def.ScheduleStrategy, priorityMap map[def.Priority]PriorityConfig) *WorkerConfig {
-	return &WorkerConfig{
-		MultiLevel: &MultiLevelConfig{
-			Enabled:    true,
-			Priorities: priorityMap,
-			Strategy:   strategy,
-		},
-	}
-}
-
-// CreateDefaultMultiLevelConfig 创建默认的多级优先级配置
-func CreateDefaultMultiLevelConfig() *WorkerConfig {
-	priorityMap := map[def.Priority]PriorityConfig{
-		def.PrioritySys:        {BatchSize: 32, Weight: 20}, // 系统：批量32
-		def.PriorityUrgent:     {BatchSize: 16, Weight: 8},  // 紧急：批量16
-		def.PriorityHigh:       {BatchSize: 12, Weight: 6},  // 高：批量12
-		def.PriorityNormal:     {BatchSize: 8, Weight: 4},   // 普通：批量8
-		def.PriorityLow:        {BatchSize: 6, Weight: 3},   // 低：批量6
-		def.PriorityBatch:      {BatchSize: 4, Weight: 2},   // 批量：批量4
-		def.PriorityBackground: {BatchSize: 2, Weight: 1},   // 后台：批量2
-	}
-	return CreateMultiLevelConfig(def.StrategyAbsolute, priorityMap)
-}
-
-// CreateAbsolutePriorityConfig 创建绝对优先级配置
-func CreateAbsolutePriorityConfig(priorityMap map[def.Priority]PriorityConfig) *WorkerConfig {
-	return CreateMultiLevelConfig(def.StrategyAbsolute, priorityMap)
-}
-
-// CreateFairnessPriorityConfig 创建防饥饿优先级配置
-func CreateFairnessPriorityConfig(priorityMap map[def.Priority]PriorityConfig) *WorkerConfig {
-	return CreateMultiLevelConfig(def.StrategyFairness, priorityMap)
 }

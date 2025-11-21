@@ -39,6 +39,8 @@ type IMailboxWorker interface {
 	Stop()
 	SubmitEvent(evt IEvent) error
 	GetWorkerId() int
+	// GetMsgLen 获取当前队列中的消息数量
+	GetMsgLen() int
 }
 
 type IMailboxStatistics interface {

@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"fmt"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"math"
 	"time"
 )
@@ -31,7 +32,7 @@ type AutoScaler struct {
 	Strategy       AutoScalerStrategy // 策略接口
 }
 
-func (s *AutoScaler) ShouldResize(current int, workers []*MultiWorker) (int, string, bool) {
+func (s *AutoScaler) ShouldResize(current int, workers []inf.IMailboxWorker) (int, string, bool) {
 	now := time.Now()
 	if now.Sub(s.lastResizeTime) < s.ResizeCoolDown {
 		return 0, "", false

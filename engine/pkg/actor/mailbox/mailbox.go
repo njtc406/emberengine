@@ -9,6 +9,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync/atomic"
 )
 
@@ -17,9 +18,9 @@ type defaultMailbox struct {
 	workerPool *WorkerPool
 }
 
-func NewDefaultMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
+func NewDefaultMailbox(conf *config.WorkerConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
 	return &defaultMailbox{
-		workerPool: NewWorkerPool(conf, invoker, middlewares...),
+		workerPool: NewWorkerPool(conf, logger, invoker, middlewares...),
 	}
 }
 
@@ -49,26 +50,4 @@ func (m *defaultMailbox) Start() {
 
 func (m *defaultMailbox) Stop() {
 	m.workerPool.Stop()
-}
-
-// SetWorkerConfig 设置Worker配置参数（必须在Start之前调用）
-func (m *defaultMailbox) SetWorkerConfig(config interface{}) {
-	if workerConfig, ok := config.(*WorkerConfig); ok {
-		m.workerPool.SetWorkerConfig(workerConfig)
-	}
-}
-
-// GetWorkerConfig 获取Worker配置参数
-func (m *defaultMailbox) GetWorkerConfig() interface{} {
-	return m.workerPool.GetWorkerConfig()
-}
-
-// NewMultiLevelMailbox 创建一个多优先级邮箱
-func NewMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
-	return NewDefaultMailbox(conf, invoker, middlewares...)
-}
-
-// NewDefaultMultiLevelMailbox 创建一个默认的多优先级邮箱
-func NewDefaultMultiLevelMailbox(conf *config.WorkerConf, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
-	return NewDefaultMailbox(conf, invoker, middlewares...)
 }
