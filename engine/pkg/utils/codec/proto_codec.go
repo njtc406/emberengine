@@ -7,6 +7,7 @@ package codec
 
 import (
 	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
@@ -36,10 +37,10 @@ func (c *protoCodec) Type() int32 {
 	return def.ProtoBuf
 }
 
-func (c *protoCodec) Encode(msg interface{}) ([]byte, string, error) {
+func (c *protoCodec) Encode(msg interface{}) ([]byte, error) {
 	pb, ok := msg.(proto.Message)
 	if !ok {
-		return nil, "", fmt.Errorf("protoCodec: msg must be proto.Message")
+		return nil, fmt.Errorf("protoCodec: msg must be proto.Message")
 	}
 	size := proto.Size(pb)
 	bufPtr := c.bufferPool.GetPool(size)
@@ -48,22 +49,20 @@ func (c *protoCodec) Encode(msg interface{}) ([]byte, string, error) {
 
 	out, err := c.opts.MarshalAppend(buf.Get(), pb)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	typeName := getProtoTypeName(msg.(proto.Message))
 	// 注意：一定要 copy 否则原始 buffer 会被覆盖
 	copied := make([]byte, len(out))
 	copy(copied, out)
-	return copied, typeName, nil
+	return copied, nil
 }
 
-func (c *protoCodec) Decode(typeName string, data []byte) (interface{}, error) {
-	t, err := getProtoType(typeName)
+func (c *protoCodec) Decode(data []byte, resp proto.Message) error {
+	err := proto.Unmarshal(data, resp)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	msg := t.New().Interface()
-	return msg, proto.Unmarshal(data, msg)
+	return nil
 }
 
 func (c *protoCodec) Stats() []*pool.Stats {

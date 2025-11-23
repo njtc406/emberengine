@@ -6,18 +6,20 @@
 package main
 
 import (
+	"github.com/njtc406/emberengine/engine/example/comm"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
-	"github.com/njtc406/emberengine/example/comm"
 )
 
 func init() {
-	services.SetService("MasterSlaverTest", func() inf.IService {
-		return &comm.MasterSlaverTest{}
+	services.SetService("ConcurrencyTest1", func() inf.IService {
+		return &comm.ConcurrencyTest1{}
 	})
 }
 
 func main() {
-	node.Start(node.WithConfPath("./example/configs/node_slave"))
+	//runtime.GOMAXPROCS(16) // 匹配CPU核心数
+	//runtime.SetMutexProfileFraction(1)
+	node.Start(node.WithConfPath("./example/configs/node_concurrency1"))
 }

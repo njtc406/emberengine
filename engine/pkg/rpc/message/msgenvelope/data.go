@@ -7,9 +7,11 @@ package msgenvelope
 
 import (
 	"errors"
+	"sync"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"sync"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func NewData() inf.IEnvelopeData {
@@ -25,7 +27,7 @@ type Data struct {
 	response    interface{} // 回复数据
 	needResp    bool        // 是否需要回复
 	err         error       // 错误
-	requestBuff []byte      // 编码好的数据
+	requestBuff *anypb.Any  // 编码好的数据
 	typeName    string      // 类型名
 }
 
@@ -38,7 +40,7 @@ func (e *Data) Reset() {
 	e.response = nil
 	e.needResp = false
 	e.err = nil
-	e.requestBuff = e.requestBuff[:0]
+	e.requestBuff = nil
 	e.typeName = ""
 }
 
@@ -88,11 +90,11 @@ func (e *Data) SetNeedResponse(need bool) {
 	e.needResp = need
 }
 
-func (e *Data) SetRequestBuff(reqBuff []byte) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.requestBuff = reqBuff
-}
+//func (e *Data) SetRequestBuff(reqBuff *anypb.Any) {
+//	e.locker.Lock()
+//	defer e.locker.Unlock()
+//	e.requestBuff = reqBuff
+//}
 
 func (e *Data) GetMethod() string {
 	e.locker.RLock()
@@ -127,22 +129,22 @@ func (e *Data) GetErrStr() string {
 	return e.err.Error()
 }
 
-func (e *Data) GetRequestBuff(tpId int32) ([]byte, string, error) {
+func (e *Data) GetRequestBuff() (*anypb.Any, error) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 
 	if e.request == nil {
-		return nil, "", nil
+		// 允许请求为nil, 因为有的方法是不需要参数的
+		return nil, nil
 	}
 
-	if len(e.requestBuff) > 0 {
-		return e.requestBuff, e.typeName, e.err
+	if e.requestBuff != nil {
+		return e.requestBuff, nil
 	}
 
-	e.requestBuff, e.typeName, e.err = codec.Encode(tpId, e.request)
-	//e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
+	e.requestBuff, e.err = codec.EncodeToAny(e.request)
 
-	return e.requestBuff, e.typeName, e.err
+	return e.requestBuff, e.err
 }
 
 func (e *Data) IsReply() bool {

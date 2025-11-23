@@ -11,12 +11,13 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"golang.org/x/net/context"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"sync"
 )
 
@@ -123,7 +124,7 @@ func (e *MsgEnvelope) Wait() {
 	<-e.meta.GetDone()
 }
 
-func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
+func (e *MsgEnvelope) ToProtoMsg() (*actor.Message, error) {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 
@@ -136,8 +137,6 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 		}
 	}()
 
-	msg.TypeId = 0 // 默认使用protobuf(后面有其他需求再修改这里)
-	msg.TypeName = ""
 	msg.SenderPid = e.meta.GetSenderPid()
 	msg.ReceiverPid = e.meta.GetReceiverPid()
 	msg.Method = e.data.GetMethod()
@@ -149,32 +148,28 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 	msg.ReqId = e.meta.GetReqId()
 	msg.NeedResp = e.data.NeedResponse()
 
-	var byteData []byte
-	var typeName string
+	var anyData *anypb.Any
 
 	if req := e.data.GetRequest(); req != nil {
-		byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
+		// 请求数据可能是多个请求共用的,所以只需要其中一个编码好就可以了
+		anyData, err = e.data.GetRequestBuff()
 		if err != nil {
-			log.SysLogger.WithContext(e.GetContext()).Errorf("serialize message[%+v] is error: %s", e, err)
-			return nil
+			return nil, err
 		}
 
-		msg.Request = byteData
+		msg.Request = anyData
 	}
 
 	if resp := e.data.GetResponse(); resp != nil {
-		byteData, typeName, err = codec.Encode(msg.TypeId, resp)
-		//byteData, typeName, err = serializer.Serialize(resp, msg.TypeId)
+		// 回复数据是独立的,直接编码
+		anyData, err = codec.EncodeToAny(resp)
 		if err != nil {
-			log.SysLogger.WithContext(e.GetContext()).Errorf("serialize message[%+v] is error: %s", e, err)
-			return nil
+			return nil, err
 		}
-		msg.Response = byteData
+		msg.Response = anyData
 	}
 
-	msg.TypeName = typeName
-
-	return msg
+	return msg, nil
 }
 
 func (e *MsgEnvelope) Clone() inf.IEnvelope {

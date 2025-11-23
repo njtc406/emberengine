@@ -32,8 +32,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 				return nil
 			}
 			// 解析回复数据
-			response, err := codec.Decode(req.TypeId, req.TypeName, req.Response)
-			//response, err := serializer.Deserialize(req.Response, req.TypeName, req.TypeId)
+			response, err := codec.DecodeFromAny(req.Response)
 			defer func() {
 				if err != nil {
 					envelope.GetData().SetError(err)
@@ -78,7 +77,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		}
 
 		// 调用
-		request, err := codec.Decode(req.TypeId, req.TypeName, req.Request)
+		request, err := codec.DecodeFromAny(req.Request)
 		//request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
 		if err != nil {
 			return err

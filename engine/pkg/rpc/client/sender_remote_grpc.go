@@ -7,6 +7,9 @@ package client
 
 import (
 	"context"
+	"runtime"
+	"sync/atomic"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -14,8 +17,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"runtime"
-	"sync/atomic"
 )
 
 type grpcSender struct {
@@ -43,8 +44,7 @@ func newGrpcClient(addr string) inf.IRpcSender {
 	}
 
 	return &grpcSender{
-		conns: conns,
-		//IRpcDispatcher: sender,
+		conns:      conns,
 		rpcClients: clients,
 	}
 }
@@ -61,7 +61,7 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	if rc.IsClosed() {
 		return def.ErrRPCHadClosed
 	}
-	// 这里仅仅代表消息发送成功
+
 	ctx := envelope.GetContext()
 	_, ok := ctx.Deadline()
 	if !ok {
@@ -71,8 +71,9 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	}
 
 	// 构建发送消息
-	msg := envelope.ToProtoMsg()
-	if msg == nil {
+	msg, err := envelope.ToProtoMsg()
+	if err != nil {
+		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg)
@@ -80,12 +81,13 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	rpcClient := rc.rpcClients[rc.i.Add(1)%int64(len(rc.rpcClients))]
 
 	if _, err := rpcClient.RPCCall(ctx, msg); err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, envelope.GetMeta().GetReceiverPid().GetServiceUid(), err)
+		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope,
+			envelope.GetMeta().GetReceiverPid().GetServiceUid(), err)
 		return def.ErrRPCCallFailed
 	}
 
 	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, envelope.GetReceiverPid().GetServiceUid())
-
+	// 这里仅仅代表消息发送成功(不代表对方已经处理完成,处理全是异步的,会在回复消息中通知处理结果)
 	return nil
 }
 

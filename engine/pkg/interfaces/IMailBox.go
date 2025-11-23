@@ -30,8 +30,8 @@ type IMailbox interface {
 	IMailboxChannel
 	Start()
 	Stop()
-	Suspend() bool
-	Resume() bool
+	Suspend() bool // 挂起
+	Resume() bool  // 恢复
 }
 
 type IMailboxWorker interface {

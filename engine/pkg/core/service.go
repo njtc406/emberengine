@@ -8,21 +8,21 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
-	"github.com/njtc406/emberengine/engine/pkg/cluster"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"path"
 	"reflect"
 	"runtime/debug"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -52,8 +52,7 @@ type Service struct {
 
 	eventHandlers map[int32]EventHandler
 
-	userMsgHooks []MsgHookFun
-	sysMsgHooks  []MsgHookFun
+	msgHooks []MsgHookFun
 }
 
 func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {

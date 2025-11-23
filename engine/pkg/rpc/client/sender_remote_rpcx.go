@@ -7,12 +7,13 @@ package client
 
 import (
 	"context"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"runtime"
 	"sync/atomic"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/smallnest/rpcx/client"
@@ -24,7 +25,7 @@ import (
 
 type rpcxSender struct {
 	rpcClients []client.XClient
-	i          atomic.Int64
+	i          atomic.Uint64
 }
 
 func newRpcxClient(addr string) inf.IRpcSender {
@@ -77,7 +78,7 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	if rc.IsClosed() {
 		return def.ErrRPCHadClosed
 	}
-	// 这里仅仅代表消息发送成功
+
 	ctx := envelope.GetContext()
 	_, ok := ctx.Deadline()
 	if !ok {
@@ -87,15 +88,15 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	}
 
 	// 构建发送消息
-	msg := envelope.ToProtoMsg()
-	if msg == nil {
+	msg, err := envelope.ToProtoMsg()
+	if err != nil {
+		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
-	defer msgenvelope.ReleaseMessage(msg)
+	defer msgenvelope.ReleaseMessage(msg) // 发送后立即释放
 
-	// 轮训使用一个client
-
-	rpcClient := rc.rpcClients[rc.i.Add(1)%int64(len(rc.rpcClients))]
+	// 均衡负载
+	rpcClient := rc.rpcClients[rc.i.Add(1)%uint64(len(rc.rpcClients))]
 
 	call, err := rpcClient.Go(ctx, "RPCCall", msg, nil, make(chan *client.Call, 1))
 	if err != nil {
@@ -114,7 +115,7 @@ func (rc *rpcxSender) send(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope
 	}
 
 	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())
-
+	// 这里仅仅代表消息发送成功(不代表对方已经处理完成,处理全是异步的,会在回复消息中通知处理结果)
 	return nil
 }
 

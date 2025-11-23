@@ -7,13 +7,9 @@ package actor
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"sync/atomic"
-)
 
-const (
-	RoleTypeMaster = "master"
-	RoleTypeSlaver = "slaver"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
 func CreateInstanceId(serverId int32, serviceName, serviceId, nodeUid string) string {
@@ -42,13 +38,6 @@ func IsRetired(pid *PID) bool {
 
 func (pid *PID) SetMaster(master bool) {
 	pid.IsMaster = master
-}
-
-func (pid *PID) GetRoleType() string {
-	if pid.IsMaster {
-		return RoleTypeMaster
-	}
-	return RoleTypeSlaver
 }
 
 func (pid *PID) GetServiceGroup() string {

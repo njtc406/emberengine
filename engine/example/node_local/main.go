@@ -6,21 +6,30 @@
 package main
 
 import (
+	comm2 "github.com/njtc406/emberengine/engine/example/comm"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
-	"github.com/njtc406/emberengine/example/comm"
+	_ "github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
 )
 
 func init() {
+	services.SetService("Service3", func() inf.IService {
+		return &comm2.Service3{}
+	})
 	services.SetService("Service2", func() inf.IService {
-		return &comm.Service2{}
+		return &comm2.Service2{}
 	})
 	services.SetService("Service1", func() inf.IService {
-		return &comm.Service1{}
+		return &comm2.Service1{}
 	})
 }
 
+var version = "1.0"
+
 func main() {
-	node.Start(node.WithConfPath("./example/configs/node1"))
+	node.Start(
+		node.WithConfPath("./example/configs/node_local"),
+		node.WithVersion(version),
+	)
 }

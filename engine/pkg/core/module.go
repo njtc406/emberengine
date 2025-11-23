@@ -6,6 +6,9 @@
 package core
 
 import (
+	"reflect"
+	"sync/atomic"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
@@ -15,8 +18,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"reflect"
-	"sync/atomic"
 )
 
 type Module struct {

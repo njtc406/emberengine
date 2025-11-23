@@ -9,14 +9,8 @@ import inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 
 type MsgHookFun func(ev inf.IEvent) bool
 
-func (s *Service) RegisterUserMsgHook(fns ...MsgHookFun) {
+func (s *Service) RegisterMsgHook(fns ...MsgHookFun) {
 	for _, fn := range fns {
-		s.userMsgHooks = append(s.userMsgHooks, fn)
-	}
-}
-
-func (s *Service) RegisterSystemMsgHook(fns ...MsgHookFun) {
-	for _, fn := range fns {
-		s.sysMsgHooks = append(s.sysMsgHooks, fn)
+		s.msgHooks = append(s.msgHooks, fn)
 	}
 }

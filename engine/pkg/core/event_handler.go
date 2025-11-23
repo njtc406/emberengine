@@ -7,6 +7,7 @@ package core
 
 import (
 	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -47,7 +48,7 @@ func (s *Service) InvokeMessage(ev inf.IEvent) {
 	}
 	defer ev.Release()
 
-	for _, hook := range s.userMsgHooks {
+	for _, hook := range s.msgHooks {
 		if !hook(ev) {
 			break
 		}

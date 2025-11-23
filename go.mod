@@ -34,7 +34,7 @@ require (
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
 	golang.org/x/net v0.39.0
 	google.golang.org/grpc v1.71.1
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/protobuf v1.36.10
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.30.0

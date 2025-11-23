@@ -58,15 +58,16 @@ func (rc *natsSender) send(envelope inf.IEnvelope) error {
 	}
 
 	// 构建发送消息
-	msg := envelope.ToProtoMsg()
-	if msg == nil {
+	msg, err := envelope.ToProtoMsg()
+	if err != nil {
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg)
 
-	data, _, err := codec.Encode(def.ProtoBuf, msg)
-	//data, err := proto.Marshal(msg)
+	data, err := codec.Encode(def.ProtoBuf, msg) // 使用protobuf编码
 	if err != nil {
+		log.SysLogger.WithContext(envelope.GetContext()).Errorf("encode message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 

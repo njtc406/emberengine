@@ -6,9 +6,11 @@
 package interfaces
 
 import (
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"time"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type IEnvelope interface {
@@ -31,7 +33,7 @@ type IEnvelope interface {
 	SetDone()
 	RunCompletions()
 	Wait()
-	ToProtoMsg() *actor.Message
+	ToProtoMsg() (*actor.Message, error)
 	Clone() IEnvelope
 }
 
@@ -81,7 +83,7 @@ type IEnvelopeData interface {
 	SetError(err error)
 	SetErrStr(err string)
 	SetNeedResponse(need bool)
-	SetRequestBuff(reqBuff []byte)
+	//SetRequestBuff(reqBuff *anypb.Any)
 
 	// Get
 
@@ -90,7 +92,7 @@ type IEnvelopeData interface {
 	GetResponse() interface{}
 	GetError() error
 	GetErrStr() string
-	GetRequestBuff(int32) ([]byte, string, error)
+	GetRequestBuff() (*anypb.Any, error)
 
 	// Check
 

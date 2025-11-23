@@ -35,6 +35,17 @@ try {
 $ProtoPath = Resolve-Path $ProtoPath
 $OutputPath = Resolve-Path $OutputPath
 
+# 构建 protoc 参数
+$protocArgs = @(
+    "--proto_path=$ProtoPath"
+)
+
+$protocArgs += @(
+    "--go_out=$OutputPath",
+    "--go-grpc_out=$OutputPath",
+    "--go_opt=paths=source_relative"
+)
+
 # 如果没有指定具体文件，则获取目录下所有 .proto 文件
 if (-not $ProtoFiles) {
     $ProtoFiles = Get-ChildItem -Path $ProtoPath -Filter *.proto | Select-Object -ExpandProperty Name
@@ -56,7 +67,10 @@ foreach ($file in $ProtoFiles) {
     Write-Host "Compiling $file to Go..."
 
     # 执行 protoc 命令
-    & protoc --proto_path=$ProtoPath --go_out=$OutputPath --go-grpc_out=$OutputPath --go_opt=paths=source_relative $protoFile
+    $finalArgs = $protocArgs + $protoFile
+    Write-Host "Running: protoc $finalArgs"
+
+    & protoc @finalArgs
 
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to compile $file"

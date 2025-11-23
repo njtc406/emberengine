@@ -7,7 +7,10 @@ package codec
 
 import (
 	"fmt"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 var codecs = map[int32]inf.ICodec{}
@@ -24,21 +27,37 @@ func GetCodec(typ int32) (inf.ICodec, error) {
 	return c, nil
 }
 
-func Encode(typ int32, msg interface{}) ([]byte, string, error) {
+func Encode(typ int32, msg interface{}) ([]byte, error) {
 	coder, err := GetCodec(typ)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	return coder.Encode(msg)
 }
 
-func Decode(tpy int32, typeName string, data []byte) (interface{}, error) {
-	if data == nil || len(data) == 0 {
-		return nil, nil
+func Decode(tpy int32, data []byte, resp proto.Message) error {
+	if data == nil {
+		return nil
 	}
 	coder, err := GetCodec(tpy)
 	if err != nil {
+		return err
+	}
+	return coder.Decode(data, resp)
+}
+
+func EncodeToAny(msg any) (*anypb.Any, error) {
+	data, ok := msg.(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("msg is not proto.Message")
+	}
+	anyMsg, err := anypb.New(data)
+	if err != nil {
 		return nil, err
 	}
-	return coder.Decode(typeName, data)
+	return anyMsg, nil
+}
+
+func DecodeFromAny(anyMsg *anypb.Any) (proto.Message, error) {
+	return anyMsg.UnmarshalNew()
 }

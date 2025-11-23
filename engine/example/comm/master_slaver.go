@@ -2,6 +2,10 @@ package comm
 
 import (
 	"fmt"
+	"sync/atomic"
+	"time"
+
+	"github.com/njtc406/emberengine/engine/example/msg"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -10,10 +14,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"github.com/njtc406/emberengine/example/msg"
 	"google.golang.org/protobuf/proto"
-	"sync/atomic"
-	"time"
 )
 
 type TestData struct {

@@ -8,6 +8,13 @@ package comm
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sort"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/njtc406/emberengine/engine/example/msg"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -17,12 +24,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"github.com/njtc406/emberengine/example/msg"
-	"runtime"
-	"sort"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
