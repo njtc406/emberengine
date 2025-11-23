@@ -18,7 +18,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
 )
 
-type Scaler interface {
+type IScaler interface {
 	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int, reason string, ok bool)
 }
 
@@ -41,7 +41,7 @@ type WorkerPool struct {
 	invoker     inf.IMessageInvoker        // 消息处理器
 	middlewares []inf.IMailboxMiddleware   // 中间件
 	profiler    *profiler.Profiler         // 性能分析（这个之后修改为性能数据采集器,只采集数据,分析放在采集器中自己去做）
-	autoScaler  Scaler                     // 自动扩容器
+	autoScaler  IScaler                    // 自动扩容器
 	logger      log.ILogger
 }
 
