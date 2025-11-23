@@ -56,4 +56,4 @@ type IMailboxStatistics interface {
 //}
 
 // MailboxProducer is a function which creates a new mailbox
-//type MailboxProducer func(conf *config.WorkerConf, invoker IMessageInvoker, middlewares ...IMailboxMiddleware) IMailbox
+//type MailboxProducer func(conf *config.Mailbox, invoker IMessageInvoker, middlewares ...IMailboxMiddleware) IMailbox

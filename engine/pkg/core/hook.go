@@ -9,8 +9,12 @@ import inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 
 type MsgHookFun func(ev inf.IEvent) bool
 
-func (s *Service) RegisterMsgHook(fns ...MsgHookFun) {
+func (s *Service) AddMsgHook(fns ...MsgHookFun) {
 	for _, fn := range fns {
 		s.msgHooks = append(s.msgHooks, fn)
 	}
+}
+
+func (s *Service) AddMailboxMiddlewares(middlewares ...inf.IMailboxMiddleware) {
+	s.mailboxMiddlewares = append(s.mailboxMiddlewares, middlewares...)
 }

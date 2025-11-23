@@ -7,9 +7,11 @@ package mailbox
 
 import (
 	"fmt"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"math"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/config"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
 func clamp(val, min, max int) int {
@@ -23,18 +25,14 @@ func clamp(val, min, max int) int {
 }
 
 type AutoScaler struct {
-	MinWorkers     int
-	MaxWorkers     int
-	GrowthFactor   float64
-	ShrinkFactor   float64
-	ResizeCoolDown time.Duration
+	conf           *config.WorkerStrategyConfig
 	lastResizeTime time.Time
 	Strategy       AutoScalerStrategy // 策略接口
 }
 
 func (s *AutoScaler) ShouldResize(current int, workers []inf.IMailboxWorker) (int, string, bool) {
 	now := time.Now()
-	if now.Sub(s.lastResizeTime) < s.ResizeCoolDown {
+	if now.Sub(s.lastResizeTime) < s.conf.ResizeCoolDown {
 		return 0, "", false
 	}
 
@@ -46,13 +44,13 @@ func (s *AutoScaler) ShouldResize(current int, workers []inf.IMailboxWorker) (in
 	// 组合策略决策
 	if s.Strategy.ShouldScaleUp(workers) {
 		// 指数增长扩容
-		add := int(math.Ceil(float64(current) * s.GrowthFactor))
-		newSize = clamp(current+add, s.MinWorkers, s.MaxWorkers)
+		add := int(math.Ceil(float64(current) * s.conf.GrowthFactor))
+		newSize = clamp(current+add, s.conf.MinWorkerNum, s.conf.MaxWorkerNum)
 		reason = fmt.Sprintf("scale up: strategy triggered")
-	} else if s.Strategy.ShouldScaleDown(workers, s.MinWorkers) {
+	} else if s.Strategy.ShouldScaleDown(workers, s.conf.MinWorkerNum) {
 		// 比例缩减容
-		reduce := int(math.Floor(float64(current) * s.ShrinkFactor))
-		newSize = clamp(current-reduce, s.MinWorkers, s.MaxWorkers)
+		reduce := int(math.Floor(float64(current) * s.conf.ShrinkFactor))
+		newSize = clamp(current-reduce, s.conf.MinWorkerNum, s.conf.MaxWorkerNum)
 		reason = fmt.Sprintf("scale down: strategy triggered")
 	} else {
 		return current, "", false

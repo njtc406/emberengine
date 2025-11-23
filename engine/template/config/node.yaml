@@ -91,8 +91,8 @@ ServiceConf:
   RemoteConfPath: ""
   StartServices:
     # 服务名称
-    - ClassName: Service1
-      ServiceName: Service1
+    - ClassName: TestService
+      ServiceName: Test
       # 服务类型
       Type: test
       # 服务器ID
@@ -100,7 +100,7 @@ ServiceConf:
       # 服务版本
       Version: 1
       # rpc方式
-      RpcType: "grpc"
+      RpcType: "nats"
       # 系统级线程池大小
       GoroutinePoolSize: 1000
       # 定时器配置
@@ -109,25 +109,62 @@ ServiceConf:
         TimerSize: 1000
         # 定时器桶大小
         TimerBucketSize: 100
-      # 工作线程配置
-      WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 1024
-        # 系统消息队列大小
-        SystemMailboxSize: 16
+      # 邮箱配置
+      Mailbox:
+        # 邮箱类型(默认simple)
+        MailboxType: "simple"
         # 工作线程数量
         WorkerNum: 1
-        # 是否开启动态线程数调整
-        DynamicWorkerScaling: false
         # 虚拟线程比例
-        VirtualWorkerRate: 10
+        VirtualWorkerRate: 24
+        # 是否开启动态线程数调整(默认不开启)
+        DynamicWorkerScaling: false
+        Strategy:
+          # 动态线程数调整策略(默认不开启)
+          # 当前可选策略："mailbox_load", "cpu", "composite"
+          # "mailbox_load"：基于邮箱负载的动态线程数调整
+          # "cpu"：基于CPU利用率的动态线程数调整
+          # "composite"：基于复合策略的动态线程数调整
+          # (有any和all模式,any表示任意一个策略返回true,则调整线程数,all表示所有策略返回true,则调整线程数)
+          # 开启自动调整线程时,默认使用的mailbox_load策略
+          Strategy: "composite"
+          # 最小工作线程数量(默认1)
+          MinWorkerNum: 1
+          # 最大工作线程数量
+          MaxWorkerNum: 100
+          # 线程池增长因子(线程池的数量=当前线程池数量*扩容因子)
+          GrowthFactor: 1.5
+          # 线程池收缩因子(线程池的数量=当前线程池数量*缩容因子)
+          ShrinkFactor: 0.5
+          # 线程池调整冷却时间(调整线程数后,需要等待这个时间才能再次调整)
+          ResizeCoolDown: 1m
+          # 复合策略参数(用map是为了之后方便扩展)
+          Params:
+            # 模式(any表示任意一个策略返回true,则调整线程数,all表示所有策略返回true,则调整线程数)
+            Mode: "any"
+          # 子策略配置(用于复合策略)
+          Subs:
+              # 子策略1:基于CPU利用率的动态线程数调整
+            - Strategy: "cpu"
+              Params:
+                # CPU利用率阈值(这个策略目前有点问题)
+                MinLoadThreshold: 0.3
+                MaxLoadThreshold: 0.7
+              # 子策略2:基于邮箱负载的动态线程数调整
+            - Strategy: "mailbox_load"
+              Params:
+                # 邮箱负载阈值
+                # 空闲worker比例(超过阈值就会触发降低)
+                IdleThreshold: 0.5
+                # 待处理最大负载阈值(如果是多线程模式,为所有工作线程中待处理的和,超过阈值就会触发增加)
+                MaxLoadThreshold: 50
       ServiceLogConf:
         # 是否开启独立日志(默认使用系统日志器)
         Enable: true
         Config:
           Path: ./example/data/logs
           # 日志文件名
-          Name: "service"
+          Name: "Test"
           # 日志级别
           Level: debug
           # 是否打印调用文件信息

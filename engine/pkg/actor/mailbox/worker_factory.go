@@ -10,16 +10,16 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
-var factory = map[string]func(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker{
+var factory = map[string]func(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker{
 	"simple": newSimpleWorker,
 	"multi":  newMultiWorker,
 }
 
-func RegisterWorkerFactory(name string, fun func(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker) {
+func RegisterWorkerFactory(name string, fun func(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker) {
 	factory[name] = fun
 }
 
-func newWorker(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker {
+func newWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
 	if fun, ok := factory[conf.MailboxType]; ok {
 		return fun(workerId, conf, pool)
 	}

@@ -1,10 +1,11 @@
 package config
 
 import (
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/viper"
-	"time"
 )
 
 // TODO 这是第一版,后续可能会根据需求改进配置
@@ -75,7 +76,7 @@ type ServiceInitConf struct {
 	ServerId               int32           `binding:"required"` // 服务ID
 	TimerConf              *TimerConf      `binding:""`         // 定时器配置
 	RpcType                string          `binding:""`         // 远程调用方式(默认使用rpcx)
-	WorkerConf             *WorkerConf     `binding:""`         // 工作线程配置
+	Mailbox                *MailboxConf    `binding:""`         // 邮箱配置
 	LogConf                *ServiceLogConf `binding:""`         // 日志配置
 	IsPrimarySecondaryMode bool            `binding:""`         // 是否是主从模式(默认不开启)
 }
@@ -102,23 +103,20 @@ type TimerConf struct {
 	TimerBucketSize int `binding:""` // 定时器调度器存储桶数量(减少锁的冲突,增加并发)
 }
 
-type WorkerConf struct {
-	MailboxType  string `binding:""` // 邮箱类型(multilevel/simple,默认simple)
-	WorkerNum    int    `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
-	MaxWorkerNum int    `binding:""` // 最大工作线程数量(只有开启了动态worker扩展,这个值才会生效)
+type MailboxConf struct {
+	MailboxType string `binding:""` // 邮箱类型(multi/default,默认default)
+
+	WorkerNum         int `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
+	VirtualWorkerRate int `binding:""` // 虚拟线程倍率(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
 
 	DynamicWorkerScaling bool                  `binding:""` // 动态worker扩展(默认false),如果开启则根据负载情况动态扩展线程池(请确保需要单线程的服务不开启这个标记)
-	VirtualWorkerRate    int                   `binding:""` // 虚拟线程倍率(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
-	GrowthFactor         float64               `binding:""` // 负载增长因子(默认1.5)(当负载大于最大负载时,则启动新的线程)
-	ShrinkFactor         float64               `binding:""` // 负载减少因子(默认0.5)(当负载小于最小负载时,则关闭多余的线程)
-	ResizeCoolDown       time.Duration         `binding:""` // 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
 	Strategy             *WorkerStrategyConfig `binding:""` // 扩容策略(在开启了动态扩展后生效)
 
-	// multilevel邮箱专用配置
+	// 多优先级邮箱配置
 	MultiLevelConf *MultiLevelMailboxConf `binding:""` // 多优先级邮箱配置(仅当MailboxType=multilevel时生效)
 
-	// simple邮箱专用配置
-	SimpleConf *SimpleMailboxConf `binding:""` // 简单邮箱配置(仅当MailboxType=simple时生效)
+	// 默认邮箱配置
+	DefaultConf *DefaultMailboxConf `binding:""` // 默认邮箱配置(仅当MailboxType=default时生效)
 }
 
 type EventBusConf struct {
@@ -154,9 +152,14 @@ type ServiceLogConf struct {
 }
 
 type WorkerStrategyConfig struct {
-	Name   string                  `binding:""` // 策略名称
-	Params map[string]interface{}  `binding:""` // 策略参数,如果是复合策略,需要固定给一个map["mode"]="all/any"
-	Subs   []*WorkerStrategyConfig `binding:""` // 子策略，复合策略才有
+	Name           string                  `binding:""` // 策略名称
+	Params         map[string]interface{}  `binding:""` // 策略参数,如果是复合策略,需要固定给一个map["mode"]="all/any"
+	MinWorkerNum   int                     `binding:""` // 最小工作线程数量(只有开启了动态worker扩展,这个值才会生效)
+	MaxWorkerNum   int                     `binding:""` // 最大工作线程数量(只有开启了动态worker扩展,这个值才会生效)
+	GrowthFactor   float64                 `binding:""` // 扩容因子(线程池的数量=当前线程池数量*扩容因子)
+	ShrinkFactor   float64                 `binding:""` // 缩容因子(线程池的数量=当前线程池数量*缩容因子)
+	ResizeCoolDown time.Duration           `binding:""` // 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
+	Subs           []*WorkerStrategyConfig `binding:""` // 子策略，复合策略才有
 }
 
 type MultiLevelMailboxConf struct {
@@ -172,8 +175,10 @@ type PriorityConfig struct {
 	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
 }
 
-type SimpleMailboxConf struct {
-	MaxBackoff int `binding:""` // 最大退避微秒数(默认4)
+type DefaultMailboxConf struct {
+	BackoffBaseDelay  time.Duration `binding:""` // 退避基础时间(默认1毫秒)
+	BackoffMaxDelay   time.Duration `binding:""` // 最大退避时间(默认16秒)
+	BackoffMaxRetries int           `binding:""` // 最大重试次数(默认3次)
 }
 
 type DeDuplicatorConf struct {

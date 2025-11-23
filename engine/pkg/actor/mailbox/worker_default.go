@@ -16,6 +16,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/backoff"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -29,20 +30,20 @@ type SimpleWorker struct {
 	wg            sync.WaitGroup
 	userMailbox   queue[inf.IEvent] // 用户消息
 	systemMailbox queue[inf.IEvent] // 系统消息(高优先级)
-	maxBackoff    int
+	backoff       *backoff.ExponentialBackoff
 }
 
 func (w *SimpleWorker) GetWorkerId() int {
 	return w.workerId
 }
 
-func newSimpleWorker(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker {
+func newSimpleWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
 	return &SimpleWorker{
 		workerId:      workerId,
 		pool:          pool,
 		userMailbox:   mpsc.New[inf.IEvent](),
 		systemMailbox: mpsc.New[inf.IEvent](),
-		maxBackoff:    conf.SimpleConf.MaxBackoff,
+		backoff:       backoff.NewExponentialBackoff(conf.DefaultConf.BackoffBaseDelay, conf.DefaultConf.BackoffMaxDelay, conf.DefaultConf.BackoffMaxRetries),
 	}
 }
 
@@ -117,7 +118,7 @@ func (w *SimpleWorker) run() {
 
 		// 使用指数退避来减少忙等开销
 		if backoff < w.maxBackoff {
-			backoff *= 2
+			backoff = backoff << 2
 		}
 		time.Sleep(time.Microsecond * time.Duration(backoff))
 

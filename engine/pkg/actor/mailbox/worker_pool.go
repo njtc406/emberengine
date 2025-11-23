@@ -1,5 +1,5 @@
 // Package mailbox
-// 模块名: 模块名
+// 模块名: 工作线程池
 // 功能描述: 描述
 // 作者:  yr  2025/7/19 0019 21:37
 // 最后更新:  yr  2025/7/19 0019 21:37
@@ -7,7 +7,6 @@ package mailbox
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"time"
 
@@ -32,35 +31,30 @@ type queue[T any] interface {
 }
 
 type WorkerPool struct {
-	conf        *config.WorkerConf
+	conf        *config.MailboxConf
 	mu          sync.RWMutex
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
-	workers     map[int]inf.IMailboxWorker
-	ring        *hashring.HashRing[int]  // 一致性哈希环，用于分派事件
-	invoker     inf.IMessageInvoker      // 消息处理器
-	middlewares []inf.IMailboxMiddleware // 中间件
-	profiler    *profiler.Profiler       // 性能分析
-	autoScaler  Scaler                   // 自动扩容器
+	workers     map[int]inf.IMailboxWorker // 工作线程
+	ring        *hashring.HashRing[int]    // 一致性哈希环，用于分派事件
+	invoker     inf.IMessageInvoker        // 消息处理器
+	middlewares []inf.IMailboxMiddleware   // 中间件
+	profiler    *profiler.Profiler         // 性能分析（这个之后修改为性能数据采集器,只采集数据,分析放在采集器中自己去做）
+	autoScaler  Scaler                     // 自动扩容器
 	logger      log.ILogger
 }
 
-func fixConf(conf *config.WorkerConf) *config.WorkerConf {
+func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	if conf == nil {
-		conf = &config.WorkerConf{
-			MailboxType:          "simple",
-			WorkerNum:            1,
-			MaxWorkerNum:         runtime.NumCPU(),
-			DynamicWorkerScaling: false,       // 默认不开启动态扩展
-			VirtualWorkerRate:    24,          // rate建议值稍微大一点,hash分布会更均匀
-			GrowthFactor:         0,           // 负载增长因子(默认1.5)(当负载大于最大负载时,则启动新的线程)
-			ShrinkFactor:         0,           // 负载减少因子(默认0.5)(当负载小于最小负载时,则关闭多余的线程)
-			ResizeCoolDown:       time.Second, // 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
-			Strategy:             nil,
-			MultiLevelConf:       nil,
-			SimpleConf: &config.SimpleMailboxConf{
-				MaxBackoff: 4, // 最大退避微秒数(默认4)
+		conf = &config.MailboxConf{
+			MailboxType:       "simple",
+			WorkerNum:         1,  // 默认单线程
+			VirtualWorkerRate: 24, // rate建议值稍微大一点,hash分布会更均匀
+			DefaultConf: &config.DefaultMailboxConf{
+				BackoffBaseDelay:  1 * time.Millisecond, // 退避基础时间(默认1毫秒)
+				BackoffMaxDelay:   16 * time.Second,     // 最大退避时间(默认16秒)
+				BackoffMaxRetries: 3,                    // 最大重试次数(默认3次)
 			},
 		}
 		return conf
@@ -73,25 +67,30 @@ func fixConf(conf *config.WorkerConf) *config.WorkerConf {
 	if conf.WorkerNum <= 0 {
 		conf.WorkerNum = 1
 	}
-	if conf.MaxWorkerNum <= 0 {
-		conf.MaxWorkerNum = runtime.NumCPU()
-	}
 	if conf.VirtualWorkerRate <= 0 {
-		conf.VirtualWorkerRate = 64
+		conf.VirtualWorkerRate = 24
 	}
-	if conf.SimpleConf == nil {
-		conf.SimpleConf = &config.SimpleMailboxConf{
-			MaxBackoff: 4, // 最大退避微秒数(默认4)
+	if conf.DefaultConf == nil {
+		conf.DefaultConf = &config.DefaultMailboxConf{
+			BackoffBaseDelay:  1 * time.Millisecond, // 退避基础时间(默认1毫秒)
+			BackoffMaxDelay:   16 * time.Second,     // 最大退避时间(默认16秒)
+			BackoffMaxRetries: 3,                    // 最大重试次数(默认3次)
 		}
 	} else {
-		if conf.SimpleConf.MaxBackoff <= 0 {
-			conf.SimpleConf.MaxBackoff = 4 // 最大退避微秒数(默认4)
+		if conf.DefaultConf.BackoffBaseDelay <= 0 {
+			conf.DefaultConf.BackoffBaseDelay = 1 * time.Millisecond // 退避基础时间(默认1毫秒)
+		}
+		if conf.DefaultConf.BackoffMaxDelay <= 0 {
+			conf.DefaultConf.BackoffMaxDelay = 16 * time.Second // 最大退避时间(默认16秒)
+		}
+		if conf.DefaultConf.BackoffMaxRetries <= 0 {
+			conf.DefaultConf.BackoffMaxRetries = 3 // 最大重试次数(默认3次)
 		}
 	}
 	return conf
 }
 
-func NewWorkerPool(conf *config.WorkerConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
+func NewWorkerPool(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
@@ -112,7 +111,7 @@ func (p *WorkerPool) Start() {
 	for i := 0; i < p.conf.WorkerNum; i++ {
 		worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 		if worker == nil {
-			p.logger.Fatal("Failed to create worker")
+			p.logger.Fatalf("service[%s] Failed to create worker, conf:%v", p.invoker.GetServiceName(), p.conf)
 		}
 		p.workers[i] = worker
 		worker.Start()
@@ -192,7 +191,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	}
 
 	if newSize > p.conf.WorkerNum {
-		if newSize < p.conf.MaxWorkerNum {
+		if newSize < p.conf.Strategy.MaxWorkerNum {
 			// 增加 workers
 			for i := p.conf.WorkerNum; i < newSize; i++ {
 				worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
@@ -212,6 +211,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 		}
 	}
 
+	// 更新当前 worker 数量
 	p.conf.WorkerNum = newSize
 }
 
@@ -224,19 +224,15 @@ func (p *WorkerPool) autoScaleWorkers() {
 			log.SysLogger.Panic(err)
 		}
 		p.autoScaler = &AutoScaler{
-			MinWorkers:     p.conf.WorkerNum,
-			MaxWorkers:     p.conf.MaxWorkerNum,
-			GrowthFactor:   p.conf.GrowthFactor,
-			ShrinkFactor:   p.conf.ShrinkFactor,
-			ResizeCoolDown: p.conf.ResizeCoolDown,
-			Strategy:       strategy,
+			conf:     p.conf.Strategy,
+			Strategy: strategy,
 		}
 	}
 
 	// TODO 定时触发检查这部分先这么用吧,主要还没想到什么好的方式来为每种策略定制一个检查机制
 	// TODO 主要是嵌套策略里面可能包含了自驱动和外部驱动两种类型的策略,不太好分开
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(p.conf.Strategy.ResizeCoolDown) // 调整间隔
 	defer ticker.Stop()
 
 	for {

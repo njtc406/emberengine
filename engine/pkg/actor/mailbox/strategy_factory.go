@@ -7,46 +7,43 @@ package mailbox
 
 import (
 	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"sync"
+	"github.com/njtc406/emberengine/engine/pkg/utils/syncx"
 )
 
 const (
-	DefaultStrategyName   = "default"
+	MaxLoadStrategyName   = "mailbox_load"
 	CompositeStrategyName = "composite"
 	CPUBasedStrategyName  = "cpu"
 )
 
-type StrategyBuilder func([]AutoScalerStrategy, map[string]interface{}) AutoScalerStrategy
+type StrategyBuilder func(subs []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy
 
-var locker sync.RWMutex
-var builderMap = map[string]StrategyBuilder{
-	DefaultStrategyName:   newDefaultStrategy,
-	CPUBasedStrategyName:  newCPUBasedStrategy,
-	CompositeStrategyName: newCompositeStrategy,
+var builderMap = syncx.Map[string, StrategyBuilder]{}
+
+func init() {
+	builderMap.Store(MaxLoadStrategyName, newMaxLoadStrategy)
+	builderMap.Store(CPUBasedStrategyName, newCPUBasedStrategy)
+	builderMap.Store(CompositeStrategyName, newCompositeStrategy)
 }
 
 // RegisterStrategy 注册策略
 func RegisterStrategy(name string, strategy StrategyBuilder) {
-	locker.Lock()
-	defer locker.Unlock()
-	builderMap[name] = strategy
+	builderMap.Store(name, strategy)
 }
 
 func BuildStrategy(cfg *config.WorkerStrategyConfig) (AutoScalerStrategy, error) {
 	if cfg == nil {
-		return newDefaultStrategy(nil, map[string]interface{}{"minLoadThreshold": 10}), nil
+		return newMaxLoadStrategy(nil, map[string]interface{}{"minLoadThreshold": 64}), nil
 	}
 	if cfg.Name == "" {
-		cfg.Name = DefaultStrategyName
+		cfg.Name = MaxLoadStrategyName
 	}
-	locker.RLock()
-	builder, ok := builderMap[cfg.Name]
+	builder, ok := builderMap.Load(cfg.Name)
 	if !ok {
-		locker.RUnlock()
 		return nil, fmt.Errorf("unknown strategy name: %s", cfg.Name)
 	}
-	locker.RUnlock()
 
 	var subs []AutoScalerStrategy
 	for _, item := range cfg.Subs {

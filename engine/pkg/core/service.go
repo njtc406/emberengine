@@ -53,6 +53,8 @@ type Service struct {
 	eventHandlers map[int32]EventHandler
 
 	msgHooks []MsgHookFun
+
+	mailboxMiddlewares []inf.IMailboxMiddleware
 }
 
 func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
@@ -133,7 +135,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
-	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.WorkerConf, s.logger, s)
+	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.Mailbox, s.logger, s, s.mailboxMiddlewares...)
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)

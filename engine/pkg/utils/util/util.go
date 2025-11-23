@@ -7,10 +7,11 @@ package util
 
 import (
 	"fmt"
-	"github.com/shirou/gopsutil/v4/cpu"
-	"golang.org/x/exp/constraints"
 	"math/rand/v2"
 	"strconv"
+
+	"github.com/shirou/gopsutil/v4/cpu"
+	"golang.org/x/exp/constraints"
 )
 
 func GetCPULoad() float64 {

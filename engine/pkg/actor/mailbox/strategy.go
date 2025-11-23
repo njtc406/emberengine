@@ -24,7 +24,7 @@ type CompositeStrategy struct {
 func newCompositeStrategy(strategies []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
 	return &CompositeStrategy{
 		Strategies: strategies,
-		Mode:       params["mode"].(string),
+		Mode:       params["Mode"].(string),
 	}
 }
 
@@ -66,17 +66,19 @@ func (c *CompositeStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min in
 	return false
 }
 
-type DefaultStrategy struct {
+type MaxLoadStrategy struct {
+	IdleThreshold    int
 	MaxLoadThreshold int
 }
 
-func newDefaultStrategy(_ []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
-	return &DefaultStrategy{
-		MaxLoadThreshold: params["max_load_threshold"].(int),
+func newMaxLoadStrategy(_ []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
+	return &MaxLoadStrategy{
+		IdleThreshold:    params["IdleThreshold"].(int),
+		MaxLoadThreshold: params["MaxLoadThreshold"].(int),
 	}
 }
 
-func (d *DefaultStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
+func (d *MaxLoadStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	for _, w := range workers {
 		if w.GetMsgLen() > d.MaxLoadThreshold {
 			return true
@@ -85,7 +87,7 @@ func (d *DefaultStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	return false
 }
 
-func (d *DefaultStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
+func (d *MaxLoadStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
 	if len(workers) <= min {
 		return false
 	}
@@ -97,7 +99,7 @@ func (d *DefaultStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int)
 		}
 	}
 
-	return idleCount > len(workers)/2
+	return idleCount > len(workers)*d.IdleThreshold/100
 }
 
 type CPUBasedStrategy struct {
@@ -108,8 +110,8 @@ type CPUBasedStrategy struct {
 
 func newCPUBasedStrategy(_ []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
 	return &CPUBasedStrategy{
-		MinLoadThreshold: params["min_load_threshold"].(float64),
-		MaxLoadThreshold: params["max_load_threshold"].(float64),
+		MinLoadThreshold: params["MinLoadThreshold"].(float64),
+		MaxLoadThreshold: params["MaxLoadThreshold"].(float64),
 		GetCPULoad:       util.GetCPULoad,
 	}
 }

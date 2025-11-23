@@ -88,7 +88,7 @@ func (w *MultiWorker) calculateTimeSliceBudget(priority def.Priority) int64 {
 	}
 }
 
-func newMultiWorker(workerId int, conf *config.WorkerConf, pool *WorkerPool) inf.IMailboxWorker {
+func newMultiWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
 	if conf.MultiLevelConf == nil {
 		conf.MultiLevelConf = DefaultWorkerConfig()
 	}
