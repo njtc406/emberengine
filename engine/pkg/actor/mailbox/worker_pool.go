@@ -158,7 +158,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	var exists bool
 	var workerID int
 
-	p.mu.RLock()
+	p.mu.RLock() // 加个锁,防止在调整worker数量时,hash环还没有更新
 	if len(p.workers) > 1 {
 		var ok bool
 		workerID, ok = p.ring.Get(evt.GetDispatcherKey())
@@ -203,13 +203,15 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	} else {
 		// 减少 workers
 		// TODO 这里应该只能减少空闲worker
+		removeMap := make(map[int]struct{}, newSize)
 		for i := newSize; i < p.conf.WorkerNum; i++ {
 			if worker, exists := p.workers[i]; exists {
 				worker.Stop()
 				delete(p.workers, i)
-				p.ring.Remove(i)
 			}
 		}
+		// 一次性移除哈希环上的节点
+		p.ring.RemoveMany(removeMap)
 	}
 
 	// 更新当前 worker 数量

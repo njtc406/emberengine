@@ -7,9 +7,10 @@ package hashring
 
 import (
 	"fmt"
-	"github.com/cespare/xxhash/v2"
 	"sort"
 	"sync"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 const hashSalt = "ember_salt_key_y_w"
@@ -76,6 +77,20 @@ func (h *HashRing[T]) Remove(key T) {
 	var newNodes []int
 	for _, hash := range h.nodes {
 		if h.ring[hash] == key {
+			delete(h.ring, hash)
+		} else {
+			newNodes = append(newNodes, hash)
+		}
+	}
+	h.nodes = newNodes
+}
+
+func (h *HashRing[T]) RemoveMany(keys map[T]struct{}) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var newNodes []int
+	for _, hash := range h.nodes {
+		if _, ok := keys[h.ring[hash]]; ok {
 			delete(h.ring, hash)
 		} else {
 			newNodes = append(newNodes, hash)
