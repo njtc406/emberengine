@@ -202,6 +202,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 		}
 	} else {
 		// 减少 workers
+		// TODO 这里应该只能减少空闲worker
 		for i := newSize; i < p.conf.WorkerNum; i++ {
 			if worker, exists := p.workers[i]; exists {
 				worker.Stop()
