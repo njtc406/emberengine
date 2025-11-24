@@ -16,7 +16,7 @@ services:
 networks:
   ember_net:
     driver: bridge
-    name: idlerpg_net
+    name: ember_net
     ipam:
       config:
         - subnet: 172.10.0.0/16

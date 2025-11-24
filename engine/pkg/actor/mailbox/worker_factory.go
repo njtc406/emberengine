@@ -11,8 +11,8 @@ import (
 )
 
 var factory = map[string]func(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker{
-	"simple": newSimpleWorker,
-	"multi":  newMultiWorker,
+	"default": newDefaultWorker,
+	"multi":   newMultiWorker,
 }
 
 func RegisterWorkerFactory(name string, fun func(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker) {

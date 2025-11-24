@@ -84,7 +84,7 @@ ClusterConf:
   DiscoveryType: etcd
   RemoteConfPath: ""
   DiscoveryConf:
-    Path: /server/rpc
+    Path: /ember/rpc
 
 ServiceConf:
   OpenRemote: false
@@ -111,11 +111,11 @@ ServiceConf:
         TimerBucketSize: 100
       # 邮箱配置
       Mailbox:
-        # 邮箱类型(默认simple)
-        MailboxType: "simple"
-        # 工作线程数量
+        # 邮箱类型(默认default)
+        MailboxType: "default"
+        # 工作线程数量(默认1)
         WorkerNum: 1
-        # 虚拟线程比例
+        # 虚拟线程比例(默认24)
         VirtualWorkerRate: 24
         # 是否开启动态线程数调整(默认不开启)
         DynamicWorkerScaling: false

@@ -23,7 +23,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 )
 
-type SimpleWorker struct {
+type DefaultWorker struct {
 	workerId      int
 	closed        atomic.Bool
 	pool          *WorkerPool
@@ -33,12 +33,12 @@ type SimpleWorker struct {
 	backoff       *backoff.ExponentialBackoff
 }
 
-func (w *SimpleWorker) GetWorkerId() int {
+func (w *DefaultWorker) GetWorkerId() int {
 	return w.workerId
 }
 
-func newSimpleWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
-	return &SimpleWorker{
+func newDefaultWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
+	return &DefaultWorker{
 		workerId:      workerId,
 		pool:          pool,
 		userMailbox:   mpsc.New[inf.IEvent](),
@@ -47,7 +47,7 @@ func newSimpleWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) i
 	}
 }
 
-func (w *SimpleWorker) SubmitEvent(e inf.IEvent) error {
+func (w *DefaultWorker) SubmitEvent(e inf.IEvent) error {
 	if w.userMailbox == nil {
 		return def.ErrMailboxWorkerUserChannelNotInit
 	}
@@ -65,12 +65,12 @@ func (w *SimpleWorker) SubmitEvent(e inf.IEvent) error {
 	return nil
 }
 
-func (w *SimpleWorker) Start() {
+func (w *DefaultWorker) Start() {
 	w.wg.Add(1)
 	go w.run()
 }
 
-func (w *SimpleWorker) run() {
+func (w *DefaultWorker) run() {
 	//log.SysLogger.Debugf("worker %d start", w.workerId)
 	defer w.wg.Done()
 
@@ -127,7 +127,7 @@ func (w *SimpleWorker) run() {
 	//log.SysLogger.Debugf("worker %d stopped", w.workerId)
 }
 
-func (w *SimpleWorker) Stop() {
+func (w *DefaultWorker) Stop() {
 	//log.SysLogger.Debugf("worker %d process userCount:%d  sysCount:%d", w.workerId, w.userCount.Load(), w.sysCount.Load())
 	if !w.closed.CompareAndSwap(false, true) {
 		return
@@ -139,7 +139,7 @@ func (w *SimpleWorker) Stop() {
 	w.workerId = 0
 }
 
-func (w *SimpleWorker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
+func (w *DefaultWorker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.SysLogger.Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
@@ -169,7 +169,7 @@ func (w *SimpleWorker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
 	}
 }
 
-func (w *SimpleWorker) GetMsgLen() int {
+func (w *DefaultWorker) GetMsgLen() int {
 	var msgLen int
 	if w.userMailbox != nil {
 		msgLen += w.userMailbox.Len()
