@@ -7,10 +7,10 @@ package backoff
 
 import (
 	"math/rand/v2"
-	"sync/atomic"
 	"time"
 )
 
+// 单线程中使用,不使用锁
 type ExponentialBackoff struct {
 	BaseDelay  time.Duration
 	MaxDelay   time.Duration
@@ -27,7 +27,7 @@ func NewExponentialBackoff(baseDelay, maxDelay time.Duration, maxRetries int) *E
 }
 
 func (eb *ExponentialBackoff) NextDelay() time.Duration {
-	cur := atomic.LoadInt32(&eb.retry)
+	cur := eb.retry
 
 	if eb.MaxRetries > 0 && cur >= int32(eb.MaxRetries) {
 		return eb.MaxDelay
@@ -48,10 +48,12 @@ func (eb *ExponentialBackoff) NextDelay() time.Duration {
 	// 加入 jitter（FullJitter）
 	delay := time.Duration(rand.Int64N(int64(exp)))
 
-	atomic.AddInt32(&eb.retry, 1)
+	eb.retry++
 	return delay
 }
 
 func (eb *ExponentialBackoff) Reset() {
-	atomic.StoreInt32(&eb.retry, 0)
+	if eb.MaxRetries > 0 {
+		eb.retry = 0
+	}
 }

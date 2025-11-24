@@ -91,6 +91,9 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 }
 
 func NewWorkerPool(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
+	if invoker == nil {
+		logger.Fatal("invoker is nil")
+	}
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
@@ -176,7 +179,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 
 	if !exists {
 		p.logger.WithContext(evt.GetContext()).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
-		return def.ErrMailboxWorkerIsFull
+		return def.ErrMailboxWorkerNotFound
 	}
 
 	return worker.SubmitEvent(evt)
@@ -202,12 +205,13 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 		}
 	} else {
 		// 减少 workers
-		// TODO 这里应该只能减少空闲worker
 		removeMap := make(map[int]struct{}, newSize)
 		for i := newSize; i < p.conf.WorkerNum; i++ {
 			if worker, exists := p.workers[i]; exists {
+				// 停止worker的时候会自动将队列中所有事件处理完成,所以不需要选择空闲的worker来停止
 				worker.Stop()
 				delete(p.workers, i)
+				removeMap[i] = struct{}{}
 			}
 		}
 		// 一次性移除哈希环上的节点
@@ -224,7 +228,7 @@ func (p *WorkerPool) autoScaleWorkers() {
 	if p.autoScaler == nil {
 		strategy, err := BuildStrategy(p.conf.Strategy)
 		if err != nil {
-			log.SysLogger.Panic(err)
+			p.logger.Panic(err)
 		}
 		p.autoScaler = &AutoScaler{
 			conf:     p.conf.Strategy,

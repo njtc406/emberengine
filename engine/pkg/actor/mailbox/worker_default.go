@@ -15,12 +15,11 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/backoff"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
-
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
 )
 
 type DefaultWorker struct {
@@ -48,13 +47,17 @@ func newDefaultWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) 
 }
 
 func (w *DefaultWorker) SubmitEvent(e inf.IEvent) error {
+	if w.isClosed() {
+		return def.ErrMailboxWorkerClosed
+	}
 	if w.userMailbox == nil {
-		return def.ErrMailboxWorkerUserChannelNotInit
+		return def.ErrMailboxWorkerChannelNotInit
 	}
 
+	// 只区分普通消息和系统消息
 	if e.GetPriority() < def.PriorityNormal {
 		if !w.systemMailbox.Push(e) {
-			return nil
+			return nil // mpsc队列无上限，不会满
 		}
 	} else {
 		if !w.userMailbox.Push(e) {
@@ -102,25 +105,24 @@ func (w *DefaultWorker) run() {
 		}
 	}()
 
-	var backoff = 1
 	for !w.closed.Load() {
 		// 优先处理系统消息
 		if e, ok = w.systemMailbox.Pop(); ok {
+			w.backoff.Reset()
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
 			continue
 		}
 
 		if e, ok = w.userMailbox.Pop(); ok {
+			w.backoff.Reset()
 			// 交由业务处理消息
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
 			continue
 		}
 
 		// 使用指数退避来减少忙等开销
-		if backoff < w.maxBackoff {
-			backoff = backoff << 2
-		}
-		time.Sleep(time.Microsecond * time.Duration(backoff))
+		// TODO 这里需要修改一下策略,当处理完消息后，优先选择继续处理,如果超过N次空闲,则使用条件唤醒,否则sleep,考虑把整个的处理逻辑放到一个utils库中,方便其他地方复用
+		time.Sleep(time.Microsecond * w.backoff.NextDelay())
 
 		//runtime.Gosched()
 	}
@@ -133,10 +135,10 @@ func (w *DefaultWorker) Stop() {
 		return
 	}
 	w.wg.Wait()
-	w.userMailbox = nil
-	w.systemMailbox = nil
-	w.pool = nil
-	w.workerId = 0
+}
+
+func (w *DefaultWorker) isClosed() bool {
+	return w.closed.Load()
 }
 
 func (w *DefaultWorker) safeExec(invokeFun func(inf.IEvent), e inf.IEvent) {
