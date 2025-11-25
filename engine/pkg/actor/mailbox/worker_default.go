@@ -19,6 +19,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/backoff"
+	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
 
@@ -29,7 +30,7 @@ type DefaultWorker struct {
 	wg            sync.WaitGroup
 	userMailbox   queue[inf.IEvent] // 用户消息
 	systemMailbox queue[inf.IEvent] // 系统消息(高优先级)
-	backoff       *backoff.ExponentialBackoff
+	idler         *idle.Controller
 }
 
 func (w *DefaultWorker) GetWorkerId() int {
@@ -37,13 +38,14 @@ func (w *DefaultWorker) GetWorkerId() int {
 }
 
 func newDefaultWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
-	return &DefaultWorker{
+	w := &DefaultWorker{
 		workerId:      workerId,
 		pool:          pool,
 		userMailbox:   mpsc.New[inf.IEvent](),
 		systemMailbox: mpsc.New[inf.IEvent](),
-		backoff:       backoff.NewExponentialBackoff(conf.DefaultConf.BackoffBaseDelay, conf.DefaultConf.BackoffMaxDelay, conf.DefaultConf.BackoffMaxRetries),
 	}
+	w.idler = idle.NewController(conf.DefaultConf.BackoffBaseDelay, conf.DefaultConf.BackoffMaxDelay, conf.DefaultConf.MaxIdleBeforeBackoff, conf.DefaultConf.BackoffMaxRetries)
+	return w
 }
 
 func (w *DefaultWorker) SubmitEvent(e inf.IEvent) error {
@@ -56,13 +58,9 @@ func (w *DefaultWorker) SubmitEvent(e inf.IEvent) error {
 
 	// 只区分普通消息和系统消息
 	if e.GetPriority() < def.PriorityNormal {
-		if !w.systemMailbox.Push(e) {
-			return nil // mpsc队列无上限，不会满
-		}
+		w.systemMailbox.Push(e)
 	} else {
-		if !w.userMailbox.Push(e) {
-			return nil // mpsc队列无上限，不会满
-		}
+		w.userMailbox.Push(e)
 	}
 
 	return nil
@@ -79,17 +77,6 @@ func (w *DefaultWorker) run() {
 
 	var e inf.IEvent
 	var ok bool
-
-	// 这里暂时先屏蔽,后面已经处理过panic了
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		w.invoker.EscalateFailure(r, e)
-	//	}
-	//	// 重启listen
-	//	w.wg.Add(1)
-	//	go w.listen()
-	//}()
-
 	defer func() {
 		// 退出时检查业务是否处理完成
 		for !w.systemMailbox.Empty() {
@@ -108,21 +95,33 @@ func (w *DefaultWorker) run() {
 	for !w.closed.Load() {
 		// 优先处理系统消息
 		if e, ok = w.systemMailbox.Pop(); ok {
-			w.backoff.Reset()
+			if w.idler != nil {
+				w.idler.Reset()
+			} else {
+				w.backoff.Reset()
+			}
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
 			continue
 		}
 
 		if e, ok = w.userMailbox.Pop(); ok {
-			w.backoff.Reset()
+			if w.idler != nil {
+				w.idler.Reset()
+			} else {
+				w.backoff.Reset()
+			}
 			// 交由业务处理消息
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
 			continue
 		}
 
-		// 使用指数退避来减少忙等开销
-		// TODO 这里需要修改一下策略,当处理完消息后，优先选择继续处理,如果超过N次空闲,则使用条件唤醒,否则sleep,考虑把整个的处理逻辑放到一个utils库中,方便其他地方复用
-		time.Sleep(time.Microsecond * w.backoff.NextDelay())
+		// 使用通用 idle 控制器来处理空闲退避策略
+		if w.idler != nil {
+			w.idler.Idle()
+		} else {
+			// 保底兼容：如果 idler 为空，仍然保持原有 sleep(backoff.NextDelay()) 逻辑
+			time.Sleep(w.backoff.NextDelay())
+		}
 
 		//runtime.Gosched()
 	}

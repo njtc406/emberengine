@@ -176,9 +176,10 @@ type PriorityConfig struct {
 }
 
 type DefaultMailboxConf struct {
-	BackoffBaseDelay  time.Duration `binding:""` // 退避基础时间(默认1毫秒)
-	BackoffMaxDelay   time.Duration `binding:""` // 最大退避时间(默认16秒)
-	BackoffMaxRetries int           `binding:""` // 最大重试次数(默认3次)
+	BackoffBaseDelay     time.Duration `binding:""` // 退避基础时间(默认1毫秒)
+	BackoffMaxDelay      time.Duration `binding:""` // 最大退避时间(默认16秒)
+	BackoffMaxRetries    int           `binding:""` // 最大重试次数(默认3次)
+	MaxIdleBeforeBackoff int           `binding:""` // 最大空闲时间(默认10秒)
 }
 
 type DeDuplicatorConf struct {

@@ -3,7 +3,7 @@
 // 功能描述: 描述
 // 作者:  yr  2025/11/24 00:42
 // 最后更新:  yr  2025/11/24 00:42
-package backoff
+package idle
 
 import (
 	"math/rand/v2"

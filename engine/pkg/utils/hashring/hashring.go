@@ -83,6 +83,7 @@ func (h *HashRing[T]) Remove(key T) {
 		}
 	}
 	h.nodes = newNodes
+	sort.Ints(h.nodes)
 }
 
 func (h *HashRing[T]) RemoveMany(keys map[T]struct{}) {
@@ -97,6 +98,7 @@ func (h *HashRing[T]) RemoveMany(keys map[T]struct{}) {
 		}
 	}
 	h.nodes = newNodes
+	sort.Ints(h.nodes)
 }
 
 // Get 根据传入的 key 计算哈希值，并在哈希环中查找对应的值。
