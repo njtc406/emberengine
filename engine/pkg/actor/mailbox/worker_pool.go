@@ -51,7 +51,7 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 			MailboxType:       "simple",
 			WorkerNum:         1,  // 默认单线程
 			VirtualWorkerRate: 24, // rate建议值稍微大一点,hash分布会更均匀
-			DefaultConf: &config.DefaultMailboxConf{
+			DefaultWorkerConf: &config.DefaultWorkerConf{
 				BackoffBaseDelay:  1 * time.Millisecond, // 退避基础时间(默认1毫秒)
 				BackoffMaxDelay:   16 * time.Second,     // 最大退避时间(默认16秒)
 				BackoffMaxRetries: 3,                    // 最大重试次数(默认3次)
@@ -70,21 +70,21 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	if conf.VirtualWorkerRate <= 0 {
 		conf.VirtualWorkerRate = 24
 	}
-	if conf.DefaultConf == nil {
-		conf.DefaultConf = &config.DefaultMailboxConf{
+	if conf.DefaultWorkerConf == nil {
+		conf.DefaultWorkerConf = &config.DefaultWorkerConf{
 			BackoffBaseDelay:  1 * time.Millisecond, // 退避基础时间(默认1毫秒)
 			BackoffMaxDelay:   16 * time.Second,     // 最大退避时间(默认16秒)
 			BackoffMaxRetries: 3,                    // 最大重试次数(默认3次)
 		}
 	} else {
-		if conf.DefaultConf.BackoffBaseDelay <= 0 {
-			conf.DefaultConf.BackoffBaseDelay = 1 * time.Millisecond // 退避基础时间(默认1毫秒)
+		if conf.DefaultWorkerConf.BackoffBaseDelay <= 0 {
+			conf.DefaultWorkerConf.BackoffBaseDelay = 1 * time.Millisecond // 退避基础时间(默认1毫秒)
 		}
-		if conf.DefaultConf.BackoffMaxDelay <= 0 {
-			conf.DefaultConf.BackoffMaxDelay = 16 * time.Second // 最大退避时间(默认16秒)
+		if conf.DefaultWorkerConf.BackoffMaxDelay <= 0 {
+			conf.DefaultWorkerConf.BackoffMaxDelay = 16 * time.Second // 最大退避时间(默认16秒)
 		}
-		if conf.DefaultConf.BackoffMaxRetries <= 0 {
-			conf.DefaultConf.BackoffMaxRetries = 3 // 最大重试次数(默认3次)
+		if conf.DefaultWorkerConf.BackoffMaxRetries <= 0 {
+			conf.DefaultWorkerConf.BackoffMaxRetries = 3 // 最大重试次数(默认3次)
 		}
 	}
 	return conf

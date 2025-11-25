@@ -158,6 +158,17 @@ ServiceConf:
                 IdleThreshold: 0.5
                 # 待处理最大负载阈值(如果是多线程模式,为所有工作线程中待处理的和,超过阈值就会触发增加)
                 MaxLoadThreshold: 50
+        DefaultWorkerConf:
+          # 是否开启条件等待(默认true)
+          EnableCond: true
+          # 初始退避延迟(默认1ms)
+          BackoffBaseDelay: 1ms
+          # 最大退避延迟(默认8ms)
+          BackoffMaxDelay: 8ms
+          # 最大空闲次数(默认500次,超过后使用条件唤醒)
+          MaxIdleBeforeBackoff: 500
+          # 最大重试次数(默认2次)
+          BackoffMaxRetries: 2
       ServiceLogConf:
         # 是否开启独立日志(默认使用系统日志器)
         Enable: true

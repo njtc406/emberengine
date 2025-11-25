@@ -6,8 +6,9 @@
 package mailbox
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/config"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
@@ -39,8 +40,8 @@ func newDefaultMultiLevelConfig() *MultiLevelConfig {
 }
 
 // DefaultWorkerConfig 返回默认配置
-func DefaultWorkerConfig() *config.MultiLevelMailboxConf {
-	return &config.MultiLevelMailboxConf{
+func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
+	return &config.MultiLevelWorkerConf{
 		WaitMode:        "busy",
 		Strategy:        def.StrategyAbsolute,
 		TotalBatchLimit: 32,
@@ -58,7 +59,7 @@ type PriorityScheduler struct {
 }
 
 // NewPriorityScheduler 创建新的优先级调度器
-func NewPriorityScheduler(conf *config.MultiLevelMailboxConf) *PriorityScheduler {
+func NewPriorityScheduler(conf *config.MultiLevelWorkerConf) *PriorityScheduler {
 	scheduler := &PriorityScheduler{
 		strategy:   conf.Strategy,
 		priorities: conf.PriorityBatches,

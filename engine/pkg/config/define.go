@@ -113,10 +113,10 @@ type MailboxConf struct {
 	Strategy             *WorkerStrategyConfig `binding:""` // 扩容策略(在开启了动态扩展后生效)
 
 	// 多优先级邮箱配置
-	MultiLevelConf *MultiLevelMailboxConf `binding:""` // 多优先级邮箱配置(仅当MailboxType=multilevel时生效)
+	MultiLevelConf *MultiLevelWorkerConf `binding:""` // 多优先级邮箱配置(仅当MailboxType=multilevel时生效)
 
 	// 默认邮箱配置
-	DefaultConf *DefaultMailboxConf `binding:""` // 默认邮箱配置(仅当MailboxType=default时生效)
+	DefaultWorkerConf *DefaultWorkerConf `binding:""` // 默认邮箱配置(仅当MailboxType=default时生效)
 }
 
 type EventBusConf struct {
@@ -162,7 +162,7 @@ type WorkerStrategyConfig struct {
 	Subs           []*WorkerStrategyConfig `binding:""` // 子策略，复合策略才有
 }
 
-type MultiLevelMailboxConf struct {
+type MultiLevelWorkerConf struct {
 	WaitMode        string                           `binding:""` // 等待模式: busy / cond (默认busy)
 	Strategy        def.ScheduleStrategy             `binding:""` // 调度策略: absolute / weighted / fair (默认absolute)
 	TotalBatchLimit int                              `binding:""` // 总批次上限(默认128)
@@ -175,7 +175,8 @@ type PriorityConfig struct {
 	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
 }
 
-type DefaultMailboxConf struct {
+type DefaultWorkerConf struct {
+	EnableCond           bool          `binding:""` // 是否开启条件等待(默认false)
 	BackoffBaseDelay     time.Duration `binding:""` // 退避基础时间(默认1毫秒)
 	BackoffMaxDelay      time.Duration `binding:""` // 最大退避时间(默认16秒)
 	BackoffMaxRetries    int           `binding:""` // 最大重试次数(默认3次)

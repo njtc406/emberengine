@@ -7,14 +7,15 @@ package mailbox
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"reflect"
 	"runtime/debug"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -25,7 +26,7 @@ import (
 type MultiWorker struct {
 	workerId int
 	closed   atomic.Bool
-	config   *config.MultiLevelMailboxConf
+	config   *config.MultiLevelWorkerConf
 	pool     *WorkerPool
 	wg       sync.WaitGroup
 

@@ -11,14 +11,12 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/backoff"
 	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
@@ -28,9 +26,9 @@ type DefaultWorker struct {
 	closed        atomic.Bool
 	pool          *WorkerPool
 	wg            sync.WaitGroup
-	userMailbox   queue[inf.IEvent] // 用户消息
-	systemMailbox queue[inf.IEvent] // 系统消息(高优先级)
-	idler         *idle.Controller
+	userMailbox   queue[inf.IEvent]        // 用户消息
+	systemMailbox queue[inf.IEvent]        // 系统消息(高优先级)
+	idler         *idle.AdaptiveController // 自适应空闲控制器(高频使用指数退避策略,低频使用条件唤醒出让cpu)
 }
 
 func (w *DefaultWorker) GetWorkerId() int {
@@ -43,8 +41,10 @@ func newDefaultWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) 
 		pool:          pool,
 		userMailbox:   mpsc.New[inf.IEvent](),
 		systemMailbox: mpsc.New[inf.IEvent](),
+		idler: idle.NewAdaptiveController(conf.DefaultWorkerConf.EnableCond, conf.DefaultWorkerConf.BackoffBaseDelay, conf.DefaultWorkerConf.BackoffMaxDelay,
+			conf.DefaultWorkerConf.MaxIdleBeforeBackoff, conf.DefaultWorkerConf.BackoffMaxRetries),
 	}
-	w.idler = idle.NewController(conf.DefaultConf.BackoffBaseDelay, conf.DefaultConf.BackoffMaxDelay, conf.DefaultConf.MaxIdleBeforeBackoff, conf.DefaultConf.BackoffMaxRetries)
+
 	return w
 }
 
@@ -62,7 +62,10 @@ func (w *DefaultWorker) SubmitEvent(e inf.IEvent) error {
 	} else {
 		w.userMailbox.Push(e)
 	}
-
+	// push 完毕后通知
+	if w.idler != nil {
+		w.idler.Wake()
+	}
 	return nil
 }
 
@@ -95,33 +98,18 @@ func (w *DefaultWorker) run() {
 	for !w.closed.Load() {
 		// 优先处理系统消息
 		if e, ok = w.systemMailbox.Pop(); ok {
-			if w.idler != nil {
-				w.idler.Reset()
-			} else {
-				w.backoff.Reset()
-			}
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
 			continue
 		}
 
 		if e, ok = w.userMailbox.Pop(); ok {
-			if w.idler != nil {
-				w.idler.Reset()
-			} else {
-				w.backoff.Reset()
-			}
 			// 交由业务处理消息
 			w.safeExec(w.pool.invoker.InvokeMessage, e)
 			continue
 		}
 
 		// 使用通用 idle 控制器来处理空闲退避策略
-		if w.idler != nil {
-			w.idler.Idle()
-		} else {
-			// 保底兼容：如果 idler 为空，仍然保持原有 sleep(backoff.NextDelay()) 逻辑
-			time.Sleep(w.backoff.NextDelay())
-		}
+		w.idler.Idle()
 
 		//runtime.Gosched()
 	}
@@ -132,6 +120,9 @@ func (w *DefaultWorker) Stop() {
 	//log.SysLogger.Debugf("worker %d process userCount:%d  sysCount:%d", w.workerId, w.userCount.Load(), w.sysCount.Load())
 	if !w.closed.CompareAndSwap(false, true) {
 		return
+	}
+	if w.idler != nil {
+		w.idler.Wake() // 防止idle状态下被阻塞
 	}
 	w.wg.Wait()
 }
