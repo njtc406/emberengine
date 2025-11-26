@@ -15,9 +15,9 @@ type Controller struct {
 	enableCond bool
 
 	// 当前连续空闲次数
-	idleCount int32
+	idleCount atomic.Int32
 
-	// 是否存在工作（由生产者先设置），fast-path 谓词
+	// 是否存在待处理工作，由 Wake 设置，Idle 看到一次后立即清零（一次性标志）
 	hasWork atomic.Bool
 
 	// 底层退避策略
@@ -28,7 +28,7 @@ type Controller struct {
 	notified bool
 }
 
-// NewController
+// NewController 创建一个 Controller。
 func NewController(enableCond bool, backoffBaseDelay, backoffMaxDelay time.Duration, condThreshold, backoffMaxRetries int) *Controller {
 	if backoffBaseDelay <= 0 {
 		backoffBaseDelay = 1
@@ -50,8 +50,8 @@ func (c *Controller) Reset() {
 	if c == nil {
 		return
 	}
-	atomic.StoreInt32(&c.idleCount, 0)
-	c.hasWork.Store(false)
+	c.idleCount.Store(0)
+	// 由 Idle 在看到 hasWork 时清零，这里不强制修改 hasWork
 	c.bo.Reset()
 }
 
@@ -61,14 +61,16 @@ func (c *Controller) Idle() {
 		return
 	}
 
-	// fast-path: 如果有工作标识，直接返回（避免锁）
+	// fast-path：如有工作标志，立即消费并返回，避免进入退避
 	if c.hasWork.Load() {
-		// note: 不在这里调用 Reset(); 消费端会在处理消息时调用 Reset
+		// 一次性消费 hasWork 标志，防止长时间忙轮询
+		c.hasWork.Store(false)
+		c.idleCount.Store(0)
 		return
 	}
 
 	// 增加空闲计数
-	count := atomic.AddInt32(&c.idleCount, 1)
+	count := c.idleCount.Add(1)
 
 	// 低空闲阶段：使用 backoff sleep（保持活跃）
 	if count < c.condThreshold {
@@ -76,36 +78,31 @@ func (c *Controller) Idle() {
 		return
 	}
 
-	// 到达 condThreshold，如果未启用 cond，则继续 backoff
+	// 未启用 cond，则持续 backoff sleep
 	if !c.enableCond {
 		time.Sleep(c.bo.NextDelay())
 		return
 	}
 
-	// cond 路径：在锁内检查 hasWork 谓词以避免丢失唤醒/虚假唤醒
+	// cond 路径：在锁内检查 hasWork/notified，避免丢失唤醒
 	c.mu.Lock()
-	// 如果已经被唤醒（hasWork），直接消费
-	if c.hasWork.Load() {
-		// 清除 idleCount（由 Wake 已经做过，但再保险）
-		atomic.StoreInt32(&c.idleCount, 0)
-		c.mu.Unlock()
-		return
-	}
-	// 如果 already notified, 也直接返回
-	if c.notified {
+	defer c.mu.Unlock()
+
+	// 再次检查一次工作标志与通知标志
+	if c.hasWork.Load() || c.notified {
+		c.hasWork.Store(false)
 		c.notified = false
-		atomic.StoreInt32(&c.idleCount, 0)
-		c.mu.Unlock()
+		c.idleCount.Store(0)
 		return
 	}
-	// 等待被通知（循环防虚假唤醒）
+
 	for !c.notified && !c.hasWork.Load() {
 		c.cond.Wait()
 	}
-	// consume notification
+	// 被唤醒后消费一次通知与工作标志
+	c.hasWork.Store(false)
 	c.notified = false
-	atomic.StoreInt32(&c.idleCount, 0)
-	c.mu.Unlock()
+	c.idleCount.Store(0)
 }
 
 // Wake 有新任务到来时调用（producer 在 push 后调用）
@@ -113,18 +110,15 @@ func (c *Controller) Wake() {
 	if c == nil {
 		return
 	}
-	// 先设置 hasWork，使 Idle 在进入 wait 前能看到
+	// 设置 hasWork，让 Idle 在进入 wait 前后都能感知
 	c.hasWork.Store(true)
-
-	// 重置 idleCount 与 backoff（保证被唤醒后不进入长 backoff）
-	atomic.StoreInt32(&c.idleCount, 0)
+	c.idleCount.Store(0)
 	c.bo.Reset()
 
 	if !c.enableCond {
 		return
 	}
 
-	// 在锁内设置 notified 并 Broadcast，避免丢失唤醒
 	c.mu.Lock()
 	c.notified = true
 	c.cond.Broadcast()
@@ -136,7 +130,7 @@ type AdaptiveController struct {
 	maxIdleBeforeCond int32 // 超过这个连续空闲次数启用 cond park
 	enableCond        bool
 
-	idleCount int32
+	idleCount atomic.Int32
 	bo        *ExponentialBackoff
 
 	mu   sync.Mutex
@@ -146,7 +140,7 @@ type AdaptiveController struct {
 // NewAdaptiveController 创建自适应空闲控制器
 func NewAdaptiveController(enableCond bool, baseDelay, maxDelay time.Duration, maxIdleBeforeCond, maxRetries int) *AdaptiveController {
 	if baseDelay <= 0 {
-		baseDelay = 1 * time.Microsecond
+		baseDelay = time.Microsecond
 	}
 	if maxIdleBeforeCond <= 0 {
 		maxIdleBeforeCond = 1
@@ -163,13 +157,13 @@ func NewAdaptiveController(enableCond bool, baseDelay, maxDelay time.Duration, m
 
 // Reset 成功处理到任务时调用
 func (c *AdaptiveController) Reset() {
-	atomic.StoreInt32(&c.idleCount, 0)
+	c.idleCount.Store(0)
 	c.bo.Reset()
 }
 
 // Idle 空闲轮询
 func (c *AdaptiveController) Idle() {
-	count := atomic.AddInt32(&c.idleCount, 1)
+	count := c.idleCount.Add(1)
 
 	// 仍在高频阶段，只用 backoff sleep
 	if count < c.maxIdleBeforeCond || !c.enableCond {

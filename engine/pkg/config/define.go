@@ -104,19 +104,8 @@ type TimerConf struct {
 }
 
 type MailboxConf struct {
-	MailboxType string `binding:""` // 邮箱类型(multi/default,默认default)
-
-	WorkerNum         int `binding:""` // 工作线程数量(默认1,如果大于1则启动多线程模式,需要自行控制资源)
-	VirtualWorkerRate int `binding:""` // 虚拟线程倍率(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
-
-	DynamicWorkerScaling bool                  `binding:""` // 动态worker扩展(默认false),如果开启则根据负载情况动态扩展线程池(请确保需要单线程的服务不开启这个标记)
-	Strategy             *WorkerStrategyConfig `binding:""` // 扩容策略(在开启了动态扩展后生效)
-
-	// 多优先级邮箱配置
-	MultiLevelConf *MultiLevelWorkerConf `binding:""` // 多优先级邮箱配置(仅当MailboxType=multilevel时生效)
-
-	// 默认邮箱配置
-	DefaultWorkerConf *DefaultWorkerConf `binding:""` // 默认邮箱配置(仅当MailboxType=default时生效)
+	MailboxType    string                `binding:""` // 邮箱类型(single/concurrent,默认single)
+	SchedulePolicy *WorkerSchedulePolicy `binding:""` // 工作线程调度策略
 }
 
 type EventBusConf struct {
@@ -175,12 +164,12 @@ type PriorityConfig struct {
 	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
 }
 
-type DefaultWorkerConf struct {
+type WorkerIdlerConf struct {
 	EnableCond           bool          `binding:""` // 是否开启条件等待(默认false)
-	BackoffBaseDelay     time.Duration `binding:""` // 退避基础时间(默认1毫秒)
-	BackoffMaxDelay      time.Duration `binding:""` // 最大退避时间(默认16秒)
-	BackoffMaxRetries    int           `binding:""` // 最大重试次数(默认3次)
-	MaxIdleBeforeBackoff int           `binding:""` // 最大空闲时间(默认10秒)
+	BackoffBaseDelay     time.Duration `binding:""` // 退避基础时间
+	BackoffMaxDelay      time.Duration `binding:""` // 最大退避时间
+	BackoffMaxRetries    int           `binding:""` // 最大退避时间扩大次数
+	MaxIdleBeforeBackoff int           `binding:""` // 最大空闲次数
 }
 
 type DeDuplicatorConf struct {
@@ -188,4 +177,13 @@ type DeDuplicatorConf struct {
 	DeDuplicatorTTL      time.Duration `binding:""`
 	DeDuplicatorCleanTTL time.Duration `binding:""`
 	DeDuplicatorSize     int           `binding:""`
+}
+
+type WorkerSchedulePolicy struct {
+	InitialWorkerNum  int                   `binding:""` // 初始工作线程数量(默认1)
+	VirtualWorkerRate int                   `binding:""` // 虚拟线程率(默认100)
+	EnableAutoScaling bool                  `binding:""` // 是否开启自动扩展(默认false)
+	ScalingStrategy   *WorkerStrategyConfig `binding:""` // 自动扩展策略配置
+	IdlerConf         *WorkerIdlerConf      `binding:""` // 工作线程执行配置
+	MultiLevelConf    *MultiLevelWorkerConf `binding:""` // 多优先级邮箱配置(仅当concurrency时生效)
 }

@@ -151,7 +151,7 @@ func BenchmarkBackoffOnly(b *testing.B) {
 
 // --- AdaptiveController Worker ---
 func BenchmarkAdaptiveControllerWorker(b *testing.B) {
-	ac := NewAdaptiveController(true, 1*time.Microsecond, 10*time.Microsecond, 500, 1000)
+	ac := NewAdaptiveController(true, 1*time.Microsecond, 10*time.Microsecond, 100, 1000)
 	ch := make(chan int, 4096)
 
 	var consumed uint64
@@ -184,7 +184,7 @@ func BenchmarkAdaptiveControllerWorker(b *testing.B) {
 }
 
 func BenchmarkAdaptiveControllerGosched(b *testing.B) {
-	ac := NewAdaptiveController(false, 1*time.Microsecond, 10*time.Microsecond, 1000, 1000)
+	ac := NewAdaptiveController(false, 1*time.Microsecond, 10*time.Microsecond, 100, 1000)
 	ch := make(chan int, 4096)
 
 	var consumed uint64

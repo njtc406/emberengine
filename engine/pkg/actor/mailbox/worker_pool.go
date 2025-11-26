@@ -48,13 +48,16 @@ type WorkerPool struct {
 func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	if conf == nil {
 		conf = &config.MailboxConf{
-			MailboxType:       "simple",
-			WorkerNum:         1,  // 默认单线程
-			VirtualWorkerRate: 24, // rate建议值稍微大一点,hash分布会更均匀
-			DefaultWorkerConf: &config.DefaultWorkerConf{
-				BackoffBaseDelay:  1 * time.Millisecond, // 退避基础时间(默认1毫秒)
-				BackoffMaxDelay:   16 * time.Second,     // 最大退避时间(默认16秒)
-				BackoffMaxRetries: 3,                    // 最大重试次数(默认3次)
+			MailboxType: ""
+			InitialWorkerNum:  1,
+			VirtualWorkerRate: 1, // 单线程模式不会用到这个
+			EnableAutoScaling: false,
+			IdlerConf: &config.WorkerIdlerConf{
+				EnableCond:           true,
+				BackoffBaseDelay:     1 * time.Microsecond,  // 退避基础时间(默认1微秒)
+				BackoffMaxDelay:      16 * time.Microsecond, // 最大退避时间(默认16微秒)
+				BackoffMaxRetries:    3,                     // 最大重试次数(默认3次)
+				MaxIdleBeforeBackoff: 10,                    // 最大空闲(默认10微秒)
 			},
 		}
 		return conf
@@ -72,19 +75,19 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	}
 	if conf.DefaultWorkerConf == nil {
 		conf.DefaultWorkerConf = &config.DefaultWorkerConf{
-			BackoffBaseDelay:  1 * time.Millisecond, // 退避基础时间(默认1毫秒)
-			BackoffMaxDelay:   16 * time.Second,     // 最大退避时间(默认16秒)
-			BackoffMaxRetries: 3,                    // 最大重试次数(默认3次)
+			BackoffBaseDelay:  1 * time.Microsecond,
+			BackoffMaxDelay:   16 * time.Microsecond,
+			BackoffMaxRetries: 3,
 		}
 	} else {
 		if conf.DefaultWorkerConf.BackoffBaseDelay <= 0 {
-			conf.DefaultWorkerConf.BackoffBaseDelay = 1 * time.Millisecond // 退避基础时间(默认1毫秒)
+			conf.DefaultWorkerConf.BackoffBaseDelay = 1 * time.Microsecond
 		}
 		if conf.DefaultWorkerConf.BackoffMaxDelay <= 0 {
-			conf.DefaultWorkerConf.BackoffMaxDelay = 16 * time.Second // 最大退避时间(默认16秒)
+			conf.DefaultWorkerConf.BackoffMaxDelay = 16 * time.Microsecond
 		}
 		if conf.DefaultWorkerConf.BackoffMaxRetries <= 0 {
-			conf.DefaultWorkerConf.BackoffMaxRetries = 3 // 最大重试次数(默认3次)
+			conf.DefaultWorkerConf.BackoffMaxRetries = 3
 		}
 	}
 	return conf

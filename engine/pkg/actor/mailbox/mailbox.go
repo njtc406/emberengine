@@ -23,7 +23,7 @@ type defaultMailbox struct {
 
 func NewDefaultMailbox(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
 	return &defaultMailbox{
-		workerPool: NewWorkerPool(conf, logger, invoker, middlewares...),
+		workerPool: NewWorkerPool(conf.MailboxConf, logger, invoker, middlewares...),
 		logger:     logger,
 	}
 }
