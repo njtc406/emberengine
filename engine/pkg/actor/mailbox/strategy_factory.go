@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	MaxLoadStrategyName   = "mailbox_load"
-	CPUBasedStrategyName  = "cpu"
-	CompositeStrategyName = "composite"
+	MaxLoadStrategyName   = "max_load"  // 最大负载策略（推荐）
+	CompositeStrategyName = "composite" // 复合策略
+
+	// 兼容旧名称
+	MaxLoadStrategyNameOld = "mailbox_load" // 旧名称，兼容性保留
 )
 
 type StrategyBuilder func(subs []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy
@@ -24,7 +26,7 @@ var builderMap = syncx.Map[string, StrategyBuilder]{}
 
 func init() {
 	builderMap.Store(MaxLoadStrategyName, newMaxLoadStrategy)
-	builderMap.Store(CPUBasedStrategyName, newCPUBasedStrategy)
+	builderMap.Store(MaxLoadStrategyNameOld, newMaxLoadStrategy) // 兼容旧配置
 	builderMap.Store(CompositeStrategyName, newCompositeStrategy)
 }
 

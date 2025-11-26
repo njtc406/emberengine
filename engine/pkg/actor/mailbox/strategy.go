@@ -7,7 +7,6 @@ package mailbox
 
 import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
 
 type AutoScalerStrategy interface {
@@ -100,51 +99,4 @@ func (d *MaxLoadStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int)
 	}
 
 	return idleCount > len(workers)*d.IdleThreshold/100
-}
-
-type CPUBasedStrategy struct {
-	MinLoadThreshold float64 // 比如 0.3 表示 30%
-	MaxLoadThreshold float64 // 比如 0.8 表示 80%
-	GetCPULoad       func() float64
-}
-
-func newCPUBasedStrategy(_ []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
-	return &CPUBasedStrategy{
-		MinLoadThreshold: params["MinLoadThreshold"].(float64),
-		MaxLoadThreshold: params["MaxLoadThreshold"].(float64),
-		GetCPULoad:       util.GetCPULoad,
-	}
-}
-
-func (s *CPUBasedStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
-	if s.GetCPULoad() < s.MaxLoadThreshold {
-		return false
-	}
-
-	avgLoad := 0
-	for _, w := range workers {
-		avgLoad += w.GetMsgLen()
-	}
-	avgLoad /= len(workers)
-
-	return avgLoad > 10
-}
-
-func (s *CPUBasedStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
-	if len(workers) <= min {
-		return false
-	}
-
-	if s.GetCPULoad() > s.MinLoadThreshold {
-		return false
-	}
-
-	idleCount := 0
-	for _, w := range workers {
-		if w.GetMsgLen() == 0 {
-			idleCount++
-		}
-	}
-
-	return idleCount > len(workers)/2
 }
