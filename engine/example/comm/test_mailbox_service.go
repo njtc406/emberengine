@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
@@ -177,58 +176,26 @@ func (s *MailboxTestService) setupMailboxConfig() {
 
 // useDefaultConfig 使用默认配置
 func (s *MailboxTestService) useDefaultConfig() {
-	config := mailbox.CreateDefaultMultiLevelConfig()
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用默认多级优先级配置 (加权轮询策略)", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	log.SysLogger.Infof("[%s] 使用默认配置（配置在启动时已指定）", s.GetName())
 }
 
 // useAbsolutePriorityConfig 使用绝对优先策略
 func (s *MailboxTestService) useAbsolutePriorityConfig() {
-	priorityMap := map[def.Priority]mailbox.PriorityConfig{
-		def.PrioritySys:        {BatchSize: 100, Weight: 100},
-		def.PriorityUrgent:     {BatchSize: 50, Weight: 50},
-		def.PriorityHigh:       {BatchSize: 30, Weight: 30},
-		def.PriorityNormal:     {BatchSize: 20, Weight: 20},
-		def.PriorityLow:        {BatchSize: 10, Weight: 10},
-		def.PriorityBatch:      {BatchSize: 5, Weight: 5},
-		def.PriorityBackground: {BatchSize: 2, Weight: 1},
-	}
-	config := mailbox.CreateAbsolutePriorityConfig(priorityMap)
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用绝对优先策略配置", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	log.SysLogger.Infof("[%s] 使用绝对优先策略配置（配置在启动时已指定）", s.GetName())
 }
 
 // useFairnessConfig 使用防饥饿策略
 func (s *MailboxTestService) useFairnessConfig() {
-	priorityMap := map[def.Priority]mailbox.PriorityConfig{
-		def.PrioritySys:        {BatchSize: 64, Weight: 20},
-		def.PriorityUrgent:     {BatchSize: 32, Weight: 10},
-		def.PriorityHigh:       {BatchSize: 24, Weight: 8},
-		def.PriorityNormal:     {BatchSize: 16, Weight: 6},
-		def.PriorityLow:        {BatchSize: 12, Weight: 4},
-		def.PriorityBatch:      {BatchSize: 8, Weight: 2},
-		def.PriorityBackground: {BatchSize: 4, Weight: 1},
-	}
-	config := mailbox.CreateFairnessPriorityConfig(priorityMap)
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用防饥饿策略配置", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	log.SysLogger.Infof("[%s] 使用防饥饿策略配置（配置在启动时已指定）", s.GetName())
 }
 
 // useCustomConfig 使用自定义配置
 func (s *MailboxTestService) useCustomConfig() {
-	// 游戏场景：战斗消息高优先级，日志消息低优先级
-	priorityMap := map[def.Priority]mailbox.PriorityConfig{
-		def.PrioritySys:        {BatchSize: 128, Weight: 30}, // 系统消息：最高优先级
-		def.PriorityUrgent:     {BatchSize: 64, Weight: 15},  // 战斗消息：紧急处理
-		def.PriorityHigh:       {BatchSize: 32, Weight: 10},  // 玩家操作：高优先级
-		def.PriorityNormal:     {BatchSize: 16, Weight: 6},   // 普通逻辑
-		def.PriorityLow:        {BatchSize: 8, Weight: 3},    // AI处理
-		def.PriorityBatch:      {BatchSize: 4, Weight: 2},    // 批量更新
-		def.PriorityBackground: {BatchSize: 2, Weight: 1},    // 日志、统计等
-	}
-	config := mailbox.CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用自定义游戏场景配置", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	log.SysLogger.Infof("[%s] 使用自定义游戏场景配置（配置在启动时已指定）", s.GetName())
 }
 
 // scheduleTests 调度测试任务

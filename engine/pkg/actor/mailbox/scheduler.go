@@ -31,6 +31,15 @@ func newDefaultPriorityMap() map[def.Priority]*config.PriorityConfig {
 	}
 }
 
+// DefaultMultiLevelQueueConf 返回默认的多优先级队列配置
+func DefaultMultiLevelQueueConf() *config.MultiLevelQueueConf {
+	return &config.MultiLevelQueueConf{
+		Strategy:        def.StrategyAbsolute,
+		TotalBatchLimit: 32,
+		PriorityBatches: newDefaultPriorityMap(),
+	}
+}
+
 func newDefaultMultiLevelConfig() *MultiLevelConfig {
 	return &MultiLevelConfig{
 		Enabled:    true,
@@ -39,7 +48,7 @@ func newDefaultMultiLevelConfig() *MultiLevelConfig {
 	}
 }
 
-// DefaultWorkerConfig 返回默认配置
+// DefaultWorkerConfig 返回默认配置（兼容旧版）
 func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
 	return &config.MultiLevelWorkerConf{
 		WaitMode:        "busy",

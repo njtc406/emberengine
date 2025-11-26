@@ -116,3 +116,8 @@ const (
 
 	DefaultDeDuplicatorTTL = time.Second
 )
+
+const (
+	WorkerTypeDefault = "default"
+	WorkerTypeMulti   = "multi"
+)

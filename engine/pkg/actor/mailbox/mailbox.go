@@ -16,14 +16,18 @@ import (
 )
 
 type defaultMailbox struct {
-	suspended  atomic.Bool // 挂起标记（挂起后,不再接收紧急以下的任何消息）
-	workerPool *WorkerPool // 工作线程池
+	// 挂起标记
+	// 邮箱挂起后,不再接收紧急以下的任何消息
+	// 如果想要在服务挂起后操作服务，需要使用紧急级别以上的消息来触发
+	suspended atomic.Bool
+	// 工作线程池
+	workerPool *WorkerPool
 	logger     log.ILogger
 }
 
 func NewDefaultMailbox(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
 	return &defaultMailbox{
-		workerPool: NewWorkerPool(conf.MailboxConf, logger, invoker, middlewares...),
+		workerPool: NewWorkerPool(conf, logger, invoker, middlewares...),
 		logger:     logger,
 	}
 }
@@ -38,7 +42,7 @@ func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
 	// 调用所有中间件的 MessageReceived 方法(比如限流、熔断等)
 	for _, middleware := range m.workerPool.middlewares {
 		if err := safe.Do(func() error {
-			middleware.MessageReceived(e)
+			middleware.MessageReceived(e) // TODO 这里可能需要一些返回信息,不然无法中断
 			return nil
 		}); err != nil {
 			return err

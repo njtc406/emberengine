@@ -103,9 +103,17 @@ type TimerConf struct {
 	TimerBucketSize int `binding:""` // 定时器调度器存储桶数量(减少锁的冲突,增加并发)
 }
 
+// MailboxConf 邮箱配置
+// 职责：配置消息队列的队列模式和调度策略
 type MailboxConf struct {
-	MailboxType    string                `binding:""` // 邮箱类型(single/concurrent,默认single)
-	SchedulePolicy *WorkerSchedulePolicy `binding:""` // 工作线程调度策略
+	// QueueMode 队列模式
+	// - "dual":   双队列模式（系统队列+用户队列，适用于简单场景）
+	// - "priority": 多优先级队列模式（支持多个优先级队列和调度策略）
+	// 默认: "dual"
+	QueueMode string `binding:""`
+
+	// SchedulePolicy 调度策略配置（包含Worker数量、扩缩容、空闲控制等）
+	SchedulePolicy *WorkerSchedulePolicy `binding:""`
 }
 
 type EventBusConf struct {
@@ -151,6 +159,30 @@ type WorkerStrategyConfig struct {
 	Subs           []*WorkerStrategyConfig `binding:""` // 子策略，复合策略才有
 }
 
+// MultiLevelQueueConf 多优先级队列配置
+// 职责：配置多优先级队列的调度策略和各优先级的批量处理大小
+// 仅在 QueueMode="priority" 时生效
+type MultiLevelQueueConf struct {
+	// Strategy 调度策略
+	// - "absolute": 绝对优先策略（始终优先处理高优先级消息，可能导致低优先级饥饿）
+	// - "weighted": 加权策略（按权重分配处理机会，兼顾各优先级）
+	// - "fairness": 公平策略（确保所有优先级都有处理机会，防止饥饿）
+	// 默认: "absolute"
+	Strategy def.ScheduleStrategy `binding:""`
+
+	// TotalBatchLimit 单次处理的总批次上限
+	// 控制每次循环最多处理多少条消息，避免长时间阻塞
+	// 默认: 32
+	TotalBatchLimit int `binding:""`
+
+	// PriorityBatches 各优先级的批量处理配置
+	// key: 优先级（PrioritySys/Urgent/High/Normal/Low/Batch）
+	// value: 该优先级的批量大小和权重配置
+	// 示例: {"sys":{BatchSize:32, Weight:20}, "urgent":{BatchSize:16, Weight:10}}
+	PriorityBatches map[def.Priority]*PriorityConfig `binding:""`
+}
+
+// MultiLevelWorkerConf 兼容旧配置（已废弃，请使用 MultiLevelQueueConf）
 type MultiLevelWorkerConf struct {
 	WaitMode        string                           `binding:""` // 等待模式: busy / cond (默认busy)
 	Strategy        def.ScheduleStrategy             `binding:""` // 调度策略: absolute / weighted / fair (默认absolute)
@@ -159,17 +191,48 @@ type MultiLevelWorkerConf struct {
 }
 
 // PriorityConfig 单个优先级配置
+// 职责：配置单个优先级队列的批量处理大小和调度权重
 type PriorityConfig struct {
-	BatchSize int `json:"batch_size"` // 该级别批量处理大小
-	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
+	// BatchSize 批量处理大小
+	// 单次从该优先级队列最多弹出的消息数量
+	// 建议: 高优先级设置较大值（如32），低优先级设置较小值（如4）
+	BatchSize int `json:"batch_size"`
+
+	// Weight 调度权重
+	// 仅在 Strategy="weighted" 时生效
+	// 权重越大，获得的处理机会越多
+	// 建议: 高优先级设置较大权重（如20），低优先级设置较小权重（如1）
+	Weight int `json:"weight"`
 }
 
+// WorkerIdlerConf 工作线程空闲控制配置
+// 职责：配置Worker在无消息时的等待策略，平衡CPU占用和响应延迟
 type WorkerIdlerConf struct {
-	EnableCond           bool          `binding:""` // 是否开启条件等待(默认false)
-	BackoffBaseDelay     time.Duration `binding:""` // 退避基础时间
-	BackoffMaxDelay      time.Duration `binding:""` // 最大退避时间
-	BackoffMaxRetries    int           `binding:""` // 最大退避时间扩大次数
-	MaxIdleBeforeBackoff int           `binding:""` // 最大空闲次数
+	// EnableCond 是否启用条件变量等待
+	// - true:  空闲时使用条件变量阻塞（节省CPU，但唤醒有开销）
+	// - false: 空闲时使用指数退避睡眠（CPU占用略高，但响应更快）
+	// 默认: false
+	EnableCond bool `binding:""`
+
+	// BackoffBaseDelay 退避基础延迟时间
+	// 第一次空闲时的睡眠时间
+	// 默认: 1微秒
+	BackoffBaseDelay time.Duration `binding:""`
+
+	// BackoffMaxDelay 退避最大延迟时间
+	// 连续空闲时睡眠时间的上限
+	// 默认: 16微秒
+	BackoffMaxDelay time.Duration `binding:""`
+
+	// BackoffMaxRetries 退避最大重试次数
+	// 睡眠时间翻倍的最大次数
+	// 默认: 3
+	BackoffMaxRetries int `binding:""`
+
+	// MaxIdleBeforeBackoff 开始退避前的最大空闲次数
+	// 前N次空闲不睡眠，直接重试（适用于高频场景）
+	// 默认: 1000
+	MaxIdleBeforeBackoff int `binding:""`
 }
 
 type DeDuplicatorConf struct {
@@ -179,11 +242,40 @@ type DeDuplicatorConf struct {
 	DeDuplicatorSize     int           `binding:""`
 }
 
+// WorkerSchedulePolicy 工作线程调度策略配置
+// 职责：配置Worker的数量、扩缩容策略、空闲控制和多优先级队列
 type WorkerSchedulePolicy struct {
-	InitialWorkerNum  int                   `binding:""` // 初始工作线程数量(默认1)
-	VirtualWorkerRate int                   `binding:""` // 虚拟线程率(默认100)
-	EnableAutoScaling bool                  `binding:""` // 是否开启自动扩展(默认false)
-	ScalingStrategy   *WorkerStrategyConfig `binding:""` // 自动扩展策略配置
-	IdlerConf         *WorkerIdlerConf      `binding:""` // 工作线程执行配置
-	MultiLevelConf    *MultiLevelWorkerConf `binding:""` // 多优先级邮箱配置(仅当concurrency时生效)
+	// InitialWorkerNum 初始工作线程数量
+	// 启动时创建的Worker数量
+	// 建议: 单核场景设为1，多核场景设为CPU核心数的1-2倍
+	// 默认: 1
+	InitialWorkerNum int `binding:""`
+
+	// VirtualWorkerRate 虚拟节点倍率
+	// 一致性哈希环中每个Worker对应的虚拟节点数量
+	// 值越大，消息分布越均匀，但哈希计算开销越大
+	// 建议: 10-24之间
+	// 默认: 24
+	VirtualWorkerRate int `binding:""`
+
+	// EnableAutoScaling 是否启用自动扩缩容
+	// true: 根据队列负载动态调整Worker数量
+	// false: Worker数量固定为InitialWorkerNum
+	// 默认: false
+	EnableAutoScaling bool `binding:""`
+
+	// ScalingStrategy 自动扩缩容策略配置
+	// 仅在 EnableAutoScaling=true 时生效
+	ScalingStrategy *WorkerStrategyConfig `binding:""`
+
+	// IdlerConf 空闲控制配置
+	// 配置Worker在无消息时的等待策略
+	IdlerConf *WorkerIdlerConf `binding:""`
+
+	// MultiLevelQueueConf 多优先级队列配置
+	// 仅在 MailboxConf.QueueMode="priority" 时生效
+	MultiLevelQueueConf *MultiLevelQueueConf `binding:""`
+
+	// MultiLevelConf 兼容旧配置（已废弃，请使用 MultiLevelQueueConf）
+	MultiLevelConf *MultiLevelWorkerConf `binding:""`
 }

@@ -14,8 +14,8 @@ import (
 
 const (
 	MaxLoadStrategyName   = "mailbox_load"
-	CompositeStrategyName = "composite"
 	CPUBasedStrategyName  = "cpu"
+	CompositeStrategyName = "composite"
 )
 
 type StrategyBuilder func(subs []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy

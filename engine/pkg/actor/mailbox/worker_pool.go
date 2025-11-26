@@ -22,14 +22,6 @@ type IScaler interface {
 	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int, reason string, ok bool)
 }
 
-type queue[T any] interface {
-	Push(T) bool
-	Pop() (T, bool)
-	BatchPop(int) []T
-	Empty() bool
-	Len() int
-}
-
 type WorkerPool struct {
 	conf        *config.MailboxConf
 	mu          sync.RWMutex
@@ -43,53 +35,59 @@ type WorkerPool struct {
 	profiler    *profiler.Profiler         // 性能分析（这个之后修改为性能数据采集器,只采集数据,分析放在采集器中自己去做）
 	autoScaler  IScaler                    // 自动扩容器
 	logger      log.ILogger
+	workerCount int
 }
 
 func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	if conf == nil {
-		conf = &config.MailboxConf{
-			MailboxType: ""
-			InitialWorkerNum:  1,
-			VirtualWorkerRate: 1, // 单线程模式不会用到这个
-			EnableAutoScaling: false,
-			IdlerConf: &config.WorkerIdlerConf{
-				EnableCond:           true,
-				BackoffBaseDelay:     1 * time.Microsecond,  // 退避基础时间(默认1微秒)
-				BackoffMaxDelay:      16 * time.Microsecond, // 最大退避时间(默认16微秒)
-				BackoffMaxRetries:    3,                     // 最大重试次数(默认3次)
-				MaxIdleBeforeBackoff: 10,                    // 最大空闲(默认10微秒)
-			},
-		}
-		return conf
+		conf = &config.MailboxConf{}
 	}
 
-	if conf.MailboxType == "" {
-		conf.MailboxType = "simple"
+	// 设置默认队列模式
+	if conf.QueueMode == "" {
+		conf.QueueMode = "dual" // 默认双队列模式
 	}
 
-	if conf.WorkerNum <= 0 {
-		conf.WorkerNum = 1
+	if conf.SchedulePolicy == nil {
+		conf.SchedulePolicy = &config.WorkerSchedulePolicy{}
 	}
-	if conf.VirtualWorkerRate <= 0 {
-		conf.VirtualWorkerRate = 24
+
+	if conf.SchedulePolicy.InitialWorkerNum <= 0 {
+		conf.SchedulePolicy.InitialWorkerNum = 1
 	}
-	if conf.DefaultWorkerConf == nil {
-		conf.DefaultWorkerConf = &config.DefaultWorkerConf{
-			BackoffBaseDelay:  1 * time.Microsecond,
-			BackoffMaxDelay:   16 * time.Microsecond,
-			BackoffMaxRetries: 3,
-		}
-	} else {
-		if conf.DefaultWorkerConf.BackoffBaseDelay <= 0 {
-			conf.DefaultWorkerConf.BackoffBaseDelay = 1 * time.Microsecond
-		}
-		if conf.DefaultWorkerConf.BackoffMaxDelay <= 0 {
-			conf.DefaultWorkerConf.BackoffMaxDelay = 16 * time.Microsecond
-		}
-		if conf.DefaultWorkerConf.BackoffMaxRetries <= 0 {
-			conf.DefaultWorkerConf.BackoffMaxRetries = 3
+	if conf.SchedulePolicy.VirtualWorkerRate <= 0 {
+		conf.SchedulePolicy.VirtualWorkerRate = 24
+	}
+	if conf.SchedulePolicy.IdlerConf == nil {
+		conf.SchedulePolicy.IdlerConf = &config.WorkerIdlerConf{
+			EnableCond: true,
 		}
 	}
+	if conf.SchedulePolicy.IdlerConf.BackoffBaseDelay <= 0 {
+		conf.SchedulePolicy.IdlerConf.BackoffBaseDelay = time.Microsecond
+	}
+	if conf.SchedulePolicy.IdlerConf.BackoffMaxDelay <= 0 {
+		conf.SchedulePolicy.IdlerConf.BackoffMaxDelay = 16 * time.Microsecond
+	}
+	if conf.SchedulePolicy.IdlerConf.BackoffMaxRetries <= 0 {
+		conf.SchedulePolicy.IdlerConf.BackoffMaxRetries = 3
+	}
+	if conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff <= 0 {
+		conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff = 1000
+	}
+
+	// 兼容旧配置：MultiLevelConf -> MultiLevelQueueConf
+	if conf.QueueMode == "priority" {
+		if conf.SchedulePolicy.MultiLevelQueueConf == nil && conf.SchedulePolicy.MultiLevelConf != nil {
+			old := conf.SchedulePolicy.MultiLevelConf
+			conf.SchedulePolicy.MultiLevelQueueConf = &config.MultiLevelQueueConf{
+				Strategy:        old.Strategy,
+				TotalBatchLimit: old.TotalBatchLimit,
+				PriorityBatches: old.PriorityBatches,
+			}
+		}
+	}
+
 	return conf
 }
 
@@ -101,9 +99,9 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMe
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
 		conf:        conf,
-		workers:     make(map[int]inf.IMailboxWorker, conf.WorkerNum),
+		workers:     make(map[int]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
 		invoker:     invoker,
-		ring:        hashring.NewHashRing[int](conf.VirtualWorkerRate),
+		ring:        hashring.NewHashRing[int](conf.SchedulePolicy.VirtualWorkerRate),
 		middlewares: middlewares,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -112,9 +110,8 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMe
 }
 
 func (p *WorkerPool) Start() {
-	p.logger.Debugf("Starting service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
 	p.mu.Lock()
-	for i := 0; i < p.conf.WorkerNum; i++ {
+	for i := 0; i < p.conf.SchedulePolicy.InitialWorkerNum; i++ {
 		worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 		if worker == nil {
 			p.logger.Fatalf("service[%s] Failed to create worker, conf:%v", p.invoker.GetServiceName(), p.conf)
@@ -124,19 +121,19 @@ func (p *WorkerPool) Start() {
 		// 将 worker 加入到哈希环中（这里每个都加进入,但是单线程时可能不会使用）
 		p.ring.Add(i)
 	}
-
+	p.workerCount = p.conf.SchedulePolicy.InitialWorkerNum
 	p.mu.Unlock()
 
 	for _, middleware := range p.middlewares {
 		middleware.MailboxStarted()
 	}
 
-	if p.conf.DynamicWorkerScaling {
+	if p.conf.SchedulePolicy.EnableAutoScaling {
 		p.wg.Add(1)
 		go p.autoScaleWorkers()
 	}
 
-	p.logger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.WorkerNum)
+	p.logger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.SchedulePolicy.InitialWorkerNum)
 }
 
 func (p *WorkerPool) Stop() {
@@ -192,14 +189,14 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if newSize == p.conf.WorkerNum {
+	if newSize == p.workerCount {
 		return
 	}
 
-	if newSize > p.conf.WorkerNum {
-		if newSize < p.conf.Strategy.MaxWorkerNum {
+	if newSize > p.workerCount {
+		if newSize < p.conf.SchedulePolicy.ScalingStrategy.MaxWorkerNum {
 			// 增加 workers
-			for i := p.conf.WorkerNum; i < newSize; i++ {
+			for i := p.workerCount; i < newSize; i++ {
 				worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 				p.workers[i] = worker
 				worker.Start()
@@ -209,7 +206,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	} else {
 		// 减少 workers
 		removeMap := make(map[int]struct{}, newSize)
-		for i := newSize; i < p.conf.WorkerNum; i++ {
+		for i := newSize; i < p.workerCount; i++ {
 			if worker, exists := p.workers[i]; exists {
 				// 停止worker的时候会自动将队列中所有事件处理完成,所以不需要选择空闲的worker来停止
 				worker.Stop()
@@ -222,19 +219,19 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	}
 
 	// 更新当前 worker 数量
-	p.conf.WorkerNum = newSize
+	p.workerCount = newSize
 }
 
 // 自动调整 worker 数量
 func (p *WorkerPool) autoScaleWorkers() {
 	defer p.wg.Done()
 	if p.autoScaler == nil {
-		strategy, err := BuildStrategy(p.conf.Strategy)
+		strategy, err := BuildStrategy(p.conf.SchedulePolicy.ScalingStrategy)
 		if err != nil {
 			p.logger.Panic(err)
 		}
 		p.autoScaler = &AutoScaler{
-			conf:     p.conf.Strategy,
+			conf:     p.conf.SchedulePolicy.ScalingStrategy,
 			Strategy: strategy,
 		}
 	}
@@ -242,7 +239,7 @@ func (p *WorkerPool) autoScaleWorkers() {
 	// TODO 定时触发检查这部分先这么用吧,主要还没想到什么好的方式来为每种策略定制一个检查机制
 	// TODO 主要是嵌套策略里面可能包含了自驱动和外部驱动两种类型的策略,不太好分开
 
-	ticker := time.NewTicker(p.conf.Strategy.ResizeCoolDown) // 调整间隔
+	ticker := time.NewTicker(p.conf.SchedulePolicy.ScalingStrategy.ResizeCoolDown) // 调整间隔
 	defer ticker.Stop()
 
 	for {
