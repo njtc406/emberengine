@@ -247,3 +247,13 @@ func BenchmarkGoschedOnly(b *testing.B) {
 
 	b.ReportMetric(float64(consumed)/b.Elapsed().Seconds(), "qps")
 }
+
+/*
+cpu: AMD Ryzen 7 5700X 8-Core Processor
+BenchmarkController-16                          20810967                61.61 ns/op       16231735 qps
+BenchmarkBackoffOnly-16                         28530805                42.76 ns/op       23385509 qps
+BenchmarkAdaptiveControllerWorker-16            25662739                48.01 ns/op       20827810 qps
+BenchmarkAdaptiveControllerGosched-16           24629328                51.06 ns/op       19582371 qps
+BenchmarkGoschedOnly-16                         28514602                42.24 ns/op       23669031 qps
+
+*/

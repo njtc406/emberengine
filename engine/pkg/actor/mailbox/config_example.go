@@ -252,6 +252,29 @@ func ExampleAutoScalingConfig() *config.MailboxConf {
 	}
 }
 
+// ExampleSingleWorkerConfig 单 worker（接近 Actor 模型）模式配置示例
+// 适用场景：希望该 Service 在单个协程中按顺序处理消息，行为接近传统 Actor
+func ExampleSingleWorkerConfig() *config.MailboxConf {
+	return &config.MailboxConf{
+		QueueMode: "dual", // 单 worker 场景下一般使用双队列即可满足需求
+
+		SchedulePolicy: &config.WorkerSchedulePolicy{
+			// 单个 Worker，所有消息在同一协程内顺序处理
+			InitialWorkerNum:  1,
+			VirtualWorkerRate: 1,     // 单 worker 时虚拟节点倍率影响较小
+			EnableAutoScaling: false, // 单 worker 模式下通常不启用自动扩缩容
+
+			IdlerConf: &config.WorkerIdlerConf{
+				EnableCond:           true,
+				BackoffBaseDelay:     1 * time.Microsecond,
+				BackoffMaxDelay:      16 * time.Microsecond,
+				BackoffMaxRetries:    3,
+				MaxIdleBeforeBackoff: 1000,
+			},
+		},
+	}
+}
+
 /* 配置说明总结：
 
 ## 队列模式选择 (QueueMode)

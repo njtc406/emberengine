@@ -172,7 +172,8 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 		}
 		worker, exists = p.workers[workerID]
 	} else {
-		// 单线程时直接使用workerID=0
+		// 单线程时直接使用 workerID=0
+		workerID = 0
 		worker, exists = p.workers[workerID]
 	}
 	p.mu.RUnlock()
@@ -194,21 +195,28 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 	}
 
 	if newSize > p.workerCount {
-		if newSize < p.conf.SchedulePolicy.ScalingStrategy.MaxWorkerNum {
-			// 增加 workers
-			for i := p.workerCount; i < newSize; i++ {
-				worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
-				p.workers[i] = worker
-				worker.Start()
-				p.ring.Add(i)
-			}
+		// 扩容：新增 worker，并受 MaxWorkerNum 约束
+		maxWorkers := 0
+		if p.conf != nil && p.conf.SchedulePolicy != nil && p.conf.SchedulePolicy.ScalingStrategy != nil {
+			maxWorkers = p.conf.SchedulePolicy.ScalingStrategy.MaxWorkerNum
+		}
+		// 如果未配置 MaxWorkerNum，则认为不限制上限
+		if maxWorkers > 0 && newSize > maxWorkers {
+			newSize = maxWorkers
+		}
+
+		for i := p.workerCount; i < newSize; i++ {
+			worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
+			p.workers[i] = worker
+			worker.Start()
+			p.ring.Add(i)
 		}
 	} else {
-		// 减少 workers
-		removeMap := make(map[int]struct{}, newSize)
+		// 缩容：关闭并移除多余 worker
+		removeMap := make(map[int]struct{}, p.workerCount-newSize)
 		for i := newSize; i < p.workerCount; i++ {
 			if worker, exists := p.workers[i]; exists {
-				// 停止worker的时候会自动将队列中所有事件处理完成,所以不需要选择空闲的worker来停止
+				// 停止worker时会自动将队列中所有事件处理完成
 				worker.Stop()
 				delete(p.workers, i)
 				removeMap[i] = struct{}{}
@@ -238,6 +246,8 @@ func (p *WorkerPool) autoScaleWorkers() {
 
 	// TODO 定时触发检查这部分先这么用吧,主要还没想到什么好的方式来为每种策略定制一个检查机制
 	// TODO 主要是嵌套策略里面可能包含了自驱动和外部驱动两种类型的策略,不太好分开
+	// TODO 下一步的改动可能是把触发时机抽离出来,这里只是一个触发入口,自动触发的放入独立的
+	// 自动调度器中,非自动触发的,由他自己来调用触发接口触发?
 
 	ticker := time.NewTicker(p.conf.SchedulePolicy.ScalingStrategy.ResizeCoolDown) // 调整间隔
 	defer ticker.Stop()
