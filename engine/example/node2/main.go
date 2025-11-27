@@ -19,5 +19,5 @@ func init() {
 }
 
 func main() {
-	node.Start(node.WithConfPath("./example/configs/node2"))
+	node.Start(node.WithConfPath("./engine/example/configs/node2"))
 }

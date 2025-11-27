@@ -90,19 +90,19 @@ func (s *Service1) OnInit() error {
 	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
 	//	return nil
 	//})
-	s.AfterFunc(time.Second, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) error {
-		// 调用Service2.APITest2 带返回参数
-		// 创建context
-		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
-		defer cancel()
-		var out int
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctxWithTimeout, "APISum", []interface{}{1, 2}, &out); err != nil {
-			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
-		}
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================5555")
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
-		return nil
-	})
+	//s.AfterFunc(time.Second, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) error {
+	//	// 调用Service2.APITest2 带返回参数
+	//	// 创建context
+	//	ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
+	//	defer cancel()
+	//	var out int
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctxWithTimeout, "APISum", []interface{}{1, 2}, &out); err != nil {
+	//		s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+	//	}
+	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================5555")
+	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
+	//	return nil
+	//})
 	//
 	//s.AfterFunc(time.Second*3, "method test demo2", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APITest2 不同类型入参
@@ -209,18 +209,20 @@ func (s *Service1) OnInit() error {
 	//})
 	//
 	////cast test
-	////s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
-	////	log.SysLogger.Debugf("================================>>>")
-	////	// 1. 让node2开启多线程,然后调用10次cast
-	////	for i := 0; i < 10; i++ {
-	////		s.SelectByServiceType(1, "test", "Service3").Send(ctx, "RPCTest2", nil)
-	////	}
-	////	s.GetLogger().Debugf("==========================================17")
-	////	// 2. 让node2开启单线程,然后调用1次cast
-	////	s.SelectSameServerByServiceType("test", "Service3").Send(ctx, "RPCTest2", nil)
-	////	s.GetLogger().Debugf("==========================================18")
-	////	return nil
-	////})
+	s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
+		log.SysLogger.Debugf("================================>>>")
+		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
+		defer cancel()
+		// 1. 让node2开启多线程,然后调用10次cast
+		for i := 0; i < 10; i++ {
+			s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1)).Send(ctxWithTimeout, "RPCTest2", nil)
+		}
+		s.GetLogger().Debugf("==========================================17")
+		// 2. 让node2开启单线程,然后调用1次cast
+		s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
+		s.GetLogger().Debugf("==========================================18")
+		return nil
+	})
 	//
 	//// other test
 	////s.AfterFunc(time.Second*7, "other test", func(timer *timingwheel.Timer, args ...interface{}) error {

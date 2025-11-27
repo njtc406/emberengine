@@ -187,22 +187,22 @@ ServiceConf:
             # 各优先级的批量处理配置
             # 格式: priority: {BatchSize: 单次最多处理数, Weight: 权重(仅weighted策略使用)}
             PriorityBatches:
-              1:  # PrioritySys - 系统消息
+              -3: # PrioritySys - 系统消息
                 BatchSize: 32
                 Weight: 20
-              2:  # PriorityUrgent - 紧急消息
+              -2: # PriorityUrgent - 紧急消息
                 BatchSize: 16
                 Weight: 10
-              3:  # PriorityHigh - 高优先级消息
+              -1: # PriorityHigh - 高优先级消息
                 BatchSize: 12
                 Weight: 5
-              4:  # PriorityNormal - 普通消息
+              0: # PriorityNormal - 普通消息
                 BatchSize: 8
                 Weight: 3
-              5:  # PriorityLow - 低优先级消息
+              1: # PriorityLow - 低优先级消息
                 BatchSize: 4
                 Weight: 2
-              6:  # PriorityBatch - 批量消息
+              2: # PriorityBatch - 批量消息
                 BatchSize: 2
                 Weight: 1
       ServiceLogConf:

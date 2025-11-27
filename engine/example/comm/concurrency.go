@@ -8,7 +8,6 @@ package comm
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -75,12 +74,13 @@ func (s *ConcurrencyTest) OnInit() error {
 	s.OpenConcurrent(1000, 1000000) // 开启并发组件
 
 	//total := 100_000
-	total := 100000
+	//total := 100000
 	//total := 10000
+	total := 10
 	//控制一下并发数
-	//concurrency := 1
+	concurrency := 1
 	//concurrency := 100
-	concurrency := 500
+	//concurrency := 500
 	//concurrency := 1000
 	//concurrency := 5000
 	wg := sync.WaitGroup{}
@@ -121,7 +121,7 @@ func (s *ConcurrencyTest) OnInit() error {
 						ctx.SetHeader(def.DefaultDispatcherKey, keys[idx%concurrency])
 
 						if testType == "send" {
-							err = s.Select(rpc.WithName(ServiceName2)).Send(ctx, "RpcEmptyFun", nil)
+							err = s.Select(rpc.WithName(ServiceName2)).Send(ctx, "abc", nil)
 						} else if testType == "asyncCall" {
 							ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 							defer cancel()
@@ -196,17 +196,17 @@ func (s *ConcurrencyTest) OnInit() error {
 		fmt.Printf("P99 latency     : %d μs\n", durations[total*99/100])
 		fmt.Println("==================================")
 
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		fmt.Println("======== Runtime Stats ============")
-		fmt.Printf("Goroutines       : %d\n", runtime.NumGoroutine())
-		fmt.Printf("GC Total         : %d\n", m.NumGC)
-		fmt.Printf("Heap Alloc       : %.2f MB\n", float64(m.HeapAlloc)/1024/1024)
-		fmt.Printf("Total Alloc      : %.2f MB\n", float64(m.TotalAlloc)/1024/1024)
-		fmt.Printf("Sys Memory       : %.2f MB\n", float64(m.Sys)/1024/1024)
-		fmt.Printf("Last GC Pause    : %.2f ms\n", float64(m.PauseNs[(m.NumGC+255)%256])/1e6)
-		fmt.Printf("Total GC Pause   : %.2f s\n", float64(m.PauseTotalNs)/1e9)
-		fmt.Println("==================================")
+		//var m runtime.MemStats
+		//runtime.ReadMemStats(&m)
+		//fmt.Println("======== Runtime Stats ============")
+		//fmt.Printf("Goroutines       : %d\n", runtime.NumGoroutine())
+		//fmt.Printf("GC Total         : %d\n", m.NumGC)
+		//fmt.Printf("Heap Alloc       : %.2f MB\n", float64(m.HeapAlloc)/1024/1024)
+		//fmt.Printf("Total Alloc      : %.2f MB\n", float64(m.TotalAlloc)/1024/1024)
+		//fmt.Printf("Sys Memory       : %.2f MB\n", float64(m.Sys)/1024/1024)
+		//fmt.Printf("Last GC Pause    : %.2f ms\n", float64(m.PauseNs[(m.NumGC+255)%256])/1e6)
+		//fmt.Printf("Total GC Pause   : %.2f s\n", float64(m.PauseTotalNs)/1e9)
+		//fmt.Println("==================================")
 
 		//samples := []metrics.Sample{
 		//	{Name: "/gc/heap/allocs:bytes"},           // 当前堆内存分配
@@ -569,7 +569,7 @@ func (s *ConcurrencyTest1) OnInit() error {
 }
 
 func (s *ConcurrencyTest1) EmptyFun() {
-
+	log.SysLogger.Debugf("EmptyFun")
 }
 
 func (s *ConcurrencyTest1) RpcEmptyFun() {

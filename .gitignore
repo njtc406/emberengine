@@ -15,3 +15,5 @@
 .idea
 /engine/example/cache
 /engine/example/data
+/example/data/logs
+/example/cache

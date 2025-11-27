@@ -61,13 +61,54 @@ ServiceConf:
         TimerSize: 1000
         # 定时器桶大小
         TimerBucketSize: 100
-      WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 102400
-        # 系统消息队列大小
-        SystemMailboxSize: 16
-        # 工作线程数量
-        WorkerNum: 1
+      # 空闲控制配置(控制Worker在无消息时的等待策略)
+      IdlerConf:
+        # 是否启用条件变量等待
+        # - true:  空闲时使用条件变量阻塞(节省CPU，但唤醒有开销)
+        # - false: 空闲时使用指数退避睡眠(CPU占用略高，但响应更快)
+        EnableCond: false
+        # 退避基础延迟(第一次空闲时的睡眠时间)
+        BackoffBaseDelay: 1us
+        # 退避最大延迟(连续空闲时睡眠时间的上限)
+        BackoffMaxDelay: 4us
+        # 开始退避前的最大空闲次数(前N次空闲不睡眠，直接重试)
+        MaxIdleBeforeBackoff: 1000
+        # 退避最大重试次数(睡眠时间翻倍的最大次数)
+        BackoffMaxRetries: 2
+
+      # 多优先级队列配置(仅在QueueMode="priority"时生效)
+      # 如果使用双队列模式(QueueMode="dual")，此配置可省略
+      MultiLevelQueueConf:
+        # 调度策略
+        # - "absolute": 绝对优先策略(始终优先处理高优先级，可能导致低优先级饥饿)
+        # - "weighted": 加权策略(按权重分配处理机会，兼顾各优先级)
+        # - "fairness": 公平策略(确保所有优先级都有处理机会，防止饥饿)
+        Strategy: "absolute"
+
+        # 单次循环最多处理的消息总数(避免长时间阻塞)
+        TotalBatchLimit: 64
+
+        # 各优先级的批量处理配置
+        # 格式: priority: {BatchSize: 单次最多处理数, Weight: 权重(仅weighted策略使用)}
+        PriorityBatches:
+          -3: # PrioritySys - 系统消息
+            BatchSize: 32
+            Weight: 20
+          -2: # PriorityUrgent - 紧急消息
+            BatchSize: 16
+            Weight: 10
+          -1: # PriorityHigh - 高优先级消息
+            BatchSize: 12
+            Weight: 5
+          0: # PriorityNormal - 普通消息
+            BatchSize: 8
+            Weight: 3
+          1: # PriorityLow - 低优先级消息
+            BatchSize: 4
+            Weight: 2
+          2: # PriorityBatch - 批量消息
+            BatchSize: 2
+            Weight: 1
       # 是否开启主从模式
       IsPrimarySecondaryMode: false
     - ClassName: Service1
@@ -83,30 +124,54 @@ ServiceConf:
         # 定时器桶大小
         TimerBucketSize: 100
       # 工作线程配置
-      WorkerConf:
-        # 用户消息队列大小
-        UserMailboxSize: 102400
-        # 系统消息队列大小
-        SystemMailboxSize: 16
-        # 工作线程数量
-        WorkerNum: 1
-        # 是否开启动态线程数调整
-        DynamicWorkerScaling: false
-        # 虚拟线程比例
-        VirtualWorkerRate: 10
-#    - ClassName: PprofService
-#      ServiceName: PprofService
-#      Type: test
-#      ServerId: 1
-#      TimerConf:
-#        TimerSize: 1000
-#        TimerBucketSize: 100
-#      WorkerConf:
-#        UserMailboxSize: 102400
-#        SystemMailboxSize: 16
-#        WorkerNum: 1
-#        DynamicWorkerScaling: false
-#        VirtualWorkerRate: 10
+      # 空闲控制配置(控制Worker在无消息时的等待策略)
+      IdlerConf:
+        # 是否启用条件变量等待
+        # - true:  空闲时使用条件变量阻塞(节省CPU，但唤醒有开销)
+        # - false: 空闲时使用指数退避睡眠(CPU占用略高，但响应更快)
+        EnableCond: false
+        # 退避基础延迟(第一次空闲时的睡眠时间)
+        BackoffBaseDelay: 1us
+        # 退避最大延迟(连续空闲时睡眠时间的上限)
+        BackoffMaxDelay: 4us
+        # 开始退避前的最大空闲次数(前N次空闲不睡眠，直接重试)
+        MaxIdleBeforeBackoff: 1000
+        # 退避最大重试次数(睡眠时间翻倍的最大次数)
+        BackoffMaxRetries: 2
+
+      # 多优先级队列配置(仅在QueueMode="priority"时生效)
+      # 如果使用双队列模式(QueueMode="dual")，此配置可省略
+      MultiLevelQueueConf:
+        # 调度策略
+        # - "absolute": 绝对优先策略(始终优先处理高优先级，可能导致低优先级饥饿)
+        # - "weighted": 加权策略(按权重分配处理机会，兼顾各优先级)
+        # - "fairness": 公平策略(确保所有优先级都有处理机会，防止饥饿)
+        Strategy: "absolute"
+
+        # 单次循环最多处理的消息总数(避免长时间阻塞)
+        TotalBatchLimit: 64
+
+        # 各优先级的批量处理配置
+        # 格式: priority: {BatchSize: 单次最多处理数, Weight: 权重(仅weighted策略使用)}
+        PriorityBatches:
+          -3: # PrioritySys - 系统消息
+            BatchSize: 32
+            Weight: 20
+          -2: # PriorityUrgent - 紧急消息
+            BatchSize: 16
+            Weight: 10
+          -1: # PriorityHigh - 高优先级消息
+            BatchSize: 12
+            Weight: 5
+          0: # PriorityNormal - 普通消息
+            BatchSize: 8
+            Weight: 3
+          1: # PriorityLow - 低优先级消息
+            BatchSize: 4
+            Weight: 2
+          2: # PriorityBatch - 批量消息
+            BatchSize: 2
+            Weight: 1
 
 
 

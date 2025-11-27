@@ -20,6 +20,11 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 )
 
+const (
+	QueueModeDual     = "dual"
+	QueueModePriority = "priority"
+)
+
 // Worker 统一的消息处理Worker
 // 职责：处理消息的提交、调度、执行，支持双队列和多优先级队列两种模式
 type Worker struct {
@@ -29,6 +34,7 @@ type Worker struct {
 	wg           sync.WaitGroup
 	queueManager IQueueManager            // 队列管理器（可以是双队列或多优先级队列）
 	idler        *idle.AdaptiveController // 自适应空闲控制器
+	count        atomic.Int64
 }
 
 // NewWorker 创建统一Worker
@@ -64,15 +70,15 @@ func createQueueManager(conf *config.MailboxConf) IQueueManager {
 	// 确定队列模式
 	queueMode := conf.QueueMode
 	if queueMode == "" {
-		queueMode = "dual" // 默认双队列模式
+		queueMode = QueueModeDual // 默认双队列模式
 	}
 
 	switch queueMode {
-	case "dual":
+	case QueueModeDual:
 		// 双队列模式（系统队列 + 用户队列）
 		return NewDualQueueManager()
 
-	case "priority":
+	case QueueModePriority:
 		// 多优先级队列模式
 		var queueConf *config.MultiLevelQueueConf
 
@@ -120,6 +126,8 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 	if err != nil {
 		return err
 	}
+	// 增加事件计数
+	w.count.Add(1)
 
 	// 唤醒Worker
 	if w.idler != nil {
@@ -145,7 +153,8 @@ func (w *Worker) run() {
 			w.safeExec(e)
 		})
 	}()
-
+	//var backoff = 1
+	//var maxBackoff = 4
 	// 主处理循环
 	for !w.closed.Load() {
 		// 尝试获取下一个事件
@@ -156,6 +165,10 @@ func (w *Worker) run() {
 
 		// 队列为空，使用空闲控制器等待
 		w.idler.Idle()
+		//if backoff < maxBackoff {
+		//	backoff *= 2
+		//}
+		//time.Sleep(time.Microsecond * time.Duration(backoff))
 	}
 }
 
@@ -173,6 +186,8 @@ func (w *Worker) Stop() {
 
 	// 等待Worker完全退出
 	w.wg.Wait()
+	// 打印计数
+	log.SysLogger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
 }
 
 // safeExec 安全执行事件处理

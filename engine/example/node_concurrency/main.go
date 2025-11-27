@@ -22,5 +22,5 @@ func init() {
 func main() {
 	//runtime.GOMAXPROCS(16) // 匹配CPU核心数
 	//runtime.SetMutexProfileFraction(1)
-	node.Start(node.WithConfPath("./example/configs/node_concurrency"))
+	node.Start(node.WithConfPath("./engine/example/configs/node_concurrency"))
 }

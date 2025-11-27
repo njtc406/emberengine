@@ -165,8 +165,13 @@ func (c *AdaptiveController) Reset() {
 func (c *AdaptiveController) Idle() {
 	count := c.idleCount.Add(1)
 
-	// 仍在高频阶段，只用 backoff sleep
-	if count < c.maxIdleBeforeCond || !c.enableCond {
+	// 高频阶段：直接重试，不睡眠（符合“前N次空闲不睡眠”设计）
+	if count < c.maxIdleBeforeCond {
+		return
+	}
+
+	// 未启用 cond：使用 backoff sleep
+	if !c.enableCond {
 		time.Sleep(c.bo.NextDelay())
 		return
 	}

@@ -96,13 +96,13 @@ const (
 
 const NatsDefaultShardCount = 16
 
-const NatsDefaultTopic = "rpc.node."
+const NatsDefaultTopic = "ember.node.%s"
 
 const (
-	DefaultTraceIdKey    = "sys.traceId"
-	DefaultDispatcherKey = "sys.dispatchKey"
-	DefaultTypeKey       = "sys.type"
-	DefaultPriorityKey   = "sys.priority"
+	DefaultTraceIdKey    = "ember.traceId"
+	DefaultDispatcherKey = "ember.dispatchKey"
+	DefaultTypeKey       = "ember.type"
+	DefaultPriorityKey   = "ember.priority"
 )
 
 const (
