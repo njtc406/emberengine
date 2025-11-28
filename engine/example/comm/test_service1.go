@@ -8,6 +8,7 @@ package comm
 import (
 	"time"
 
+	"github.com/njtc406/emberengine/engine/example/msg"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -209,17 +210,25 @@ func (s *Service1) OnInit() error {
 	//})
 	//
 	////cast test
-	s.AfterFunc(time.Second*9, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*1, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
 		log.SysLogger.Debugf("================================>>>")
-		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
+		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*10000)
 		defer cancel()
 		// 1. 让node2开启多线程,然后调用10次cast
-		for i := 0; i < 10; i++ {
-			s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1)).Send(ctxWithTimeout, "RPCTest2", nil)
+		//for i := 0; i < 10; i++ {
+		//	s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1)).Send(ctxWithTimeout, "RPCTest2", nil)
+		//}
+		resp := &msg.Msg_Test_Resp{}
+		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Call(ctxWithTimeout, "RPCSum",
+			&msg.Msg_Test_Req{A: 1, B: 2}, resp); err != nil {
+			log.SysLogger.Errorf("call Service3.RPCSum failed, err:%v", err)
+		} else {
+			log.SysLogger.Debugf("call Service3.RPCSum result:%v", resp)
 		}
+
 		s.GetLogger().Debugf("==========================================17")
 		// 2. 让node2开启单线程,然后调用1次cast
-		s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
+		//s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
 		s.GetLogger().Debugf("==========================================18")
 		return nil
 	})

@@ -6,11 +6,12 @@
 package client
 
 import (
+	"sync"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
-	"sync"
 )
 
 // TODO 考虑一下使用grpc的方式来构建各种接口,API和RPC的,现在的方式在编译阶段无法排除参数错误的问题,而且使用字符串调用无法定位到被调用api
@@ -50,18 +51,18 @@ func init() {
 	}
 }
 
-func getSenderHandler(addr string, tp string) inf.IRpcSender {
-	// 对于本地类型，使用原有逻辑
-	if tp == def.RpcTypeLocal {
-		return getOriginalSenderHandler(addr, tp)
-	}
-
-	// 对于远程类型，优先使用增强的连接池发送器
-	return NewEnhancedSender(addr, tp)
-}
+//func getSenderHandler(addr string, tp string) inf.IRpcSender {
+//	// 对于本地类型，使用原有逻辑
+//	if tp == def.RpcTypeLocal {
+//		return getOriginalSenderHandler(addr, tp)
+//	}
+//
+//	// 对于远程类型，优先使用增强的连接池发送器
+//	return NewEnhancedSender(addr, tp)
+//}
 
 // getOriginalSenderHandler 原有的获取发送器逻辑（用于本地类型）
-func getOriginalSenderHandler(addr string, tp string) inf.IRpcSender {
+func getSenderHandler(addr string, tp string) inf.IRpcSender {
 	lock.RLock()
 	if tps, ok := senderHandlerMap[addr]; ok {
 		if handler, ok := tps[tp]; ok {

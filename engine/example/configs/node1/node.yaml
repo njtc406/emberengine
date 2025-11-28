@@ -177,7 +177,7 @@ ServiceConf:
 
 # 日志配置
 SystemLogger:
-  Path: ./example/data/logs
+  Path: ./engine/example/data/logs
   # 日志文件名
   Name: "system-1"
   # 日志级别

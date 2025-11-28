@@ -59,21 +59,8 @@ type Service struct {
 
 func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 	if serviceInitConf == nil {
-		serviceInitConf = &config.ServiceInitConf{
-			ServiceId:   "",
-			ServiceName: "",
-			Type:        "Normal",
-			TimerConf: &config.TimerConf{
-				TimerSize:       def.DefaultTimerSize,
-				TimerBucketSize: def.DefaultTimerBucketSize,
-			},
-			RpcType: def.RpcTypeGrpc,
-			LogConf: &config.ServiceLogConf{
-				Enable: false,
-				Config: nil,
-			},
-		}
-		return serviceInitConf
+		log.SysLogger.Fatalf("service init conf is nil, service name: %s", s.GetName())
+		return nil
 	}
 
 	if serviceInitConf.Type == "" {
@@ -156,7 +143,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	s.IConcurrent = concurrent.NewTaskScheduler()
 
-	// 注册邮箱事件
+	// 注册事件处理函数
 	s.initEventHandlers()
 
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
