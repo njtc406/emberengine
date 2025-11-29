@@ -6,7 +6,6 @@
 package nt
 
 import (
-	"fmt"
 	"github.com/nats-io/nats.go"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -56,7 +55,7 @@ func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
 	}
 	s.server = conn
 
-	subscription, err := s.server.Subscribe(fmt.Sprintf(def.NatsDefaultTopic, nodeUid), s.listener.Handle)
+	subscription, err := s.server.Subscribe(def.NatsDefaultTopic+nodeUid, s.listener.Handle)
 	if err != nil {
 		log.SysLogger.Errorf("nats server subscribe error: %s", err)
 		return err

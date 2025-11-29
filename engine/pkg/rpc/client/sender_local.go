@@ -6,10 +6,11 @@
 package client
 
 import (
+	"sync/atomic"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
-	"sync/atomic"
 )
 
 // localSender 本地服务的Client

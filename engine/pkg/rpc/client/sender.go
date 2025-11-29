@@ -14,9 +14,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
 )
 
-// TODO 考虑一下使用grpc的方式来构建各种接口,API和RPC的,现在的方式在编译阶段无法排除参数错误的问题,而且使用字符串调用无法定位到被调用api
-// TODO 就无法使用编辑器的跳转,维护代码的时候比较麻烦,优点是增加新的接口的时候直接加就可以了,不需要修改消息的interface
-
 type SenderCreator func(addr string) inf.IRpcSender
 
 var senderMap = map[string]SenderCreator{
@@ -51,17 +48,6 @@ func init() {
 	}
 }
 
-//func getSenderHandler(addr string, tp string) inf.IRpcSender {
-//	// 对于本地类型，使用原有逻辑
-//	if tp == def.RpcTypeLocal {
-//		return getOriginalSenderHandler(addr, tp)
-//	}
-//
-//	// 对于远程类型，优先使用增强的连接池发送器
-//	return NewEnhancedSender(addr, tp)
-//}
-
-// getOriginalSenderHandler 原有的获取发送器逻辑（用于本地类型）
 func getSenderHandler(addr string, tp string) inf.IRpcSender {
 	lock.RLock()
 	if tps, ok := senderHandlerMap[addr]; ok {
@@ -101,15 +87,11 @@ func addSenderHandler(addr, tp string) inf.IRpcSender {
 }
 
 func Close() {
-	// 关闭原有的发送器
 	for _, tps := range senderHandlerMap {
 		for _, handler := range tps {
 			handler.Close()
 		}
 	}
-
-	// 关闭连接池管理器
-	pool.GetGlobalPoolManager().Close()
 }
 
 type Dispatcher struct {

@@ -35,60 +35,7 @@ type WorkerPool struct {
 	profiler    *profiler.Profiler         // 性能分析（这个之后修改为性能数据采集器,只采集数据,分析放在采集器中自己去做）
 	autoScaler  IScaler                    // 自动扩容器
 	logger      log.ILogger
-	workerCount int
-}
-
-func fixConf(conf *config.MailboxConf) *config.MailboxConf {
-	if conf == nil {
-		conf = &config.MailboxConf{}
-	}
-
-	// 设置默认队列模式
-	if conf.QueueMode == "" {
-		conf.QueueMode = "dual" // 默认双队列模式
-	}
-
-	if conf.SchedulePolicy == nil {
-		conf.SchedulePolicy = &config.WorkerSchedulePolicy{}
-	}
-
-	if conf.SchedulePolicy.InitialWorkerNum <= 0 {
-		conf.SchedulePolicy.InitialWorkerNum = 1
-	}
-	if conf.SchedulePolicy.VirtualWorkerRate <= 0 {
-		conf.SchedulePolicy.VirtualWorkerRate = 24
-	}
-	if conf.SchedulePolicy.IdlerConf == nil {
-		conf.SchedulePolicy.IdlerConf = &config.WorkerIdlerConf{
-			EnableCond: true,
-		}
-	}
-	if conf.SchedulePolicy.IdlerConf.BackoffBaseDelay <= 0 {
-		conf.SchedulePolicy.IdlerConf.BackoffBaseDelay = time.Microsecond
-	}
-	if conf.SchedulePolicy.IdlerConf.BackoffMaxDelay <= 0 {
-		conf.SchedulePolicy.IdlerConf.BackoffMaxDelay = 16 * time.Microsecond
-	}
-	if conf.SchedulePolicy.IdlerConf.BackoffMaxRetries <= 0 {
-		conf.SchedulePolicy.IdlerConf.BackoffMaxRetries = 3
-	}
-	if conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff <= 0 {
-		conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff = 1000
-	}
-
-	// 兼容旧配置：MultiLevelConf -> MultiLevelQueueConf
-	if conf.QueueMode == "priority" {
-		if conf.SchedulePolicy.MultiLevelQueueConf == nil && conf.SchedulePolicy.MultiLevelConf != nil {
-			old := conf.SchedulePolicy.MultiLevelConf
-			conf.SchedulePolicy.MultiLevelQueueConf = &config.MultiLevelQueueConf{
-				Strategy:        old.Strategy,
-				TotalBatchLimit: old.TotalBatchLimit,
-				PriorityBatches: old.PriorityBatches,
-			}
-		}
-	}
-
-	return conf
+	workerCount int // 当前 worker 数量（用于扩缩容）
 }
 
 func NewWorkerPool(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
@@ -155,6 +102,10 @@ func (p *WorkerPool) Stop() {
 	p.workers = nil
 }
 
+// DispatchEvent 将事件分派给具体 worker。
+//
+//   - 多 worker 模式：通过 ring.Get(evt.GetDispatcherKey()) 选择 worker，保证相同 dispatcherKey 的事件落到同一 worker；
+//   - 单 worker 模式：固定使用 workerID=0，行为接近 Actor 模型的串行执行。
 func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
 	var worker inf.IMailboxWorker
@@ -276,4 +227,45 @@ func (p *WorkerPool) autoScaleWorkers() {
 			}
 		}
 	}
+}
+
+func fixConf(conf *config.MailboxConf) *config.MailboxConf {
+	if conf == nil {
+		conf = &config.MailboxConf{}
+	}
+
+	// 设置默认队列模式
+	if conf.QueueMode == "" {
+		conf.QueueMode = "dual" // 默认双队列模式
+	}
+
+	if conf.SchedulePolicy == nil {
+		conf.SchedulePolicy = &config.WorkerSchedulePolicy{}
+	}
+
+	if conf.SchedulePolicy.InitialWorkerNum <= 0 {
+		conf.SchedulePolicy.InitialWorkerNum = 1
+	}
+	if conf.SchedulePolicy.VirtualWorkerRate <= 0 {
+		conf.SchedulePolicy.VirtualWorkerRate = 24
+	}
+	if conf.SchedulePolicy.IdlerConf == nil {
+		conf.SchedulePolicy.IdlerConf = &config.WorkerIdlerConf{
+			EnableCond: true,
+		}
+	}
+	if conf.SchedulePolicy.IdlerConf.BackoffBaseDelay <= 0 {
+		conf.SchedulePolicy.IdlerConf.BackoffBaseDelay = time.Microsecond
+	}
+	if conf.SchedulePolicy.IdlerConf.BackoffMaxDelay <= 0 {
+		conf.SchedulePolicy.IdlerConf.BackoffMaxDelay = 16 * time.Microsecond
+	}
+	if conf.SchedulePolicy.IdlerConf.BackoffMaxRetries <= 0 {
+		conf.SchedulePolicy.IdlerConf.BackoffMaxRetries = 3
+	}
+	if conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff <= 0 {
+		conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff = 1000
+	}
+
+	return conf
 }

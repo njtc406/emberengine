@@ -22,7 +22,7 @@ import (
 )
 
 // 使用rpcx框架点对点直接调用, 这个相对于nats有一个优势, 就是可以知道消息是否被对方接收
-
+// TODO 需要做成配置
 type rpcxSender struct {
 	rpcClients []client.XClient
 	i          atomic.Uint64

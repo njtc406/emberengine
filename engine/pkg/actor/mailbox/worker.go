@@ -25,8 +25,13 @@ const (
 	QueueModePriority = "priority"
 )
 
-// Worker 统一的消息处理Worker
-// 职责：处理消息的提交、调度、执行，支持双队列和多优先级队列两种模式
+// Worker 统一的消息处理 Worker，实现 IMailboxWorker。
+//
+// 职责：
+//   - 接收 SubmitEvent 调用，将事件提交至内部队列管理器（IQueueManager）；
+//   - 在独立 goroutine 中循环从队列获取事件并执行；
+//   - 使用 idle.AdaptiveController 在队列为空时进行条件等待或退避，避免空转占用 CPU；
+//   - 在 Stop 时，通过 queueManager.DrainAll 将队列中剩余事件处理完毕，保证关闭过程无消息丢失。
 type Worker struct {
 	workerId     int
 	closed       atomic.Bool
@@ -137,13 +142,19 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 	return nil
 }
 
-// Start 启动Worker
+// Start 启动 Worker，在独立 goroutine 中运行 run 主循环。
 func (w *Worker) Start() {
 	w.wg.Add(1)
 	go w.run()
 }
 
-// run Worker主循环
+// run 是 Worker 的主循环。
+//
+// 循环逻辑：
+//  1. 尝试从 queueManager.NextEvent() 获取下一个事件；
+//  2. 若获取成功，则调用 safeExec 执行并继续下一轮；
+//  3. 若当前没有事件，则调用 idler.Idle() 进行条件等待或退避；
+//  4. 当 closed 标记为 true 时，循环退出，并在 defer 中通过 DrainAll 处理所有残留事件。
 func (w *Worker) run() {
 	defer w.wg.Done()
 
@@ -190,7 +201,10 @@ func (w *Worker) Stop() {
 	log.SysLogger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
 }
 
-// safeExec 安全执行事件处理
+// safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析：
+//   - 捕获业务处理中的 panic，调用 invoker.EscalateFailure 上报错误；
+//   - 可选地通过 profiler.Analyzer 记录每类事件的处理耗时；
+//   - 在业务处理完成后，依次调用所有 mailbox 中间件的 MessageReceived 作为后置 hook。
 func (w *Worker) safeExec(e inf.IEvent) {
 	defer func() {
 		if r := recover(); r != nil {

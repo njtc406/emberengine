@@ -96,7 +96,7 @@ const (
 
 const NatsDefaultShardCount = 16
 
-const NatsDefaultTopic = "ember.node.%s"
+const NatsDefaultTopic = "ember.node."
 
 const (
 	DefaultTraceIdKey    = "ember.traceId"
