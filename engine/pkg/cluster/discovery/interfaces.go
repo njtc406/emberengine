@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )

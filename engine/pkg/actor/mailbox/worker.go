@@ -42,8 +42,8 @@ type Worker struct {
 	count        atomic.Int64
 }
 
-// NewWorker 创建统一Worker
-func NewWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
+// newWorker 创建统一Worker
+func newWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
 	w := &Worker{
 		workerId: workerId,
 		pool:     pool,
@@ -85,25 +85,7 @@ func createQueueManager(conf *config.MailboxConf) IQueueManager {
 
 	case QueueModePriority:
 		// 多优先级队列模式
-		var queueConf *config.MultiLevelQueueConf
-
-		// 优先使用新配置
-		if conf.SchedulePolicy != nil && conf.SchedulePolicy.MultiLevelQueueConf != nil {
-			queueConf = conf.SchedulePolicy.MultiLevelQueueConf
-		} else if conf.SchedulePolicy != nil && conf.SchedulePolicy.MultiLevelConf != nil {
-			// 兼容旧配置
-			old := conf.SchedulePolicy.MultiLevelConf
-			queueConf = &config.MultiLevelQueueConf{
-				Strategy:        old.Strategy,
-				TotalBatchLimit: old.TotalBatchLimit,
-				PriorityBatches: old.PriorityBatches,
-			}
-		} else {
-			// 使用默认配置
-			queueConf = DefaultMultiLevelQueueConf()
-		}
-
-		return NewPriorityQueueManager(queueConf)
+		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf)
 
 	default:
 		log.SysLogger.Warnf("Unknown queue mode: %s, using dual queue", queueMode)
@@ -164,8 +146,7 @@ func (w *Worker) run() {
 			w.safeExec(e)
 		})
 	}()
-	//var backoff = 1
-	//var maxBackoff = 4
+
 	// 主处理循环
 	for !w.closed.Load() {
 		// 尝试获取下一个事件
@@ -176,10 +157,6 @@ func (w *Worker) run() {
 
 		// 队列为空，使用空闲控制器等待
 		w.idler.Idle()
-		//if backoff < maxBackoff {
-		//	backoff *= 2
-		//}
-		//time.Sleep(time.Microsecond * time.Duration(backoff))
 	}
 }
 
@@ -237,7 +214,7 @@ func (w *Worker) safeExec(e inf.IEvent) {
 
 	// 调用中间件
 	for _, ms := range w.pool.middlewares {
-		ms.MessageReceived(e)
+		ms.MessageProcessed(e) // TODO 这里过于简单,后续考虑是否需要更复杂的处理逻辑
 	}
 }
 

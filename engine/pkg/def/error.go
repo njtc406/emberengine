@@ -48,6 +48,7 @@ var (
 	RouterNotFound                 = errors.New("router not found")                          // 未找到路由
 	ErrRepeatExecute               = errors.New("repeat execute")                            // 重复执行
 	ErrTimerReuse                  = errors.New("timer reuse")                               // 定时器复用
+	ErrMailboxSuspended            = errors.New("mailbox suspended")                         // 邮箱已挂起
 )
 
 //type RpcErr string

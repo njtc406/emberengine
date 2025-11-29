@@ -6,6 +6,7 @@ package log
 
 import (
 	"fmt"
+
 	"github.com/njtc406/logrus"
 )
 

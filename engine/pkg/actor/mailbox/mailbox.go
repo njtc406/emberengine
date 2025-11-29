@@ -64,9 +64,10 @@ func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
 	// TODO 这个是不是也可以做成一个中间件？还是直接写成是机制
 	if e.GetPriority() > def.PriorityUrgent && m.isSuspended() {
 		// 挂起后,不再接收紧急以下的任何消息
-		return def.ErrMailboxNotRunning
+		return def.ErrMailboxSuspended
 	}
 
+	// TODO 中间件这块还需要仔细考虑一下怎么做,现在的太简陋了
 	// 调用所有中间件的 MessageReceived 方法(比如限流、熔断等)
 	for _, middleware := range m.workerPool.middlewares {
 		if err := safe.Do(func() error {

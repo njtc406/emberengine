@@ -262,7 +262,7 @@ func ExampleSingleWorkerConfig() *config.MailboxConf {
 			// 单个 Worker，所有消息在同一协程内顺序处理
 			InitialWorkerNum:  1,
 			VirtualWorkerRate: 1,     // 单 worker 时虚拟节点倍率影响较小
-			EnableAutoScaling: false, // 单 worker 模式下通常不启用自动扩缩容
+			EnableAutoScaling: false, // 单 worker 模式下不启用自动扩缩容
 
 			IdlerConf: &config.WorkerIdlerConf{
 				EnableCond:           true,

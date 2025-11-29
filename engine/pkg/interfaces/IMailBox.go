@@ -9,8 +9,9 @@ import "github.com/njtc406/emberengine/engine/pkg/def"
 
 // IMailboxMiddleware 中间件
 type IMailboxMiddleware interface {
-	MailboxStarted()
-	MessageReceived(evt IEvent)
+	MailboxStarted()             // 当Mailbox启动时调用
+	MessageReceived(evt IEvent)  // 当有消息到达时调用
+	MessageProcessed(evt IEvent) // 当消息处理完成时调用
 }
 
 // IMessageInvoker 处理消息

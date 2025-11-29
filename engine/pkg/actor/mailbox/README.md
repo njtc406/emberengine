@@ -1,6 +1,6 @@
 # Mailbox 设计与使用说明
 
-Mailbox 是 Ember 中 service/actor 的消息入口，负责接收事件、分发到 worker 并按配置的队列/扩缩容策略处理。
+Mailbox 是 Ember 中 service 的消息入口，负责接收事件、分发到 worker 并按配置的队列/扩缩容策略处理。
 
 ## 核心概念
 
@@ -18,21 +18,21 @@ Mailbox 是 Ember 中 service/actor 的消息入口，负责接收事件、分�
 Mailbox 的并发行为由 `WorkerSchedulePolicy.InitialWorkerNum` 决定：
 
 - **单 worker 模式（Actor-like）**
-  - `InitialWorkerNum = 1`。
+  - `WorkerNum = 1`,且没有自动扩容策略,即运行过程中始终只有一个worker。
   - WorkerPool 只创建一个 worker，所有消息在单个 goroutine 中按顺序处理。
   - 对于同一个 service：
     - 不会有多个线程同时执行业务逻辑；
     - 可以将内部状态视为“单线程上下文”；
-    - 行为接近经典 Actor 模型。
+    - 行为是经典 Actor 模型。
 
 - **多 worker 模式（并发服务模型）**
-  - `InitialWorkerNum > 1`。
+  - `WorkerNum > 1`, 这里的workerNum指运行后的实际worker数量,不管初始是不是1。
   - WorkerPool 创建多个 worker，并基于一致性哈希环（`evt.GetDispatcherKey()`）将事件路由到具体 worker：
     - 相同 dispatcherKey 的消息会落在同一 worker 上，保持局部顺序；
     - 不同 dispatcherKey 的消息可以在多个 worker 上并发处理。
   - 此时 service 内部如有共享状态，需要自行保证并发安全（锁、无锁结构等）。
 
-> 总结：想要“接近 Actor 模型”的语义，请使用单 worker 配置；想要更高吞吐量，请配置多 worker 并注意并发安全。
+> 总结：想要“ Actor 模型”的语义，请使用单 worker 配置；想要更高吞吐量，请配置多 worker 并注意并发安全。
 
 ## 配置入口：MailboxConf 与 WorkerSchedulePolicy
 
@@ -56,7 +56,7 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 
 参见 `config_example.go` 中的示例函数：
 
-- `ExampleSingleWorkerConfig`：单 worker（接近 Actor）模式。
+- `ExampleSingleWorkerConfig`：单 worker（Actor）模式。
 - `ExampleDualQueueConfig`：多 worker + 双队列模式。
 - `ExamplePriorityQueueConfig_Absolute`：多优先级队列 + 绝对优先策略。
 - `ExamplePriorityQueueConfig_Weighted`：多优先级队列 + 加权策略。
@@ -90,10 +90,7 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 - Mailbox 支持中间件（`IMailboxMiddleware`），可以在消息进入 worker 之前/之后执行自定义逻辑（如限流、统计、埋点等）。
 - 当前实现中：
   - 在 `defaultMailbox.PostMessage` 中，在消息入队前调用一次 `MessageReceived`；
-  - 在 `Worker.safeExec` 中，在消息处理完成后再次调用一次 `MessageReceived`。
-- 如果你的中间件对调用时机敏感（例如需要区分“入队前”和“处理后”），请在实现中自行区分上下文，或仅在一个阶段中使用。
-
-> 注意：未来可能会将中间件拆分为 `BeforeEnqueue` / `AfterHandle` 两类 hook，目前 `MessageReceived` 可能被调用两次。
+  - 在 `Worker.safeExec` 中，在消息处理完成后再次调用一次 `MessageProcessed`。
 
 ### 挂起与恢复（Suspend/Resume）
 
@@ -108,7 +105,7 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 ## 使用建议与注意事项
 
 1. **选择合适的 worker 数量**
-   - 对顺序敏感、状态机类逻辑：优先考虑单 worker 模式（`InitialWorkerNum=1`）。
+   - 对顺序敏感、状态机类逻辑：优先考虑单 worker 模式。
    - CPU 密集或高并发场景：根据 CPU 核心数和业务特性配置 4~16 个 worker，再通过压测调整。
 
 2. **正确使用 dispatcherKey**
@@ -116,8 +113,7 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
    - 相同 dispatcherKey 的事件会保持顺序，适合用来绑定“会话/玩家/房间”等需要顺序的实体；
    - 不同 dispatcherKey 之间可以并行，避免所有请求都挤在同一个 worker。
 
-3. **注意中间件的时机与开销**
-   - 中间件可能在入队前和处理后各被调用一次，避免在中间件里做非常重的操作；
+3. **注意中间件的开销**
    - 在压测场景下，请关闭不必要的 debug 日志和重型中间件逻辑，以免干扰基准测试。
 
 4. **扩缩容策略从简单开始**

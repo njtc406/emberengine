@@ -1,8 +1,9 @@
 package log
 
 import (
-	"github.com/njtc406/logrus"
 	"io"
+
+	"github.com/njtc406/logrus"
 )
 
 // TODO 差一个文件日志,这个日志是用来写入一些统计日志的,所以格式上可能会和其他不太一样,只需要数据,不需要附加信息,可以接入kafka

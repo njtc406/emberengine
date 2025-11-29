@@ -7,6 +7,7 @@ package gate
 
 import (
 	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config"
