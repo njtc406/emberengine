@@ -6,25 +6,35 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/njtc406/logrus"
 )
 
 func TestInfo(t *testing.T) {
 	logger, err := NewDefaultLogger("./", &LoggerConf{
-		Path:  "log",
-		Name:  "xx.log",
-		Level: "info",
-		AsyncMode: &AsyncMode{
-			Enable: true,
-			Config: &AsyncWriterConfig{
-				BufferSize:    1024,
-				FlushInterval: time.Second,
-			},
-		},
+		Path:         "log",
+		Name:         "",
+		Level:        "info",
 		Caller:       true,
 		FullCaller:   true,
 		Color:        false,
 		MaxAge:       time.Hour * 24 * 15,
 		RotationTime: time.Hour * 24,
+		LevelWriter: &LevelWriterConf{
+			AsyncMode: &AsyncMode{
+				Enable: true,
+				Config: &AsyncWriterConfig{
+					BufferSize:    1024,
+					FlushInterval: time.Second,
+				},
+			},
+			Routes: []LevelRoute{
+				{
+					Name:   "info",
+					Levels: logrus.AllLevels,
+				},
+			},
+		},
 	}, true)
 	if err != nil {
 		fmt.Println(err)
@@ -52,26 +62,33 @@ func TestInfo(t *testing.T) {
 
 	end := time.Now()
 	fmt.Println(end.Sub(start))
-	Release(logger)
 }
 
 func BenchmarkName(b *testing.B) {
 	logger, err := NewDefaultLogger("./", &LoggerConf{
-		Path:  "log",
-		Name:  "xx.log",
-		Level: "info",
-		AsyncMode: &AsyncMode{
-			Enable: true,
-			Config: &AsyncWriterConfig{
-				BufferSize:    1024,
-				FlushInterval: time.Second,
-			},
-		},
+		Path:         "log",
+		Name:         "xx.log",
+		Level:        "info",
 		Caller:       true,
 		FullCaller:   true,
 		Color:        false,
 		MaxAge:       time.Hour * 24 * 15,
 		RotationTime: time.Hour * 24,
+		LevelWriter: &LevelWriterConf{
+			AsyncMode: &AsyncMode{
+				Enable: true,
+				Config: &AsyncWriterConfig{
+					BufferSize:    1024,
+					FlushInterval: time.Second,
+				},
+			},
+			Routes: []LevelRoute{
+				{
+					Name:   "info",
+					Levels: logrus.AllLevels,
+				},
+			},
+		},
 	}, true)
 	if err != nil {
 		fmt.Println(err)
@@ -80,8 +97,6 @@ func BenchmarkName(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		logger.Error("aaaa")
 	}
-
-	Release(logger)
 }
 
 func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
@@ -91,14 +106,25 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 		Path:  "",
 		Name:  "app.log",
 		Level: "debug",
-		AsyncMode: &AsyncMode{
-			Enable: false, // 简化测试，同步写入
+		LevelWriter: &LevelWriterConf{
+			AsyncMode: &AsyncMode{
+				Enable: true,
+				Config: &AsyncWriterConfig{
+					BufferSize:    1024,
+					FlushInterval: time.Second,
+				},
+			},
+			Routes: []LevelRoute{
+				{
+					Name:   "info",
+					Levels: logrus.AllLevels,
+				},
+			},
 		},
 	}, false)
 	if err != nil {
 		t.Fatalf("NewDefaultLogger error: %v", err)
 	}
-	defer Release(logger)
 
 	logger.Info("info msg")
 	logger.Error("error msg")
@@ -123,19 +149,22 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 		Path:  "",
 		Name:  "app.log",
 		Level: "debug",
-		AsyncMode: &AsyncMode{
-			Enable: false, // 为了简单起见，先用同步写入
-		},
 		LevelWriter: &LevelWriterConf{
-			Sync: true,
+			AsyncMode: &AsyncMode{
+				Enable: true,
+				Config: &AsyncWriterConfig{
+					BufferSize:    1024,
+					FlushInterval: time.Second,
+				},
+			},
 			Routes: []LevelRoute{
 				{
-					Levels: []Level{ErrorLevel, FatalLevel, PanicLevel},
-					Name:   "error",
+					Name:   "info",
+					Levels: []Level{InfoLevel, DebugLevel, WarnLevel, TraceLevel},
 				},
 				{
-					Levels: []Level{InfoLevel, DebugLevel},
-					Name:   "info",
+					Name:   "error",
+					Levels: []Level{ErrorLevel, FatalLevel, PanicLevel},
 				},
 			},
 		},
@@ -143,7 +172,6 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDefaultLogger error: %v", err)
 	}
-	defer Release(logger)
 
 	logger.Info("info msg")
 	logger.Error("error msg")

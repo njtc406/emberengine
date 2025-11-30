@@ -2,45 +2,14 @@ package log
 
 import (
 	"io"
+	"os"
 	"path"
+	"time"
 )
 
-// levelFileHook 按日志级别将日志写入不同的 io.Writer。
-//
-// 典型用法：
-//   - 通过 LevelWriterConf 描述哪些 Level 共享同一个 writer；
-//   - 每个路由创建一个独立的 rotateNew（可选异步包装）作为最终输出目标。
-//
-// 注意：
-//   - 该 Hook 只负责“额外写入”，不会影响 logger.Out 的输出；
-//   - 复用现有 Formatter，保证与主输出格式一致。
-type levelFileHook struct {
-	formatter *Formatter
-	writers   map[Level]io.Writer
-}
-
-func newLevelFileHook(formatter *Formatter, writers map[Level]io.Writer) *levelFileHook {
-	return &levelFileHook{
-		formatter: formatter,
-		writers:   writers,
-	}
-}
-
-func (h *levelFileHook) Levels() []Level {
-	return []Level{PanicLevel, FatalLevel, ErrorLevel, WarnLevel, InfoLevel, DebugLevel, TraceLevel}
-}
-
-func (h *levelFileHook) Fire(entry *Entry) error {
-	w, ok := h.writers[entry.Level]
-	if !ok || w == nil {
-		return nil
-	}
-	line, err := h.formatter.Format(entry)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(line)
-	return err
+type LevelRouter struct {
+	routers map[Level]io.Writer
+	closers []io.WriteCloser
 }
 
 // buildLevelWriters 根据 LoggerConf.LevelWriter 构建每个 Level 对应的文件 writer。
@@ -50,13 +19,21 @@ func (h *levelFileHook) Fire(entry *Entry) error {
 //   - 每个 LevelRoute 会创建一个独立的 rotateNew 文件前缀（Name 或 Name+"_route.Name"）；
 //   - route.Levels 中的所有级别共用同一个 writer，实现“多级别合并到同一个文件”；
 //   - Sync=false 时，优先按全局 AsyncMode 决策是否包一层 AsyncWriter（全局未启用则保持同步）。
-func buildLevelWriters(filePath string, conf *LoggerConf) (map[Level]io.Writer, error) {
+func buildLevelWriters(filePath string, conf *LoggerConf, openStdout bool) (*LevelRouter, error) {
 	lw := conf.LevelWriter
-	if lw == nil || !lw.Enable || conf.Name == "" {
+	if lw == nil || conf.Name == "" {
 		return nil, nil
 	}
-
-	levelWriters := make(map[Level]io.Writer)
+	var writers []io.Writer
+	if openStdout {
+		writers = append(writers, os.Stdout)
+	} else {
+		writers = append(writers, io.Discard)
+	}
+	router := LevelRouter{
+		routers: make(map[Level]io.Writer),
+		closers: make([]io.WriteCloser, 0),
+	}
 
 	for _, route := range lw.Routes {
 		if len(route.Levels) == 0 {
@@ -68,37 +45,80 @@ func buildLevelWriters(filePath string, conf *LoggerConf) (map[Level]io.Writer, 
 			baseName = conf.Name + "_" + route.Name
 		}
 
-		// 为该路由创建一个独立的 rotate writer
-		w, err := rotateNew(
-			path.Join(filePath, baseName),
-			WithMaxAge(conf.MaxAge),
-			WithRotationTime(conf.RotationTime),
-		)
-		if err != nil {
-			if w != nil {
-				_ = w.Close()
+		var writerCloser io.WriteCloser
+		if len(baseName) > 0 {
+			if len(filePath) == 0 {
+				filePath = "./" // 默认当前目录
 			}
-			return nil, err
+			if conf.RotationTime < time.Second*60 || conf.RotationTime > time.Hour*24 {
+				return nil, RotationTimeErr
+			}
+			pattern := "_%Y%m%d.log"
+			if conf.RotationTime < time.Minute*60 {
+				pattern = "_%Y%m%d%H%M.log"
+			} else if conf.RotationTime < time.Hour*24 {
+				pattern = "_%Y%m%d%H.log"
+			}
+
+			w, err := rotateNew(
+				path.Join(filePath, baseName),
+				WithMaxAge(conf.MaxAge),
+				WithRotationTime(conf.RotationTime),
+				WithPattern(pattern),
+			)
+			if err != nil {
+				if w != nil {
+					_ = w.Close()
+				}
+				return nil, err
+			} else {
+				writers = append(writers, w)
+				writerCloser = w
+			}
 		}
 
-		// 记录该 writer，方便 Release(logger) 统一关闭文件句柄
-		// 注意：具体 logger 实例稍后在 NewDefaultLogger 中注册，这里只返回 writer。
-
-		var writer io.Writer = w
-
-		// route.Sync=false 时允许异步；若全局 AsyncMode 未开启，则保持同步
-		if !route.Sync && conf.AsyncMode != nil && conf.AsyncMode.Enable {
-			writer = NewAsyncWriter(writer, conf.AsyncMode.Config, w)
+		var wCloser io.WriteCloser
+		var writer io.Writer
+		if lw.AsyncMode != nil && lw.AsyncMode.Enable {
+			// 开启了异步模式,使用异步writer代替同步writer
+			w := NewAsyncWriter(
+				io.MultiWriter(writers...),
+				lw.AsyncMode.Config,
+				writerCloser,
+			)
+			writer = w
+			// 记录异步模式的writer,用于close的时候释放
+			wCloser = w
+		} else {
+			writer = io.MultiWriter(writers...)
 		}
 
 		for _, lvl := range route.Levels {
-			levelWriters[lvl] = writer
+			router.routers[lvl] = writer
 		}
+
+		if wCloser != nil {
+			router.closers = append(router.closers, wCloser)
+		}
+
 	}
 
-	if len(levelWriters) == 0 {
+	if len(router.routers) == 0 {
 		return nil, nil
 	}
 
-	return levelWriters, nil
+	return &router, nil
+}
+
+func (l *LevelRouter) Route(level Level) io.Writer {
+	return l.routers[level]
+}
+
+func (l *LevelRouter) Close() error {
+	for _, closer := range l.closers {
+		if closer != nil {
+			_ = closer.Close()
+		}
+	}
+	return nil
 }

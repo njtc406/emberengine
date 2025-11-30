@@ -11,7 +11,6 @@ package log
 
 import (
 	"io"
-	"os"
 	"path"
 	"strings"
 	"sync"
@@ -34,9 +33,8 @@ type LevelRoute struct {
 
 // LevelWriterConf 描述按级别拆分时的 writer 组合配置。
 type LevelWriterConf struct {
-	// 是否同步写入（true=同步，false=使用异步包装,默认异步）
-	// （如果希望精细控制每个路由的行为,就放入到Routes中）
-	Sync bool
+	// 是否异步写入(默认开启)
+	AsyncMode *AsyncMode `binding:""`
 	// 每个路由对应一组级别和一个目标 writer
 	Routes []LevelRoute
 }
@@ -48,8 +46,6 @@ type LoggerConf struct {
 	Name string `binding:""`
 	// 日志写入级别 小于设置级别的类型都会被记录
 	Level string `binding:"oneof=panic fatal error warn info debug trace"`
-	// 是否异步写入(默认开启)
-	AsyncMode *AsyncMode `binding:""`
 	// 是否打印调用者
 	Caller bool `binding:""`
 	// 是否打印完整调用者
@@ -86,21 +82,37 @@ func New(opts ...Option) ILogger {
 func fixConf(conf *LoggerConf) *LoggerConf {
 	if conf == nil {
 		conf = &LoggerConf{
-			Path:  "",
-			Name:  "",
-			Level: "info",
-			AsyncMode: &AsyncMode{
-				Enable: true,
-				Config: &AsyncWriterConfig{
-					BufferSize:    65536, // 64kb
-					FlushInterval: time.Second,
-				},
-			},
+			Path:         "",
+			Name:         "",
+			Level:        "info",
 			Caller:       true,
 			FullCaller:   false,
 			Color:        false,
 			MaxAge:       time.Hour * 24 * 15, // 默认15天
 			RotationTime: time.Hour * 24,
+			LevelWriter: &LevelWriterConf{
+				AsyncMode: &AsyncMode{
+					Enable: true,
+					Config: &AsyncWriterConfig{
+						BufferSize:    65536, // 64kb
+						FlushInterval: time.Second,
+					},
+				},
+				Routes: []LevelRoute{
+					{
+						Levels: []Level{
+							PanicLevel,
+							FatalLevel,
+							ErrorLevel,
+							WarnLevel,
+							InfoLevel,
+							DebugLevel,
+							TraceLevel,
+						},
+						Name: "all",
+					},
+				},
+			},
 		}
 	}
 
@@ -126,7 +138,7 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 	// 这样单文件和多文件在语义上都是基于 LevelRoute 的按级别路由。
 	if conf.LevelWriter == nil {
 		conf.LevelWriter = &LevelWriterConf{
-			Sync: false,
+			AsyncMode: conf.LevelWriter.AsyncMode,
 			Routes: []LevelRoute{
 				{
 					Levels: []Level{
@@ -161,74 +173,25 @@ func NewDefaultLogger(filePath string, conf *LoggerConf, openStdout bool) (ILogg
 	// 统一通过 LevelWriter 构建按级别路由的文件 writers：
 	//   - 单文件：fixConf 自动补一个“所有级别 -> Name”的 Route；
 	//   - 多文件：用户显式配置多个 Route。
-	levelWriters, err := buildLevelWriters(path.Join(filePath, conf.Path), conf)
+	picker, err := newPicker(path.Join(filePath, conf.Path), conf, openStdout)
 	if err != nil {
 		return nil, err
 	}
 
-	// 构建基础输出：stdout 或丢弃。文件写入全部由 levelFileHook 负责。
-	var baseOut io.Writer
-	if openStdout {
-		baseOut = os.Stdout
-	} else {
-		baseOut = io.Discard
-	}
-
 	level := strings.ToLower(conf.Level)
 	if _, ok := levelMap[level]; !ok {
-		level = "error"
+		level = ErrorLevelStr
 	}
 
 	logger := New(
 		WithLevel(levelMap[level]),
 		WithCaller(conf.Caller),
 		WithColor(conf.Color),
-		WithOut(baseOut),
 		WithFullCaller(conf.FullCaller),
+		WithOuterPicker(picker),
 	)
 
-	// 如果存在 levelWriters，则挂载 Hook 按级别写入对应文件
-	if len(levelWriters) > 0 {
-		if lr, ok := logger.(*logrus.Logger); ok {
-			if f, ok2 := lr.Formatter.(*Formatter); ok2 {
-				lr.AddHook(newLevelFileHook(f, levelWriters))
-			}
-		}
-		// 注册所有底层 writer，方便 Release 时统一关闭
-		registerLevelWriters(logger, levelWriters)
-	}
-
 	return logger, nil
-}
-
-// registerLevelWriters 将 levelWriters 中的底层可关闭 writer 记录到全局 writerLog 中。
-func registerLevelWriters(logger ILogger, levelWriters map[Level]io.Writer) {
-	seen := make(map[io.WriteCloser]struct{})
-	for _, w := range levelWriters {
-		var wc io.WriteCloser
-		switch wt := w.(type) {
-		case *AsyncWriter:
-			wc = wt
-		case *Rotate:
-			wc = wt
-		}
-		if wc == nil {
-			continue
-		}
-		if _, ok := seen[wc]; ok {
-			continue
-		}
-		seen[wc] = struct{}{}
-		logWriter(logger, wc)
-	}
-}
-
-func Release(logger ILogger) {
-	if logger == nil {
-		return
-	}
-
-	logRelease(logger)
 }
 
 // LoggerX 扩展日志对象,可以在日志中添加一些固定的字段
@@ -262,4 +225,26 @@ func (w *LevelRouterWriter) Write(p []byte) (n int, err error) {
 	// 所以 LevelRouterWriter 主要用于概念预留，当前仍由主 writer 写入。
 	// 后续如果将 ILogger 扩展为按级别调用不同 writer，可在这里接入。
 	return w.defaultWriter.Write(p)
+}
+
+var locker sync.Mutex
+var writerLog = map[ILogger]io.WriteCloser{}
+
+func logWriter(logger ILogger, writer io.WriteCloser) {
+	locker.Lock()
+	defer locker.Unlock()
+
+	if _, ok := writerLog[logger]; ok {
+		return
+	}
+
+	writerLog[logger] = writer
+}
+
+func Release(logger ILogger) {
+	if logger == nil {
+		return
+	}
+
+	_ = logger.GetOuterPicker().Close()
 }

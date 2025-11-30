@@ -21,6 +21,8 @@ type HookFunction = logrus.Hook
 
 type Entry = logrus.Entry
 
+type IPicker = logrus.IPicker
+
 // These are the different logging levels. You can set the logging level to log
 // on your instance of rusLogger, obtained with `logrus.New()`.
 const (
@@ -111,5 +113,11 @@ func WithTimeFormat(formatStr string) Option {
 func WithHook(hook HookFunction) Option {
 	return func(logger *Logger) {
 		logger.AddHook(hook)
+	}
+}
+
+func WithOuterPicker(picker logrus.IPicker) Option {
+	return func(logger *Logger) {
+		logger.SetOuterPicker(picker)
 	}
 }
