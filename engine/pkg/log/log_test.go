@@ -11,16 +11,19 @@ import (
 )
 
 func TestInfo(t *testing.T) {
-	logger, err := NewDefaultLogger("./", &LoggerConf{
-		Path:         "log",
-		Name:         "",
-		Level:        "info",
-		Caller:       true,
-		FullCaller:   true,
-		Color:        false,
-		MaxAge:       time.Hour * 24 * 15,
-		RotationTime: time.Hour * 24,
-		LevelWriter: &LevelWriterConf{
+	logger, err := NewDefaultLogger(&LoggerConf{
+		Dir:        "./logs",
+		Name:       "app",
+		MinLevel:   "info",
+		Stdout:     true,
+		Caller:     true,
+		FullCaller: true,
+		Color:      false,
+		Rotation: RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: true,
 				Config: &AsyncWriterConfig{
@@ -35,11 +38,12 @@ func TestInfo(t *testing.T) {
 				},
 			},
 		},
-	}, true)
+	})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	defer Release(logger)
 	defer func() {
 		if err := recover(); err != nil {
 			return
@@ -52,29 +56,25 @@ func TestInfo(t *testing.T) {
 	//Logs.Panic("panic test")
 	logger.Info("-----------info test")
 	logger.Error("-----------error test")
-	logger.Error("-----------error test")
-	logger.Error("-----------error test")
-	logger.Error("-----------error test")
-	logger.Error("-----------error test")
-	logger.Error("-----------error test")
-	logger.Error("-----------error test")
-	logger.Error("-----------error test")
 
 	end := time.Now()
 	fmt.Println(end.Sub(start))
 }
 
 func BenchmarkName(b *testing.B) {
-	logger, err := NewDefaultLogger("./", &LoggerConf{
-		Path:         "log",
-		Name:         "xx.log",
-		Level:        "info",
-		Caller:       true,
-		FullCaller:   true,
-		Color:        false,
-		MaxAge:       time.Hour * 24 * 15,
-		RotationTime: time.Hour * 24,
-		LevelWriter: &LevelWriterConf{
+	logger, err := NewDefaultLogger(&LoggerConf{
+		Dir:        "./logs",
+		Name:       "xx.log",
+		MinLevel:   "info",
+		Stdout:     true,
+		Caller:     true,
+		FullCaller: true,
+		Color:      false,
+		Rotation: RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: true,
 				Config: &AsyncWriterConfig{
@@ -89,7 +89,7 @@ func BenchmarkName(b *testing.B) {
 				},
 			},
 		},
-	}, true)
+	})
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -102,13 +102,17 @@ func BenchmarkName(b *testing.B) {
 func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 	dir := t.TempDir()
 
-	logger, err := NewDefaultLogger(dir, &LoggerConf{
-		Path:  "",
-		Name:  "app.log",
-		Level: "debug",
-		LevelWriter: &LevelWriterConf{
+	logger, err := NewDefaultLogger(&LoggerConf{
+		Dir:      dir,
+		Name:     "app.log",
+		MinLevel: "debug",
+		Rotation: RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: RoutingConf{
 			AsyncMode: &AsyncMode{
-				Enable: true,
+				Enable: false,
 				Config: &AsyncWriterConfig{
 					BufferSize:    1024,
 					FlushInterval: time.Second,
@@ -121,10 +125,12 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 				},
 			},
 		},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("NewDefaultLogger error: %v", err)
 	}
+
+	defer Release(logger)
 
 	logger.Info("info msg")
 	logger.Error("error msg")
@@ -143,15 +149,17 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 }
 
 func TestMultiFileByLevelRoutes(t *testing.T) {
-	dir := t.TempDir()
-
-	logger, err := NewDefaultLogger(dir, &LoggerConf{
-		Path:  "",
-		Name:  "app.log",
-		Level: "debug",
-		LevelWriter: &LevelWriterConf{
+	logger, err := NewDefaultLogger(&LoggerConf{
+		Dir:      "./logs",
+		Name:     "app.log",
+		MinLevel: "info",
+		Rotation: RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: RoutingConf{
 			AsyncMode: &AsyncMode{
-				Enable: true,
+				Enable: false,
 				Config: &AsyncWriterConfig{
 					BufferSize:    1024,
 					FlushInterval: time.Second,
@@ -168,19 +176,27 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 				},
 			},
 		},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("NewDefaultLogger error: %v", err)
 	}
 
+	defer Release(logger)
+
 	logger.Info("info msg")
+	logger.Debug("debug msg")
+	logger.Warn("warn msg")
+	logger.Trace("trace msg")
+
 	logger.Error("error msg")
+	//logger.Fatal("fatal msg")
+	//logger.Panic("panic msg")
 
 	time.Sleep(100 * time.Millisecond)
 
 	// 检查 info 文件和 error 文件都存在
-	patternInfo := filepath.Join(dir, "app.log_info_*.log")
-	patternErr := filepath.Join(dir, "app.log_error_*.log")
+	patternInfo := filepath.Join("./logs", "app.log_info_*.log")
+	patternErr := filepath.Join("./logs", "app.log_error_*.log")
 
 	matchesInfo, _ := filepath.Glob(patternInfo)
 	matchesErr, _ := filepath.Glob(patternErr)

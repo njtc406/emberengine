@@ -8,7 +8,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"path"
 	"reflect"
 	"runtime/debug"
 	"sync/atomic"
@@ -106,17 +105,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.cfg = cfg
 
 	// 初始化日志
-	if serviceInitConf.LogConf.Enable {
-		logger, err := log.NewDefaultLogger(path.Join(serviceInitConf.LogConf.Config.Path, serviceInitConf.LogConf.Config.Name), serviceInitConf.LogConf.Config, config.IsDebug())
-		if err != nil {
-			log.SysLogger.Panicf("service[%s] init logger error: %s", s.GetName(), err)
-		} else {
-			s.logger = logger
-		}
-	} else {
-		// 使用系统日志
-		s.logger = log.SysLogger
-	}
+	s.logger = log.NewLoggerX(log.SysLogger, log.Fields{
+		"serviceName": s.GetName(),
+		"serverId":    serviceInitConf.ServerId,
+	})
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器

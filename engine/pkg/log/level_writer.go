@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"time"
 )
 
 type LevelRouter struct {
@@ -19,23 +18,24 @@ type LevelRouter struct {
 //   - 每个 LevelRoute 会创建一个独立的 rotateNew 文件前缀（Name 或 Name+"_route.Name"）；
 //   - route.Levels 中的所有级别共用同一个 writer，实现“多级别合并到同一个文件”；
 //   - Sync=false 时，优先按全局 AsyncMode 决策是否包一层 AsyncWriter（全局未启用则保持同步）。
-func buildLevelWriters(filePath string, conf *LoggerConf, openStdout bool) (*LevelRouter, error) {
-	lw := conf.LevelWriter
-	if lw == nil || conf.Name == "" {
+func buildLevelWriters(conf *LoggerConf) (*LevelRouter, error) {
+	// 路由配置使用统一字段 Routing
+	var routes []LevelRoute
+	var asyncMode *AsyncMode
+	routes = conf.Routing.Routes
+	asyncMode = conf.Routing.AsyncMode
+	if len(routes) == 0 {
 		return nil, nil
 	}
-	var writers []io.Writer
-	if openStdout {
-		writers = append(writers, os.Stdout)
-	} else {
-		writers = append(writers, io.Discard)
+	if conf.Name == "" {
+		return nil, nil
 	}
 	router := LevelRouter{
 		routers: make(map[Level]io.Writer),
 		closers: make([]io.WriteCloser, 0),
 	}
 
-	for _, route := range lw.Routes {
+	for _, route := range routes {
 		if len(route.Levels) == 0 {
 			continue
 		}
@@ -45,25 +45,30 @@ func buildLevelWriters(filePath string, conf *LoggerConf, openStdout bool) (*Lev
 			baseName = conf.Name + "_" + route.Name
 		}
 
+		writers := make([]io.Writer, 0, 2)
+		if conf.Stdout {
+			writers = append(writers, os.Stdout)
+		} else {
+			writers = append(writers, io.Discard)
+		}
+
 		var writerCloser io.WriteCloser
 		if len(baseName) > 0 {
-			if len(filePath) == 0 {
-				filePath = "./" // 默认当前目录
+			if len(conf.Dir) == 0 {
+				conf.Dir = "./" // 默认当前目录
 			}
-			if conf.RotationTime < time.Second*60 || conf.RotationTime > time.Hour*24 {
-				return nil, RotationTimeErr
+			// 切割周期校验
+			every := conf.Rotation.Every
+			if err := ValidateEvery(every); err != nil {
+				return nil, err
 			}
-			pattern := "_%Y%m%d.log"
-			if conf.RotationTime < time.Minute*60 {
-				pattern = "_%Y%m%d%H%M.log"
-			} else if conf.RotationTime < time.Hour*24 {
-				pattern = "_%Y%m%d%H.log"
-			}
+			// 选择模式
+			pattern := DeducePattern(every, conf.Rotation.Pattern)
 
 			w, err := rotateNew(
-				path.Join(filePath, baseName),
-				WithMaxAge(conf.MaxAge),
-				WithRotationTime(conf.RotationTime),
+				path.Join(conf.Dir, baseName),
+				WithMaxAge(conf.Rotation.MaxAge),
+				WithRotationTime(every),
 				WithPattern(pattern),
 			)
 			if err != nil {
@@ -79,11 +84,11 @@ func buildLevelWriters(filePath string, conf *LoggerConf, openStdout bool) (*Lev
 
 		var wCloser io.WriteCloser
 		var writer io.Writer
-		if lw.AsyncMode != nil && lw.AsyncMode.Enable {
+		if asyncMode != nil && asyncMode.Enable {
 			// 开启了异步模式,使用异步writer代替同步writer
 			w := NewAsyncWriter(
 				io.MultiWriter(writers...),
-				lw.AsyncMode.Config,
+				asyncMode.Config,
 				writerCloser,
 			)
 			writer = w
@@ -97,10 +102,15 @@ func buildLevelWriters(filePath string, conf *LoggerConf, openStdout bool) (*Lev
 			router.routers[lvl] = writer
 		}
 
-		if wCloser != nil {
-			router.closers = append(router.closers, wCloser)
+		if asyncMode != nil && asyncMode.Enable {
+			if wCloser != nil {
+				router.closers = append(router.closers, wCloser)
+			}
+		} else {
+			if writerCloser != nil {
+				router.closers = append(router.closers, writerCloser)
+			}
 		}
-
 	}
 
 	if len(router.routers) == 0 {

@@ -17,7 +17,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/nats-io/nats.go v1.41.1
-	github.com/njtc406/logrus v1.1.4
+	github.com/njtc406/logrus v1.1.5
 	github.com/njtc406/viper v0.0.0-20241204023427-3b9ef60a450c
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/patrickmn/go-cache v2.1.0+incompatible

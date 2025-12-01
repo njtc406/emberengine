@@ -1,9 +1,10 @@
 package log
 
 import (
-	"github.com/lestrrat-go/file-rotatelogs"
 	"runtime"
 	"time"
+
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )
 
 type options struct {
@@ -76,4 +77,25 @@ func rotateNew(p string, opts ...ROption) (*Rotate, error) {
 		p+opt.Pattern,
 		optList...,
 	)
+}
+
+// ValidateEvery 校验切割周期（1min 到 24h）
+func ValidateEvery(every time.Duration) error {
+	if every < time.Minute || every > 24*time.Hour {
+		return RotationTimeErr
+	}
+	return nil
+}
+
+// DeducePattern 根据切割周期推导缺省 Pattern；若已有 Pattern 则直接返回
+func DeducePattern(every time.Duration, pattern string) string {
+	if pattern != "" {
+		return pattern
+	}
+	if every < time.Hour {
+		return "_%Y%m%d%H%M.log"
+	} else if every < 24*time.Hour {
+		return "_%Y%m%d%H.log"
+	}
+	return "_%Y%m%d.log"
 }
