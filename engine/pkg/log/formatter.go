@@ -78,10 +78,6 @@ type Formatter struct {
 
 // Format a log entry (2006-01-02 15:04:05.000 [DEBUG] (test.go:5 func test) aaa=1 bbb=2 this is message) [header]
 func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
-	// logrus 在主输出路径会提前为 entry.Buffer 分配 buffer，但在 Hook 中可能为 nil，
-	// 这里需要兜底分配，避免空指针。
-
-	// TODO 目前这里还会panic，应该是注册的hook执行位置不对,应该在写入之前执行，而不是format之前执行level分级
 	b := entry.Buffer
 
 	// write time
