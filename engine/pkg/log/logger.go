@@ -11,7 +11,6 @@ package log
 
 import (
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/njtc406/logrus"
@@ -24,7 +23,7 @@ type AsyncMode struct {
 
 type LevelRoute struct {
 	// 要路由到同一 writer 的日志级别集合
-	Levels []Level
+	Levels []string
 	// 文件名后缀；空则使用主 Name
 	Name string `binding:""`
 }
@@ -46,10 +45,10 @@ type RoutingConf struct {
 
 type LoggerConf struct {
 	// 统一命名
-	Dir      string `binding:""`
-	Name     string `binding:""`
-	MinLevel string `binding:"oneof=panic fatal error warn info debug trace"`
-	Stdout   bool   `binding:""`
+	Dir    string `binding:""`
+	Name   string `binding:""`
+	Level  string `binding:"oneof=panic fatal error warn info debug trace"`
+	Stdout bool   `binding:""`
 	// 是否打印调用者
 	Caller bool `binding:""`
 	// 是否打印完整调用者
@@ -62,12 +61,10 @@ type LoggerConf struct {
 }
 
 // New creates a new Logger object.
-func New(opts ...Option) ILogger {
+func New(isDebug bool, opts ...Option) ILogger {
 	l := logrus.New()
-	//AddHook(&Hook{})
-	l.SetBufferPool(bufferPool)
+	l.SetBufferPool(getBufferPool(isDebug))
 	l.SetFormatter(&Formatter{
-		Mu:              new(sync.Mutex),
 		TimestampFormat: "2006-01-02 15:04:05.000",
 	})
 	for _, opt := range opts {
@@ -82,8 +79,8 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 		conf = &LoggerConf{}
 	}
 	// 默认值
-	if conf.MinLevel == "" {
-		conf.MinLevel = "info"
+	if conf.Level == "" {
+		conf.Level = "info"
 	}
 	if conf.Rotation.MaxAge == 0 {
 		conf.Rotation.MaxAge = time.Hour * 24 * 15
@@ -107,7 +104,7 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 			}
 		}
 		conf.Routing.Routes = []LevelRoute{
-			{Levels: []Level{PanicLevel, FatalLevel, ErrorLevel, WarnLevel, InfoLevel, DebugLevel, TraceLevel}, Name: ""},
+			{Levels: AllLevelStrs, Name: ""},
 		}
 	}
 	return conf
@@ -128,12 +125,13 @@ func NewDefaultLogger(conf *LoggerConf) (ILogger, error) {
 		return nil, err
 	}
 
-	level := strings.ToLower(conf.MinLevel)
+	level := strings.ToLower(conf.Level)
 	if _, ok := levelMap[level]; !ok {
 		level = ErrorLevelStr
 	}
 
 	logger := New(
+		conf.Stdout,
 		WithLevel(levelMap[level]),
 		WithCaller(conf.Caller),
 		WithColor(conf.Color),

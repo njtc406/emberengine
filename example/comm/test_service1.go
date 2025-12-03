@@ -10,10 +10,11 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"github.com/njtc406/emberengine/example/msg"
 )
 
 const (
@@ -33,64 +34,64 @@ func (s *Service1) OnInit() error {
 	//var ctx context.Context
 
 	// 复用bus
-	//s.AfterFunc(time.Second, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) error {
-	//	startTime := timelib.Now()
-	//	// 调用Service2.APITest2
-	//	ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
-	//	defer cancel()
-	//	// 获取消息总线
-	//	bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithServerId(1))
-	//	defer bus.Release()
-	//
-	//	// 发送消息
-	//	var out int
-	//	if err := bus.CallWithOpt(
-	//		dto.WithCtx(ctxWithTimeout),
-	//		dto.WithMethod("APISum"),
-	//		dto.WithNotRecycle(),
-	//		dto.WithIn([]interface{}{1, 2}),
-	//		dto.WithOut(&out),
-	//	); err != nil {
-	//		s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
-	//	}
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
-	//
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================1111")
-	//	if err := bus.SendWithOpt(
-	//		dto.WithCtx(ctxWithTimeout),
-	//		dto.WithMethod("APITest2"),
-	//		dto.WithNotRecycle(),
-	//	); err != nil {
-	//		s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
-	//	}
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================2222")
-	//	if _, err := bus.AsyncCallWithOpt(
-	//		dto.WithCtx(ctxWithTimeout),
-	//		dto.WithMethod("APISum"),
-	//		dto.WithNotRecycle(),
-	//		dto.WithIn([]interface{}{1, 2}),
-	//		dto.WithCallbacks(func(data interface{}, err error, params ...interface{}) {
-	//			s.LoggerWithCtx(ctxWithTimeout).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
-	//		}),
-	//	); err != nil {
-	//		s.LoggerWithCtx(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
-	//	}
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================33333")
-	//
-	//	// 循环call
-	//	for i := 0; i < 10; i++ {
-	//		if err := bus.CallWithOpt(
-	//			dto.WithCtx(ctxWithTimeout),
-	//			dto.WithMethod("APITest2"),
-	//			dto.WithNotRecycle(),
-	//		); err != nil {
-	//			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
-	//		}
-	//	}
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================4444")
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
-	//	return nil
-	//})
+	s.AfterFunc(time.Second, "method test demo", func(timer *timingwheel.Timer, args ...interface{}) error {
+		startTime := timelib.Now()
+		// 调用Service2.APITest2
+		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
+		defer cancel()
+		// 获取消息总线
+		bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithServerId(1))
+		defer bus.Release()
+
+		// 发送消息
+		var out int
+		if err := bus.CallWithOpt(
+			dto.WithCtx(ctxWithTimeout),
+			dto.WithMethod("APISum"),
+			dto.WithNotRecycle(),
+			dto.WithIn([]interface{}{1, 2}),
+			dto.WithOut(&out),
+		); err != nil {
+			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+		}
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
+
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================1111")
+		if err := bus.SendWithOpt(
+			dto.WithCtx(ctxWithTimeout),
+			dto.WithMethod("APITest2"),
+			dto.WithNotRecycle(),
+		); err != nil {
+			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+		}
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================2222")
+		if _, err := bus.AsyncCallWithOpt(
+			dto.WithCtx(ctxWithTimeout),
+			dto.WithMethod("APISum"),
+			dto.WithNotRecycle(),
+			dto.WithIn([]interface{}{1, 2}),
+			dto.WithCallbacks(func(data interface{}, err error, params ...interface{}) {
+				s.LoggerWithCtx(ctxWithTimeout).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
+			}),
+		); err != nil {
+			s.LoggerWithCtx(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
+		}
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================33333")
+
+		// 循环call
+		for i := 0; i < 10; i++ {
+			if err := bus.CallWithOpt(
+				dto.WithCtx(ctxWithTimeout),
+				dto.WithMethod("APITest2"),
+				dto.WithNotRecycle(),
+			); err != nil {
+				s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+			}
+		}
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================4444")
+		s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
+		return nil
+	})
 	//s.AfterFunc(time.Second, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) error {
 	//	// 调用Service2.APITest2 带返回参数
 	//	// 创建context
@@ -210,28 +211,28 @@ func (s *Service1) OnInit() error {
 	//})
 	//
 	////cast test
-	s.AfterFunc(time.Second*1, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
-		log.SysLogger.Debugf("================================>>>")
-		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*10000)
-		defer cancel()
-		// 1. 让node2开启多线程,然后调用10次cast
-		//for i := 0; i < 10; i++ {
-		//	s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1)).Send(ctxWithTimeout, "RPCTest2", nil)
-		//}
-		resp := &msg.Msg_Test_Resp{}
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Call(ctxWithTimeout, "RPCSum",
-			&msg.Msg_Test_Req{A: 1, B: 2}, resp); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCSum failed, err:%v", err)
-		} else {
-			log.SysLogger.Debugf("call Service3.RPCSum result:%v", resp)
-		}
-
-		s.GetLogger().Debugf("==========================================17")
-		// 2. 让node2开启单线程,然后调用1次cast
-		//s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
-		s.GetLogger().Debugf("==========================================18")
-		return nil
-	})
+	//s.AfterFunc(time.Second*1, "cast test", func(timer *timingwheel.Timer, args ...interface{}) error {
+	//	log.SysLogger.Debugf("================================>>>")
+	//	ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*10000)
+	//	defer cancel()
+	//	// 1. 让node2开启多线程,然后调用10次cast
+	//	//for i := 0; i < 10; i++ {
+	//	//	s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1)).Send(ctxWithTimeout, "RPCTest2", nil)
+	//	//}
+	//	resp := &msg.Msg_Test_Resp{}
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Call(ctxWithTimeout, "RPCSum",
+	//		&msg.Msg_Test_Req{A: 1, B: 2}, resp); err != nil {
+	//		log.SysLogger.Errorf("call Service3.RPCSum failed, err:%v", err)
+	//	} else {
+	//		log.SysLogger.Debugf("call Service3.RPCSum result:%v", resp)
+	//	}
+	//
+	//	s.GetLogger().Debugf("==========================================17")
+	//	// 2. 让node2开启单线程,然后调用1次cast
+	//	//s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
+	//	s.GetLogger().Debugf("==========================================18")
+	//	return nil
+	//})
 	//
 	//// other test
 	////s.AfterFunc(time.Second*7, "other test", func(timer *timingwheel.Timer, args ...interface{}) error {

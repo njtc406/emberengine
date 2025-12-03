@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"os"
 	"path"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/njtc406/emberengine/engine/pkg/config/remote"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/validate"
 	"github.com/njtc406/viper"
 )
@@ -118,7 +118,7 @@ func parseNodeConfig(confPath string) {
 func initDir() {
 	createDirIfNotExists(Conf.NodeConf.PVPath)
 	createDirIfNotExists(Conf.NodeConf.PVPath)
-	createDirIfNotExists(Conf.SystemLogger.Path)
+	createDirIfNotExists(Conf.SystemLogger.Dir)
 }
 
 // createDirIfNotExists 创建目录
@@ -143,19 +143,30 @@ func setDefaultValues() {
 
 	// 日志默认配置
 	runtimeViper.SetDefault("SystemLogger", &log.LoggerConf{
-		Path:         path.Join(def.DefaultPVPath, "logs"),
-		Name:         "system",
-		Level:        "error",
-		Caller:       true,
-		FullCaller:   false,
-		Color:        false,
-		MaxAge:       time.Hour * 24 * 15,
-		RotationTime: time.Hour * 24,
-		AsyncMode: &log.AsyncMode{
-			Enable: true,
-			Config: &log.AsyncWriterConfig{
-				BufferSize:    65536, // 64kb
-				FlushInterval: time.Second,
+		Dir:        path.Join(def.DefaultPVPath, "logs"),
+		Name:       "system",
+		Level:      "error",
+		Stdout:     false,
+		Caller:     true,
+		FullCaller: false,
+		Color:      false,
+		Rotation: log.RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: log.RoutingConf{
+			AsyncMode: &log.AsyncMode{
+				Enable: true,
+				Config: &log.AsyncWriterConfig{
+					BufferSize:    1024,
+					FlushInterval: time.Second,
+				},
+			},
+			Routes: []log.LevelRoute{
+				{
+					Name:   "info",
+					Levels: log.AllLevelStrs,
+				},
 			},
 		},
 	})

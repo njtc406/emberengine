@@ -66,6 +66,16 @@ var levelMap = map[string]logrus.Level{
 	TraceLevelStr: TraceLevel,
 }
 
+var AllLevelStrs = []string{
+	PanicLevelStr,
+	FatalLevelStr,
+	ErrorLevelStr,
+	WarnLevelStr,
+	InfoLevelStr,
+	DebugLevelStr,
+	TraceLevelStr,
+}
+
 type Option func(*Logger)
 
 // WithLevel sets the rusLogger level.

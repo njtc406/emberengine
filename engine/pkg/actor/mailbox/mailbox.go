@@ -38,7 +38,7 @@ type defaultMailbox struct {
 	suspended atomic.Bool
 	// 工作线程池
 	workerPool *WorkerPool
-	logger     log.ILogger
+	logger     log.ILoggerX
 }
 
 // NewDefaultMailbox 根据 MailboxConf 创建一个默认 mailbox 实例。
@@ -47,7 +47,8 @@ type defaultMailbox struct {
 //   - logger: 用于记录 mailbox 运行日志；
 //   - invoker: 实际处理事件的 IMessageInvoker（通常由 Service 容器提供）；
 //   - middlewares: 可选的 mailbox 中间件，在消息入队和处理后被调用。
-func NewDefaultMailbox(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
+func NewDefaultMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker,
+	middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
 	return &defaultMailbox{
 		workerPool: NewWorkerPool(conf, logger, invoker, middlewares...),
 		logger:     logger,

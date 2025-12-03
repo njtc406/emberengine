@@ -384,7 +384,7 @@ func (s *Service) IsPrivate() bool {
 	return s.methodMgr.IsPrivate()
 }
 
-func (s *Service) GetLogger() log.ILogger {
+func (s *Service) GetLogger() log.ILoggerX {
 	return s.logger
 }
 

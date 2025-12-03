@@ -34,11 +34,11 @@ type WorkerPool struct {
 	middlewares []inf.IMailboxMiddleware   // 中间件
 	profiler    *profiler.Profiler         // 性能分析（这个之后修改为性能数据采集器,只采集数据,分析放在采集器中自己去做）
 	autoScaler  IScaler                    // 自动扩容器
-	logger      log.ILogger
+	logger      log.ILoggerX
 	workerCount int // 当前 worker 数量（用于扩缩容）
 }
 
-func NewWorkerPool(conf *config.MailboxConf, logger log.ILogger, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
+func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
 	if invoker == nil {
 		logger.Fatal("invoker is nil")
 	}

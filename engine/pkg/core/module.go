@@ -39,7 +39,7 @@ type Module struct {
 	inf.IRpcHandler                // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
 	methodMgr       inf.IMethodMgr // 接口信息管理器
 
-	logger log.ILogger
+	logger log.ILoggerX
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -212,6 +212,6 @@ func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
 }
 
-func (m *Module) GetLogger() log.ILogger {
+func (m *Module) GetLogger() log.ILoggerX {
 	return m.logger
 }

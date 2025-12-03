@@ -50,7 +50,7 @@ const (
 type Formatter struct {
 	logrus.Formatter
 
-	Mu *sync.Mutex
+	Mu sync.Mutex
 	// FieldsOrder - default: fields sorted alphabetically
 	FieldsOrder []string
 
@@ -180,7 +180,6 @@ func (f *Formatter) SetFullCaller(status bool) {
 }
 
 func (f *Formatter) writeCaller(b *bytes.Buffer, entry *logrus.Entry) {
-	// TODO 后面在看需不需要根据日志等级来控制某些等级的日志不需要caller信息
 	if entry.HasCaller() {
 		if f.CustomCallerFormatter != nil {
 			_, _ = fmt.Fprintf(b, f.CustomCallerFormatter(entry.Caller))
@@ -197,7 +196,6 @@ func (f *Formatter) writeCaller(b *bytes.Buffer, entry *logrus.Entry) {
 }
 
 func (f *Formatter) writeSimpleCaller(b *bytes.Buffer, entry *logrus.Entry) {
-	// TODO 后面在看需不需要根据日志等级来控制某些等级的日志不需要caller信息
 	if entry.HasCaller() {
 		if f.CustomCallerFormatter != nil {
 			_, _ = fmt.Fprintf(b, f.CustomCallerFormatter(entry.Caller))

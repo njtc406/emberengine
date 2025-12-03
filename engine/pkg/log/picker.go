@@ -46,6 +46,7 @@ func (l *loggerPicker) Pick(entry *Entry) io.Writer {
 	// 根据日志级别选择 writer
 	return l.router.Route(entry.Level)
 }
+
 func (l *loggerPicker) Close() error {
 	return l.router.Close()
 }

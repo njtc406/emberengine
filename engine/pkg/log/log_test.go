@@ -14,7 +14,7 @@ func TestInfo(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
 		Name:       "app",
-		MinLevel:   "info",
+		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
 		FullCaller: true,
@@ -65,7 +65,7 @@ func BenchmarkName(b *testing.B) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
 		Name:       "xx.log",
-		MinLevel:   "info",
+		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
 		FullCaller: true,
@@ -103,9 +103,9 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 	dir := t.TempDir()
 
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Dir:      dir,
-		Name:     "app.log",
-		MinLevel: "debug",
+		Dir:   dir,
+		Name:  "app.log",
+		Level: "debug",
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
@@ -150,9 +150,9 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 
 func TestMultiFileByLevelRoutes(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Dir:      "./logs",
-		Name:     "app.log",
-		MinLevel: "info",
+		Dir:   "./logs",
+		Name:  "app.log",
+		Level: "info",
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
@@ -211,4 +211,53 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 	// 简单打印下路径，便于调试
 	fmt.Println("info files:", matchesInfo)
 	fmt.Println("error files:", matchesErr)
+}
+
+func TestLoggerX(t *testing.T) {
+	logger, err := NewDefaultLogger(&LoggerConf{
+		Dir:        "./logs",
+		Name:       "app.log",
+		Level:      "info",
+		Stdout:     true,
+		Caller:     true,
+		FullCaller: true,
+		Color:      false,
+		Rotation: RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: RoutingConf{
+			AsyncMode: &AsyncMode{
+				Enable: false,
+				Config: &AsyncWriterConfig{
+					BufferSize:    1024,
+					FlushInterval: time.Second,
+				},
+			},
+			Routes: []LevelRoute{
+				{
+					Name:   "info",
+					Levels: []Level{InfoLevel, DebugLevel, WarnLevel, TraceLevel},
+				},
+				{
+					Name:   "error",
+					Levels: []Level{ErrorLevel, FatalLevel, PanicLevel},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewDefaultLogger error: %v", err)
+	}
+	defer Release(logger)
+
+	// 创建一个 LoggerX 实例
+	loggerX := NewLoggerX(logger, Fields{"app": "emberengine"})
+
+	loggerX.Info("info msg")
+	loggerX.Debug("debug msg")
+	loggerX.Warn("warn msg")
+	loggerX.Trace("trace msg")
+	loggerX.Error("error msg")
+
 }

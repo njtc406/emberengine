@@ -18,12 +18,10 @@ import (
 type ILogger = logrus.ILogger
 
 type ILoggerX interface {
-	// 需要 WithFields 返回一个同样实现 ILoggerX 的类型（通常是 *Entry）
 	WithFields(Fields) *Entry
 	WithField(string, interface{}) *Entry
 	WithContext(ctx context.Context) *Entry
 
-	// 以及一整套常用的日志输出方法
 	Trace(args ...interface{})
 	Debug(args ...interface{})
 	Info(args ...interface{})

@@ -99,7 +99,7 @@ func buildLevelWriters(conf *LoggerConf) (*LevelRouter, error) {
 		}
 
 		for _, lvl := range route.Levels {
-			router.routers[lvl] = writer
+			router.routers[levelMap[lvl]] = writer
 		}
 
 		if asyncMode != nil && asyncMode.Enable {
