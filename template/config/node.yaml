@@ -244,7 +244,7 @@ SystemLogger:
   Stdout: false
   # 是否打印调用文件信息
   Caller: true
-  # 是否打印完整调用文件信息
+  # 是否打印完整调用文件信息(默认false,完整路径是绝对路径,否则打印以项目根目录为基准的相对路径)
   FullCaller: false
   # 是否显示日志颜色
   Color: true

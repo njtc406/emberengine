@@ -52,44 +52,47 @@ func (s *Service1) OnInit() error {
 			dto.WithIn([]interface{}{1, 2}),
 			dto.WithOut(&out),
 		); err != nil {
-			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+			s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
 		}
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
+		s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
 
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================1111")
+		s.WithContext(ctxWithTimeout).Debugf("==========================================1111")
 		if err := bus.SendWithOpt(
 			dto.WithCtx(ctxWithTimeout),
 			dto.WithMethod("APITest2"),
 			dto.WithNotRecycle(),
 		); err != nil {
-			s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+			s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
 		}
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================2222")
+		s.WithContext(ctxWithTimeout).Debugf("==========================================2222")
 		if _, err := bus.AsyncCallWithOpt(
 			dto.WithCtx(ctxWithTimeout),
 			dto.WithMethod("APISum"),
 			dto.WithNotRecycle(),
 			dto.WithIn([]interface{}{1, 2}),
 			dto.WithCallbacks(func(data interface{}, err error, params ...interface{}) {
-				s.LoggerWithCtx(ctxWithTimeout).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
+				s.WithContext(ctxWithTimeout).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
 			}),
 		); err != nil {
-			s.LoggerWithCtx(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
+			s.WithContext(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
 		}
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================33333")
+		s.WithContext(ctxWithTimeout).Debugf("==========================================33333")
 
 		// 循环call
 		for i := 0; i < 10; i++ {
+			callCtx := xcontext.New(nil)
 			if err := bus.CallWithOpt(
-				dto.WithCtx(ctxWithTimeout),
+				dto.WithCtx(callCtx),
 				dto.WithMethod("APITest2"),
 				dto.WithNotRecycle(),
 			); err != nil {
-				s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+				s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+			} else {
+				s.WithContext(callCtx).Debugf(">>>>call Service2.APITest2 success")
 			}
 		}
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================4444")
-		s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
+		s.WithContext(ctxWithTimeout).Debugf("==========================================4444")
+		s.WithContext(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
 		return nil
 	})
 	//s.AfterFunc(time.Second, "method test demo1", func(timer *timingwheel.Timer, args ...interface{}) error {
@@ -99,10 +102,10 @@ func (s *Service1) OnInit() error {
 	//	defer cancel()
 	//	var out int
 	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctxWithTimeout, "APISum", []interface{}{1, 2}, &out); err != nil {
-	//		s.LoggerWithCtx(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+	//		s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
 	//	}
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("==========================================5555")
-	//	s.LoggerWithCtx(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
+	//	s.WithContext(ctxWithTimeout).Debugf("==========================================5555")
+	//	s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
 	//	return nil
 	//})
 	//

@@ -41,6 +41,7 @@ func Init(confPath string) {
 	parseNodeConfig(confPath)
 	// 初始化目录
 	initDir()
+	fmt.Printf("Conf: %s\n", Conf.String())
 	fmt.Println("=============配置解析完成===================")
 }
 

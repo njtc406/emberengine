@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/njtc406/logrus"
 )
 
 func TestInfo(t *testing.T) {
@@ -34,7 +32,7 @@ func TestInfo(t *testing.T) {
 			Routes: []LevelRoute{
 				{
 					Name:   "info",
-					Levels: logrus.AllLevels,
+					Levels: AllLevelStrs,
 				},
 			},
 		},
@@ -64,11 +62,11 @@ func TestInfo(t *testing.T) {
 func BenchmarkName(b *testing.B) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
-		Name:       "xx.log",
+		Name:       "xx",
 		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
-		FullCaller: true,
+		FullCaller: false,
 		Color:      false,
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
@@ -85,7 +83,7 @@ func BenchmarkName(b *testing.B) {
 			Routes: []LevelRoute{
 				{
 					Name:   "info",
-					Levels: logrus.AllLevels,
+					Levels: AllLevelStrs,
 				},
 			},
 		},
@@ -104,7 +102,7 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:   dir,
-		Name:  "app.log",
+		Name:  "app",
 		Level: "debug",
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
@@ -121,7 +119,7 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 			Routes: []LevelRoute{
 				{
 					Name:   "info",
-					Levels: logrus.AllLevels,
+					Levels: AllLevelStrs,
 				},
 			},
 		},
@@ -150,9 +148,11 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 
 func TestMultiFileByLevelRoutes(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Dir:   "./logs",
-		Name:  "app.log",
-		Level: "info",
+		Dir:    "./logs",
+		Name:   "app",
+		Level:  "info",
+		Caller: true,
+		Stdout: true,
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
@@ -168,11 +168,11 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 			Routes: []LevelRoute{
 				{
 					Name:   "info",
-					Levels: []Level{InfoLevel, DebugLevel, WarnLevel, TraceLevel},
+					Levels: []string{InfoLevelStr, DebugLevelStr, WarnLevelStr, TraceLevelStr},
 				},
 				{
 					Name:   "error",
-					Levels: []Level{ErrorLevel, FatalLevel, PanicLevel},
+					Levels: []string{ErrorLevelStr, FatalLevelStr, PanicLevelStr},
 				},
 			},
 		},
@@ -216,11 +216,11 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 func TestLoggerX(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
-		Name:       "app.log",
+		Name:       "app",
 		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
-		FullCaller: true,
+		FullCaller: false,
 		Color:      false,
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
@@ -237,11 +237,11 @@ func TestLoggerX(t *testing.T) {
 			Routes: []LevelRoute{
 				{
 					Name:   "info",
-					Levels: []Level{InfoLevel, DebugLevel, WarnLevel, TraceLevel},
+					Levels: []string{InfoLevelStr, DebugLevelStr, WarnLevelStr, TraceLevelStr},
 				},
 				{
 					Name:   "error",
-					Levels: []Level{ErrorLevel, FatalLevel, PanicLevel},
+					Levels: []string{ErrorLevelStr, FatalLevelStr, PanicLevelStr},
 				},
 			},
 		},

@@ -6,7 +6,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"runtime/debug"
@@ -56,12 +55,7 @@ type Service struct {
 	mailboxMiddlewares []inf.IMailboxMiddleware
 }
 
-func (s *Service) fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
-	if serviceInitConf == nil {
-		log.SysLogger.Fatalf("service init conf is nil, service name: %s", s.GetName())
-		return nil
-	}
-
+func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 	if serviceInitConf.Type == "" {
 		serviceInitConf.Type = "Normal"
 	}
@@ -98,14 +92,29 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		return
 	}
 	// 整理配置参数
-	serviceInitConf = s.fixConf(serviceInitConf)
+	if serviceInitConf == nil {
+		log.SysLogger.Fatalf("service init conf is nil, service name: %s", s.GetName())
+		return
+	}
+	serviceInitConf = fixConf(serviceInitConf)
 	//s.logger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
 	// 初始化服务数据
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
 
 	// 初始化日志
-	s.logger = log.NewLoggerX(log.SysLogger, log.Fields{
+	if serviceInitConf.LogConf.Enable {
+		// 配置了独立日志
+		s.enableLogging = true
+		l, err := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
+		if err != nil {
+			s.logger.Panicf("service[%s] create logger error: %s", s.GetName(), err)
+		}
+		s.logger = l
+	} else {
+		s.logger = log.SysLogger
+	}
+	s.ILoggerX = log.NewLoggerX(s.logger, log.Fields{
 		"serviceName": s.GetName(),
 		"serverId":    serviceInitConf.ServerId,
 	})
@@ -114,7 +123,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
-	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.Mailbox, s.logger, s, s.mailboxMiddlewares...)
+	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)
@@ -143,6 +152,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.logger.Panicf("service[%s] create pid error", s.GetName())
 		return
 	}
+	s.ILoggerX = s.ILoggerX.WithFields(log.Fields{
+		"serviceUid": s.pid.GetServiceUid(),
+		"version":    s.pid.GetVersion(),
+	})
 
 	// 初始化根节点rpc处理器
 	s.methodMgr = rpc.NewMethodMgr()
@@ -201,14 +214,14 @@ func (s *Service) startListenCallback() {
 				return
 			}
 			if err := s.pushConcurrentCallback(t); err != nil {
-				s.logger.Errorf("service [%s] submit concurrent callback error: %v", s.GetName(), err)
+				s.Errorf("submit concurrent callback error: %v", err)
 			}
 		case t, ok := <-s.ITimerScheduler.GetTimerCbChannel():
 			if !ok {
 				return
 			}
 			if err := s.pushTimerCallback(t); err != nil {
-				s.logger.Errorf("service [%s] submit timer callback error: %v", s.GetName(), err)
+				s.Errorf("submit timer callback error: %v", err)
 			}
 		}
 	}
@@ -228,11 +241,20 @@ func (s *Service) Stop() {
 	// 关闭并发
 	s.IConcurrent.Close()
 
+	// TODO release和mailbox的stop的关闭顺序还需要考虑,
+	// 按理说应该先关闭邮箱,再释放模块
+	// 但是释放模块时又可能会用到邮箱
+
 	// 释放资源(这里面可能还会有call类型的调用,所以先执行)
 	s.release()
 
 	// 关闭邮箱(完全关闭所有的工作线程,不再接收新的消息)
 	s.mailbox.Stop()
+
+	if s.enableLogging {
+		// 如果开启了独立日志,则关闭日志
+		log.Release(s.logger)
+	}
 
 	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
@@ -240,7 +262,7 @@ func (s *Service) Stop() {
 func (s *Service) release() {
 	defer func() {
 		if err := recover(); err != nil {
-			s.logger.Errorf("service [%s] release error: %v", s.GetName(), err)
+			s.Errorf("release error: %v", err)
 		}
 	}()
 
@@ -251,6 +273,7 @@ func (s *Service) release() {
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
 	endpoints.GetEndpointManager().RemoveService(s)
+
 }
 
 func (s *Service) PushEvent(evt inf.IEvent) error {
@@ -327,7 +350,7 @@ func (s *Service) IsClosed() bool {
 func (s *Service) OpenProfiler() {
 	s.profiler = profiler.RegProfiler(s.pid.GetServiceUid())
 	if s.profiler == nil {
-		s.logger.Fatalf("profiler %s reg fail", s.GetName())
+		s.logger.Fatalf("service[%s] profiler %s reg fail", s.GetName(), s.pid.GetServiceUid())
 	}
 }
 
@@ -349,7 +372,7 @@ func (s *Service) GetServiceCfg() interface{} {
 func (s *Service) safeExec(f func()) {
 	defer func() {
 		if err := recover(); err != nil {
-			s.logger.Errorf("service [%s] exec error: %v\ntrace:%s", s.GetName(), err, debug.Stack())
+			s.Errorf("safe exec error: %v\ntrace:%s", err, debug.Stack())
 		}
 	}()
 	f()
@@ -377,19 +400,18 @@ func (s *Service) GetRpcHandler() inf.IRpcHandler {
 }
 
 func (s *Service) EscalateFailure(reason interface{}, evt inf.IEvent) {
-	s.logger.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
+	s.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {
 	return s.methodMgr.IsPrivate()
 }
 
-func (s *Service) GetLogger() log.ILoggerX {
+func (s *Service) GetLogger() log.ILogger {
 	return s.logger
 }
-
-func (s *Service) LoggerWithCtx(ctx context.Context) *log.Entry {
-	return s.logger.WithContext(ctx)
+func (s *Service) GetLoggerX() log.ILoggerX {
+	return s.ILoggerX
 }
 
 func (s *Service) IsPrimarySecondaryMode() bool {

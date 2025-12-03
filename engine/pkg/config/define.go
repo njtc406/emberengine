@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -20,6 +21,11 @@ type conf struct {
 	SystemLogger *log.LoggerConf `binding:"required"` // 系统日志
 	ClusterConf  *ClusterConf    `binding:"required"` // 集群配置
 	ServiceConf  *ServiceConf    `binding:"required"` // 服务配置
+}
+
+func (c *conf) String() string {
+	jsonStr, _ := json.Marshal(c)
+	return string(jsonStr)
 }
 
 type NodeConf struct {

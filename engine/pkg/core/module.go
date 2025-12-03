@@ -39,7 +39,10 @@ type Module struct {
 	inf.IRpcHandler                // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
 	methodMgr       inf.IMethodMgr // 接口信息管理器
 
-	logger log.ILoggerX
+	// 独立日志
+	enableLogging bool
+	logger        log.ILogger
+	log.ILoggerX
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -66,6 +69,11 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	pModule.ITimerScheduler = m.GetRoot().GetBaseModule().(*Module).ITimerScheduler
 	pModule.root = m.root
 	pModule.logger = m.GetService().GetLogger()
+	pModule.ILoggerX = m.GetService().GetLoggerX()
+	pModule.ILoggerX = pModule.ILoggerX.WithFields(log.Fields{
+		"moduleId":    pModule.GetModuleID(),
+		"module_name": pModule.GetModuleName(),
+	})
 	pModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pModule.eventHandler = event.NewHandler()
 	pModule.eventHandler.Init(m.eventHandler.GetEventProcessor())
@@ -212,6 +220,10 @@ func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
 }
 
-func (m *Module) GetLogger() log.ILoggerX {
+func (m *Module) GetLogger() log.ILogger {
 	return m.logger
+}
+
+func (m *Module) GetLoggerX() log.ILoggerX {
+	return m.ILoggerX
 }

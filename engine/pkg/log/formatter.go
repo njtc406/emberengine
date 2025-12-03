@@ -12,7 +12,9 @@ package log
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -24,15 +26,10 @@ import (
 var (
 	colorPre = "\033["
 	colorSuf = "\033[0m"
-	//colorMap = map[logrus.Level]string{
-	//	logrus.PanicLevel: "1;36m",
-	//	logrus.FatalLevel: "1;35m",
-	//	logrus.ErrorLevel: "1;31m",
-	//	logrus.WarnLevel:  "1;33m",
-	//	logrus.InfoLevel:  "1;37m",
-	//	logrus.DebugLevel: "1;32m",
-	//	logrus.TraceLevel: "1;34m",
-	//}
+
+	// 缓存模块名（项目名），用于路径提取优化
+	moduleNameOnce sync.Once
+	moduleName     string
 )
 
 const (
@@ -76,18 +73,49 @@ type Formatter struct {
 	CustomCallerFormatter func(*runtime.Frame) string
 }
 
-// Format a log entry (2006-01-02 15:04:05.000 [DEBUG] (test.go:5 func test) aaa=1 bbb=2 this is message) [header]
+// Format 格式化日志条目
+// 输出格式：日期 [级别] 文件名:行号 [fields] [context] >> 消息
 func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	b := entry.Buffer
 
-	// write time
+	// 1. 写入时间戳
+	f.writeTimestamp(b, entry)
+
+	// 2. 写入日志级别
+	f.writeLevel(b, entry)
+
+	// 3. 写入调用者信息（文件名:行号）
+	f.writeCallerInfo(b, entry)
+
+	// 4. 写入额外字段
+	f.writeFieldsInfo(b, entry)
+
+	// 5. 写入上下文头（如 traceId）
+	f.writeContextHeaders(b, entry)
+
+	// 6. 分隔符
+	b.WriteString(" >> ")
+
+	// 7. 写入日志消息
+	f.writeMessage(b, entry)
+
+	// 8. 换行
+	b.WriteByte('\n')
+
+	return b.Bytes(), nil
+}
+
+// writeTimestamp 写入时间戳
+func (f *Formatter) writeTimestamp(b *bytes.Buffer, entry *logrus.Entry) {
 	timestampFormat := f.TimestampFormat
 	if timestampFormat == "" {
 		timestampFormat = "2006-01-02 15:04:05.000"
 	}
 	b.WriteString(entry.Time.Format(timestampFormat))
+}
 
-	// write level
+// writeLevel 写入日志级别
+func (f *Formatter) writeLevel(b *bytes.Buffer, entry *logrus.Entry) {
 	b.WriteString(" [")
 	if f.Colors {
 		_, _ = fmt.Fprintf(b, "%s%s", colorPre, getColorByLevel(entry.Level))
@@ -97,58 +125,66 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 		b.WriteString(colorSuf)
 	}
 	b.WriteString("] ")
+}
 
-	if entry.Context != nil {
-		header := emberctx.ToHeaders(entry.Context)
-		if header != nil && len(header) > 0 {
-			b.WriteString("[")
-			// 对 keys 排序以保证输出顺序一致
-			keys := make([]string, 0, len(header))
-			for k := range header {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-
-			// 按排序后的顺序输出
-			pairs := make([]string, 0, len(keys))
-			for _, k := range keys {
-				pairs = append(pairs, fmt.Sprintf("%s=%s", k, header[k]))
-			}
-			b.WriteString(strings.Join(pairs, ", "))
-			b.WriteString("] ")
-		}
+// writeCallerInfo 写入调用者信息
+func (f *Formatter) writeCallerInfo(b *bytes.Buffer, entry *logrus.Entry) {
+	if f.NoCaller {
+		return
 	}
 
-	// write caller
-	if !f.NoCaller {
-		if f.FullCaller {
-			f.writeCaller(b, entry)
-		} else {
-			f.writeSimpleCaller(b, entry)
-		}
+	if f.FullCaller {
+		f.writeCaller(b, entry)
+	} else {
+		f.writeSimpleCaller(b, entry)
 	}
+	b.WriteString(" ")
+}
 
-	b.WriteString(" >> ")
-
-	// write fields
+// writeFieldsInfo 写入额外字段
+func (f *Formatter) writeFieldsInfo(b *bytes.Buffer, entry *logrus.Entry) {
 	if f.FieldsOrder == nil {
 		f.writeFields(b, entry)
 	} else {
 		f.writeOrderedFields(b, entry)
 	}
+}
 
-	//b.WriteString(" ")
+// writeContextHeaders 写入上下文头信息（如 traceId）
+func (f *Formatter) writeContextHeaders(b *bytes.Buffer, entry *logrus.Entry) {
+	if entry.Context == nil {
+		return
+	}
 
-	// write message
+	header := emberctx.ToHeaders(entry.Context)
+	if header == nil || len(header) == 0 {
+		return
+	}
+
+	b.WriteString("[")
+	// 对 keys 排序以保证输出顺序一致
+	keys := make([]string, 0, len(header))
+	for k := range header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// 按排序后的顺序输出
+	pairs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, fmt.Sprintf("%s=%s", k, header[k]))
+	}
+	b.WriteString(strings.Join(pairs, ", "))
+	b.WriteString("]")
+}
+
+// writeMessage 写入日志消息
+func (f *Formatter) writeMessage(b *bytes.Buffer, entry *logrus.Entry) {
 	if f.TrimMessages {
 		b.WriteString(strings.TrimSpace(entry.Message))
 	} else {
 		b.WriteString(entry.Message)
 	}
-
-	b.WriteByte('\n')
-
-	return b.Bytes(), nil
 }
 
 // SetColors 是否启用颜色(默认不启动)
@@ -186,10 +222,9 @@ func (f *Formatter) writeCaller(b *bytes.Buffer, entry *logrus.Entry) {
 		} else {
 			_, _ = fmt.Fprintf(
 				b,
-				"(file: %s:%d function: %s)",
+				"%s:%d",
 				entry.Caller.File,
 				entry.Caller.Line,
-				entry.Caller.Function,
 			)
 		}
 	}
@@ -200,14 +235,89 @@ func (f *Formatter) writeSimpleCaller(b *bytes.Buffer, entry *logrus.Entry) {
 		if f.CustomCallerFormatter != nil {
 			_, _ = fmt.Fprintf(b, f.CustomCallerFormatter(entry.Caller))
 		} else {
+			// 提取相对路径：从项目根目录开始
+			filePath := getRelativePath(entry.Caller.File)
 			_, _ = fmt.Fprintf(
 				b,
 				"%s:%d",
-				entry.Caller.File,
+				filePath,
 				entry.Caller.Line,
 			)
 		}
 	}
+}
+
+// getRelativePath 提取相对路径，智能识别项目根目录
+// 优先级：
+// 1. 使用 go module 的项目名在路径中定位项目根目录（最精确）
+// 2. 从路径中移除 GOPATH/src/项目名 前缀
+// 3. 移除盘符和常见前缀后取合理路径
+// 4. 兜底返回最后三级目录+文件名
+func getRelativePath(fullPath string) string {
+	// 将路径统一为正斜杠
+	fullPath = filepath.ToSlash(fullPath)
+
+	// 策略1：使用 go module 的项目名定位
+	// 首次调用时初始化模块名缓存
+	moduleNameOnce.Do(func() {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Path != "" {
+			// 从 module path 中提取最后一段作为项目名
+			// 例如：github.com/njtc406/emberengine -> emberengine
+			parts := strings.Split(info.Main.Path, "/")
+			if len(parts) > 0 {
+				moduleName = parts[len(parts)-1]
+			}
+		}
+	})
+
+	// 如果获取到了模块名，在路径中查找它
+	if moduleName != "" {
+		// 查找项目名在路径中的位置
+		// 例如：F:/go/src/emberengine/example/test.go
+		// 项目名：emberengine
+		idx := strings.Index(fullPath, "/"+moduleName+"/")
+		if idx != -1 {
+			// 返回项目名之后的路径
+			return fullPath[idx+len(moduleName)+2:]
+		}
+		// 处理路径末尾是项目名的情况（不太可能，但做个兜底）
+		if strings.HasSuffix(fullPath, "/"+moduleName) {
+			return ""
+		}
+	}
+
+	// 策略2：移除 GOPATH/src/ 前缀
+	// 例如：F:/go/src/emberengine/example/test.go -> example/test.go
+	if idx := strings.Index(fullPath, "/src/"); idx != -1 {
+		pathAfterSrc := fullPath[idx+5:] // 跳过 "/src/"
+		// 从 src 后的路径中，取第一个斜杠之后的部分（去掉项目名）
+		if firstSlash := strings.Index(pathAfterSrc, "/"); firstSlash != -1 {
+			return pathAfterSrc[firstSlash+1:]
+		}
+		return pathAfterSrc
+	}
+
+	// 策略3：移除常见的用户目录前缀
+	commonPrefixes := []string{"/home/", "C:/Users/", "D:/", "E:/", "F:/"}
+	for _, prefix := range commonPrefixes {
+		if strings.HasPrefix(fullPath, prefix) {
+			// 找到用户名后的路径
+			parts := strings.Split(fullPath[len(prefix):], "/")
+			if len(parts) > 2 {
+				// 返回从第二级开始的路径（通常是项目名/子路径/文件）
+				return strings.Join(parts[1:], "/")
+			}
+		}
+	}
+
+	// 兜底：返回最后三级目录 + 文件名
+	parts := strings.Split(fullPath, "/")
+	if len(parts) >= 3 {
+		return strings.Join(parts[len(parts)-3:], "/")
+	}
+
+	// 最终兜底：只返回文件名
+	return filepath.Base(fullPath)
 }
 
 func (f *Formatter) writeFields(b *bytes.Buffer, entry *logrus.Entry) {
