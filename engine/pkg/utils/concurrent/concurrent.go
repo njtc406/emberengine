@@ -7,6 +7,7 @@ package concurrent
 
 import (
 	"fmt"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
@@ -27,13 +28,14 @@ type IConcurrentCallback interface {
 
 // TaskScheduler 是并发任务调度器
 type TaskScheduler struct {
-	pool *ants.Pool
-	c    chan IConcurrentCallback
+	pool   *ants.Pool
+	c      chan IConcurrentCallback
+	logger log.ILoggerX
 }
 
 // NewTaskScheduler 创建一个新的任务调度器
-func NewTaskScheduler() IConcurrent {
-	return &TaskScheduler{}
+func NewTaskScheduler(logger log.ILoggerX) IConcurrent {
+	return &TaskScheduler{logger: logger}
 }
 
 // OpenConcurrent 初始化并发调度器 第一个参数为线程池大小, 第二个参数为回调函数的通道大小
@@ -97,7 +99,7 @@ func (s *TaskScheduler) notifyCallback(name string, cb func(error), err error) {
 		case s.c <- &CallbackEvent{name: name, cb: cb, err: err}:
 		default:
 			// 通道满了时，可根据需要记录日志或采取其他措施
-			log.SysLogger.Errorf("callback channel full or closed")
+			s.logger.Errorf("callback channel full or closed")
 		}
 	}
 }

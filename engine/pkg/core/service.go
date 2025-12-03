@@ -97,7 +97,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		return
 	}
 	serviceInitConf = fixConf(serviceInitConf)
-	//s.logger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
+	//log.SysLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
 	// 初始化服务数据
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
@@ -108,7 +108,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.enableLogging = true
 		l, err := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
 		if err != nil {
-			s.logger.Panicf("service[%s] create logger error: %s", s.GetName(), err)
+			log.SysLogger.Panicf("service[%s] create logger error: %s", s.GetName(), err)
 		}
 		s.logger = l
 	} else {
@@ -142,7 +142,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.globalEventProcessor = event.NewProcessor()
 	s.globalEventProcessor.Init(s)
 
-	s.IConcurrent = concurrent.NewTaskScheduler()
+	s.IConcurrent = concurrent.NewTaskScheduler(s.ILoggerX)
 
 	// 注册事件处理函数
 	s.initEventHandlers()
@@ -163,7 +163,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	if s.src.OnInit != nil {
 		if err := s.src.OnInit(); err != nil {
-			s.logger.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+			s.Panicf("service[%s] onInit error: %s", s.GetName(), err)
 		}
 	}
 }
@@ -195,7 +195,7 @@ func (s *Service) Start() error {
 
 	// 所有服务都注册到服务列表
 	endpoints.GetEndpointManager().AddService(s)
-	//s.logger.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
+	//s.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
 	if s.src.OnStarted != nil {
 		if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
@@ -232,18 +232,19 @@ func (s *Service) Stop() {
 		// 防止多次关闭
 		return
 	}
-	//s.logger.Debugf("service[%s] begin stop", s.GetName())
+	//s.Debugf("service[%s] begin stop", s.GetName())
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
+
+	// TODO 整个关闭顺序都需要考虑
+	// release和mailbox的stop的关闭顺序还需要考虑,
+	// 按理说应该先关闭邮箱,再释放模块
+	// 但是释放模块时又可能会用到邮箱
 
 	// 关闭定时器
 	s.ITimerScheduler.Stop()
 
 	// 关闭并发
 	s.IConcurrent.Close()
-
-	// TODO release和mailbox的stop的关闭顺序还需要考虑,
-	// 按理说应该先关闭邮箱,再释放模块
-	// 但是释放模块时又可能会用到邮箱
 
 	// 释放资源(这里面可能还会有call类型的调用,所以先执行)
 	s.release()

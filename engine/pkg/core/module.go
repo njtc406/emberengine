@@ -42,7 +42,7 @@ type Module struct {
 	// 独立日志
 	enableLogging bool
 	logger        log.ILogger
-	log.ILoggerX
+	log.ILoggerX  // 需要在服务init阶段之后才能使用
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -85,7 +85,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	m.children[pModule.GetModuleID()] = module
 	m.GetRoot().GetBaseModule().(*Module).rootContains[pModule.GetModuleID()] = module
 
-	//m.logger.Debugf("add module [%s] completed", pModule.GetModuleName())
+	//m.Debugf("add module [%s] completed", pModule.GetModuleName())
 
 	return pModule.moduleId, nil
 }
@@ -93,7 +93,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 func (m *Module) ReleaseModule(moduleId uint32) {
 	pModule := m.GetModule(moduleId).GetBaseModule().(*Module)
 	if pModule == nil {
-		m.logger.Errorf("module %d not found", moduleId)
+		m.Errorf("module %d not found", moduleId)
 		return
 	}
 
@@ -106,7 +106,7 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 
 	pModule.self.OnRelease()
 	pModule.GetEventHandler().Destroy()
-	//m.logger.Debugf("Release module %s", pModule.GetModuleName())
+	//m.Debugf("Release module %s", pModule.GetModuleName())
 	delete(m.children, moduleId)
 	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
 	// 从methodmgr中移除模块api(service那层的api是不会移除的)
@@ -214,6 +214,8 @@ func (m *Module) reset() {
 	m.IConcurrent = nil
 	m.IRpcHandler = nil
 	m.methodMgr = nil
+	m.logger = nil
+	m.ILoggerX = nil
 }
 
 func (m *Module) NotifyEvent(e inf.IEvent) {
