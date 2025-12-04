@@ -218,7 +218,7 @@ func (f *Formatter) SetFullCaller(status bool) {
 func (f *Formatter) writeCaller(b *bytes.Buffer, entry *logrus.Entry) {
 	if entry.HasCaller() {
 		if f.CustomCallerFormatter != nil {
-			_, _ = fmt.Fprintf(b, f.CustomCallerFormatter(entry.Caller))
+			_, _ = fmt.Fprint(b, f.CustomCallerFormatter(entry.Caller))
 		} else {
 			_, _ = fmt.Fprintf(
 				b,
@@ -233,7 +233,7 @@ func (f *Formatter) writeCaller(b *bytes.Buffer, entry *logrus.Entry) {
 func (f *Formatter) writeSimpleCaller(b *bytes.Buffer, entry *logrus.Entry) {
 	if entry.HasCaller() {
 		if f.CustomCallerFormatter != nil {
-			_, _ = fmt.Fprintf(b, f.CustomCallerFormatter(entry.Caller))
+			_, _ = fmt.Fprint(b, f.CustomCallerFormatter(entry.Caller))
 		} else {
 			// 提取相对路径：从项目根目录开始
 			filePath := getRelativePath(entry.Caller.File)
@@ -349,7 +349,7 @@ func (f *Formatter) writeOrderedFields(b *bytes.Buffer, entry *logrus.Entry) {
 	if length > 0 {
 		notFoundFields := make([]string, 0, length)
 		for field := range entry.Data {
-			if foundFieldsMap[field] == false {
+			if !foundFieldsMap[field] {
 				notFoundFields = append(notFoundFields, field)
 			}
 		}
