@@ -157,7 +157,7 @@ func (f *Formatter) writeContextHeaders(b *bytes.Buffer, entry *logrus.Entry) {
 	}
 
 	header := emberctx.ToHeaders(entry.Context)
-	if header == nil || len(header) == 0 {
+	if len(header) == 0 {
 		return
 	}
 
