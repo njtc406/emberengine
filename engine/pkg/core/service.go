@@ -37,10 +37,10 @@ type Service struct {
 	pid  *actor.PID // 服务基础信息
 	name string     // 服务名称
 
-	src                    inf.IService // 服务源
-	cfg                    interface{}  // 服务配置
-	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
-	isPrimarySecondaryMode bool         // 是否是主从模式
+	src                    inf.IService
+	cfg                    interface{} // 服务配置
+	status                 int32       // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
+	isPrimarySecondaryMode bool        // 是否是主从模式
 
 	mailbox              inf.IMailbox        // 邮箱
 	eventProcessor       inf.IEventProcessor // 事件管理器
@@ -106,6 +106,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	if serviceInitConf.LogConf.Enable {
 		// 配置了独立日志
 		s.enableLogging = true
+		// 更新日志文件的前缀名称为服务名称
+		serviceInitConf.LogConf.Config.Name = s.GetName()
 		l, err := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
 		if err != nil {
 			log.SysLogger.Panicf("service[%s] create logger error: %s", s.GetName(), err)

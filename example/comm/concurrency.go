@@ -48,10 +48,10 @@ func (s *ConcurrencyTest) OnInit1() error {
 		startTime = timelib.Now()
 		for i := 0; i < concurrentNum; i++ {
 
-			s.AsyncDo("concurrency", func() error {
+			s.AsyncDo("concurrency", context.Background(), func(ctx context.Context) error {
 				return s.Select(rpc.WithName(ServiceName2)).Call(nil, "RpcSum", &msg.Msg_Test_Req{A: 1, B: 2}, nil)
 				//return s.Select(rpc.WithName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
-			}, func(err error) {
+			}, func(ctx context.Context, err error) {
 				count.Add(1)
 				//log.SysLogger.Debugf("call ConcurrencyTest1.APISum cost:%d ms, count:%d", timelib.Now().Sub(startTime), count.Load())
 				wg.Done()

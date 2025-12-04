@@ -27,12 +27,10 @@ func (s *Service) initEventHandlers() {
 	s.RegisterUserHandler(event.ServiceResumed, s.handleServiceResumed)
 	s.RegisterUserHandler(event.SysEventServiceClose, s.handleServiceClose)
 	s.RegisterUserHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
-	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleSystemGlobalEvent)
-	//s.RegisterUserHandler(event.RpcMsg, s.handleSystemRpcMsg)
 	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
 	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
 	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
-	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleUserGlobalEvent)
+	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleGlobalEvent)
 }
 
 // RegisterUserHandler 注册事件处理器
@@ -105,16 +103,7 @@ func (s *Service) handleServiceHeartbeat(ev inf.IEvent, _ bool, _ *profiler.Anal
 	// TODO 需要回复服务负载等等信息
 }
 
-func (s *Service) handleSystemGlobalEvent(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
-	evt := ev.(*event.Event)
-	t := evt.Data.(*actor.Event)
-	if open {
-		analyzer = s.profiler.Push(fmt.Sprintf("[SYS_GLB_EVENT] type:%d", t.GetType()))
-	}
-	s.globalEventProcessor.EventHandler(t)
-}
-
-// 具体的事件处理器实现
+// handleUserRpcMsg 处理用户RPC消息事件
 func (s *Service) handleUserRpcMsg(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	c := ev.(inf.IEnvelope)
 	meta := c.GetMeta()
@@ -142,26 +131,31 @@ func (s *Service) handleUserRpcMsg(ev inf.IEvent, open bool, analyzer *profiler.
 	}
 }
 
+// handleTimerCallback 处理定时器回调事件
 func (s *Service) handleTimerCallback(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	evt := ev.(*event.Event)
 	t := evt.Data.(timingwheel.ITimer)
 	if open {
 		analyzer = s.profiler.Push(fmt.Sprintf("[USER_TIME_CB] name:%s", t.GetName()))
 	}
-	// Timer.Do()内部已经有版本验证，防止ABA问题
-	t.Do()
+
+	if err := t.Do(); err != nil {
+		s.WithContext(evt.GetContext()).Errorf("timer callback error: %v", err)
+	}
 }
 
+// handleConcurrentCallback 处理并发回调事件
 func (s *Service) handleConcurrentCallback(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	evt := ev.(*event.Event)
 	t := evt.Data.(concurrent.IConcurrentCallback)
 	if open {
 		analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", t.GetName()))
 	}
-	t.DoCallback()
+	t.DoCallback(evt.GetContext())
 }
 
-func (s *Service) handleUserGlobalEvent(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
+// handleGlobalEvent 处理用户全局事件
+func (s *Service) handleGlobalEvent(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	evt := ev.(*event.Event)
 	t := evt.Data.(*actor.Event)
 	if open {

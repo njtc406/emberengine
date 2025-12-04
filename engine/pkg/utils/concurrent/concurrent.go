@@ -12,18 +12,19 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/panjf2000/ants/v2"
+	"golang.org/x/net/context"
 )
 
 type IConcurrent interface {
 	OpenConcurrent(poolSize, callbackChannelSize int)
-	AsyncDo(name string, f func() error, cb func(err error))
+	AsyncDo(name string, ctx context.Context, f func(ctx context.Context) error, cb func(ctx context.Context, err error))
 	GetChannel() chan IConcurrentCallback
 	Close()
 }
 
 type IConcurrentCallback interface {
 	inf.INamed
-	DoCallback()
+	DoCallback(ctx context.Context)
 }
 
 // TaskScheduler 是并发任务调度器
@@ -53,7 +54,7 @@ func (s *TaskScheduler) GetChannel() chan IConcurrentCallback {
 }
 
 // AsyncDo 添加一个任务到调度器
-func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
+func (s *TaskScheduler) AsyncDo(name string, ctx context.Context, fn func(ctx context.Context) error, cb func(ctx context.Context, err error)) {
 	if s.pool == nil || (fn == nil && cb == nil) {
 		return
 	}
@@ -82,7 +83,7 @@ func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
 			}
 		}()
 
-		task.err = fn()
+		task.err = fn(ctx)
 	})
 	if err != nil {
 		// 任务提交失败,直接回调
@@ -90,7 +91,7 @@ func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
 	}
 }
 
-func (s *TaskScheduler) notifyCallback(name string, cb func(error), err error) {
+func (s *TaskScheduler) notifyCallback(name string, cb func(context.Context, error), err error) {
 	if cb == nil {
 		return
 	}
@@ -118,21 +119,21 @@ func (s *TaskScheduler) Close() {
 
 // Task 表示一个并发任务(如果后续有大量并发任务,那么这里就改用pool创建)
 type Task struct {
-	fn       func() error
-	callback func(error)
+	fn       func(ctx context.Context) error
+	callback func(context.Context, error)
 	err      error
 }
 
 // CallbackEvent 表示一个回调事件
 type CallbackEvent struct {
 	name string
-	cb   func(error)
+	cb   func(ctx context.Context, err error)
 	err  error
 }
 
-func (c *CallbackEvent) DoCallback() {
+func (c *CallbackEvent) DoCallback(ctx context.Context) {
 	if c.cb != nil {
-		c.cb(c.err)
+		c.cb(ctx, c.err)
 	}
 }
 
