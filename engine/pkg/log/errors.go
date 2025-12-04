@@ -12,6 +12,6 @@ package log
 import "errors"
 
 var (
-	RotationTimeErr = errors.New("rotationTime must >= 1min and <= 24hour")
-	LevelErr        = errors.New("log level must <= 6")
+	ErrRotationTime = errors.New("rotationTime must >= 1min and <= 24hour")
+	ErrLevel        = errors.New("log level must <= 6")
 )

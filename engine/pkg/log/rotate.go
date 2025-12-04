@@ -82,7 +82,7 @@ func rotateNew(p string, opts ...ROption) (*Rotate, error) {
 // ValidateEvery 校验切割周期（1min 到 24h）
 func ValidateEvery(every time.Duration) error {
 	if every < time.Minute || every > 24*time.Hour {
-		return RotationTimeErr
+		return ErrRotationTime
 	}
 	return nil
 }
