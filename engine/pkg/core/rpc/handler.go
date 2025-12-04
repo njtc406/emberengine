@@ -109,7 +109,7 @@ func (h *Handler) registerMethod() {
 	for m := 0; m < typ.NumMethod(); m++ {
 		err := h.suitableMethods(typ.Method(m))
 		if err != nil {
-			log.SysLogger.Panic(err)
+			h.Panic(err)
 		}
 	}
 }
