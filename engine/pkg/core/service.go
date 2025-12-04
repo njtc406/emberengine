@@ -117,8 +117,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.logger = log.SysLogger
 	}
 	s.ILoggerX = log.NewLoggerX(s.logger, log.Fields{
-		"serviceName": s.GetName(),
-		"serverId":    serviceInitConf.ServerId,
+		"sName": s.GetName(),
+		"sId":   serviceInitConf.ServerId,
 	})
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
@@ -155,15 +155,15 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		return
 	}
 	s.ILoggerX = s.ILoggerX.WithFields(log.Fields{
-		"serviceUid": s.pid.GetServiceUid(),
-		"version":    s.pid.GetVersion(),
+		"sUid":    s.pid.GetServiceUid(),
+		"version": s.pid.GetVersion(),
 	})
 
 	// 初始化根节点rpc处理器
-	s.methodMgr = rpc.NewMethodMgr()
+	s.methodMgr = rpc.NewMethodMgr(s.ILoggerX)
 	s.IRpcHandler = rpc.NewHandler(s.self).Init(s.methodMgr)
 
-	if s.src.OnInit != nil {
+	if s.src != nil {
 		if err := s.src.OnInit(); err != nil {
 			s.Panicf("service[%s] onInit error: %s", s.GetName(), err)
 		}
@@ -182,7 +182,7 @@ func (s *Service) Start() error {
 	go s.startListenCallback()
 
 	// 主从服务需要在onstart中处理
-	if s.src.OnStart != nil {
+	if s.src != nil {
 		if err := s.src.OnStart(); err != nil {
 			return err
 		}
@@ -199,7 +199,7 @@ func (s *Service) Start() error {
 	endpoints.GetEndpointManager().AddService(s)
 	//s.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
-	if s.src.OnStarted != nil {
+	if s.src != nil {
 		if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
 			return err
 		}
@@ -237,10 +237,8 @@ func (s *Service) Stop() {
 	//s.Debugf("service[%s] begin stop", s.GetName())
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
 
-	// TODO 整个关闭顺序都需要考虑
-	// release和mailbox的stop的关闭顺序还需要考虑,
-	// 按理说应该先关闭邮箱,再释放模块
-	// 但是释放模块时又可能会用到邮箱
+	// 挂起邮箱
+	s.mailbox.Suspend()
 
 	// 关闭定时器
 	s.ITimerScheduler.Stop()
@@ -269,7 +267,7 @@ func (s *Service) release() {
 		}
 	}()
 
-	if s.self.OnRelease != nil {
+	if s.self != nil {
 		s.self.OnRelease()
 	}
 	s.closeProfiler()

@@ -9,6 +9,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -19,10 +24,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"google.golang.org/protobuf/proto"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 // EventMetrics 事件指标统计
@@ -283,6 +284,7 @@ func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
 	return e, nil
 }
 
+// TODO 全局事件这里可以考虑订阅指定服务的事件，比如当处于某个场景服时，可以只订阅该场景服的事件，就可以实现广播功能，可以通过广播减少rpc寻址调用
 // PublishGlobal 发布全局事件(带限流和批处理)
 func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
 	// 1. 检查限流

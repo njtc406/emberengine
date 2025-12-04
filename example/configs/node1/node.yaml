@@ -56,6 +56,7 @@ ServiceConf:
       ServiceName: Service2
       Type: test
       ServerId: 1
+      ServiceId: 1
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -113,6 +114,7 @@ ServiceConf:
       IsPrimarySecondaryMode: false
     - ClassName: Service1
       ServiceName: Service1
+      ServiceId: 1
       # 服务类型
       Type: test
       # 服务器ID

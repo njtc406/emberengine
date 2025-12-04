@@ -8,11 +8,13 @@ package log
 import (
 	"bytes"
 	"context"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
-	"github.com/njtc406/logrus"
 	"io"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
+	"github.com/njtc406/logrus"
 )
 
 const defaultBufferSize = 1024 * 1024
@@ -30,6 +32,7 @@ type AsyncWriter struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
+	idler        *idle.AdaptiveController
 }
 
 func fixAsyncWriterConf(conf *AsyncWriterConfig) *AsyncWriterConfig {
@@ -48,6 +51,8 @@ func fixAsyncWriterConf(conf *AsyncWriterConfig) *AsyncWriterConfig {
 func NewAsyncWriter(w io.Writer, conf *AsyncWriterConfig, writerCloser io.WriteCloser) *AsyncWriter {
 	conf = fixAsyncWriterConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
+	// 自适应空闲控制器
+	idler := idle.NewAdaptiveController(false, time.Millisecond, time.Millisecond*128, 10, 8)
 	aw := &AsyncWriter{
 		writer:       w,
 		queue:        mpsc.New[[]byte](),
@@ -55,7 +60,9 @@ func NewAsyncWriter(w io.Writer, conf *AsyncWriterConfig, writerCloser io.WriteC
 		ctx:          ctx,
 		cancel:       cancel,
 		writerCloser: writerCloser,
+		idler:        idler,
 	}
+
 	// 注册一个退出函数,确保使用FATAL级别的时候也能正确打印出错误信息后再退出
 	logrus.RegisterExitHandler(func() {
 		_ = aw.Close()
@@ -73,6 +80,7 @@ func (aw *AsyncWriter) Write(p []byte) (n int, err error) {
 	data := make([]byte, len(p))
 	copy(data, p)
 	aw.queue.Push(data)
+	aw.idler.Wake()
 	return len(data), nil
 }
 
@@ -95,7 +103,7 @@ func (aw *AsyncWriter) loop() {
 			aw.flush(buf)
 		default:
 			if !aw.read(buf) {
-				time.Sleep(1 * time.Millisecond) // 避免空转
+				aw.idler.Idle()
 			}
 		}
 	}

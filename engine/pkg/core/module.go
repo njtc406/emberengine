@@ -71,8 +71,8 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	pModule.logger = m.GetService().GetLogger()
 	pModule.ILoggerX = m.GetService().GetLoggerX()
 	pModule.ILoggerX = pModule.ILoggerX.WithFields(log.Fields{
-		"moduleId":    pModule.GetModuleID(),
-		"module_name": pModule.GetModuleName(),
+		"mId":   pModule.GetModuleID(),
+		"mName": pModule.GetModuleName(),
 	})
 	pModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pModule.eventHandler = event.NewHandler()

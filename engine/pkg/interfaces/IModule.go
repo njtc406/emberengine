@@ -7,6 +7,7 @@ package interfaces
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 type IModule interface {
@@ -14,8 +15,10 @@ type IModule interface {
 	IModuleIdentity
 	IModuleHierarchy
 	IModuleServiceEvent
+	log.ILoggerX
 	//concurrent.IConcurrent 暂时不暴露
 	//timingwheel.ITimerScheduler 暂时不暴露
+
 }
 
 type IModuleLifecycle interface {

@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
-
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 

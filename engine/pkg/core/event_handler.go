@@ -27,10 +27,10 @@ func (s *Service) initEventHandlers() {
 	s.RegisterUserHandler(event.ServiceResumed, s.handleServiceResumed)
 	s.RegisterUserHandler(event.SysEventServiceClose, s.handleServiceClose)
 	s.RegisterUserHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
-	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
 	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
 	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
 	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleGlobalEvent)
+	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
 }
 
 // RegisterUserHandler 注册事件处理器

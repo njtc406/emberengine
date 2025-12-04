@@ -8,16 +8,17 @@ package timingwheel
 import (
 	"container/list"
 	"errors"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
 type ITimer interface {

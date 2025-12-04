@@ -15,7 +15,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 )
@@ -88,7 +87,6 @@ func createQueueManager(conf *config.MailboxConf) IQueueManager {
 		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf)
 
 	default:
-		log.SysLogger.Warnf("Unknown queue mode: %s, using dual queue", queueMode)
 		return NewDualQueueManager()
 	}
 }
@@ -175,7 +173,7 @@ func (w *Worker) Stop() {
 	// 等待Worker完全退出
 	w.wg.Wait()
 	// 打印计数
-	log.SysLogger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
+	w.pool.logger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
 }
 
 // safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析：
@@ -185,13 +183,13 @@ func (w *Worker) Stop() {
 func (w *Worker) safeExec(e inf.IEvent) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.WithContext(e.GetContext()).Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
+			w.pool.logger.WithContext(e.GetContext()).Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
 
 			// 双重保护：EscalateFailure 可能也会 panic
 			func() {
 				defer func() {
 					if r2 := recover(); r2 != nil {
-						log.SysLogger.WithContext(e.GetContext()).Errorf("EscalateFailure also panicked: %v\ntrace:%s", r2, debug.Stack())
+						w.pool.logger.WithContext(e.GetContext()).Errorf("EscalateFailure also panicked: %v\ntrace:%s", r2, debug.Stack())
 					}
 				}()
 				w.pool.invoker.EscalateFailure(r, e)

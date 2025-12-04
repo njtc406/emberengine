@@ -8,15 +8,16 @@ package rpc
 import (
 	"context"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"reflect"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 var (
@@ -30,11 +31,13 @@ type MethodMgr struct {
 	mu        sync.RWMutex
 	rpcCnt    int // rpc 接口数量
 	methodMap map[string]def.MethodCallFunc
+	logger    log.ILoggerX
 }
 
-func NewMethodMgr() inf.IMethodMgr {
+func NewMethodMgr(logger log.ILoggerX) inf.IMethodMgr {
 	return &MethodMgr{
 		methodMap: make(map[string]def.MethodCallFunc),
+		logger:    logger,
 	}
 }
 
@@ -46,7 +49,7 @@ func (m *MethodMgr) IsPrivate() bool {
 
 func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
 	if name == "" {
-		log.SysLogger.Debugf("method[%s] register failed", name)
+		m.logger.Debugf("method[%s] register failed", name)
 		return
 	}
 	m.mu.Lock()
@@ -196,16 +199,17 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 			multiOut > 1,
 			method.Type.IsVariadic(),
 			hasCtx, // 新增：告诉闭包是否需要自动注入 ctx
+			h,
 		),
 	)
 
 	h.methods = append(h.methods, name)
-	log.SysLogger.Debugf("service[%s] method[%s] register success", h.GetModuleName(), name)
+	h.Debugf("method[%s] register success", name)
 	return nil
 }
 
 // compileCallFunc 预编译调用闭包
-func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value, in, outs []reflect.Type, multiOut, isVariadic bool, hasCtx bool) func(ctx context.Context, req interface{}) (interface{}, error) {
+func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value, in, outs []reflect.Type, multiOut, isVariadic bool, hasCtx bool, logger log.ILoggerX) func(ctx context.Context, req interface{}) (interface{}, error) {
 	paramCount := len(in)
 	return func(ctx context.Context, req interface{}) (interface{}, error) {
 		params := []reflect.Value{owner}
@@ -225,13 +229,13 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 
 			if req == nil {
 				if fixedCount > 0 {
-					log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: 0    params:%+v", name, fixedCount, params)
+					logger.Errorf("method[%s] param count not match, need at least: %d, got: 0    params:%+v", name, fixedCount, params)
 					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				if reqSlice, ok := req.([]interface{}); ok {
 					if len(reqSlice) < fixedCount {
-						log.SysLogger.Errorf("method[%s] param count not match, need at least: %d, got: %d     params:%+v", name, fixedCount, len(reqSlice), params)
+						logger.Errorf("method[%s] param count not match, need at least: %d, got: %d     params:%+v", name, fixedCount, len(reqSlice), params)
 						return nil, def.ErrInputParamNotMatch
 					}
 
@@ -242,7 +246,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 				} else {
 					if fixedCount > 0 {
 						// 只有一个可变参,就不允许有多个参数
-						log.SysLogger.Errorf("method[%s] param count not match", name)
+						logger.Errorf("method[%s] param count not match", name)
 						return nil, def.ErrInputParamNotMatch
 					}
 					// 否则只有一个参数
@@ -253,14 +257,14 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 			// 非 variadic 方法处理
 			if req == nil {
 				if paramCount != 1 {
-					log.SysLogger.Errorf("method[%s] param count not match, need : %d, got: 0    params:%+v", name, paramCount-1, params)
+					logger.Errorf("method[%s] param count not match, need : %d, got: 0    params:%+v", name, paramCount-1, params)
 					return nil, def.ErrInputParamNotMatch
 				}
 			} else {
 				switch reqData := req.(type) {
 				case []interface{}:
 					if len(reqData) != paramCount-1 {
-						log.SysLogger.Errorf("method[%s] param count not match, need: %d, got: %d     params:%+v", name, paramCount-1, len(reqData), params)
+						logger.Errorf("method[%s] param count not match, need: %d, got: %d     params:%+v", name, paramCount-1, len(reqData), params)
 						return nil, def.ErrInputParamNotMatch
 					}
 					for i := 0; i < len(reqData); i++ {
@@ -268,7 +272,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 					}
 				default:
 					if paramCount != 2 {
-						log.SysLogger.Errorf("method[%s] param count not match", name)
+						logger.Errorf("method[%s] param count not match", name)
 						return nil, def.ErrInputParamNotMatch
 					}
 					params = append(params, reflect.ValueOf(req))
@@ -308,9 +312,7 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 	data := envelope.GetData()
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.WithContext(envelope.GetContext()).
-				WithField("service", h.GetService().GetName()).
-				WithField("module", h.GetModuleName()).
+			h.WithContext(envelope.GetContext()).
 				WithField("caller", meta.GetSenderPid().String()).
 				WithField("method", data.GetMethod()).
 				WithField("error", r).
@@ -328,7 +330,7 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 	}
 	resp, err := call(envelope.GetContext(), data.GetRequest())
 	if err != nil {
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("method call failed:%v", err)
+		h.WithContext(envelope.GetContext()).Errorf("method call failed:%v", err)
 		data.SetError(err)
 		return
 	}
@@ -349,7 +351,7 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 		sender := meta.GetSenderPid()
 		meta.SetReceiverPid(sender)
 		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
-			log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
+			h.WithContext(envelope.GetContext()).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		}
 	}
 }
@@ -357,7 +359,7 @@ func (h *Handler) doResponse(envelope inf.IEnvelope) {
 func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.Errorf("service[%s] handle message panic: %v\n trace:%s",
+			h.WithContext(envelope.GetContext()).Errorf("service[%s] handle message panic: %v\n trace:%s",
 				h.GetModuleName(), r, debug.Stack())
 		}
 	}()

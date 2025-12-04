@@ -1,5 +1,5 @@
 # EmberEngine 🔥
-> 以 Actor + RPC 为内核的分布式服务运行时 / 服务容器
+> 以 Actor + RPC 为内核的分布式服务框架/容器
 
 > *只考虑自己的叫想法，能平衡各方的才叫设计。*
 
@@ -9,7 +9,7 @@
 
 **Ember** 是一个以 **Actor 模型 + RPC 通信** 为核心能力的分布式 **服务运行时 / 服务容器**。
 
-它提供了一套统一的运行模型（**Node → Service → Module → Component**），
+它提供了一套统一的运行模型（**Node → Service → Module **），
 可以在同一套框架下承载多种类型的 long-running 服务：
 
 - 游戏服务器（逻辑服、房间服、网关服等）；
@@ -21,10 +21,10 @@
 
 核心特点：
 
-- **服务容器化运行时**：统一的 Node → Service → Module → Component 架构；
-- **高并发 Actor 设计**：并行事件驱动 + 安全队列；
+- **服务容器化运行时**：统一的 Node → Service → Module 架构；
+- **高并发 / Actor 设计**：并行事件驱动 + 安全队列；
 - **自动扩缩容**：可配置策略，动态调整资源；
-- **灵活路由机制**：支持 UID、Pid、ServiceType 等多维选择；
+- **灵活路由机制**：通过选择器自由选择调用服务,支持 UID、Pid、ServiceType 等多维选择；
 - **内置时间轮**：支持低成本高性能定时器；
 - **可配置执行模型**：每个 Service 可通过配置选择“严格单线程（接近 Actor 风格）”或“多 Worker 并发”执行模型，以在顺序性与吞吐量之间灵活权衡；
 - **集群事件**： 支持集群事件, 按需订阅；
@@ -43,10 +43,9 @@
   进程内的业务服务单元，例如：玩家服务、房间服务、匹配服务、HTTP 服务等。每个 Service 拥有自己的消息队列和生命周期管理。
 
 - **Module**  
-  Service 内部或 Node 级别的功能模块/子系统，例如：`sysModule/httpmodule`（内部嵌入 gin 的 HTTP 模块）、未来的 WebSocket 模块、监控模块等。Module 通过统一的生命周期接口挂载到运行时中。
-
-- **Component**  
-  更细粒度的通用插件/技术组件（当前为预留扩展接口），用于复用通用能力（如认证、存储、Metrics 等），可被多个 Module/Service 共享。
+  Service 内部或 Node 级别的功能模块/子系统，是构成service整体功能的基本单位。
+  每个 Module 都有自己的生命周期管理，且可以挂载到不同的 Service 中。
+  Service本身也是一个Module
 
 整体结构示意：
 
