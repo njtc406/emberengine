@@ -6,12 +6,13 @@
 package repository
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"sync"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
 // TODO 存储改造,使用go-memdb内存数据库来存储所有的pid数据
@@ -66,8 +67,8 @@ func (r *Repository) tick() {
 		defer func() {
 			// 退出时关闭所有临时连接
 			r.tmpMapPid.Range(func(key, value any) bool {
-				if client, ok := value.(inf.IRpcDispatcher); ok {
-					client.Close()
+				if tmp, ok := value.(*tmpInfo); ok {
+					tmp.dispatcher.Close()
 				}
 				return true
 			})
@@ -122,53 +123,50 @@ func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 }
 
 func (r *Repository) Add(key string, dispatcher inf.IRpcDispatcher) {
-
 	pid := dispatcher.GetPid()
-	if key != "" {
-		r.keyMap.Store(key, pid.GetServiceUid())
-	}
 	serviceUid := pid.GetServiceUid()
+	if key == "" {
+		key = serviceUid
+	}
+	r.keyMap.Store(key, serviceUid)
 	oldClient, ok := r.mapPID.LoadOrStore(serviceUid, dispatcher)
 	if ok {
-		//log.SysLogger.Debugf("service already exists: %s", dispatcher.GetPid().GetServiceUid())
-		oldClient.(inf.IRpcDispatcher).Close()                          // 旧的关闭
-		r.mapPID.Store(dispatcher.GetPid().GetServiceUid(), dispatcher) // 更新
+		oldClient.(inf.IRpcDispatcher).Close()
+		r.mapPID.Store(serviceUid, dispatcher)
 		return
 	}
 
 	r.mapNodeLock.Lock(serviceUid)
 	defer r.mapNodeLock.Unlock(serviceUid)
 
+	r.indexAdd(pid)
+}
+
+// indexAdd 维护按 serviceName / serviceType 的本地索引
+func (r *Repository) indexAdd(pid *actor.PID) {
+	serviceUid := pid.GetServiceUid()
 	serviceType := pid.GetServiceType()
 	serviceName := pid.GetName()
 
 	nameMap, ok := r.mapSvcBySNameAndSUid[serviceName]
 	if !ok {
-		r.mapSvcBySNameAndSUid[serviceName] = make(map[string]struct{})
-		nameMap = r.mapSvcBySNameAndSUid[serviceName]
+		nameMap = make(map[string]struct{})
+		r.mapSvcBySNameAndSUid[serviceName] = nameMap
 	}
-
-	_, ok = nameMap[serviceUid]
-	if !ok {
-		nameMap[serviceUid] = struct{}{}
-	}
+	nameMap[serviceUid] = struct{}{}
 
 	nodeNameUidMap, ok := r.mapSvcBySTpAndSName[serviceType]
 	if !ok {
-		r.mapSvcBySTpAndSName[serviceType] = make(map[string]map[string]struct{})
-		nodeNameUidMap = r.mapSvcBySTpAndSName[serviceType]
+		nodeNameUidMap = make(map[string]map[string]struct{})
+		r.mapSvcBySTpAndSName[serviceType] = nodeNameUidMap
 	}
 
 	nameUidMap, ok := nodeNameUidMap[serviceName]
 	if !ok {
-		nodeNameUidMap[serviceName] = make(map[string]struct{})
-		nameUidMap = nodeNameUidMap[serviceName]
+		nameUidMap = make(map[string]struct{})
+		nodeNameUidMap[serviceName] = nameUidMap
 	}
-
-	_, ok = nameUidMap[serviceUid]
-	if !ok {
-		nameUidMap[serviceUid] = struct{}{}
-	}
+	nameUidMap[serviceUid] = struct{}{}
 }
 
 func (r *Repository) Remove(key string) {
@@ -188,10 +186,17 @@ func (r *Repository) Remove(key string) {
 	pid := client.GetPid()
 	client.Close()
 
-	r.mapNodeLock.Lock(key)
-	defer r.mapNodeLock.Unlock(key)
-	serviceName := pid.GetName()
+	r.mapNodeLock.Lock(serviceUid)
+	defer r.mapNodeLock.Unlock(serviceUid)
+
+	r.indexRemove(pid)
+}
+
+// indexRemove 从本地索引中移除指定 pid 相关条目
+func (r *Repository) indexRemove(pid *actor.PID) {
+	serviceUid := pid.GetServiceUid()
 	serviceType := pid.GetServiceType()
+	serviceName := pid.GetName()
 
 	nameMap, ok := r.mapSvcBySNameAndSUid[serviceName]
 	if ok {
@@ -200,6 +205,7 @@ func (r *Repository) Remove(key string) {
 			delete(r.mapSvcBySNameAndSUid, serviceName)
 		}
 	} else {
+		// 没有按名称索引, 可以认为索引已被清理, 无需继续
 		return
 	}
 

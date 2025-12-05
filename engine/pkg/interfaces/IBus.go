@@ -7,6 +7,7 @@ package interfaces
 
 import (
 	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 )
 
@@ -34,25 +35,3 @@ type IBus interface {
 
 	Release()
 }
-
-/*
-统一一下风格
-Call(ctx, method, in, out)
-CallWithOption(opts ...BusOptionBuilder)
-
-AsyncCall(ctx, method, in, params, callbacks...)
-AsyncCallWithOption(opts ...BusOptionBuilder)
-
-Send(ctx, method, in)
-SendWithOption(opts ...BusOptionBuilder)
-
-internal的接口
-doCall(ctx, data, out) error
-doCallWithRecycle(ctx, data, out, recycle bool) error
-
-doAsyncCall(ctx, data, param, callbacks...) (uint64, error)
-doAsyncCallWithRecycle(ctx, data, recycle bool, param, callbacks...) (uint64, error)
-
-doSend(ctx, data) error
-doSendWithRecycle(ctx, data, recycle bool) error
-*/
