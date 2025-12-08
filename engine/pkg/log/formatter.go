@@ -249,7 +249,7 @@ func (f *Formatter) writeSimpleCaller(b *bytes.Buffer, entry *logrus.Entry) {
 
 // getRelativePath 提取相对路径，智能识别项目根目录
 // 优先级：
-// 1. 使用 go module 的项目名在路径中定位项目根目录（最精确）
+// 1. 使用 go module 的项目名在路径中定位项目根目录（按目录段前缀匹配，兼容本地目录如 emberengine111）
 // 2. 从路径中移除 GOPATH/src/项目名 前缀
 // 3. 移除盘符和常见前缀后取合理路径
 // 4. 兜底返回最后三级目录+文件名
@@ -270,19 +270,20 @@ func getRelativePath(fullPath string) string {
 		}
 	})
 
-	// 如果获取到了模块名，在路径中查找它
+	// 如果获取到了模块名，在路径中“按目录段前缀”查找它
+	// 例如 moduleName=emberengine 时, 既匹配 emberengine, 也匹配 emberengine111
 	if moduleName != "" {
-		// 查找项目名在路径中的位置
-		// 例如：F:/go/src/emberengine/example/test.go
-		// 项目名：emberengine
-		idx := strings.Index(fullPath, "/"+moduleName+"/")
-		if idx != -1 {
-			// 返回项目名之后的路径
-			return fullPath[idx+len(moduleName)+2:]
-		}
-		// 处理路径末尾是项目名的情况（不太可能，但做个兜底）
-		if strings.HasSuffix(fullPath, "/"+moduleName) {
-			return ""
+		parts := strings.Split(fullPath, "/")
+		for i := 0; i < len(parts); i++ {
+			part := parts[i] // 从前往后匹配,防止目录名和项目名相同
+			if strings.HasPrefix(part, moduleName) {
+				// 例如: /xx/emberengine111/example/test.go -> example/test.go
+				if i+1 < len(parts) {
+					return strings.Join(parts[i+1:], "/")
+				}
+				// 末尾刚好是项目名或其前缀变体, 返回空字符串作为兜底
+				return ""
+			}
 		}
 	}
 
