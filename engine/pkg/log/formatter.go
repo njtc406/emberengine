@@ -32,15 +32,15 @@ var (
 	moduleName     string
 )
 
-const (
-	ColorRed     = "1;31m"  // 红色
-	ColorGreen   = "1;32m"  // 绿色
-	ColorYellow  = "1;33m"  // 黄色
-	ColorBlue    = "1;34m"  // 蓝色
-	ColorMagenta = "1;35m"  // 紫色
-	ColorCyan    = "1;36m"  // 天蓝色
-	ColorWhite   = "1;37m"  // 白色
-	ColorRedBg   = "41;37m" // 红底白字
+var (
+	ColorRed     = logrus.ColorRed     // 红色
+	ColorGreen   = logrus.ColorGreen   // 绿色
+	ColorYellow  = logrus.ColorYellow  // 黄色
+	ColorBlue    = logrus.ColorBlue    // 蓝色
+	ColorMagenta = logrus.ColorMagenta // 紫色
+	ColorCyan    = logrus.ColorCyan    // 天蓝色
+	ColorWhite   = logrus.ColorWhite   // 白色
+	ColorRedBg   = logrus.ColorRedBg   // 红底白字
 )
 
 // Formatter - logrus formatter, implements logrus.Formatter
@@ -117,10 +117,17 @@ func (f *Formatter) writeTimestamp(b *bytes.Buffer, entry *logrus.Entry) {
 // writeLevel 写入日志级别
 func (f *Formatter) writeLevel(b *bytes.Buffer, entry *logrus.Entry) {
 	b.WriteString(" [")
+	tag := entry.GetTag()
 	if f.Colors {
 		_, _ = fmt.Fprintf(b, "%s%s", colorPre, getColorByLevel(entry.Level))
 	}
-	b.WriteString(strings.ToUpper(entry.Level.String()))
+
+	if tag != "" {
+		b.WriteString(strings.ToUpper(tag))
+	} else {
+		b.WriteString(strings.ToUpper(entry.Level.String()))
+	}
+
 	if f.Colors {
 		b.WriteString(colorSuf)
 	}

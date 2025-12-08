@@ -1,6 +1,6 @@
 package log
 
-var SysLogger ILogger
+var SysLogger *Logger
 
 func Init(conf *LoggerConf, isDebug bool) {
 	if SysLogger != nil {

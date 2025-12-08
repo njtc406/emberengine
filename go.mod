@@ -2,6 +2,10 @@ module github.com/njtc406/emberengine
 
 go 1.23.1
 
+replace (
+	github.com/njtc406/logrus => ../logrus
+)
+
 require (
 	github.com/bluele/gcache v0.0.2
 	github.com/cespare/xxhash/v2 v2.3.0

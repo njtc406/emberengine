@@ -107,7 +107,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		// 配置了独立日志
 		s.enableLogging = true
 		// 更新日志文件的前缀名称为服务名称
-		serviceInitConf.LogConf.Config.Name = s.GetName()
+		if serviceInitConf.LogConf.Config.Name == "" {
+			serviceInitConf.LogConf.Config.Name = s.GetName()
+		}
 		l, err := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
 		if err != nil {
 			log.SysLogger.Panicf("service[%s] create logger error: %s", s.GetName(), err)
@@ -123,7 +125,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
-	s.ITimerScheduler = timingwheel.NewTaskScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
+	s.ITimerScheduler = timingwheel.NewJobScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
 	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
 
@@ -188,8 +190,6 @@ func (s *Service) Start() error {
 		}
 	}
 
-	s.setStatus(def.SvcStatusRunning) // 到这里算是服务已经准备好所有东西,准备工作都在OnStart中完成
-
 	if !s.isPrimarySecondaryMode || s.IsPrivate() || !cluster.GetCluster().IsClusterMode() {
 		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
 		s.pid.SetMaster(true)
@@ -198,6 +198,8 @@ func (s *Service) Start() error {
 	// 所有服务都注册到服务列表
 	endpoints.GetEndpointManager().AddService(s)
 	//s.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
+
+	s.setStatus(def.SvcStatusRunning) // 到这里服务已经准备启动完成,可以正常处理请求了
 
 	if s.src != nil {
 		if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
@@ -408,7 +410,7 @@ func (s *Service) IsPrivate() bool {
 	return s.methodMgr.IsPrivate()
 }
 
-func (s *Service) GetLogger() log.ILogger {
+func (s *Service) GetLogger() *log.Logger {
 	return s.logger
 }
 func (s *Service) GetLoggerX() log.ILoggerX {

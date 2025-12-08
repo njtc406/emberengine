@@ -33,11 +33,11 @@ type TimingWheel struct {
 	closed    *atomic.Bool
 	waitGroup waitGroupWrapper
 
-	logger log.ILogger
+	logger *log.Logger
 }
 
 // NewTimingWheel creates an instance of TimingWheel with the given tick and wheelSize.
-func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILogger) *TimingWheel {
+func NewTimingWheel(tick time.Duration, wheelSize int64, logger *log.Logger) *TimingWheel {
 	tickMs := int64(tick / time.Millisecond)
 	if tickMs <= 0 {
 		panic(errors.New("tick must be greater than or equal to 1ms"))
@@ -56,7 +56,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILogger) *Ti
 }
 
 // newTimingWheel is an internal helper function that really creates an instance of TimingWheel.
-func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger log.ILogger, closed *atomic.Bool) *TimingWheel {
+func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger *log.Logger, closed *atomic.Bool) *TimingWheel {
 	buckets := make([]*bucket, wheelSize)
 	for i := range buckets {
 		buckets[i] = newBucket()

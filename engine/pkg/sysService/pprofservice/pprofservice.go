@@ -6,11 +6,12 @@
 package pprofservice
 
 import (
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/gin-gonic/gin"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
-	"net/http"
-	_ "net/http/pprof"
 
 	systemConfig "github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/core"
@@ -46,7 +47,7 @@ func (ps *PprofService) getConf() *config.PprofConf {
 }
 
 func (ps *PprofService) OnInit() error {
-	ps.httpModule = httpmodule.NewHttpModule(ps.getConf().PprofConf, log.SysLogger, systemConfig.GetStatus())
+	ps.httpModule = httpmodule.NewHttpModule(ps.getConf().PprofConf, systemConfig.GetStatus())
 	ps.httpModule.SetRouter(ps.initRouter())
 	_, err := ps.AddModule(ps.httpModule)
 	if err != nil {

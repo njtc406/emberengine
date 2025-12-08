@@ -56,7 +56,7 @@ func (s *Service1) OnInit() error {
 		}
 		s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
 
-		s.WithContext(ctxWithTimeout).Debugf("==========================================1111")
+		s.WithContext(ctxWithTimeout).WithTag("State", log.ColorBlue).Debugf("==========================================1111")
 		if err := bus.SendWithOpt(
 			dto.WithCtx(ctxWithTimeout),
 			dto.WithMethod("APITest2"),
@@ -64,7 +64,7 @@ func (s *Service1) OnInit() error {
 		); err != nil {
 			s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
 		}
-		s.WithContext(ctxWithTimeout).Debugf("==========================================2222")
+		s.WithContext(ctxWithTimeout).WithTag("State", log.ColorBlue).Debugf("==========================================2222")
 		if _, err := bus.AsyncCallWithOpt(
 			dto.WithCtx(ctxWithTimeout),
 			dto.WithMethod("APISum"),
@@ -76,7 +76,7 @@ func (s *Service1) OnInit() error {
 		); err != nil {
 			s.WithContext(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
 		}
-		s.WithContext(ctxWithTimeout).Debugf("==========================================33333")
+		s.WithContext(ctxWithTimeout).WithTag("State", log.ColorBlue).Debugf("==========================================33333")
 
 		// 循环call
 		for i := 0; i < 10; i++ {

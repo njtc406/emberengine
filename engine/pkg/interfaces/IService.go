@@ -73,6 +73,6 @@ type IActor interface {
 
 type ILogger interface {
 	// GetLogger 获取日志记录器
-	GetLogger() log.ILogger
+	GetLogger() *log.Logger
 	GetLoggerX() log.ILoggerX
 }

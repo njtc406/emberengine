@@ -217,11 +217,11 @@ func TestLoggerX(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
 		Name:       "app",
-		Level:      "info",
+		Level:      "debug",
 		Stdout:     true,
 		Caller:     true,
 		FullCaller: false,
-		Color:      false,
+		Color:      true,
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
@@ -254,9 +254,9 @@ func TestLoggerX(t *testing.T) {
 	// 创建一个 LoggerX 实例
 	loggerX := NewLoggerX(logger, Fields{"app": "emberengine"})
 
-	loggerX.Info("info msg")
-	loggerX.Debug("debug msg")
-	loggerX.Warn("warn msg")
+	loggerX.Slow().Info("info msg")
+	loggerX.State().Debug("debug msg")
+	loggerX.Metric().Warn("warn msg")
 	loggerX.Trace("trace msg")
 	loggerX.Error("error msg")
 

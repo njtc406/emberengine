@@ -7,10 +7,11 @@ package timingwheel
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
 // ITimerScheduler 定时器调度器接口
@@ -67,7 +68,7 @@ func (b *timerBucket) remove(timerId uint64) *Timer {
 	return nil
 }
 
-type taskScheduler struct {
+type jobScheduler struct {
 	closed    int32
 	shards    []*timerBucket
 	c         chan ITimer
@@ -75,10 +76,10 @@ type taskScheduler struct {
 	timerPool pool.IPool[*Timer]
 }
 
-// NewTaskScheduler 创建一个新的任务调度器
+// NewJobScheduler 创建一个新的任务调度器
 // chanSize: 回调通道大小
 // bucketSize: 桶数量，用于分片存储任务以提高并发性能
-func NewTaskScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler {
+func NewJobScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler {
 	if chanSize <= 0 {
 		chanSize = 100000
 	}
@@ -91,7 +92,7 @@ func NewTaskScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler 
 			tasks: make(map[uint64]*Timer),
 		}
 	}
-	return &taskScheduler{
+	return &jobScheduler{
 		shards: shards,
 		c:      make(chan ITimer, chanSize),
 		tw:     t,
@@ -113,27 +114,25 @@ func NewTaskScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler 
 	}
 }
 
-func (scheduler *taskScheduler) getShard(timerId uint64) *timerBucket {
+func (scheduler *jobScheduler) getShard(timerId uint64) *timerBucket {
 	return scheduler.shards[timerId%uint64(len(scheduler.shards))]
 }
 
-func (scheduler *taskScheduler) add(t *Timer) bool {
+func (scheduler *jobScheduler) add(t *Timer) bool {
 
 	if !t.isActive() {
-		fmt.Println("task is not active")
 		// 任务已经被取消
 		return false
 	}
 
 	if !scheduler.getShard(t.timerId).add(t) {
-		fmt.Println("task had add")
 		return false
 	}
 
 	return true
 }
 
-func (scheduler *taskScheduler) remove(taskId uint64) *Timer {
+func (scheduler *jobScheduler) remove(taskId uint64) *Timer {
 	shard := scheduler.getShard(taskId)
 	if shard == nil {
 		return nil
@@ -142,12 +141,12 @@ func (scheduler *taskScheduler) remove(taskId uint64) *Timer {
 	return shard.remove(taskId)
 }
 
-func (scheduler *taskScheduler) GetTimerCbChannel() chan ITimer {
+func (scheduler *jobScheduler) GetTimerCbChannel() chan ITimer {
 	return scheduler.c
 }
 
 // AfterFunc 延时任务
-func (scheduler *taskScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
@@ -167,7 +166,7 @@ func (scheduler *taskScheduler) AfterFunc(d time.Duration, name string, f TimerC
 }
 
 // AfterAsyncFunc 异步执行任务
-func (scheduler *taskScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
@@ -184,7 +183,7 @@ func (scheduler *taskScheduler) AfterAsyncFunc(d time.Duration, name string, f f
 }
 
 // TickerFunc 循环任务
-func (scheduler *taskScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
@@ -207,7 +206,7 @@ func (scheduler *taskScheduler) TickerFunc(d time.Duration, name string, f Timer
 }
 
 // TickerAsyncFunc 异步循环任务
-func (scheduler *taskScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
 	t := scheduler.createTimer()
 	t.name = name
 	t.interval = d
@@ -231,7 +230,7 @@ func (scheduler *taskScheduler) TickerAsyncFunc(d time.Duration, name string, f 
 // spec: cron表达式 秒 分 时 日 月 周(可选) | @every 5s
 // 示例: 0 */1 * * * 每分钟执行一次
 // 示例: @every 5s 每5秒执行一次
-func (scheduler *taskScheduler) CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
@@ -252,7 +251,7 @@ func (scheduler *taskScheduler) CronFunc(spec string, name string, f TimerCallba
 }
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
-func (scheduler *taskScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
 	t := scheduler.createTimer()
 	t.name = name
 	t.spec = spec
@@ -272,7 +271,7 @@ func (scheduler *taskScheduler) CronAsyncFunc(spec string, name string, f func(.
 	return t.GetTimerId(), nil
 }
 
-func (scheduler *taskScheduler) CancelTimer(timerId uint64) {
+func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
 	if timerId == 0 {
 		return
 	}
@@ -283,7 +282,7 @@ func (scheduler *taskScheduler) CancelTimer(timerId uint64) {
 	scheduler.releaseTimer(t)
 }
 
-func (scheduler *taskScheduler) Stop() {
+func (scheduler *jobScheduler) Stop() {
 	atomic.StoreInt32(&scheduler.closed, 1)
 	for _, shard := range scheduler.shards {
 		shard.Lock()
@@ -296,13 +295,13 @@ func (scheduler *taskScheduler) Stop() {
 	close(scheduler.c)
 }
 
-func (scheduler *taskScheduler) createTimer() *Timer {
+func (scheduler *jobScheduler) createTimer() *Timer {
 	t := scheduler.timerPool.Get()
 	t.SetTimerId(scheduler.tw.genTimerId())
 	return t
 }
 
-func (scheduler *taskScheduler) releaseTimer(t *Timer) {
+func (scheduler *jobScheduler) releaseTimer(t *Timer) {
 	if t.IsRef() {
 		// 防止重复释放
 		t.stop()

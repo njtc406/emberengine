@@ -41,7 +41,7 @@ type Module struct {
 
 	// 独立日志
 	enableLogging bool
-	logger        log.ILogger
+	logger        *log.Logger
 	log.ILoggerX  // 需要在服务init阶段之后才能使用
 }
 
@@ -222,7 +222,7 @@ func (m *Module) NotifyEvent(e inf.IEvent) {
 	m.eventHandler.NotifyEvent(e)
 }
 
-func (m *Module) GetLogger() log.ILogger {
+func (m *Module) GetLogger() *log.Logger {
 	return m.logger
 }
 

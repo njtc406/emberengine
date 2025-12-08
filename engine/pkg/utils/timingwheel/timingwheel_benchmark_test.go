@@ -1,9 +1,10 @@
 package timingwheel_test
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"testing"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
@@ -12,7 +13,7 @@ func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
-var dp = timingwheel.NewTaskScheduler(10000000, 10, timingwheel.GetTimingWheel())
+var dp = timingwheel.NewJobScheduler(10000000, 10, timingwheel.GetTimingWheel())
 
 func printTask1(t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)

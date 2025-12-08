@@ -61,7 +61,7 @@ type LoggerConf struct {
 }
 
 // New creates a new Logger object.
-func New(isDebug bool, opts ...Option) ILogger {
+func New(isDebug bool, opts ...Option) *Logger {
 	l := logrus.New()
 	l.SetBufferPool(getBufferPool(isDebug))
 	l.SetFormatter(&Formatter{
@@ -117,8 +117,8 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 //   - 如果未显式配置 Routing 且 Name 非空，则默认所有级别写入同一个文件（单文件）。
 //
 // openStdout 是否开启标准输出(如果Name为空,且openStdout未开启,那么将不会有任何日志信息被记录)
-// TODO 如果需要远程日志,那么远程日志覆写io.Writer加入到输出就可以了
-func NewDefaultLogger(conf *LoggerConf) (ILogger, error) {
+// TODO 如果需要远程日志,增加一个firehook,比如当日志等级为error时,将日志发送到远程服务器
+func NewDefaultLogger(conf *LoggerConf) (*Logger, error) {
 	conf = fixConf(conf)
 	picker, err := newPicker(conf)
 	if err != nil {
@@ -142,7 +142,7 @@ func NewDefaultLogger(conf *LoggerConf) (ILogger, error) {
 	return logger, nil
 }
 
-func Release(logger ILogger) {
+func Release(logger *Logger) {
 	if logger == nil {
 		return
 	}

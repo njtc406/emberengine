@@ -6,11 +6,12 @@
 package monitor
 
 import (
+	"sync"
+	"sync/atomic"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"sync"
-	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
@@ -39,7 +40,7 @@ func GetRpcMonitor() *RpcMonitor {
 func (rm *RpcMonitor) Init() inf.IMonitor {
 	rm.closed = make(chan struct{})
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.sd = timingwheel.NewTaskScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize, timingwheel.GetTimingWheel())
+	rm.sd = timingwheel.NewJobScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize, timingwheel.GetTimingWheel())
 	return rm
 }
 

@@ -2,10 +2,11 @@ package timingwheel_test
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"os"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
 type EveryScheduler struct {
@@ -24,7 +25,7 @@ func printTask(t *timingwheel.Timer, args ...interface{}) error {
 }
 
 func Example_scheduleTimer() {
-	logger, err := log.NewDefaultLogger("", nil, true)
+	logger, err := log.NewDefaultLogger(nil)
 	if err != nil {
 		panic(err)
 	}

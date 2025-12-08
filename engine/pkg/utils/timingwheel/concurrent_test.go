@@ -2,23 +2,24 @@ package timingwheel
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 // TestConcurrentTimerStopAndExecute tests concurrent stop and execute
 func TestConcurrentTimerStopAndExecute(t *testing.T) {
-	logger, err := log.NewDefaultLogger("", nil, true)
+	logger, err := log.NewDefaultLogger(nil)
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	Start(time.Millisecond, 20, logger)
 	defer Stop()
 
-	scheduler := NewTaskScheduler(1000, 10, GetTimingWheel())
+	scheduler := NewJobScheduler(1000, 10, GetTimingWheel())
 	var executedCount atomic.Int32
 	var stoppedCount atomic.Int32
 
@@ -78,7 +79,7 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 //
 // Solution: Use generation counter + Event.Header to pass version without allocation
 func TestTimerABAProblem(t *testing.T) {
-	logger, err := log.NewDefaultLogger("", nil, true)
+	logger, err := log.NewDefaultLogger(nil)
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
@@ -86,8 +87,8 @@ func TestTimerABAProblem(t *testing.T) {
 	defer Stop()
 
 	// Create two schedulers, simulating two services
-	schedulerA := NewTaskScheduler(100, 10, GetTimingWheel())
-	schedulerB := NewTaskScheduler(100, 10, GetTimingWheel())
+	schedulerA := NewJobScheduler(100, 10, GetTimingWheel())
+	schedulerB := NewJobScheduler(100, 10, GetTimingWheel())
 	defer schedulerA.Stop()
 	defer schedulerB.Stop()
 

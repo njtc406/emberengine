@@ -8,16 +8,17 @@ package httpx
 import (
 	"context"
 	"fmt"
-	"github.com/gin-contrib/gzip"
-	"github.com/gin-gonic/gin"
-	log2 "github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"io"
 	"net/http"
 	"path"
 	"runtime/debug"
 	"sync"
 	"time"
+
+	"github.com/gin-contrib/gzip"
+	"github.com/gin-gonic/gin"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 )
 
 // Conf 配置信息
@@ -63,7 +64,7 @@ type GinServer struct {
 	server  *http.Server
 	router  *router_center.GroupHandlerPool
 	conf    *Conf
-	logger  log2.ILogger
+	logger  *log.Logger
 
 	middleware     []gin.HandlerFunc
 	beforeServHook []func()
@@ -80,11 +81,11 @@ func NewGinServer() *GinServer {
 	}
 }
 
-func (gs *GinServer) Init(logger log2.ILogger, systemMod string, conf *Conf) error {
+func (gs *GinServer) Init(logger *log.Logger, systemMod string, conf *Conf) error {
 	gs.conf = conf
 	gs.logger = logger
-	gin.DefaultWriter = io.MultiWriter(gs.logger.WriterLevel(log2.InfoLevel))       // 设置默认日志输出为info级别
-	gin.DefaultErrorWriter = io.MultiWriter(gs.logger.WriterLevel(log2.ErrorLevel)) // 设置默认错误日志输出为error级别
+	gin.DefaultWriter = io.MultiWriter(gs.logger.WriterLevel(log.InfoLevel))       // 设置默认日志输出为info级别
+	gin.DefaultErrorWriter = io.MultiWriter(gs.logger.WriterLevel(log.ErrorLevel)) // 设置默认错误日志输出为error级别
 	// 运行模式
 	gin.SetMode(systemMod)
 	// 设置中间件

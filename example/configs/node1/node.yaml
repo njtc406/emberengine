@@ -176,8 +176,6 @@ ServiceConf:
             BatchSize: 2
             Weight: 1
 
-
-
 # 日志配置
 SystemLogger:
   Dir: ./example/data/logs
@@ -208,8 +206,8 @@ SystemLogger:
       Config:
         # 刷新间隔(默认1s)
         FlushInterval: 1s
-        # 缓冲区大小(默认1M,满时会立即写入)
-        BufferSize: 1048576
+        # 缓冲区大小(默认4kB,满时会立即写入)
+        BufferSize: 4096
     # 路由规则
     Routes:
       # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName_Pattern)
