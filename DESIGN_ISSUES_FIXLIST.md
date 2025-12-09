@@ -1,50 +1,5 @@
 # EmberEngine 设计漏洞修复清单
 
-## 版本信息
-- 创建时间: 2025-08-27
-- 分析版本: EmberEngine v1.0
-- 严重程度: 🔴 高危 🟡 中危 ⚪ 低危
-
----
-
-## 1. 并发安全与一致性问题
-
-### 1.1 Actor邮箱忙等循环导致CPU资源浪费 🔴
-
-**问题描述:**
-Worker的run()方法使用忙等循环 + 指数退避机制，在高并发场景下CPU资源浪费严重。
-
-**文件位置:** `engine/pkg/actor/mailbox/worker.go:104-115`
-
-**问题代码:**
-```go
-for !w.closed.Load() {
-    // 优先处理系统消息
-    if e, ok = w.systemMailbox.Pop(); ok {
-        w.safeExec(w.pool.invoker.InvokeSystemMessage, e)
-        continue
-    }
-    if e, ok = w.userMailbox.Pop(); ok {
-        w.safeExec(w.pool.invoker.InvokeUserMessage, e)
-        continue
-    }
-    // 使用指数退避来减少忙等开销
-    if backoff < maxBackoff {
-        backoff *= 2
-    }
-    time.Sleep(time.Microsecond * time.Duration(backoff))
-}
-```
-
-**修复方案:**
-1. 引入条件变量或信号量机制，避免忙等
-2. 使用事件驱动的通知机制
-3. 实现更智能的调度策略
-
-**修复优先级:** 高
-**预计工作量:** 2-3天
-
----
 
 ### 1.2 服务状态管理的竞态条件 🟡
 

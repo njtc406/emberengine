@@ -7,6 +7,7 @@ package dto
 
 import (
 	"context"
+
 	"github.com/njtc406/logrus"
 )
 
@@ -72,7 +73,8 @@ type BusOption struct {
 	Out            interface{}
 	Callbacks      []CompletionFunc
 	CallbackParams *AsyncCallParams
-	NotRecycle     bool // 不回收bus
+	NotRecycle     bool  // 不回收bus
+	CallMode       int32 // TODO 调用模式,0：任意返回则返回， 1:所有回调都返回后才返回
 }
 
 func (o *BusOption) Reset() {
