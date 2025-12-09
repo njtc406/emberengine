@@ -351,9 +351,9 @@ func (s *Service) IsClosed() bool {
 }
 
 func (s *Service) OpenProfiler() {
-	s.profiler = profiler.RegProfiler(s.pid.GetServiceUid())
+	s.profiler = profiler.RegProfiler(s.pid.GetServiceUid(), s.ILoggerX)
 	if s.profiler == nil {
-		s.logger.Fatalf("service[%s] profiler %s reg fail", s.GetName(), s.pid.GetServiceUid())
+		s.Fatal("profiler reg fail")
 	}
 }
 
@@ -403,7 +403,7 @@ func (s *Service) GetRpcHandler() inf.IRpcHandler {
 }
 
 func (s *Service) EscalateFailure(reason interface{}, evt inf.IEvent) {
-	s.Errorf("service [%s] event[%d] EscalateFailure: %v", s.GetName(), evt.GetType(), reason)
+	s.Errorf("event[%d] EscalateFailure: %v", evt.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {

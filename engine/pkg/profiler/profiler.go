@@ -3,9 +3,11 @@ package profiler
 import (
 	"container/list"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
 // DefaultMaxOvertime 最大超时时间，一般可以认为是死锁或者死循环，或者极差的性能问题
@@ -52,14 +54,15 @@ type Profiler struct {
 	overTime     time.Duration
 	maxRecordNum int
 
-	analyzerPool sync.Pool
+	analyzerPool pool.IPool[*Analyzer]
+	logger       log.ILoggerX
 }
 
 func init() {
 	mapProfiler = map[string]*Profiler{}
 }
 
-func RegProfiler(profilerName string) *Profiler {
+func RegProfiler(profilerName string, logger log.ILoggerX) *Profiler {
 	mapLock.Lock()
 	defer mapLock.Unlock()
 	if _, ok := mapProfiler[profilerName]; ok == true {
@@ -71,9 +74,16 @@ func RegProfiler(profilerName string) *Profiler {
 		record:      list.New(),
 		maxOverTime: DefaultMaxOvertime,
 		overTime:    DefaultOvertime,
-		analyzerPool: sync.Pool{New: func() interface{} {
-			return &Analyzer{}
-		}},
+		analyzerPool: pool.NewSyncPoolWrapper[*Analyzer](
+			func() *Analyzer {
+				return &Analyzer{}
+			},
+			pool.NewNoStatsRecorder(),
+			pool.WithReset(func(t *Analyzer) {
+				t.Reset()
+			}),
+		),
+		logger: logger,
 	}
 	mapProfiler[profilerName] = pProfiler
 	return pProfiler
@@ -106,7 +116,7 @@ func (slf *Profiler) Push(tag string) *Analyzer {
 
 	pElem := slf.stack.PushBack(&Element{tagName: tag, pushTime: time.Now()}) // 使用真实时间
 
-	analyzer := slf.analyzerPool.Get().(*Analyzer)
+	analyzer := slf.analyzerPool.Get()
 	analyzer.elem = pElem
 	analyzer.profiler = slf
 
