@@ -21,7 +21,7 @@ func printTask1(t *timingwheel.Timer, args ...interface{}) error {
 }
 
 func BenchmarkTimingWheel_StartStop(b *testing.B) {
-	logger, err := log.NewDefaultLogger("", nil, true)
+	logger, err := log.NewDefaultLogger(&log.LoggerConf{})
 	if err != nil {
 		b.Fatalf("Failed to create logger: %v", err)
 	}

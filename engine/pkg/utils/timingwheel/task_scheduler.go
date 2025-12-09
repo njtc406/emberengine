@@ -33,6 +33,9 @@ type ITimerScheduler interface {
 	Stop()
 
 	GetTimerCbChannel() chan ITimer
+
+	// AdjustTime adjusts all timers after time offset change (for development only)
+	AdjustTime(offsetMs int64)
 }
 
 var (
@@ -235,6 +238,7 @@ func (scheduler *jobScheduler) CronFunc(spec string, name string, f TimerCallbac
 	t := scheduler.createTimer()
 	t.name = name
 	t.spec = spec
+	t.isCron = true // 标记为cron定时器
 	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
@@ -255,6 +259,7 @@ func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f func(..
 	t := scheduler.createTimer()
 	t.name = name
 	t.spec = spec
+	t.isCron = true // 标记为cron定时器
 	t.asyncTask = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
@@ -307,4 +312,74 @@ func (scheduler *jobScheduler) releaseTimer(t *Timer) {
 		t.stop()
 		scheduler.timerPool.Put(t)
 	}
+}
+
+// AdjustTime adjusts all timers in the timing wheel after time offset change.
+// This is designed for development/testing environments only.
+//
+// IMPORTANT: This method DOES NOT change timer expiration times.
+// Only the current time is adjusted. Timers that become expired after adjustment
+// will be triggered immediately.
+//
+// For Cron timers: if time adjustment crosses a trigger point, the timer will
+// be executed once regardless of how many trigger points were crossed.
+func (scheduler *jobScheduler) AdjustTime(offsetMs int64) {
+	if scheduler.tw == nil {
+		return
+	}
+
+	// 先检查并触发Cron定时器(在调整currentTime之前)
+	oldCurrentTime := atomic.LoadInt64(&scheduler.tw.currentTime)
+	newCurrentTime := oldCurrentTime + offsetMs
+
+	for _, shard := range scheduler.shards {
+		shard.Lock()
+		for _, t := range shard.tasks {
+			if t.isCron && t.isActive() {
+				// 检查是否跨过了触发点
+				if scheduler.shouldTriggerCronOnAdjust(t, oldCurrentTime, newCurrentTime) {
+					scheduler.executeCronTimerOnce(t)
+				}
+			}
+		}
+		shard.Unlock()
+	}
+
+	// 再调整时间轮
+	scheduler.tw.AdjustTime(offsetMs)
+}
+
+// shouldTriggerCronOnAdjust 检查Cron定时器是否跨过触发点
+func (scheduler *jobScheduler) shouldTriggerCronOnAdjust(t *Timer, oldCurrentTime, newCurrentTime int64) bool {
+	if t.spec == "" {
+		return false
+	}
+
+	// 解析cron表达式
+	sd, err := cronParser.Parse(t.spec)
+	if err != nil {
+		return false
+	}
+
+	// 计算时间范围
+	oldTime := msToTime(oldCurrentTime)
+	newTime := msToTime(newCurrentTime)
+
+	// 确保oldTime < newTime
+	if oldTime.After(newTime) {
+		oldTime, newTime = newTime, oldTime
+	}
+
+	// 获取oldTime之后的第一个触发点
+	nextTrigger := sd.Next(oldTime)
+
+	// 如果nextTrigger在newTime之前,说明跨过了触发点
+	return !nextTrigger.IsZero() && nextTrigger.Before(newTime)
+}
+
+// executeCronTimerOnce 立即投递一次Cron定时器执行
+// 直接使用TimingWheel的runTimer公共逻辑
+func (scheduler *jobScheduler) executeCronTimerOnce(t *Timer) {
+	// runLoop=false: Cron定时器的时间调整触发不需要执行loop逻辑
+	scheduler.tw.runTimer(t, false)
 }

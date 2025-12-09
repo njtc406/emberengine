@@ -7,11 +7,12 @@ TimingWheel 是一个基于时间轮算法的高性能定时器库，专为多�
 ## 特性
 
 - ✅ **高性能时间轮算法** - O(1)时间复杂度的定时器插入和删除
-- ✅ **对象池复用** - Timer对象复用，减少GC压力
+- ✅ **对象池复用** - Timer对象复用,减少GC压力
 - ✅ **并发安全** - 完整的并发保护机制
 - ✅ **ABA问题防护** - 通过generation版本号机制防止对象复用导致的错误执行
 - ✅ **多种定时器类型** - 支持一次性定时器、循环定时器、Cron表达式定时器
 - ✅ **异步执行支持** - 支持在独立goroutine中执行任务
+- ✅ **时间调整支持** - 开发环境支持时间调整,所有定时器自动重算(仅开发环境)
 
 ## 架构设计
 
@@ -351,9 +352,150 @@ scheduler := NewTaskScheduler(
 
 1. **全局初始化**：必须先调用`timingwheel.Start()`启动全局时间轮
 2. **优雅关闭**：程序退出前调用`timingwheel.Stop()`和`scheduler.Stop()`
-3. **版本号验证**：Timer.Do()内部自动验证版本号，防止ABA问题
-4. **回调执行上下文**：回调在Service的Worker线程中执行，可安全访问Service状态
+3. **版本号验证**：Timer.Do()内部自动验证版本号,防止ABA问题
+4. **回调执行上下文**：回调在Service的Worker线程中执行,可安全访问Service状态
 5. **Cron表达式**：使用标准Cron格式（秒 分 时 日 月 周）或`@every`语法
+
+## 时间调整功能(仅开发环境)
+
+### 使用场景
+
+在开发环境中,可能需要快速调试某个时间点的功能,此时可以使用时间调整功能。**注意:这个功能只应该在开发/测试环境使用,生产环境不应该调整时间。**
+
+### 使用方法
+
+```go
+import (
+    "time"
+    "github.com/njtc406/emberengine/engine/pkg/utils/timelib"
+    "github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+)
+
+// 1. 先调整 timelib 的时间偏移
+offset := int64(10 * time.Hour) // 向前跳10小时
+timelib.SetTimeOffset(offset)
+
+// 2. 再调整时间轮中的所有定时器
+timingwheel.AdjustTime(offset / int64(time.Millisecond))
+
+// 或者使用 TaskScheduler 接口
+scheduler.AdjustTime(offset / int64(time.Millisecond))
+```
+
+### 工作原理
+
+当调用 `AdjustTime` 时,时间轮会执行以下操作:
+
+1. **收集所有活跃的定时器** - 遍历所有bucket,收集正在等待的Timer
+2. **清空所有bucket** - 移除所有Timer,准备重新插入
+3. **调整currentTime** - 更新时间轮的当前时间
+4. **调整Timer过期时间** - 对每个Timer的过期时间应用offset
+5. **重新插入Timer** - 将调整后的Timer重新插入到正确的bucket
+6. **递归调整overflow wheel** - 如果有多层时间轮,递归调整
+
+```go
+// 内部实现示例
+func (tw *TimingWheel) AdjustTime(offsetMs int64) {
+    tw.adjustMu.Lock()
+    defer tw.adjustMu.Unlock()
+    
+    // 1. 收集所有活跃的 timer
+    allTimers := tw.collectAllTimers()
+    
+    // 2. 清空所有 bucket
+    tw.clearAllBuckets()
+    
+    // 3. 调整 currentTime
+    oldCurrentTime := atomic.LoadInt64(&tw.currentTime)
+    newCurrentTime := oldCurrentTime + offsetMs
+    atomic.StoreInt64(&tw.currentTime, truncate(newCurrentTime, tw.tick))
+    
+    // 4. 调整所有 timer 的过期时间并重新插入
+    for _, t := range allTimers {
+        oldExpiration := t.GetExpiration()
+        newExpiration := oldExpiration + offsetMs
+        t.SetExpiration(newExpiration)
+        tw.addOrRun(t) // 重新插入
+    }
+    
+    // 5. 递归调整 overflow wheel
+    if overflowWheel != nil {
+        overflowWheel.adjustTimeInternal(offsetMs)
+    }
+}
+```
+
+### 性能考虑
+
+**警告:** 时间调整是一个**昂贵的操作**,会:
+- 遍历所有bucket收集Timer (O(n))
+- 清空所有bucket (O(n))
+- 重新插入所有Timer (O(n))
+- 期间会加写锁,阻塞所有定时器操作
+
+因此:
+- ✅ **适用场景**: 开发/测试环境,快速调试时间相关功能
+- ❌ **不适用场景**: 生产环境,高频调用
+- ⚠️ **建议**: 只在必要时使用,避免在运行时频繁调整
+
+### 示例场景
+
+#### 场景1: 测试每日0点的任务
+
+```go
+// 创建一个每天0点执行的任务
+timerId, _ := scheduler.CronFunc("0 0 0 * * *", "daily_task", 
+    func(t *Timer, args ...interface{}) error {
+        fmt.Println("执行每日任务")
+        return nil
+    })
+
+// 不想等到明天0点,直接跳到明天0点
+tomorrow := timelib.GetDayStartTime(timelib.Now().Add(24 * time.Hour))
+offset := tomorrow.Sub(timelib.Now())
+
+// 调整时间
+timelib.SetTimeOffset(int64(offset))
+timingwheel.AdjustTime(int64(offset / time.Millisecond))
+
+// 等待任务执行
+time.Sleep(2 * time.Second)
+
+// 恢复时间
+timelib.SetTimeOffset(0)
+timingwheel.AdjustTime(-int64(offset / time.Millisecond))
+```
+
+#### 场景2: 测试时间回退
+
+```go
+// 测试时间回退后定时器是否正常
+timerId, _ := scheduler.AfterFunc(5*time.Second, "test", 
+    func(t *Timer, args ...interface{}) error {
+        fmt.Println("5秒后执行")
+        return nil
+    })
+
+// 回退10秒
+offset := int64(-10 * time.Second)
+timelib.SetTimeOffset(offset)
+timingwheel.AdjustTime(offset / int64(time.Millisecond))
+
+// 现在定时器还需要等待 5+10=15秒才会执行
+time.Sleep(3 * time.Second)
+// 任务不应该执行
+
+time.Sleep(13 * time.Second)
+// 现在任务应该执行了
+```
+
+### 测试用例
+
+完整的测试用例请参考 `time_adjust_test.go`:
+- `TestTimeAdjustment` - 基础时间调整测试
+- `TestTimeAdjustmentWithMultipleTimers` - 多定时器调整测试
+- `TestTimeAdjustmentWithTickerTimer` - 循环定时器调整测试
+- `TestTimeAdjustmentBackward` - 时间回退测试
 
 ## 示例
 

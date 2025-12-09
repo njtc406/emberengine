@@ -50,3 +50,24 @@ func GetTimingWheel() *TimingWheel {
 	defer twMutex.Unlock()
 	return globTW
 }
+
+// AdjustTime adjusts all timers in the global timing wheel after time offset change.
+// This is designed for development/testing environments only.
+// offsetMs: the time offset in milliseconds (can be positive or negative)
+//
+// WARNING: This operation is expensive and will block all timer operations.
+// DO NOT use in production environment.
+//
+// Usage:
+//
+//	timelib.SetTimeOffset(offset) // first adjust timelib
+//	timingwheel.AdjustTime(offset / time.Millisecond) // then adjust timing wheel
+func AdjustTime(offsetMs int64) {
+	twMutex.Lock()
+	tw := globTW
+	twMutex.Unlock()
+
+	if tw != nil {
+		tw.AdjustTime(offsetMs)
+	}
+}
