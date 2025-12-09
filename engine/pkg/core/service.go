@@ -30,29 +30,34 @@ import (
 
 // TODO 之后将所有的serverId换个名字,叫做namespace,或者group,用来划分服务组
 
+var (
+	_ inf.IMessageInvoker = (*Service)(nil)
+	_ inf.IService        = (*Service)(nil)
+)
+
 type Service struct {
 	Module
 	inf.IMessageInvoker
 
-	pid  *actor.PID // 服务基础信息
+	pid  *actor.PID // 服务元数据
 	name string     // 服务名称
 
-	src                    inf.IService
-	cfg                    interface{} // 服务配置
-	status                 int32       // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
-	isPrimarySecondaryMode bool        // 是否是主从模式
+	src                    inf.IService // 服务实现
+	cfg                    interface{}  // 服务配置
+	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
+	isPrimarySecondaryMode bool         // 是否是主从模式
 
-	mailbox              inf.IMailbox        // 邮箱
-	eventProcessor       inf.IEventProcessor // 事件管理器
-	globalEventProcessor inf.IEventProcessor // 全局事件管理器
+	mailbox              *mailbox.Mailbox // 邮箱
+	eventProcessor       *event.Processor // 事件管理器
+	globalEventProcessor *event.Processor // 全局事件管理器
 
 	profiler *profiler.Profiler // 性能监控
 
 	eventHandlers map[int32]EventHandler
 
-	msgHooks []MsgHookFun
+	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用)
 
-	mailboxMiddlewares []inf.IMailboxMiddleware
+	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
 }
 
 func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
@@ -127,7 +132,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewJobScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
 	// 创建邮箱
-	s.mailbox = mailbox.NewDefaultMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
+	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)

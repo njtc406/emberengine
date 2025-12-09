@@ -16,6 +16,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
+// TODO 这个函数需要修改,如果pprof做成了模块,那么这里就不需要什么open这些字段了
 // EventHandler 定义事件处理函数类型
 type EventHandler func(ev inf.IEvent, open bool, analyzer *profiler.Analyzer)
 

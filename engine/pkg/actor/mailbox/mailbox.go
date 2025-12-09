@@ -15,7 +15,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
 )
 
-// defaultMailbox 是 IMailbox 的默认实现，用于承载一个 service 的消息入口。
+// Mailbox 是 IMailbox 的默认实现，用于承载一个 service 的消息入口。
 //
 // 运行时行为：
 //  1. 外部通过 PostMessage 投递 IEvent；
@@ -31,7 +31,7 @@ import (
 // 注意：
 //   - 中间件 MessageReceived 当前会在 PostMessage 入口和 worker 执行后各被调用一次；
 //     如果中间件依赖调用时机，请在实现中自行区分上下文，或仅在一个阶段使用。
-type defaultMailbox struct {
+type Mailbox struct {
 	// 挂起标记
 	// mailbox 挂起后, 不再接收紧急以下的任何消息
 	// 如果想要在服务挂起后操作服务，需要使用紧急级别以上的消息来触发
@@ -41,15 +41,15 @@ type defaultMailbox struct {
 	logger     log.ILoggerX
 }
 
-// NewDefaultMailbox 根据 MailboxConf 创建一个默认 mailbox 实例。
+// NewMailbox 根据 MailboxConf 创建一个默认 mailbox 实例。
 //
 //   - conf: 控制队列模式、worker 数量、扩缩容策略等；
 //   - logger: 用于记录 mailbox 运行日志；
 //   - invoker: 实际处理事件的 IMessageInvoker（通常由 Service 容器提供）；
 //   - middlewares: 可选的 mailbox 中间件，在消息入队和处理后被调用。
-func NewDefaultMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker,
-	middlewares ...inf.IMailboxMiddleware) inf.IMailbox {
-	return &defaultMailbox{
+func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker,
+	middlewares ...inf.IMailboxMiddleware) *Mailbox {
+	return &Mailbox{
 		workerPool: NewWorkerPool(conf, logger, invoker, middlewares...),
 		logger:     logger,
 	}
@@ -61,7 +61,7 @@ func NewDefaultMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker in
 //  1. 如果 mailbox 已挂起（suspended=true），并且事件优先级低于紧急级别，则返回 ErrMailboxNotRunning；
 //  2. 依次调用所有中间件的 MessageReceived（入队前 hook，带 panic 防护）；
 //  3. 将事件交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
-func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
+func (m *Mailbox) PostMessage(e inf.IEvent) error {
 	// TODO 这个是不是也可以做成一个中间件？还是直接写成是机制
 	if e.GetPriority() > def.PriorityUrgent && m.isSuspended() {
 		// 挂起后,不再接收紧急以下的任何消息
@@ -82,22 +82,22 @@ func (m *defaultMailbox) PostMessage(e inf.IEvent) error {
 	return m.workerPool.DispatchEvent(e)
 }
 
-func (m *defaultMailbox) isSuspended() bool {
+func (m *Mailbox) isSuspended() bool {
 	return m.suspended.Load()
 }
 
-func (m *defaultMailbox) Suspend() bool {
+func (m *Mailbox) Suspend() bool {
 	return m.suspended.CompareAndSwap(false, true)
 }
 
-func (m *defaultMailbox) Resume() bool {
+func (m *Mailbox) Resume() bool {
 	return m.suspended.CompareAndSwap(true, false)
 }
 
-func (m *defaultMailbox) Start() {
+func (m *Mailbox) Start() {
 	m.workerPool.Start()
 }
 
-func (m *defaultMailbox) Stop() {
+func (m *Mailbox) Stop() {
 	m.workerPool.Stop()
 }

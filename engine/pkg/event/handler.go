@@ -6,9 +6,12 @@
 package event
 
 import (
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"sync"
+
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
+
+var _ inf.IEventHandler = (*Handler)(nil)
 
 type Handler struct {
 	sync.RWMutex

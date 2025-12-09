@@ -54,6 +54,11 @@ type Bus struct {
 	serverLock        *shardedlock.ShardedRWLock
 	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
+	// 特定事件(只有订阅者会收到)
+	specificPrefix      string // 特定事件前缀
+	specificLock        *shardedlock.ShardedRWLock
+	specificSubscribers map[int32]map[string]map[string]inf.IListener // map[事件类型]map[目标服务唯一id]map[订阅者服务唯一id]事件通道
+
 	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
 
 	// 新增的事件分类和限流系统
@@ -152,6 +157,10 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 		if eb.serverPrefix == "" {
 			eb.serverPrefix = def.NatsDefaultServerPrefix
 		}
+		eb.specificPrefix = conf.SpecificPrefix
+		if eb.specificPrefix == "" {
+			eb.specificPrefix = def.DefaultSpecificPrefix
+		}
 		log.SysLogger.Debug("==========> nats init success")
 	}
 
@@ -164,6 +173,8 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	eb.globalSubscribers = make(map[int32]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
+	eb.specificLock = shardedlock.NewShardedRWLock(shardCount)
+	eb.specificSubscribers = make(map[int32]map[string]map[string]inf.IListener)
 }
 
 func (eb *Bus) Stop() {
@@ -474,6 +485,120 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 				//fmt.Println("subscribe global event from nats failed, error:", err)
 			}
 		}
+	}
+}
+
+// PublishSpecific 发布指定服务的事件(只有订阅了该服务事件的服务会收到)
+func (eb *Bus) PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
+	e, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
+	if err != nil {
+		return err
+	}
+	if eb.isNatsEnabled() {
+		// 发到nats
+		eventData, err := proto.Marshal(e)
+		if err != nil {
+			return err
+		}
+
+		return eb.nc.Publish(eb.genKey(eb.specificPrefix, eventType, serviceUid), eventData)
+	} else {
+		// 没有使用nats,那么直接触发本地事件
+		eb.publishSpecific(e)
+		return nil
+	}
+}
+
+// PublishSpecificLocal 发布本地指定服务事件
+func (eb *Bus) PublishSpecificLocal(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
+	e, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
+	if err != nil {
+		return err
+	}
+	eb.publishSpecific(e)
+	return nil
+}
+
+// publishSpecific 发布特定服务事件
+func (eb *Bus) publishSpecific(e *actor.Event) {
+	key := eb.genKey(eb.specificPrefix, e.EventType, e.ServiceUid)
+	eb.specificLock.RLock(key)
+	defer eb.specificLock.RUnlock(key)
+	if eventMap, ok := eb.specificSubscribers[e.EventType]; ok {
+		if subMap, ok := eventMap[e.ServiceUid]; ok {
+			ev := NewEvent()
+			ev.Type = ServiceGlobalEventTrigger
+			ev.Data = e
+			ev.SetHeader(def.DefaultDispatcherKey, e.GetDispatcherKey())
+			ev.SetHeader(def.DefaultPriorityKey, e.GetPriority())
+
+			for _, ch := range subMap {
+				if err := ch.PushEvent(ev); err != nil {
+					log.SysLogger.Errorf("push specific event error: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// SubscribeSpecific 订阅指定服务的事件
+// eventType: 事件类型
+// serviceUid: 目标服务的唯一ID(要订阅哪个服务的事件)
+// svc: 订阅者服务
+func (eb *Bus) SubscribeSpecific(eventType int32, serviceUid string, svc inf.IListener) {
+	key := eb.genKey(eb.specificPrefix, eventType, serviceUid)
+	eb.specificLock.Lock(key)
+	defer eb.specificLock.Unlock(key)
+	var needListen bool
+	if _, ok := eb.specificSubscribers[eventType]; !ok {
+		eb.specificSubscribers[eventType] = make(map[string]map[string]inf.IListener)
+	}
+	if _, ok := eb.specificSubscribers[eventType][serviceUid]; !ok {
+		eb.specificSubscribers[eventType][serviceUid] = make(map[string]inf.IListener)
+		needListen = true
+	}
+	eb.specificSubscribers[eventType][serviceUid][svc.GetPid().GetServiceUid()] = svc
+	if needListen {
+		// 之前没有监听过这个事件类型和目标服务的组合
+		if eb.isNatsEnabled() {
+			if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
+				// 解析数据
+				e, err := eb.unmarshalEvent(msg.Data)
+				if err != nil {
+					log.SysLogger.Errorf("unmarshal specific event error: %v", err)
+					return
+				}
+
+				eb.publishSpecific(e)
+			}); err == nil {
+				eb.addSub(key, subscription)
+			} else {
+				log.SysLogger.Errorf("subscribe specific event from nats failed, error: %v", err)
+			}
+		}
+	}
+}
+
+// UnSubscribeSpecific 取消订阅指定服务的事件
+func (eb *Bus) UnSubscribeSpecific(eventType int32, serviceUid string, svc inf.IListener) {
+	key := eb.genKey(eb.specificPrefix, eventType, serviceUid)
+	eb.specificLock.Lock(key)
+	defer eb.specificLock.Unlock(key)
+	var needUnListen bool
+	if eventMap, ok := eb.specificSubscribers[eventType]; ok {
+		if subMap, ok := eventMap[serviceUid]; ok {
+			delete(subMap, svc.GetPid().GetServiceUid())
+			if len(subMap) == 0 {
+				delete(eventMap, serviceUid)
+				needUnListen = true
+			}
+		}
+		if len(eventMap) == 0 {
+			delete(eb.specificSubscribers, eventType)
+		}
+	}
+	if needUnListen {
+		eb.unSubscribe(key)
 	}
 }
 

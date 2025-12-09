@@ -31,8 +31,8 @@ type IMailbox interface {
 	IMailboxChannel
 	Start()
 	Stop()
-	Suspend() bool // 挂起
-	Resume() bool  // 恢复
+	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
+	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
 }
 
 type IMailboxWorker interface {

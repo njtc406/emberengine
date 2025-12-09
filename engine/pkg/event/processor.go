@@ -7,11 +7,14 @@ package event
 
 import (
 	"context"
+	"sync"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"google.golang.org/protobuf/proto"
-	"sync"
 )
+
+var _ inf.IEventProcessor = (*Processor)(nil)
 
 type Processor struct {
 	inf.IListener
@@ -21,7 +24,7 @@ type Processor struct {
 	mapBindHandlerEvent map[int32]map[inf.IEventHandler]inf.EventCallBack //收到事件处理
 }
 
-func NewProcessor() inf.IEventProcessor {
+func NewProcessor() *Processor {
 	p := &Processor{
 		mapListenerEvent:    make(map[int32]map[inf.IEventProcessor]int),
 		mapBindHandlerEvent: make(map[int32]map[inf.IEventHandler]inf.EventCallBack),
@@ -94,6 +97,17 @@ func (p *Processor) UnRegServerEventReceiverFun(eventType int32, receiver inf.IE
 	GetEventBus().UnSubscribeServer(eventType, p)
 }
 
+// 特定服务事件
+func (p *Processor) RegSpecificEventReceiverFunc(eventType int32, serviceUid string, receiver inf.IEventHandler, callback inf.EventCallBack) {
+	p.RegEventReceiverFunc(eventType, receiver, callback)
+	GetEventBus().SubscribeSpecific(eventType, serviceUid, p)
+}
+
+func (p *Processor) UnRegSpecificEventReceiverFun(eventType int32, serviceUid string, receiver inf.IEventHandler) {
+	p.UnRegEventReceiverFun(eventType, receiver)
+	GetEventBus().UnSubscribeSpecific(eventType, serviceUid, p)
+}
+
 // 发布全局事件
 func (p *Processor) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
 	return GetEventBus().PublishGlobal(ctx, eventType, data)
@@ -102,6 +116,11 @@ func (p *Processor) PublishGlobal(ctx context.Context, eventType int32, data pro
 // 发布服务器事件
 func (p *Processor) PublishServer(ctx context.Context, eventType int32, data proto.Message) error {
 	return GetEventBus().PublishServer(ctx, eventType, p.GetServerId(), data)
+}
+
+// 发布特定服务事件
+func (p *Processor) PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
+	return GetEventBus().PublishSpecific(ctx, eventType, serviceUid, data)
 }
 
 // castEvent 广播事件

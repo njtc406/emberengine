@@ -33,7 +33,7 @@ type Cluster struct {
 	endpoints *endpoints.EndpointManager
 
 	// 事件
-	eventProcessor inf.IEventProcessor
+	eventProcessor *event.Processor
 	eventChannel   chan inf.IEvent
 }
 

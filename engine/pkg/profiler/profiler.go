@@ -10,6 +10,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
+// TODO 这里面的整个内容应该是需要提到单独的模块中去做，所有监控信息都发送到监控模块中,统一写入日志
+// TODO 如果做成服务，主要是logger的问题，输出可能就不是分开的了,做成模块,直接挂到每个服务中去
+
 // DefaultMaxOvertime 最大超时时间，一般可以认为是死锁或者死循环，或者极差的性能问题
 var DefaultMaxOvertime time.Duration = 1 * time.Second
 
@@ -170,7 +173,6 @@ func (slf *Analyzer) Reset() {
 func (slf *Analyzer) Pop() {
 	slf.profiler.stackLocker.Lock()
 	defer func() {
-		slf.Reset()
 		slf.profiler.analyzerPool.Put(slf)
 	}()
 	defer slf.profiler.stackLocker.Unlock()
@@ -220,6 +222,7 @@ func DefaultReportFunction(name string, callNum int, costTime time.Duration, rec
 	log.SysLogger.Debugf("report: %s", strReport)
 }
 
+// Report 上报所有Profiler的记录(应该由监控模块调用)
 func Report() {
 	var record *list.List
 	for name, prof := range mapProfiler {

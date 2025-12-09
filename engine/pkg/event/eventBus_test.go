@@ -2,19 +2,21 @@ package event
 
 import (
 	"fmt"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"sync"
-	"testing"
-	"time"
 )
 
 type testService struct {
 	name     string
 	serverId int32
+	pid      *actor.PID
 }
 
 func (s *testService) SetName(name string) {
@@ -30,9 +32,10 @@ func (s *testService) GetServerId() int32 {
 }
 
 func (s *testService) SetPid(pid *actor.PID) {
+	s.pid = pid
 }
 func (s *testService) GetPid() *actor.PID {
-	return nil
+	return s.pid
 }
 
 func (s *testService) PushEvent(e inf.IEvent) error {
@@ -61,7 +64,7 @@ func TestEventBus(t *testing.T) {
 	defer eb.Stop()
 	ctx := xcontext.New(nil)
 	ctx.SetHeader(def.DefaultDispatcherKey, "111")
-	ctx.SetHeader(def.DefaultPriorityKey, def.PriorityUser)
+	ctx.SetHeader(def.DefaultPriorityKey, def.PriorityNormal)
 
 	service1 := &testService{}
 	service2 := &testService{}
@@ -105,4 +108,72 @@ func TestEventBus(t *testing.T) {
 
 	eb.UnSubscribeGlobal(1, service1)
 	eb.UnSubscribeServer(2, service2)
+}
+
+// TestSpecificEvent 测试特定服务事件
+func TestSpecificEvent(t *testing.T) {
+	eb := GetEventBus()
+	eb.Init(
+		&config.EventBusConf{
+			SpecificPrefix: "specific.%d.%s",
+			ShardCount:     16,
+		},
+	)
+	defer eb.Stop()
+
+	ctx := xcontext.New(nil)
+	ctx.SetHeader(def.DefaultDispatcherKey, "test-dispatcher")
+	ctx.SetHeader(def.DefaultPriorityKey, def.PriorityNormal)
+
+	// 创建测试服务
+	targetService := &testService{
+		name:     "target-service",
+		serverId: 1,
+		pid: &actor.PID{
+			ServiceUid: "target-service-uid-001",
+		},
+	}
+
+	subscriber1 := &testService{
+		name:     "subscriber1",
+		serverId: 2,
+		pid: &actor.PID{
+			ServiceUid: "subscriber1-uid-001",
+		},
+	}
+
+	subscriber2 := &testService{
+		name:     "subscriber2",
+		serverId: 3,
+		pid: &actor.PID{
+			ServiceUid: "subscriber2-uid-001",
+		},
+	}
+
+	// subscriber1 和 subscriber2 都订阅 targetService 的事件
+	fmt.Println("\n=== 订阅特定服务事件 ===")
+	eb.SubscribeSpecific(100, targetService.GetPid().GetServiceUid(), subscriber1)
+	eb.SubscribeSpecific(100, targetService.GetPid().GetServiceUid(), subscriber2)
+	fmt.Println("subscriber1 和 subscriber2 已订阅 targetService 的事件")
+
+	// 等待订阅生效
+	time.Sleep(100 * time.Millisecond)
+
+	// 发布特定服务事件
+	fmt.Println("\n=== 发布特定服务事件 ===")
+	if err := eb.PublishSpecificLocal(ctx, 100, targetService.GetPid().GetServiceUid(), nil); err != nil {
+		t.Errorf("发布特定服务事件失败: %v", err)
+	}
+	fmt.Println("targetService 发布事件完成")
+
+	// 等待事件处理
+	time.Sleep(500 * time.Millisecond)
+
+	// 取消订阅
+	fmt.Println("\n=== 取消订阅 ===")
+	eb.UnSubscribeSpecific(100, targetService.GetPid().GetServiceUid(), subscriber1)
+	eb.UnSubscribeSpecific(100, targetService.GetPid().GetServiceUid(), subscriber2)
+	fmt.Println("取消订阅完成")
+
+	fmt.Println("\n=== 测试完成 ===")
 }

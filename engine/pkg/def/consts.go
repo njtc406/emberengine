@@ -92,6 +92,7 @@ const (
 	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.serverId
 	NatsDefaultMasterPrefix = "event.master.%s"    // master.serviceUid
 	NatsDefaultSlavePrefix  = "event.slave.%s"     // slave.serviceUid
+	DefaultSpecificPrefix   = "event.specific.%d"  // specific.eventType
 )
 
 const NatsDefaultShardCount = 16

@@ -20,6 +20,14 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
+var (
+	_ inf.IModule             = (*Module)(nil)
+	_ inf.IModuleLifecycle    = (*Module)(nil)
+	_ inf.IModuleIdentity     = (*Module)(nil)
+	_ inf.IModuleHierarchy    = (*Module)(nil)
+	_ inf.IModuleServiceEvent = (*Module)(nil)
+)
+
 type Module struct {
 	//interfaces.IRpcHandler
 	concurrent.IConcurrent

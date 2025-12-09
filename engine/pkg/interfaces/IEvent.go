@@ -7,6 +7,7 @@ package interfaces
 
 import (
 	"context"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -49,6 +50,12 @@ type IEventProcessor interface {
 	UnRegServerEventReceiverFun(eventType int32, receiver IEventHandler)
 	// 发布服务器事件
 	PublishServer(ctx context.Context, eventType int32, data proto.Message) error
+
+	// 特定服务事件
+	RegSpecificEventReceiverFunc(eventType int32, serviceUid string, receiver IEventHandler, callback EventCallBack)
+	UnRegSpecificEventReceiverFun(eventType int32, serviceUid string, receiver IEventHandler)
+	// 发布特定服务事件
+	PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error
 
 	CastEvent(event IEvent) //广播事件
 	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)
