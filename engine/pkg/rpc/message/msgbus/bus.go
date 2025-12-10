@@ -234,11 +234,13 @@ func (mb *MessageBus) Call(ctx context.Context, method string, in, out interface
 	return mb.call(ctx, data, out)
 }
 
-func (mb *MessageBus) CallWithOpt(opts ...dto.BusOptionBuilder) error {
+func (mb *MessageBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
 	option := dto.NewBusOption(opts...)
 	if !option.NotRecycle {
 		defer ReleaseMessageBus(mb)
 	}
+	option.Ctx = ctx
+
 	if mb.err != nil {
 		return mb.err
 	}
@@ -341,8 +343,9 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 	return monitor.GetRpcMonitor().NewCancel(reqId), nil
 }
 
-func (mb *MessageBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
+func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
 	option := dto.NewBusOption(opts...)
+	option.Ctx = ctx
 	if !option.NotRecycle {
 		defer ReleaseMessageBus(mb)
 	}
@@ -422,8 +425,9 @@ func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) e
 	return mb.send(ctx, method, in)
 }
 
-func (mb *MessageBus) SendWithOpt(opts ...dto.BusOptionBuilder) error {
+func (mb *MessageBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
 	option := dto.NewBusOption(opts...)
+	option.Ctx = ctx
 	if !option.NotRecycle {
 		defer ReleaseMessageBus(mb)
 	}
@@ -489,24 +493,46 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 	return errorlib.CombineErr(errs...)
 }
 
-func (m MultiBus) CallWithOpt(opts ...dto.BusOptionBuilder) error {
+func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
 	option := dto.NewBusOption(opts...)
+	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.Warnf("===========select empty service to call %s", option.Method)
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", option.Method)
 		return def.ErrSelectEmptyResult
 	}
 
-	// 依次尝试调用每个服务，找到第一个成功的就返回
-	// 注意：call方法只在成功时才会修改out，失败时不会修改，因此这里是安全的
-	var errs []error
-	for _, bus := range m {
-		if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, !option.NotRecycle); err != nil {
-			errs = append(errs, err)
-		} else {
-			return nil // 找到一个成功的就返回
+	// 根据 CallMode 决定调用策略
+	switch option.CallMode {
+	case dto.CallModeAll:
+		// 模式1: 所有节点都调用，收集所有结果
+		var errs []error
+		successCount := 0
+		for _, bus := range m {
+			if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, !option.NotRecycle); err != nil {
+				errs = append(errs, err)
+			} else {
+				successCount++
+			}
 		}
+		// 返回组合错误，即使所有调用都成功，也让调用者知道有多少个成功
+		if len(errs) > 0 {
+			log.SysLogger.WithContext(ctx).Warnf("call %s with CallModeAll: %d/%d succeeded", option.Method, successCount, len(m))
+		}
+		return errorlib.CombineErr(errs...)
+
+	default: // dto.CallModeAny 或未设置
+		// 模式0: 依次尝试调用每个服务，找到第一个成功的就返回
+		// 注意：call方法只在成功时才会修改out，失败时不会修改，因此这里是安全的
+		var errs []error
+		for _, bus := range m {
+			if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, !option.NotRecycle); err != nil {
+				errs = append(errs, err)
+			} else {
+				return nil // 找到一个成功的就返回
+			}
+		}
+		return errorlib.CombineErr(errs...)
 	}
-	return errorlib.CombineErr(errs...)
 }
 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
@@ -532,10 +558,11 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
 
-func (m MultiBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
+func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
 	option := dto.NewBusOption(opts...)
+	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.Warnf("===========select empty service to async call %s", option.Method)
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", option.Method)
 		return dto.EmptyCancelRpc, def.ErrSelectEmptyResult
 	}
 	data := msgenvelope.NewData()
@@ -543,6 +570,13 @@ func (m MultiBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc,
 	data.SetRequest(option.In)
 	data.SetResponse(nil) // 容错
 	data.SetNeedResponse(true)
+
+	// 异步调用的语义:
+	// - err 只表示消息是否成功发送,不代表执行结果
+	// - 执行结果通过 callback 返回
+	// - CallModeAny: 发送给所有节点,任意一个回调执行即可
+	// - CallModeAll: 发送给所有节点,所有回调都会执行
+	// 因此两种模式的发送逻辑是一样的,都是发送给所有节点
 
 	var errs []error
 	var reqIds []uint64
@@ -553,6 +587,12 @@ func (m MultiBus) AsyncCallWithOpt(opts ...dto.BusOptionBuilder) (dto.CancelRpc,
 			reqIds = append(reqIds, reqId)
 		}
 	}
+
+	if len(errs) > 0 {
+		log.SysLogger.WithContext(ctx).Warnf("async call %s: %d/%d nodes sent successfully", option.Method, len(reqIds), len(m))
+	}
+
+	// 返回 MultiCancel,可以取消所有节点的回调
 	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
 
@@ -579,8 +619,14 @@ func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error
 	return errorlib.CombineErr(errs...)
 }
 
-func (m MultiBus) SendWithOpt(opts ...dto.BusOptionBuilder) error {
+func (m MultiBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
 	option := dto.NewBusOption(opts...)
+	option.Ctx = ctx
+	if len(m) == 0 {
+		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", option.Method)
+		return nil
+		//return def.ErrSelectEmptyResult
+	}
 	var errs []error
 	envelopeData := msgenvelope.NewData()
 	envelopeData.SetMethod(option.Method)

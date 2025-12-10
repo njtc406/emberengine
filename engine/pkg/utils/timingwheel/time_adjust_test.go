@@ -60,7 +60,7 @@ func TestTimeAdjustment(t *testing.T) {
 	fmt.Printf("[%s] timelib adjusted\n", timelib.Now().Format("2006-01-02 15:04:05"))
 
 	// 再调整时间轮
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("2006-01-02 15:04:05"))
 	newExpiration := js.getShard(timerId).tasks[timerId].GetExpiration()
@@ -141,7 +141,7 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 	fmt.Printf("\n[%s] Adjusting time forward by +10s\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -207,7 +207,7 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	fmt.Printf("[%s] Adjusting time forward by +5s\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	// 等待任务继续执行
 	time.Sleep(3 * time.Second)
@@ -256,7 +256,7 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	fmt.Printf("\n[%s] Adjusting time backward by -5s\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted (went back 5s)\n", timelib.Now().Format("15:04:05"))
 
@@ -310,7 +310,7 @@ func TestCronTimerAdjustment(t *testing.T) {
 	fmt.Printf("\n[%s] Adjusting time forward by +15s (crossing one trigger point)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -366,7 +366,7 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 	fmt.Printf("\n[%s] Adjusting time forward by +25s (crossing 5 trigger points)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -425,7 +425,7 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 	fmt.Printf("\n[%s] Adjusting time forward by +30h (from 5AM to next day 11AM, crossing 12PM trigger point)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	scheduler.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(offset / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -480,7 +480,7 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	offset1 := int64(20 * time.Second)
 	fmt.Printf("\n[%s] First: Adjusting time forward by +20s\n", timelib.Now().Format("15:04:05"))
 	timelib.SetTimeOffset(offset1)
-	scheduler.AdjustTime(offset1 / int64(time.Millisecond))
+	tw.AdjustTime(offset1 / int64(time.Millisecond))
 
 	// 重置执行计数
 	time.Sleep(2 * time.Second)
@@ -491,18 +491,18 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	fmt.Printf("\n[%s] Second: Adjusting time backward by -15s (crossing trigger point)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset1 + offset2)
-	scheduler.AdjustTime(offset2 / int64(time.Millisecond))
+	tw.AdjustTime(offset2 / int64(time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted backward\n", timelib.Now().Format("15:04:05"))
 
 	// 等待任务执行
 	time.Sleep(2 * time.Second)
 
-	// 验证任务执行了一次(往回调整也跨过了触发点)
-	if executionCount.Load() != 1 {
-		t.Errorf("Task should have been executed exactly once after backward adjustment crossing trigger point, got %d executions", executionCount.Load())
+	// 验证任务没有执行(往回调整不会触发执行,只是维持相对延迟)
+	if executionCount.Load() != 0 {
+		t.Errorf("Task should not have been executed after backward adjustment, got %d executions", executionCount.Load())
 	} else {
-		fmt.Printf("\n✓ Task executed exactly once when time adjusted backward crossing trigger point\n")
+		fmt.Printf("\n✓ Task correctly did not execute when time adjusted backward (maintains relative delay)\n")
 	}
 
 	scheduler.CancelTimer(timerId)
