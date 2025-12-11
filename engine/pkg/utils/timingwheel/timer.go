@@ -89,6 +89,10 @@ func (t *Timer) Reset() {
 }
 
 func (t *Timer) GetName() string {
+	if !t.isActive() {
+		return ""
+	}
+	// TODO 这里实际上有风险，需要修改一下,并发时会出现data race
 	if t.name != "" {
 		return t.name
 	}

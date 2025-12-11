@@ -16,7 +16,7 @@ func TestTimeAdjustment(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	// 启动callback channel的消费者
@@ -52,7 +52,7 @@ func TestTimeAdjustment(t *testing.T) {
 		originalExpiration-atomic.LoadInt64(&tw.currentTime))
 
 	// 立即调整时间,向前跳5秒 (超过任务应该执行的时间点)
-	offset := int64(5 * time.Second)
+	offset := 5 * time.Second
 	fmt.Printf("\n[%s] Adjusting time forward by +5s\n", timelib.Now().Format("2006-01-02 15:04:05"))
 
 	// 先调整 timelib 的时间
@@ -60,7 +60,7 @@ func TestTimeAdjustment(t *testing.T) {
 	fmt.Printf("[%s] timelib adjusted\n", timelib.Now().Format("2006-01-02 15:04:05"))
 
 	// 再调整时间轮
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("2006-01-02 15:04:05"))
 	newExpiration := js.getShard(timerId).tasks[timerId].GetExpiration()
@@ -99,7 +99,7 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	// 启动callback channel的消费者
@@ -137,11 +137,11 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// 时间向前跳跃10秒
-	offset := int64(10 * time.Second)
+	offset := 10 * time.Second
 	fmt.Printf("\n[%s] Adjusting time forward by +10s\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -169,7 +169,7 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	// 启动callback channel的消费者
@@ -203,11 +203,11 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	fmt.Printf("\n[%s] First phase: executed %d times\n", timelib.Now().Format("15:04:05"), firstCount)
 
 	// 时间向前跳跃5秒
-	offset := int64(5 * time.Second)
+	offset := 5 * time.Second
 	fmt.Printf("[%s] Adjusting time forward by +5s\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	// 等待任务继续执行
 	time.Sleep(3 * time.Second)
@@ -231,7 +231,7 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 
 	var executionCount atomic.Int32
 
@@ -252,11 +252,11 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// 时间回退5秒
-	offset := int64(-5 * time.Second)
+	offset := -5 * time.Second
 	fmt.Printf("\n[%s] Adjusting time backward by -5s\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted (went back 5s)\n", timelib.Now().Format("15:04:05"))
 
@@ -279,7 +279,7 @@ func TestCronTimerAdjustment(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	go func() {
@@ -306,11 +306,11 @@ func TestCronTimerAdjustment(t *testing.T) {
 	fmt.Printf("[%s] Cron task created (@every 10s)\n", timelib.Now().Format("15:04:05"))
 
 	// 立即调整时间,向前跳15秒(跨过一个触发点)
-	offset := int64(15 * time.Second)
+	offset := 15 * time.Second
 	fmt.Printf("\n[%s] Adjusting time forward by +15s (crossing one trigger point)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -334,7 +334,7 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	go func() {
@@ -362,11 +362,11 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 
 	// 调整时间,向前跳25秒(跨过5个触发点: 5s, 10s, 15s, 20s, 25s)
 	// 但只应该执行一次
-	offset := int64(25 * time.Second)
+	offset := 25 * time.Second
 	fmt.Printf("\n[%s] Adjusting time forward by +25s (crossing 5 trigger points)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -391,7 +391,7 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	go func() {
@@ -421,11 +421,11 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 
 	// 模拟从早上5点调整到明天早上11点(跨过了今天12点这个触发点)
 	// 5点 -> 明天11点 = 24h + 6h = 30h
-	offset := int64(30 * time.Hour)
+	offset := 30 * time.Hour
 	fmt.Printf("\n[%s] Adjusting time forward by +30h (from 5AM to next day 11AM, crossing 12PM trigger point)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(offset / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
 
@@ -450,7 +450,7 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(1000, 10, tw)
+	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
 
 	go func() {
@@ -477,21 +477,21 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	fmt.Printf("[%s] Cron task created (@every 10s)\n", timelib.Now().Format("15:04:05"))
 
 	// 先向前跳20秒
-	offset1 := int64(20 * time.Second)
+	offset1 := 20 * time.Second
 	fmt.Printf("\n[%s] First: Adjusting time forward by +20s\n", timelib.Now().Format("15:04:05"))
 	timelib.SetTimeOffset(offset1)
-	tw.AdjustTime(offset1 / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset1 / time.Millisecond))
 
 	// 重置执行计数
 	time.Sleep(2 * time.Second)
 	executionCount.Store(0)
 
 	// 再往回调整15秒(跨过10秒触发点)
-	offset2 := int64(-15 * time.Second)
+	offset2 := -15 * time.Second
 	fmt.Printf("\n[%s] Second: Adjusting time backward by -15s (crossing trigger point)\n", timelib.Now().Format("15:04:05"))
 
 	timelib.SetTimeOffset(offset1 + offset2)
-	tw.AdjustTime(offset2 / int64(time.Millisecond))
+	tw.AdjustTime(int64(offset2 / time.Millisecond))
 
 	fmt.Printf("[%s] Time adjusted backward\n", timelib.Now().Format("15:04:05"))
 

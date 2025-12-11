@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
@@ -74,17 +75,31 @@ type jobScheduler struct {
 	c         chan ITimer
 	tw        *TimingWheel // 关联的timingwheel实例
 	timerPool pool.IPool[*Timer]
+	logger    log.ILoggerX
 }
 
 // NewJobScheduler 创建一个新的任务调度器
 // chanSize: 回调通道大小
 // bucketSize: 桶数量，用于分片存储任务以提高并发性能
-func NewJobScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler {
+func NewJobScheduler(jobName string, chanSize, bucketSize int, t *TimingWheel, logger log.ILoggerX, isDebug bool) ITimerScheduler {
+	if logger == nil {
+		l, err := log.NewDefaultLogger(nil)
+		if err != nil {
+			panic(fmt.Sprintf("create logger failed: %v", err))
+		}
+		logger = l.WithField("name", jobName)
+	}
 	if chanSize <= 0 {
 		chanSize = 100000
 	}
 	if bucketSize <= 0 {
 		bucketSize = 10
+	}
+	if t == nil {
+		t = globTW
+	}
+	if t == nil {
+		logger.Panic("timing wheel is nil")
 	}
 	shards := make([]*timerBucket, bucketSize)
 	for i := range shards {
@@ -100,7 +115,13 @@ func NewJobScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler {
 			func() *Timer {
 				return &Timer{}
 			},
-			pool.NewStatsRecorder("timerPool"),
+			func() pool.IStatsRecorder {
+				if isDebug {
+					return pool.NewStatsRecorder("timerPool")
+				} else {
+					return pool.NewNoStatsRecorder()
+				}
+			}(),
 			pool.WithRef(func(t *Timer) {
 				t.Ref()
 			}),

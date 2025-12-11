@@ -6,6 +6,7 @@
 package monitor
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -22,7 +23,9 @@ import (
 var rpcMonitor *RpcMonitor
 
 type RpcMonitor struct {
-	closed  chan struct{}
+	closed  atomic.Bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 	locker  sync.RWMutex
 	seed    uint64
 	waitMap map[uint64]inf.IEnvelope
@@ -38,38 +41,58 @@ func GetRpcMonitor() *RpcMonitor {
 }
 
 func (rm *RpcMonitor) Init() inf.IMonitor {
-	rm.closed = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	rm.ctx = ctx
+	rm.cancel = cancel
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.sd = timingwheel.NewJobScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize, timingwheel.GetTimingWheel())
+	rm.sd = timingwheel.NewJobScheduler("rpc monitor", config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize,
+		timingwheel.GetTimingWheel(), log.SysLogger.WithField("component", "rpc monitor"), config.IsDebug())
 	return rm
 }
 
 func (rm *RpcMonitor) Start() {
+	if rm.closed.Load() {
+		return
+	}
+	if rm.sd == nil {
+		log.SysLogger.Panic("rpc monitor is not initialized")
+	}
 	rm.wg.Add(1)
 	go rm.listen()
 }
 
 func (rm *RpcMonitor) Stop() {
-	close(rm.closed)
-	rm.sd.Stop()
+	if !rm.closed.CompareAndSwap(false, true) {
+		return
+	}
+	rm.cancel()
+	if rm.sd != nil {
+		rm.sd.Stop()
+	}
 	rm.wg.Wait()
 }
 
 func (rm *RpcMonitor) listen() {
 	defer rm.wg.Done()
+	wg := sync.WaitGroup{}
+	defer wg.Wait() // 等待所有回调执行完成
 	for {
 		select {
 		case t := <-rm.sd.GetTimerCbChannel():
 			if t == nil {
 				continue
 			}
-			asynclib.Go(func() {
-				//name := t.GetName()
-				//log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", name)
-				t.Do()
-				//log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", name)
-			})
-		case <-rm.closed:
+			name := t.GetName()
+			wg.Add(1)
+			if err := asynclib.Go(func() {
+				defer wg.Done()
+				if err := t.Do(); err != nil {
+					log.SysLogger.Errorf("rpc monitor: %s callback failed,error:%s", name, err)
+				}
+			}); err != nil {
+				log.SysLogger.Errorf("rpc monitor execute timeout callback failed,error:%s", err)
+			}
+		case <-rm.ctx.Done():
 			return
 		}
 	}

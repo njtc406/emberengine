@@ -14,8 +14,8 @@ type LevelRouter struct {
 // buildLevelWriters 根据 LoggerConf.LevelWriter 构建每个 Level 对应的文件 writer。
 //
 // 行为说明：
-//   - 当 LevelWriter 为空或 Enable=false 或 Name 为空时，不创建任何文件 writer，返回 nil；
-//   - 每个 LevelRoute 会创建一个独立的 rotateNew 文件前缀（Name 或 Name+"_route.Name"）；
+//   - 当 LevelWriter 为空或 Enable=false 或 PrefixName 为空时，不创建任何文件 writer，返回 nil；
+//   - 每个 LevelRoute 会创建一个独立的 rotateNew 文件前缀（PrefixName 或 PrefixName+"_route.PrefixName"）；
 //   - route.Levels 中的所有级别共用同一个 writer，实现“多级别合并到同一个文件”；
 //   - Sync=false 时，优先按全局 AsyncMode 决策是否包一层 AsyncWriter（全局未启用则保持同步）。
 func buildLevelWriters(conf *LoggerConf) (*LevelRouter, error) {
@@ -27,7 +27,7 @@ func buildLevelWriters(conf *LoggerConf) (*LevelRouter, error) {
 	if len(routes) == 0 {
 		return nil, nil
 	}
-	if conf.Name == "" {
+	if conf.PrefixName == "" {
 		return nil, nil
 	}
 	router := LevelRouter{
@@ -40,9 +40,9 @@ func buildLevelWriters(conf *LoggerConf) (*LevelRouter, error) {
 			continue
 		}
 
-		baseName := conf.Name
+		baseName := conf.PrefixName
 		if route.Name != "" {
-			baseName = conf.Name + "_" + route.Name
+			baseName = conf.PrefixName + "_" + route.Name
 		}
 
 		writers := make([]io.Writer, 0, 2)

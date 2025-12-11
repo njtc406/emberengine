@@ -110,8 +110,9 @@ func Start(opts ...StartOption) {
 	// 启动线程池
 	asynclib.InitAntsPool(config.Conf.NodeConf.AntsPoolSize)
 
-	// 启动timer(默认使用时间轮)
-	timingwheel.Start(time.Millisecond*10, 100, log.SysLogger)
+	// 启动timer
+	// TODO 做成配置吧,有些精度要求不高的场景可以直接使用秒
+	timingwheel.Start(config.Conf.NodeConf.TimingWheelConf.Interval, config.Conf.NodeConf.TimingWheelConf.WheelSize, log.SysLogger)
 
 	// 记录pid
 	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
@@ -175,18 +176,17 @@ func shutdownSequence(startTime time.Time, version string) {
 	monitor.GetRpcMonitor().Stop()
 	log.SysLogger.Info("[3/6] RPC monitor stopped")
 
-	log.SysLogger.Info("[4/6] Releasing async lib...")
-	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
-	log.SysLogger.Info("[4/6] Async lib released")
-
-	log.SysLogger.Info("[5/6] Stopping timing wheel...")
+	log.SysLogger.Info("[4/6] Stopping timing wheel...")
 	timingwheel.Stop()
-	log.SysLogger.Info("[5/6] Timing wheel stopped")
+	log.SysLogger.Info("[4/6] Timing wheel stopped")
+
+	log.SysLogger.Info("[5/6] Releasing async lib...")
+	asynclib.Release() // 最后释放线程池,防止任务没有执行完就退出了
+	log.SysLogger.Info("[5/6] Async lib released")
 
 	log.SysLogger.Info("[6/6] Closing logger...")
-	log.Close()
-
 	log.SysLogger.Info("server stopped, program exited...")
+	log.Close()
 	// 优雅退出
 	title.GracefulExit(time.Since(startTime), version)
 }

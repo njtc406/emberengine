@@ -39,6 +39,11 @@ type NodeConf struct {
 	MonitorBucketSize int               `binding:""`         // 定时器桶数量(默认20)
 	EventBusConf      *EventBusConf     `binding:""`         // nats配置
 	DeDuplicatorConf  *DeDuplicatorConf `binding:""`         // deDuplicator配置
+	TimingWheelConf   *TimingWheelConf  `binding:""`         // 定时器配置
+}
+type TimingWheelConf struct {
+	Interval  time.Duration `binding:""` // 定时器间隔(默认10毫秒)
+	WheelSize int64         `binding:""` // 定时器轮数(默认1000)
 }
 
 type ClusterConf struct {

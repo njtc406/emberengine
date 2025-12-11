@@ -112,8 +112,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		// 配置了独立日志
 		s.enableLogging = true
 		// 更新日志文件的前缀名称为服务名称
-		if serviceInitConf.LogConf.Config.Name == "" {
-			serviceInitConf.LogConf.Config.Name = s.GetName()
+		if serviceInitConf.LogConf.Config.PrefixName == "" {
+			serviceInitConf.LogConf.Config.PrefixName = s.GetName()
 		}
 		l, err := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
 		if err != nil {
@@ -130,7 +130,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 
 	// 创建定时器调度器
-	s.ITimerScheduler = timingwheel.NewJobScheduler(serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel())
+	s.ITimerScheduler = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize, timingwheel.GetTimingWheel(), s.ILoggerX)
 	// 创建邮箱
 	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
 

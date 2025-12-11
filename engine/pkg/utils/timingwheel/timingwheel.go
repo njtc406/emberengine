@@ -1,7 +1,6 @@
 package timingwheel
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -34,7 +33,7 @@ type TimingWheel struct {
 	closed    *atomic.Bool
 	waitGroup waitGroupWrapper
 
-	logger *log.Logger
+	logger log.ILoggerX
 
 	// adjustMu protects time adjustment operations
 	adjusting     atomic.Bool // 是否正在调整时间
@@ -43,10 +42,29 @@ type TimingWheel struct {
 }
 
 // NewTimingWheel creates an instance of TimingWheel with the given tick and wheelSize.
-func NewTimingWheel(tick time.Duration, wheelSize int64, logger *log.Logger) *TimingWheel {
+func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILoggerX) *TimingWheel {
+	if logger == nil {
+		l, err := log.NewDefaultLogger(nil)
+		if err != nil {
+			panic(fmt.Sprintf("create logger failed: %v", err))
+		}
+		logger = l.WithField("pkg", "timingwheel")
+	}
 	tickMs := int64(tick / time.Millisecond)
 	if tickMs <= 0 {
-		panic(errors.New("tick must be greater than or equal to 1ms"))
+		if logger == nil {
+			panic("logger is nil")
+		} else {
+			logger.Panic("tick must be greater than or equal to 1ms")
+		}
+	}
+
+	if wheelSize <= 0 {
+		if logger == nil {
+			panic("logger is nil")
+		} else {
+			logger.Panic("wheelSize must be greater than 0")
+		}
 	}
 
 	startMs := timeToMs(timelib.Now())
@@ -62,7 +80,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64, logger *log.Logger) *Ti
 }
 
 // newTimingWheel is an internal helper function that really creates an instance of TimingWheel.
-func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger *log.Logger, closed *atomic.Bool) *TimingWheel {
+func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger log.ILoggerX, closed *atomic.Bool) *TimingWheel {
 	buckets := make([]*bucket, wheelSize)
 	for i := range buckets {
 		buckets[i] = newBucket()

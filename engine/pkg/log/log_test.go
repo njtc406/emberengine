@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
 func TestInfo(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
-		Name:       "app",
+		PrefixName: "app",
 		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
@@ -62,7 +64,7 @@ func TestInfo(t *testing.T) {
 func BenchmarkName(b *testing.B) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
-		Name:       "xx",
+		PrefixName: "xx",
 		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
@@ -101,9 +103,9 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 	dir := t.TempDir()
 
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Dir:   dir,
-		Name:  "app",
-		Level: "debug",
+		Dir:        dir,
+		PrefixName: "app",
+		Level:      "debug",
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
@@ -148,11 +150,11 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 
 func TestMultiFileByLevelRoutes(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Dir:    "./logs",
-		Name:   "app",
-		Level:  "info",
-		Caller: true,
-		Stdout: true,
+		Dir:        "./logs",
+		PrefixName: "app",
+		Level:      "info",
+		Caller:     true,
+		Stdout:     true,
 		Rotation: RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
@@ -214,9 +216,10 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 }
 
 func TestLoggerX(t *testing.T) {
+	timelib.SetTimeOffset(time.Hour)
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
-		Name:       "app",
+		PrefixName: "app",
 		Level:      "debug",
 		Stdout:     true,
 		Caller:     true,

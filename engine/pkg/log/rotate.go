@@ -7,6 +7,8 @@ import (
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )
 
+// TODO 日志切割换成lumberjack库
+
 type options struct {
 	// Pattern 文件切分精度 可选(%Y%m%d%H%M) 默认(%Y%m%d)
 	// 具体含义github.com/lestrrat-go/strftime/specifications.go的defaultSpecifications中定义

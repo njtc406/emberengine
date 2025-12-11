@@ -5,28 +5,28 @@ import "time"
 // Tips: 服务器的所有时间函数都是用time.Local作为时间源,如果需要用到utc或者其他特殊时区,请自行处理并备注清除
 // 不要直接使用time.Parse解析时间字符串,请使用time.ParseInLocation解析时间字符串,明确指出使用的时区
 
-var timeOffset int64 = 0 // 服务器时间偏移量
+var timeOffset time.Duration // 服务器时间偏移量
 
 // Now 获取服务器当前时间
 func Now() time.Time {
-	return time.Now().Add(time.Duration(timeOffset))
+	return time.Now().Add(timeOffset)
 }
 
 // GetTimeUnix 获取服务器时间戳
 func GetTimeUnix() int64 {
-	return time.Now().Add(time.Duration(timeOffset)).Unix()
+	return time.Now().Add(timeOffset).Unix()
 }
 
 func GetTimeMilli() int64 {
-	return time.Now().Add(time.Duration(timeOffset)).UnixMilli()
+	return time.Now().Add(timeOffset).UnixMilli()
 }
 
 func GetTimeMicro() int64 {
-	return time.Now().Add(time.Duration(timeOffset)).UnixMicro()
+	return time.Now().Add(timeOffset).UnixMicro()
 }
 
 // SetTimeOffset 设置服务器时间偏移量
-func SetTimeOffset(offset int64) {
+func SetTimeOffset(offset time.Duration) {
 	timeOffset = offset
 }
 

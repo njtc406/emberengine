@@ -6,6 +6,7 @@
 package timingwheel
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -31,7 +32,19 @@ func Start(interval time.Duration, wheelSize int64, logger *log.Logger) {
 		return
 	}
 
-	globTW = NewTimingWheel(interval, wheelSize, logger)
+	if interval <= 0 {
+		interval = time.Second
+	}
+
+	if logger == nil {
+		l, err := log.NewDefaultLogger(nil)
+		if err != nil {
+			panic(fmt.Sprintf("create logger failed: %v", err))
+		}
+		logger = l
+	}
+
+	globTW = NewTimingWheel(interval, wheelSize, logger.WithField("pkg", "timingwheel"))
 	globTW.Start()
 }
 

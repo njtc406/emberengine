@@ -140,12 +140,16 @@ func setDefaultValues() {
 		AntsPoolSize:      def.DefaultAntsPoolSize,
 		MonitorTimerSize:  def.DefaultMonitorTimerSize,
 		MonitorBucketSize: def.DefaultMonitorBucketSize,
+		TimingWheelConf: &TimingWheelConf{
+			Interval:  time.Millisecond * 10,
+			WheelSize: 1000,
+		},
 	})
 
 	// 日志默认配置
 	runtimeViper.SetDefault("SystemLogger", &log.LoggerConf{
 		Dir:        path.Join(def.DefaultPVPath, "logs"),
-		Name:       "system",
+		PrefixName: "system",
 		Level:      "error",
 		Stdout:     false,
 		Caller:     true,

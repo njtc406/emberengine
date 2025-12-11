@@ -43,15 +43,17 @@ var (
 	ColorRedBg   = logrus.ColorRedBg   // 红底白字
 )
 
+const defaultTimeFormat = "2006-01-02 15:04:05.000Z0700"
+
+var _ logrus.Formatter = (*Formatter)(nil)
+
 // Formatter - logrus formatter, implements logrus.Formatter
 type Formatter struct {
-	logrus.Formatter
-
 	Mu sync.Mutex
 	// FieldsOrder - default: fields sorted alphabetically
 	FieldsOrder []string
 
-	// TimestampFormat - default: time.StampMilli = "2006-01-02 15:04:05.000"
+	// TimestampFormat - default: time.StampMilli = "2006-01-02 15:04:05.000Z0700"
 	TimestampFormat string
 
 	// HideKeys - show [fieldValue] instead of [fieldKey:fieldValue]
@@ -109,8 +111,9 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 func (f *Formatter) writeTimestamp(b *bytes.Buffer, entry *logrus.Entry) {
 	timestampFormat := f.TimestampFormat
 	if timestampFormat == "" {
-		timestampFormat = "2006-01-02 15:04:05.000"
+		timestampFormat = defaultTimeFormat
 	}
+	//time.DateTime
 	b.WriteString(entry.Time.Format(timestampFormat))
 }
 

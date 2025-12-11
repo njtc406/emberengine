@@ -19,7 +19,7 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 	Start(time.Millisecond, 20, logger)
 	defer Stop()
 
-	scheduler := NewJobScheduler(1000, 10, GetTimingWheel())
+	scheduler := NewJobScheduler("concurrent test", 1000, 10, GetTimingWheel(), logger.WithField("pkg", "concurrent test"))
 	var executedCount atomic.Int32
 	var stoppedCount atomic.Int32
 
@@ -87,8 +87,8 @@ func TestTimerABAProblem(t *testing.T) {
 	defer Stop()
 
 	// Create two schedulers, simulating two services
-	schedulerA := NewJobScheduler(100, 10, GetTimingWheel())
-	schedulerB := NewJobScheduler(100, 10, GetTimingWheel())
+	schedulerA := NewJobScheduler("test A", 100, 10, GetTimingWheel(), logger.WithField("pkg", "concurrent test A"))
+	schedulerB := NewJobScheduler("test B", 100, 10, GetTimingWheel(), logger.WithField("pkg", "concurrent test B"))
 	defer schedulerA.Stop()
 	defer schedulerB.Stop()
 

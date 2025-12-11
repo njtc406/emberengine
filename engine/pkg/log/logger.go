@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/logrus"
 )
 
@@ -45,10 +46,13 @@ type RoutingConf struct {
 
 type LoggerConf struct {
 	// 统一命名
-	Dir    string `binding:""`
-	Name   string `binding:""`
-	Level  string `binding:"oneof=panic fatal error warn info debug trace"`
-	Stdout bool   `binding:""`
+	Dir string `binding:""`
+	// 日志文件名前缀
+	PrefixName string `binding:""`
+	// 日志级别
+	Level string `binding:"oneof=panic fatal error warn info debug trace"`
+	// 是否打印到标准输出
+	Stdout bool `binding:""`
 	// 是否打印调用者
 	Caller bool `binding:""`
 	// 是否打印完整调用者
@@ -64,8 +68,9 @@ type LoggerConf struct {
 func New(isDebug bool, opts ...Option) *Logger {
 	l := logrus.New()
 	l.SetBufferPool(getBufferPool(isDebug))
+	l.SetTimeFunc(timelib.Now)
 	l.SetFormatter(&Formatter{
-		TimestampFormat: "2006-01-02 15:04:05.000",
+		TimestampFormat: defaultTimeFormat,
 	})
 	for _, opt := range opts {
 		opt(l)
@@ -79,6 +84,12 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 		conf = &LoggerConf{}
 	}
 	// 默认值
+	if conf.Stdout == false {
+		conf.Stdout = true
+	}
+	if conf.Caller == false {
+		conf.Caller = true
+	}
 	if conf.Level == "" {
 		conf.Level = "info"
 	}
@@ -88,8 +99,8 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 	if conf.Rotation.Every == 0 {
 		conf.Rotation.Every = time.Hour * 24
 	}
-	// 如果 Name 为空，则不写文件，也不启用路由
-	if conf.Name == "" {
+	// 如果 PrefixName 为空，则不写文件，也不启用路由
+	if conf.PrefixName == "" {
 		conf.Routing.Routes = nil
 		return conf
 	}
@@ -114,7 +125,7 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 // filePath 日志输出目录
 // conf 日志配置：
 //   - 通过 Routing.Routes 将不同级别写入不同文件；
-//   - 如果未显式配置 Routing 且 Name 非空，则默认所有级别写入同一个文件（单文件）。
+//   - 如果未显式配置 Routing，则默认所有级别写入同一个文件（单文件）。
 //
 // openStdout 是否开启标准输出(如果Name为空,且openStdout未开启,那么将不会有任何日志信息被记录)
 // TODO 如果需要远程日志,增加一个firehook,比如当日志等级为error时,将日志发送到远程服务器
