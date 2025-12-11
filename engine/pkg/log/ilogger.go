@@ -13,8 +13,6 @@ import (
 	"github.com/njtc406/logrus"
 )
 
-type ILogger = logrus.ILogger
-
 type ILoggerX = logrus.Ext1FieldLogger
 
 type IStdLogger = logrus.StdLogger

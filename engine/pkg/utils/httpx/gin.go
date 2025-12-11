@@ -8,7 +8,6 @@ package httpx
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"path"
 	"runtime/debug"
@@ -84,14 +83,12 @@ func NewGinServer() *GinServer {
 func (gs *GinServer) Init(logger *log.Logger, systemMod string, conf *Conf) error {
 	gs.conf = conf
 	gs.logger = logger
-	gin.DefaultWriter = io.MultiWriter(gs.logger.WriterLevel(log.InfoLevel))       // 设置默认日志输出为info级别
-	gin.DefaultErrorWriter = io.MultiWriter(gs.logger.WriterLevel(log.ErrorLevel)) // 设置默认错误日志输出为error级别
 	// 运行模式
 	gin.SetMode(systemMod)
 	// 设置中间件
 	gs.handler.Use(
 		gzip.Gzip(gzip.DefaultCompression),
-		gin.LoggerWithFormatter(gs.logFormatter), // 这个设置的是默认日志的输出格式
+		gs.customLoggerMiddleware(),
 		gin.Recovery(),
 	)
 	// 自定义中间件
@@ -216,4 +213,37 @@ func (gs *GinServer) WithMiddleware(middleware ...gin.HandlerFunc) *GinServer {
 func (gs *GinServer) SetRouter(router *router_center.GroupHandlerPool) *GinServer {
 	gs.router = router
 	return gs
+}
+
+func (gs *GinServer) customLoggerMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		p := c.Request.URL.Path
+		rawQuery := c.Request.URL.RawQuery
+		c.Next()
+		// 构建日志消息
+		entry := gs.logger.WithFields(log.Fields{
+			"status":     c.Writer.Status(),
+			"method":     c.Request.Method,
+			"path":       p,
+			"query":      rawQuery,
+			"ip":         c.ClientIP(),
+			"latency":    time.Since(start),
+			"user_agent": c.Request.UserAgent(),
+		})
+		// 添加错误信息（如果有）
+		if len(c.Errors) > 0 {
+			entry = entry.WithField("errors", c.Errors.String())
+		}
+		// 根据状态码级别决定日志级别
+		status := c.Writer.Status()
+		switch {
+		case status >= 500:
+			entry.Error("Request completed with server error")
+		case status >= 400:
+			entry.Warn("Request completed with client error")
+		default:
+			entry.Info("Request completed successfully")
+		}
+	}
 }

@@ -33,7 +33,7 @@ func TestInfo(t *testing.T) {
 			},
 			Routes: []LevelRoute{
 				{
-					Name:   "info",
+					Name:   "access.log",
 					Levels: AllLevelStrs,
 				},
 			},
@@ -84,7 +84,7 @@ func BenchmarkName(b *testing.B) {
 			},
 			Routes: []LevelRoute{
 				{
-					Name:   "info",
+					Name:   "access.log",
 					Levels: AllLevelStrs,
 				},
 			},
@@ -120,7 +120,7 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 			},
 			Routes: []LevelRoute{
 				{
-					Name:   "info",
+					Name:   "access.log",
 					Levels: AllLevelStrs,
 				},
 			},
@@ -169,11 +169,11 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 			},
 			Routes: []LevelRoute{
 				{
-					Name:   "info",
+					Name:   "access.log",
 					Levels: []string{InfoLevelStr, DebugLevelStr, WarnLevelStr, TraceLevelStr},
 				},
 				{
-					Name:   "error",
+					Name:   "error.log",
 					Levels: []string{ErrorLevelStr, FatalLevelStr, PanicLevelStr},
 				},
 			},
@@ -239,11 +239,11 @@ func TestLoggerX(t *testing.T) {
 			},
 			Routes: []LevelRoute{
 				{
-					Name:   "info",
+					Name:   "access.log",
 					Levels: []string{InfoLevelStr, DebugLevelStr, WarnLevelStr, TraceLevelStr},
 				},
 				{
-					Name:   "error",
+					Name:   "error.log",
 					Levels: []string{ErrorLevelStr, FatalLevelStr, PanicLevelStr},
 				},
 			},

@@ -1,13 +1,16 @@
 package log
 
 import (
-	"runtime"
 	"time"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 )
 
-// TODO 日志切割换成lumberjack库
+const (
+	dayRotationPattern    = `.%Y%m%d`     // 天切分模式
+	hourRotationPattern   = `.%Y%m%d%H`   // 小时切分模式
+	minuteRotationPattern = `.%Y%m%d%H%M` // 分钟切分模式
+)
 
 type options struct {
 	// Pattern 文件切分精度 可选(%Y%m%d%H%M) 默认(%Y%m%d)
@@ -22,6 +25,9 @@ type options struct {
 	// 默认:24*time.Hour
 	// 这个值和上面的pattern一起,可以实时对文件进行切分 比如:这里配置1分钟切一次,那么如果pattern精确到分钟时,就会每分钟产生一个新的文件
 	RotationTime time.Duration
+
+	// MaxSize 日志文件最大大小
+	MaxSize int64
 }
 
 func (o *options) opts(p string, opts ...ROption) []rotatelogs.Option {
@@ -29,11 +35,15 @@ func (o *options) opts(p string, opts ...ROption) []rotatelogs.Option {
 		opt(o)
 	}
 	l := make([]rotatelogs.Option, 0, 3)
-	if runtime.GOOS != `windows` {
-		l = append(l, rotatelogs.WithLinkName(p))
-	}
+	l = append(l, rotatelogs.WithLinkName(p))
 	l = append(l, rotatelogs.WithMaxAge(o.MaxAge))
 	l = append(l, rotatelogs.WithRotationTime(o.RotationTime))
+	l = append(l, rotatelogs.ForceNewFile())
+	// 最大文件大小
+	if o.MaxSize > 0 {
+		l = append(l, rotatelogs.WithRotationSize(o.MaxSize))
+	}
+
 	return l
 }
 
@@ -62,11 +72,18 @@ func WithRotationTime(d time.Duration) ROption {
 	}
 }
 
+func WithMaxSize(s int64) ROption {
+	return func(o *options) {
+		o.MaxSize = s
+	}
+}
+
 func defaultOpt() *options {
 	return &options{
-		Pattern:      `_%Y%m%d.log`,
+		Pattern:      dayRotationPattern,
 		MaxAge:       15 * 24 * time.Hour,
 		RotationTime: 24 * time.Hour,
+		MaxSize:      100 << 20, // 100MB
 	}
 }
 
@@ -95,9 +112,9 @@ func DeducePattern(every time.Duration, pattern string) string {
 		return pattern
 	}
 	if every < time.Hour {
-		return "_%Y%m%d%H%M.log"
+		return minuteRotationPattern
 	} else if every < 24*time.Hour {
-		return "_%Y%m%d%H.log"
+		return hourRotationPattern
 	}
-	return "_%Y%m%d.log"
+	return dayRotationPattern
 }

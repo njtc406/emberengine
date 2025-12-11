@@ -2,9 +2,7 @@ module github.com/njtc406/emberengine
 
 go 1.23.1
 
-replace (
-	github.com/njtc406/logrus => ../logrus
-)
+replace github.com/njtc406/logrus => ../logrus
 
 require (
 	github.com/bluele/gcache v0.0.2
@@ -151,5 +149,6 @@ require (
 	golang.org/x/tools v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250414145226-207652e42e2e // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250414145226-207652e42e2e // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
