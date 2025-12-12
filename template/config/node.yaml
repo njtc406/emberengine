@@ -229,7 +229,7 @@ ServiceConf:
             # 日志切分周期(默认24h)
             Every: 24h
             # 文件切分精度(系统会根据切分周期自动推导)
-            Pattern: "_%Y%m%d.log"
+            Pattern: "%Y%m%d"
           Routing:
             AsyncMode:
               # 开启异步模式(默认不开启,内部调试时可以关闭)

@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	dayRotationPattern    = `.%Y%m%d`     // 天切分模式
-	hourRotationPattern   = `.%Y%m%d%H`   // 小时切分模式
-	minuteRotationPattern = `.%Y%m%d%H%M` // 分钟切分模式
+	dayRotationPattern    = `%Y%m%d`     // 天切分模式
+	hourRotationPattern   = `%Y%m%d%H`   // 小时切分模式
+	minuteRotationPattern = `%Y%m%d%H%M` // 分钟切分模式
 )
 
 type options struct {
@@ -38,7 +38,6 @@ func (o *options) opts(p string, opts ...ROption) []rotatelogs.Option {
 	l = append(l, rotatelogs.WithLinkName(p))
 	l = append(l, rotatelogs.WithMaxAge(o.MaxAge))
 	l = append(l, rotatelogs.WithRotationTime(o.RotationTime))
-	l = append(l, rotatelogs.ForceNewFile())
 	// 最大文件大小
 	if o.MaxSize > 0 {
 		l = append(l, rotatelogs.WithRotationSize(o.MaxSize))
@@ -93,7 +92,7 @@ func rotateNew(p string, opts ...ROption) (*Rotate, error) {
 	opt := defaultOpt()
 	optList := opt.opts(p, opts...)
 	return rotatelogs.New(
-		p+opt.Pattern,
+		p+"."+opt.Pattern,
 		optList...,
 	)
 }

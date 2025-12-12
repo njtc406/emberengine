@@ -138,27 +138,48 @@ ServiceConf:
 
 # 日志配置
 SystemLogger:
-  Path: ./example/data/logs
+  Dir: ./example/data/logs
   # 日志文件名
-  Name: "system-concurrency1"
+  Name: "app"
   # 日志级别
   Level: debug
+  # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
+  Stdout: false
   # 是否打印调用文件信息
   Caller: true
-  # 是否打印完整调用文件信息
+  # 是否打印完整调用文件信息(默认false,完整路径是绝对路径,否则打印以项目根目录为基准的相对路径)
   FullCaller: false
   # 是否显示日志颜色
   Color: true
-  # 日志最大保存时间(默认15天)
-  MaxAge: 720h
-  # 日志切分周期(默认24h)
-  RotationTime: 24h
-  AsyncMode:
-    # 开启异步模式(内部调试时可以关闭)
-    Enable: true
-    Config:
-      # 刷新间隔
-      FlushInterval: 1s
-      # 缓冲区大小(满时会立即写入)
-      BufferSize: 1048576  # 1MB
+  # 日志切割配置
+  Rotation:
+    # 日志最大保存时间(默认15天)
+    MaxAge: 720h
+    # 日志切分周期(默认24h)
+    Every: 24h
+    # 文件切分精度(系统会根据切分周期自动推导)
+    Pattern: "%Y%m%d"
+  Routing:
+    AsyncMode:
+      # 开启异步模式(默认不开启,内部调试时可以关闭)
+      Enable: true
+      Config:
+        # 刷新间隔(默认1s)
+        FlushInterval: 1s
+        # 缓冲区大小(默认1M,满时会立即写入)
+        BufferSize: 1048576
+    # 路由规则
+    Routes:
+      # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName_Pattern)
+      - Name: "access"
+        Levels:
+          - info
+          - debug
+          - trace
+          - warn
+      - Name: "error"
+        Levels:
+          - error
+          - fatal
+          - panic
 
