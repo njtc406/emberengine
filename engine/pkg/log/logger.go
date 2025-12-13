@@ -60,8 +60,8 @@ type LoggerConf struct {
 	// 是否打印级别色彩
 	Color bool `binding:""`
 	// 切割与路由
-	Rotation RotationConf `binding:""`
-	Routing  RoutingConf  `binding:""`
+	Rotation *RotationConf `binding:""`
+	Routing  *RoutingConf  `binding:""`
 }
 
 // New creates a new Logger object.

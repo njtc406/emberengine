@@ -38,7 +38,7 @@ func TestRedBlackTreePut(t *testing.T) {
 		{5, "e", true},
 		{6, "f", true},
 		{7, "g", true},
-		{8, nil, false},
+		{8, "", false},
 	}
 
 	for _, test := range tests1 {
@@ -85,10 +85,10 @@ func TestRedBlackTreeRemove(t *testing.T) {
 		{2, "b", true},
 		{3, "c", true},
 		{4, "d", true},
-		{5, nil, false},
-		{6, nil, false},
-		{7, nil, false},
-		{8, nil, false},
+		{5, "", false},
+		{6, "", false},
+		{7, "", false},
+		{8, "", false},
 	}
 
 	for _, test := range tests2 {

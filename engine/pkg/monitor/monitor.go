@@ -45,7 +45,7 @@ func (rm *RpcMonitor) Init() inf.IMonitor {
 	rm.ctx = ctx
 	rm.cancel = cancel
 	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.sd = timingwheel.NewJobScheduler("rpc monitor", config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize,
+	rm.sd = timingwheel.NewJobScheduler("rpc monitor", config.Conf.NodeConf.RpcMonitorConf.MonitorTimerSize, config.Conf.NodeConf.RpcMonitorConf.MonitorBucketSize,
 		timingwheel.GetTimingWheel(), log.SysLogger.WithField("component", "rpc monitor"), config.IsDebug())
 	return rm
 }

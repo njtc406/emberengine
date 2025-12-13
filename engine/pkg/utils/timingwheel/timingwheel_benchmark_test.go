@@ -13,7 +13,7 @@ func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
-var dp = timingwheel.NewJobScheduler("benchmark test", 10000000, 10, timingwheel.GetTimingWheel(), nil)
+var dp timingwheel.ITimerScheduler
 
 func printTask1(t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
@@ -27,6 +27,15 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 	}
 	timingwheel.Start(time.Millisecond, 20, logger)
 	defer timingwheel.Stop()
+
+	dp = timingwheel.NewJobScheduler(
+		"benchmark test",
+		10000000,
+		10,
+		timingwheel.GetTimingWheel(),
+		logger.WithField("pkg", "timingwheel_benchmark"),
+		false,
+	)
 
 	cases := []struct {
 		name string

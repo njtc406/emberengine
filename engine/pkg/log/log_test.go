@@ -19,11 +19,11 @@ func TestInfo(t *testing.T) {
 		Caller:     true,
 		FullCaller: true,
 		Color:      false,
-		Rotation: RotationConf{
+		Rotation: &RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
 		},
-		Routing: RoutingConf{
+		Routing: &RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: true,
 				Config: &AsyncWriterConfig{
@@ -70,11 +70,11 @@ func BenchmarkName(b *testing.B) {
 		Caller:     true,
 		FullCaller: false,
 		Color:      false,
-		Rotation: RotationConf{
+		Rotation: &RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
 		},
-		Routing: RoutingConf{
+		Routing: &RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: true,
 				Config: &AsyncWriterConfig{
@@ -106,11 +106,11 @@ func TestSingleFileViaDefaultLevelWriter(t *testing.T) {
 		Dir:        dir,
 		PrefixName: "app",
 		Level:      "debug",
-		Rotation: RotationConf{
+		Rotation: &RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
 		},
-		Routing: RoutingConf{
+		Routing: &RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: false,
 				Config: &AsyncWriterConfig{
@@ -155,11 +155,11 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 		Level:      "info",
 		Caller:     true,
 		Stdout:     true,
-		Rotation: RotationConf{
+		Rotation: &RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
 		},
-		Routing: RoutingConf{
+		Routing: &RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: false,
 				Config: &AsyncWriterConfig{
@@ -197,8 +197,8 @@ func TestMultiFileByLevelRoutes(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// 检查 info 文件和 error 文件都存在
-	patternInfo := filepath.Join("./logs", "app.log_info_*.log")
-	patternErr := filepath.Join("./logs", "app.log_error_*.log")
+	patternInfo := filepath.Join("./logs", "app_access.log.*")
+	patternErr := filepath.Join("./logs", "app_error.log.*")
 
 	matchesInfo, _ := filepath.Glob(patternInfo)
 	matchesErr, _ := filepath.Glob(patternErr)
@@ -225,11 +225,11 @@ func TestLoggerX(t *testing.T) {
 		Caller:     true,
 		FullCaller: false,
 		Color:      true,
-		Rotation: RotationConf{
+		Rotation: &RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
 		},
-		Routing: RoutingConf{
+		Routing: &RoutingConf{
 			AsyncMode: &AsyncMode{
 				Enable: false,
 				Config: &AsyncWriterConfig{

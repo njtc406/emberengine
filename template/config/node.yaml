@@ -10,22 +10,23 @@ NodeConf:
   PVCPath: ./example/data
   # 系统缓存目录
   PVPath: ./example/cache
-  # 性能监控(0表示不开启监控)
-  ProfilerInterval: 10s
   # 线程池大小=cpu核数*设置值 (配置0表示不开启线程池)
   # 这个根据业务自行调整,cpu密集型一般直接为cpu核数,即设为1
   # 如果是io密集型可以根据:CPU核数 * (1 + 平均等待时间/平均计算时间) 来计算
   # 混合型就只能自行压测找最优
   AntsPoolSize: 1
-  # 定时器数量(用于监控rpc调用的timer)
-  MonitorTimerSize: 10000
-  # 定时器桶数量(决定锁的粒度)
-  MonitorBucketSize: 20
+  RpcMonitorConf:
+    # 定时器数量(用于监控rpc调用的timer)
+    MonitorTimerSize: 10000
+    # 定时器桶数量(决定锁的粒度)
+    MonitorBucketSize: 20
   EventBusConf:
     # 全局事件前缀
     GlobalPrefix: "ember.global"
     # 服务器事件前缀
     ServerPrefix: "ember.server"
+    # 特定服务事件前缀
+    SpecificPrefix: "ember.specific"
     # 主服务事件前缀
     MasterPrefix: "ember.master"
     # 从服务事件前缀
@@ -56,6 +57,11 @@ NodeConf:
     DeDuplicatorTTL: 1s
     DeDuplicatorCleanTTL: 3s
     DeDuplicatorSize: 10000
+  TimingWheelConf:
+    # 时间精度
+    Interval: 1s
+    # 槽位数
+    WheelSize: 3600
 
 ClusterConf:
   ETCDConf:
@@ -258,7 +264,7 @@ ServiceConf:
 SystemLogger:
   Dir: ./example/data/logs
   # 日志文件名
-  Name: "app"
+  PrefixName: "app"
   # 日志级别
   Level: debug
   # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
@@ -284,8 +290,8 @@ SystemLogger:
       Config:
         # 刷新间隔(默认1s)
         FlushInterval: 1s
-        # 缓冲区大小(默认1M,满时会立即写入)
-        BufferSize: 1048576
+        # 缓冲区大小
+        BufferSize: 1024
     # 路由规则
     Routes:
         # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName_Pattern)

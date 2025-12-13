@@ -83,7 +83,7 @@ func (m *WebSocketManager) closeSession(session inf.ISession, reason string) {
 	session.Close()
 	_ = session.GetConn().Close()
 
-	log.SysLogger.Debugf("user[%s] session %d closed, reason: %s", uid, sessionId, reason)
+	log.SysLogger.Debugf("user[%d] session %d closed, reason: %s", uid, sessionId, reason)
 }
 
 func (m *WebSocketManager) listen(session inf.ISession) {

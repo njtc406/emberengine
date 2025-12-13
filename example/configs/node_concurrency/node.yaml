@@ -12,10 +12,18 @@ NodeConf:
   ProfilerInterval: 0s
   # 线程池大小 cpu_num*size
   AntsPoolSize: 10000
-  # 定时器数量(用于监控rpc调用的timer)
-  MonitorTimerSize: 10000
-  # 定时器桶数量(决定锁的粒度)
-  MonitorBucketSize: 20
+  # rpc监控配置
+  RpcMonitorConf:
+    # 定时器数量(用于监控rpc调用的timer)
+    MonitorTimerSize: 10000
+    # 定时器桶数量(决定锁的粒度)
+    MonitorBucketSize: 200
+  # 时间轮配置
+  TimingWheelConf:
+    # 时间精度
+    Interval: 500ms
+    # 槽位数
+    WheelSize: 2000
 
 ClusterConf:
   ETCDConf:
@@ -154,11 +162,11 @@ ServiceConf:
 SystemLogger:
   Dir: ./example/data/logs
   # 日志文件名
-  Name: "app"
+  PrefixName: "concurrency_test"
   # 日志级别
   Level: debug
   # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
-  Stdout: false
+  Stdout: true
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息(默认false,完整路径是绝对路径,否则打印以项目根目录为基准的相对路径)
@@ -181,10 +189,10 @@ SystemLogger:
         # 刷新间隔(默认1s)
         FlushInterval: 1s
         # 缓冲区大小(默认1M,满时会立即写入)
-        BufferSize: 1048576
+        BufferSize: 1024
     # 路由规则
     Routes:
-      # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName_Pattern)
+      # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName.log_Pattern)
       - Name: "access"
         Levels:
           - info
@@ -196,4 +204,3 @@ SystemLogger:
           - error
           - fatal
           - panic
-

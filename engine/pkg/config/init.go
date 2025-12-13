@@ -133,13 +133,14 @@ func createDirIfNotExists(dir string) {
 func setDefaultValues() {
 	// 默认基础配置
 	runtimeViper.SetDefault("NodeConf", &NodeConf{
-		SystemStatus:      Debug,
-		PVCPath:           def.DefaultPVCPath,
-		PVPath:            def.DefaultPVPath,
-		ProfilerInterval:  0, // 默认不开启
-		AntsPoolSize:      def.DefaultAntsPoolSize,
-		MonitorTimerSize:  def.DefaultMonitorTimerSize,
-		MonitorBucketSize: def.DefaultMonitorBucketSize,
+		SystemStatus: Debug,
+		PVCPath:      def.DefaultPVCPath,
+		PVPath:       def.DefaultPVPath,
+		AntsPoolSize: def.DefaultAntsPoolSize,
+		RpcMonitorConf: &RpcMonitorConf{
+			MonitorTimerSize:  def.DefaultMonitorTimerSize,
+			MonitorBucketSize: def.DefaultMonitorBucketSize,
+		},
 		TimingWheelConf: &TimingWheelConf{
 			Interval:  time.Millisecond * 10,
 			WheelSize: 1000,
@@ -155,11 +156,11 @@ func setDefaultValues() {
 		Caller:     true,
 		FullCaller: false,
 		Color:      false,
-		Rotation: log.RotationConf{
+		Rotation: &log.RotationConf{
 			MaxAge: 15 * 24 * time.Hour,
 			Every:  24 * time.Hour,
 		},
-		Routing: log.RoutingConf{
+		Routing: &log.RoutingConf{
 			AsyncMode: &log.AsyncMode{
 				Enable: true,
 				Config: &log.AsyncWriterConfig{

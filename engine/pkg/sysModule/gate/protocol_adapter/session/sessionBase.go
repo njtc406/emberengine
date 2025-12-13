@@ -53,7 +53,7 @@ func (s *BaseSession) StartSender() {
 				data, ok := s.msgCh.Pop()
 				if ok {
 					if err := s.conn.Send(data); err != nil {
-						log.SysLogger.Errorf("user[%s] conn[%d] send client pkg error: %v", s.uid, s.id, err)
+						log.SysLogger.Errorf("user[%d] conn[%d] send client pkg error: %v", s.uid, s.id, err)
 						break // 如果已经断开了,则直接退出(需不需要对比一下error?)
 					}
 				}
@@ -69,7 +69,7 @@ func (s *BaseSession) StartSender() {
 					// TODO 批量发送
 				} else {
 					if err := s.conn.Send(data); err != nil {
-						log.SysLogger.Errorf("user[%s] conn[%d] send client pkg error: %v", s.uid, s.id, err)
+						log.SysLogger.Errorf("user[%d] conn[%d] send client pkg error: %v", s.uid, s.id, err)
 						// TODO 要不要踢连接,可以考虑做成hook函数,由业务来决定
 					}
 				}

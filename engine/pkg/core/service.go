@@ -260,7 +260,7 @@ func (s *Service) Stop() {
 	// 关闭邮箱(完全关闭所有的工作线程,不再接收新的消息)
 	s.mailbox.Stop()
 
-	if s.enableLogging {
+	if s.enableLogging && s.logger != nil {
 		// 如果开启了独立日志,则关闭日志
 		log.Release(s.logger)
 	}

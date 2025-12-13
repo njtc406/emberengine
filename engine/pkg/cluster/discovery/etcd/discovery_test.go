@@ -8,6 +8,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	mvccpb "go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -44,14 +45,24 @@ func (p *mockProcessor) PublishGlobal(context.Context, int32, proto.Message) err
 func (p *mockProcessor) RegServerEventReceiverFunc(int32, inf.IEventHandler, inf.EventCallBack) {}
 func (p *mockProcessor) UnRegServerEventReceiverFun(int32, inf.IEventHandler)                   {}
 func (p *mockProcessor) PublishServer(context.Context, int32, proto.Message) error              { return nil }
-func (p *mockProcessor) CastEvent(inf.IEvent)                                                   {}
-func (p *mockProcessor) AddBindEvent(int32, inf.IEventHandler, inf.EventCallBack)               {}
-func (p *mockProcessor) AddListen(int32, inf.IEventHandler)                                     {}
-func (p *mockProcessor) RemoveBindEvent(int32, inf.IEventHandler)                               {}
-func (p *mockProcessor) RemoveListen(int32, inf.IEventHandler)                                  {}
-func (p *mockProcessor) PushEvent(ev inf.IEvent) error                                          { p.got = append(p.got, ev); return nil }
+func (p *mockProcessor) RegSpecificEventReceiverFunc(int32, string, inf.IEventHandler, inf.EventCallBack) {
+}
+func (p *mockProcessor) UnRegSpecificEventReceiverFun(int32, string, inf.IEventHandler) {}
+func (p *mockProcessor) PublishSpecific(context.Context, int32, string, proto.Message) error {
+	return nil
+}
+func (p *mockProcessor) CastEvent(inf.IEvent)                                     {}
+func (p *mockProcessor) AddBindEvent(int32, inf.IEventHandler, inf.EventCallBack) {}
+func (p *mockProcessor) AddListen(int32, inf.IEventHandler)                       {}
+func (p *mockProcessor) RemoveBindEvent(int32, inf.IEventHandler)                 {}
+func (p *mockProcessor) RemoveListen(int32, inf.IEventHandler)                    {}
+func (p *mockProcessor) PushEvent(ev inf.IEvent) error                            { p.got = append(p.got, ev); return nil }
 
 func TestWatchLoopPushesEvents(t *testing.T) {
+	if log.SysLogger == nil {
+		log.Init(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "debug"}, true)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -62,7 +73,7 @@ func TestWatchLoopPushesEvents(t *testing.T) {
 	mp := &mockProvider{connected: true, watchCh: watchCh, getResp: &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{kv}}}
 	proc := &mockProcessor{}
 
-	e := &EtcdDiscovery{ctx: ctx, provider: mp, proc: proc, conf: &config.ClusterConf{DiscoveryConf: &config.DiscoveryConf{Path: "/ember/service"}}}
+	e := &EtcdDiscovery{ctx: ctx, provider: mp, proc: proc, conf: &config.DiscoveryConf{Path: "/ember/service"}}
 
 	// run watch loop briefly
 	go e.watchLoop()

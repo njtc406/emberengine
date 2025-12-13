@@ -10,6 +10,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
@@ -49,12 +50,14 @@ func (s *testService) PushEvent(e inf.IEvent) error {
 }
 
 func TestEventBus(t *testing.T) {
+	if log.SysLogger == nil {
+		log.Init(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "debug"}, true)
+	}
+
 	eb := GetEventBus()
 	eb.Init(
 		&config.EventBusConf{
-			NatsConf: &config.NatsConf{
-				EndPoints: []string{"nats://192.168.145.188:4222"},
-			},
+			NatsConf:     nil,
 			ServerPrefix: "server.%d.%d",
 			GlobalPrefix: "global.%d",
 			ShardCount:   16,
@@ -73,6 +76,8 @@ func TestEventBus(t *testing.T) {
 	service2.SetName("service2")
 	service1.serverId = 2
 	service2.serverId = 1
+	service1.SetPid(actor.NewPID("", "test-node", service1.serverId, "svc1", "test", service1.GetName(), 1, "local"))
+	service2.SetPid(actor.NewPID("", "test-node", service2.serverId, "svc2", "test", service2.GetName(), 1, "local"))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -93,10 +98,10 @@ func TestEventBus(t *testing.T) {
 		time.Sleep(time.Second * 1)
 
 		fmt.Println("publish goroutine start")
-		if err := eb.PublishGlobal(ctx, 1, nil); err != nil {
+		if err := eb.PublishGlobalLocal(ctx, 1, nil); err != nil {
 			t.Error(err)
 		}
-		if err := eb.PublishServer(ctx, 2, 1, nil); err != nil {
+		if err := eb.PublishServerLocal(ctx, 2, 1, nil); err != nil {
 			t.Error(err)
 		}
 		fmt.Println("publish done")

@@ -59,5 +59,8 @@ func EncodeToAny(msg any) (*anypb.Any, error) {
 }
 
 func DecodeFromAny(anyMsg *anypb.Any) (proto.Message, error) {
+	if anyMsg == nil {
+		return nil, nil
+	}
 	return anyMsg.UnmarshalNew()
 }

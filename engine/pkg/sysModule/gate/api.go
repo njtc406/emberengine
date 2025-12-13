@@ -57,7 +57,7 @@ func (g *Gate) RpcSendMsgToClientsByUid(msg *gate_proto.Message) error {
 	for _, uid := range msg.Uids {
 		session := sessionMgr.GetSessionByUid(uid)
 		if session == nil {
-			g.GetLogger().Errorf("RpcSendMsgToClientsByUid:role[%s] msg:%d marshal error: %s", uid, msg.Id, err)
+			g.GetLogger().Errorf("RpcSendMsgToClientsByUid: uid[%d] session not found, msg:%d", uid, msg.Id)
 			continue
 		}
 		session.Send(data)

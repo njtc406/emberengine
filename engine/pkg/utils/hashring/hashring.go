@@ -62,7 +62,7 @@ func (h *HashRing[T]) Add(key T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for i := 0; i < h.replicas; i++ {
-		virtualNodeKey := fmt.Sprintf("%s-%d-%d", hashSalt, key, i)
+		virtualNodeKey := fmt.Sprintf("%s-%v-%d", hashSalt, key, i)
 		hash := hashEvent(virtualNodeKey)
 		h.nodes = append(h.nodes, hash)
 		h.ring[hash] = key

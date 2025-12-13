@@ -28,7 +28,7 @@ func buildLevelWriters(conf *LoggerConf) (*LevelRouter, error) {
 		return nil, nil
 	}
 	if conf.PrefixName == "" {
-		return nil, nil
+		conf.PrefixName = "sys"
 	}
 	router := LevelRouter{
 		routers: make(map[Level]io.Writer),
