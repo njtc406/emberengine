@@ -21,5 +21,8 @@ func Init(conf *LoggerConf, isDebug bool) {
 
 func Close() {
 	SysLogger.Info("-------->system log release<---------")
+	if SysLogger == nil {
+		return
+	}
 	Release(SysLogger)
 }
