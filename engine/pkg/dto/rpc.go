@@ -8,7 +8,7 @@ package dto
 import (
 	"context"
 
-	"github.com/njtc406/logrus"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 // CancelRpc 异步调用时的取消函数,可用于取消回调(请注意,一旦调用发送后是无法取消的,只能取消回调)
@@ -64,8 +64,8 @@ func (header Headers) ToMap() map[string]string {
 	return mp
 }
 
-func (header Headers) ToFields() logrus.Fields {
-	f := make(logrus.Fields, len(header))
+func (header Headers) ToFields() log.Fields {
+	f := make(log.Fields, len(header))
 	for k, v := range header {
 		f[k] = v
 	}

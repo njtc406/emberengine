@@ -44,7 +44,7 @@ func Start(interval time.Duration, wheelSize int64, logger *log.Logger) {
 		logger = l
 	}
 
-	globTW = NewTimingWheel(interval, wheelSize, logger.WithField("pkg", "timingwheel"))
+	globTW = NewTimingWheel(interval, wheelSize, log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel"}))
 	globTW.Start()
 }
 

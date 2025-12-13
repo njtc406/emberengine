@@ -33,7 +33,7 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 		10000000,
 		10,
 		timingwheel.GetTimingWheel(),
-		logger.WithField("pkg", "timingwheel_benchmark"),
+		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_benchmark"}),
 		false,
 	)
 

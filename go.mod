@@ -2,8 +2,6 @@ module github.com/njtc406/emberengine
 
 go 1.23.1
 
-replace github.com/njtc406/logrus => ../logrus
-
 require (
 	github.com/bluele/gcache v0.0.2
 	github.com/cespare/xxhash/v2 v2.3.0
@@ -18,8 +16,8 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
+	github.com/mattn/go-colorable v0.1.14
 	github.com/nats-io/nats.go v1.41.1
-	github.com/njtc406/logrus v1.1.6
 	github.com/njtc406/viper v0.0.0-20241204023427-3b9ef60a450c
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/patrickmn/go-cache v2.1.0+incompatible
@@ -92,7 +90,6 @@ require (
 	github.com/lestrrat-go/strftime v1.1.0 // indirect
 	github.com/libp2p/go-sockaddr v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-sqlite3 v1.14.28 // indirect
 	github.com/miekg/dns v1.1.65 // indirect
@@ -149,6 +146,5 @@ require (
 	golang.org/x/tools v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250414145226-207652e42e2e // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250414145226-207652e42e2e // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

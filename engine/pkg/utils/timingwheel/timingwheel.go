@@ -48,7 +48,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILoggerX) *T
 		if err != nil {
 			panic(fmt.Sprintf("create logger failed: %v", err))
 		}
-		logger = l.WithField("pkg", "timingwheel")
+		logger = log.NewLoggerX(l, log.Fields{"pkg": "timingwheel"})
 	}
 	tickMs := int64(tick / time.Millisecond)
 	if tickMs <= 0 {

@@ -9,7 +9,7 @@ package log
 //
 // 关键点:
 //   - 直接调用底层 Logger 的 WithFields 返回新的 Logger(通常是 *Entry 实现 Logger 接口)；
-//   - 不在这里覆写 Info/Debug 等方法, 这样最终调用者仍然是底层实现, caller 由 logrus 内部计算；
+//   - 不在这里覆写 Info/Debug 等方法, 这样最终调用者仍然是底层实现, caller 由底层 logger 计算；
 //   - 不在 LoggerX 中持有可变 map, 避免在多 goroutine 场景下出现竞态。
 func NewLoggerX(logger *Logger, fields Fields) ILoggerX {
 	if logger == nil {
@@ -18,8 +18,5 @@ func NewLoggerX(logger *Logger, fields Fields) ILoggerX {
 	if fields == nil {
 		fields = Fields{}
 	}
-
-	// 底层 fork 的 logrus 通常会返回一个实现了 ILogger 的 *Entry,
-	// 这里直接把它当作 ILogger 返回, 调用方继续通过 ILogger 接口使用。
-	return logger.WithFields(fields)
+	return logger.WithFields(map[string]interface{}(fields))
 }

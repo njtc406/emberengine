@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -220,7 +221,7 @@ func TestLoggerX(t *testing.T) {
 	logger, err := NewDefaultLogger(&LoggerConf{
 		Dir:        "./logs",
 		PrefixName: "app",
-		Level:      "debug",
+		Level:      "info",
 		Stdout:     true,
 		Caller:     true,
 		FullCaller: false,
@@ -257,10 +258,66 @@ func TestLoggerX(t *testing.T) {
 	// 创建一个 LoggerX 实例
 	loggerX := NewLoggerX(logger, Fields{"app": "emberengine"})
 
+	loggerX.Slow().Trace("trace msg")
+	loggerX.Slow().Debug("debug msg")
 	loggerX.Slow().Info("info msg")
-	loggerX.State().Debug("debug msg")
-	loggerX.Metric().Warn("warn msg")
-	loggerX.Trace("trace msg")
-	loggerX.Error("error msg")
+	loggerX.Slow().Warn("warn msg")
+	loggerX.Slow().Error("error msg")
+	//func() {
+	//	defer func() { _ = recover() }()
+	//	loggerX.Slow().Panic("panic msg")
+	//}()
+	// Fatal 会触发 os.Exit(1)，不应在单测中直接调用。
+	// loggerX.Slow().Fatal("fatal msg")
+	//loggerX.State().Debug("debug msg")
+	//loggerX.Metric().Warn("warn msg")
+	//loggerX.Trace("trace msg")
+	//loggerX.Error("error msg")
 
+}
+
+func TestNoAnsiInFileEvenWhenColorEnabled(t *testing.T) {
+	dir := t.TempDir()
+
+	logger, err := NewDefaultLogger(&LoggerConf{
+		Dir:        dir,
+		PrefixName: "app",
+		Level:      "debug",
+		Stdout:     true,
+		Caller:     true,
+		FullCaller: false,
+		Color:      true,
+		Rotation: &RotationConf{
+			MaxAge: 15 * 24 * time.Hour,
+			Every:  24 * time.Hour,
+		},
+		Routing: &RoutingConf{
+			AsyncMode: &AsyncMode{
+				Enable: false,
+				Config: &AsyncWriterConfig{BufferSize: 1024, FlushInterval: time.Second},
+			},
+			Routes: []LevelRoute{{Name: "access.log", Levels: AllLevelStrs}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewDefaultLogger error: %v", err)
+	}
+	defer Release(logger)
+
+	logger.Error("error msg")
+	time.Sleep(100 * time.Millisecond)
+
+	pattern := filepath.Join(dir, "app_access.log.*")
+	matches, _ := filepath.Glob(pattern)
+	if len(matches) == 0 {
+		t.Fatalf("expected log file matching %s", pattern)
+	}
+
+	bs, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if strings.Contains(string(bs), "\x1b[") {
+		t.Fatalf("expected no ANSI escapes in file output")
+	}
 }

@@ -87,7 +87,7 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, t *TimingWheel, l
 		if err != nil {
 			panic(fmt.Sprintf("create logger failed: %v", err))
 		}
-		logger = l.WithField("name", jobName)
+		logger = log.NewLoggerX(l, log.Fields{"name": jobName})
 	}
 	if chanSize <= 0 {
 		chanSize = 100000

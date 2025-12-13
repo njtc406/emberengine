@@ -6,7 +6,12 @@ func Init(conf *LoggerConf, isDebug bool) {
 	if SysLogger != nil {
 		return
 	}
+	conf = fixConf(conf)
 	conf.Stdout = conf.Stdout || isDebug
+	// Debug mode 默认更详细
+	if isDebug && conf.Level == "info" {
+		conf.Level = "debug"
+	}
 	logger, err := NewDefaultLogger(
 		conf,
 	)
@@ -20,9 +25,9 @@ func Init(conf *LoggerConf, isDebug bool) {
 }
 
 func Close() {
-	SysLogger.Info("-------->system log release<---------")
-	if SysLogger == nil {
-		return
+	if SysLogger != nil {
+		SysLogger.Info("-------->system log release<---------")
+		Release(SysLogger)
+		SysLogger = nil
 	}
-	Release(SysLogger)
 }

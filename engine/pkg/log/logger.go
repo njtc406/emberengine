@@ -10,16 +10,28 @@
 package log
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
-	"github.com/njtc406/logrus"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type AsyncMode struct {
 	Enable bool
 	Config *AsyncWriterConfig
+}
+
+type AsyncWriterConfig struct {
+	// 异步写入缓冲区大小
+	BufferSize    int           `binding:""`
+	FlushInterval time.Duration `binding:""`
 }
 
 type LevelRoute struct {
@@ -45,6 +57,8 @@ type RoutingConf struct {
 }
 
 type LoggerConf struct {
+	// 生产模式：开启时日志以 JSON 格式输出（适合采集/检索）；同时会禁用 Color。
+	Production bool `binding:""`
 	// 统一命名
 	Dir string `binding:""`
 	// 日志文件名前缀
@@ -64,24 +78,19 @@ type LoggerConf struct {
 	Routing  *RoutingConf  `binding:""`
 }
 
-// New creates a new Logger object.
-func New(isDebug bool, opts ...Option) *Logger {
-	l := logrus.New()
-	l.SetBufferPool(getBufferPool(isDebug))
-	l.SetTimeFunc(timelib.Now)
-	l.SetFormatter(&Formatter{
-		TimestampFormat: defaultTimeFormat,
-	})
-	for _, opt := range opts {
-		opt(l)
-	}
-
-	return l
-}
-
 func fixConf(conf *LoggerConf) *LoggerConf {
 	if conf == nil {
 		conf = &LoggerConf{}
+	}
+	if conf.Rotation == nil {
+		conf.Rotation = &RotationConf{}
+	}
+	if conf.Routing == nil {
+		conf.Routing = &RoutingConf{}
+	}
+	// 生产模式强制结构化输出，不使用颜色
+	if conf.Production {
+		conf.Color = false
 	}
 	// 默认值
 	if conf.Stdout == false {
@@ -121,6 +130,18 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 	return conf
 }
 
+// Logger is a zap-backed logger that keeps the existing leveled API surface.
+// It also implements ILoggerX, so it can be passed through the engine consistently.
+type Logger struct {
+	shared *loggerShared
+	z      *zap.Logger
+}
+
+type loggerShared struct {
+	closeOnce sync.Once
+	closers   []closeFn
+}
+
 // NewDefaultLogger 创建一个通用日志对象
 // filePath 日志输出目录
 // conf 日志配置：
@@ -131,32 +152,176 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 // TODO 如果需要远程日志,增加一个firehook,比如当日志等级为error时,将日志发送到远程服务器
 func NewDefaultLogger(conf *LoggerConf) (*Logger, error) {
 	conf = fixConf(conf)
-	picker, err := newPicker(conf)
+
+	levelStr := strings.ToLower(conf.Level)
+	minLevel, ok := levelMap[levelStr]
+	if !ok {
+		minLevel = ErrorLevel
+	}
+
+	core, closers, err := buildZapTeeCore(conf, minLevel, conf.Caller, conf.FullCaller, conf.Color, conf.Production)
 	if err != nil {
+		for _, c := range closers {
+			_ = c()
+		}
 		return nil, err
 	}
 
-	level := strings.ToLower(conf.Level)
-	if _, ok := levelMap[level]; !ok {
-		level = ErrorLevelStr
+	opts := []zap.Option{
+		zap.AddCallerSkip(2),
+		zap.ErrorOutput(zapcore.AddSync(os.Stderr)),
+	}
+	if conf.Caller {
+		opts = append(opts, zap.AddCaller())
 	}
 
-	logger := New(
-		conf.Stdout,
-		WithLevel(levelMap[level]),
-		WithCaller(conf.Caller),
-		WithColor(conf.Color),
-		WithFullCaller(conf.FullCaller),
-		WithOuterPicker(picker),
-	)
-
-	return logger, nil
+	zl := zap.New(core, opts...)
+	return &Logger{
+		shared: &loggerShared{closers: closers},
+		z:      zl,
+	}, nil
 }
 
 func Release(logger *Logger) {
 	if logger == nil {
 		return
 	}
+	_ = logger.Close()
+}
 
-	_ = logger.GetOuterPicker().Close()
+func (l *Logger) Close() error {
+	if l == nil || l.shared == nil {
+		return nil
+	}
+	l.shared.closeOnce.Do(func() {
+		_ = l.z.Sync()
+		for _, c := range l.shared.closers {
+			_ = c()
+		}
+		l.shared.closers = nil
+	})
+	return nil
+}
+
+// GetOutput returns an io.Writer for libraries expecting a standard logger output.
+// It logs at InfoLevel through this logger.
+func (l *Logger) GetOutput() io.Writer {
+	return &loggerOutputWriter{l: l}
+}
+
+type loggerOutputWriter struct {
+	l *Logger
+}
+
+func (w *loggerOutputWriter) Write(p []byte) (n int, err error) {
+	if w == nil || w.l == nil {
+		return len(p), nil
+	}
+	msg := strings.TrimRight(string(p), "\r\n")
+	if msg == "" {
+		return len(p), nil
+	}
+	// Skip this writer frame so caller points to the library using the writer.
+	zl := w.l.z.WithOptions(zap.AddCallerSkip(1))
+	ce := zl.Check(zapcore.Level(InfoLevel), msg)
+	if ce != nil {
+		ce.Write()
+	}
+	return len(p), nil
+}
+
+func (l *Logger) WithContext(_ context.Context) ILoggerX {
+	return l
+}
+
+func (l *Logger) WithField(key string, value interface{}) ILoggerX {
+	if l == nil {
+		return nil
+	}
+	return &Logger{shared: l.shared, z: l.z.With(zap.Any(key, value))}
+}
+
+func (l *Logger) WithFields(fields map[string]interface{}) ILoggerX {
+	if l == nil {
+		return nil
+	}
+	if len(fields) == 0 {
+		return l
+	}
+	zfs := make([]zap.Field, 0, len(fields))
+	for k, v := range fields {
+		zfs = append(zfs, zap.Any(k, v))
+	}
+	return &Logger{shared: l.shared, z: l.z.With(zfs...)}
+}
+
+func (l *Logger) Slow() ILoggerX   { return l.WithField("tag", "SLOW") }
+func (l *Logger) State() ILoggerX  { return l.WithField("tag", "STATE") }
+func (l *Logger) Metric() ILoggerX { return l.WithField("tag", "METRIC") }
+
+func (l *Logger) logAt(level Level, msg string) {
+	if l == nil {
+		return
+	}
+	msgToLog := msg
+	if level == PanicLevel || level == FatalLevel {
+		msgToLog = msg + "\n" + string(debug.Stack())
+	}
+	ce := l.z.Check(level, msgToLog)
+	if ce == nil {
+		return
+	}
+	ce.Write()
+
+	// In this project, Fatal/Panic are treated as control-flow, not just levels.
+	switch level {
+	case PanicLevel:
+		panic(msg)
+	case FatalLevel:
+		_ = l.Close()
+		os.Exit(1)
+	}
+}
+
+func (l *Logger) Trace(args ...interface{}) { l.logAt(TraceLevel, fmt.Sprint(args...)) }
+func (l *Logger) Tracef(format string, args ...interface{}) {
+	l.logAt(TraceLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Debug(args ...interface{}) { l.logAt(DebugLevel, fmt.Sprint(args...)) }
+func (l *Logger) Debugf(format string, args ...interface{}) {
+	l.logAt(DebugLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Info(args ...interface{}) { l.logAt(InfoLevel, fmt.Sprint(args...)) }
+func (l *Logger) Infof(format string, args ...interface{}) {
+	l.logAt(InfoLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Warn(args ...interface{}) { l.logAt(WarnLevel, fmt.Sprint(args...)) }
+func (l *Logger) Warnf(format string, args ...interface{}) {
+	l.logAt(WarnLevel, fmt.Sprintf(format, args...))
+}
+func (l *Logger) Warning(args ...interface{}) { l.Warn(args...) }
+func (l *Logger) Warningf(format string, args ...interface{}) {
+	l.Warnf(format, args...)
+}
+
+func (l *Logger) Error(args ...interface{}) { l.logAt(ErrorLevel, fmt.Sprint(args...)) }
+func (l *Logger) Errorf(format string, args ...interface{}) {
+	l.logAt(ErrorLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Panic(args ...interface{}) {
+	l.logAt(PanicLevel, fmt.Sprint(args...))
+}
+func (l *Logger) Panicf(format string, args ...interface{}) {
+	l.logAt(PanicLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Fatal(args ...interface{}) {
+	l.logAt(FatalLevel, fmt.Sprint(args...))
+}
+func (l *Logger) Fatalf(format string, args ...interface{}) {
+	l.logAt(FatalLevel, fmt.Sprintf(format, args...))
 }

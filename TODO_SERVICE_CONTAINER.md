@@ -135,10 +135,10 @@
       - [ ] 在某个 Service 示例中使用 LoggerX 创建带固定 `mod`/`service` 字段的 logger，体现推荐用法。
 
 - [ ] **日志上下文 / Caller 行为说明**
-  - [ ] 在 `log/formatter.go` + `log/logger.go` 中：
+  - [ ] 在 `engine/pkg/log/zap_core.go` + `engine/pkg/log/logger.go` 中：
     - [ ] 注释说明：
-      - [ ] Caller 的计算依赖 logrus 的 `SetReportCaller`；
-      - [ ] 避免在日志调用上增加额外包装层导致 caller 错位（例如不在 Info/Debug 外再包一层）。
+      - [ ] Caller 的计算依赖 zap 的 `AddCaller` / `AddCallerSkip`（以及本项目的 caller 相对路径编码逻辑）；
+      - [ ] 避免在日志调用上增加额外包装层导致 caller 错位（如确需包装，务必正确调整 caller skip）。
 
 - [ ] **监控/Profiler 接入点说明**
   - [ ] 在 `engine/pkg/monitor` / `profiler` 中：
