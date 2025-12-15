@@ -6,6 +6,8 @@
 package interfaces
 
 import (
+	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
@@ -47,10 +49,10 @@ type IModuleHierarchy interface {
 }
 
 type IModuleServiceEvent interface {
-	GetService() IService               // 获取服务
-	GetEventHandler() IEventHandler     // 获取事件处理器
-	GetEventProcessor() IEventProcessor // 获取事件管理器
-	NotifyEvent(IEvent)                 // 通知事件
+	GetService() IService                       // 获取服务
+	GetEventHandler() IEventHandler             // 获取事件处理器
+	GetEventProcessor() IEventProcessor         // 获取事件管理器
+	NotifyEvent(ctx context.Context, ev IEvent) // 通知事件
 }
 
 type IMethodMgr interface {

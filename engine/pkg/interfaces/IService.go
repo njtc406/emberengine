@@ -47,7 +47,6 @@ type IIdentifiable interface {
 	IServer
 	INamed
 	IActor
-	OnSetup(svc IService)
 	IsClosed() bool // 服务是否已经关闭
 }
 
@@ -66,6 +65,7 @@ type IServer interface {
 	GetServerId() int32
 }
 
+// IActor 表示一个可寻址的 Actor 实体
 type IActor interface {
 	SetPid(pid *actor.PID)
 	GetPid() *actor.PID

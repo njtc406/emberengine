@@ -16,6 +16,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
@@ -47,7 +48,7 @@ func fixVersion(v string) string {
 type HookFun func(map[any]any)
 
 type StartParam struct {
-	Language translate.LanguageType
+	Language translate.LanguageType // 语言
 	Version  string
 	ConfPath string
 	Hooks    []HookFun
@@ -150,12 +151,7 @@ func Start(opts ...StartOption) {
 		log.SysLogger.Infof("-------------->>received the signal: %v", sig)
 	}
 
-	log.SysLogger.Info("==================>>begin stop modules<<==================")
-
-	// 调试提示：如果需要断点调试，可以在这里暂停
-	log.SysLogger.Debug("[DEBUG] Starting shutdown sequence...")
-	// 调试断点：取消注释下面这行来在此处强制停止（调试器会捕获panic）
-	//panic("DEBUG BREAKPOINT: shutdown sequence started")
+	log.SysLogger.Info("==================>>begin stop<<==================")
 
 	// 执行关闭流程
 	shutdownSequence(startTime, param.Version)
@@ -185,6 +181,11 @@ func shutdownSequence(startTime time.Time, version string) {
 	log.SysLogger.Info("[5/6] Async lib released")
 
 	log.SysLogger.Info("[6/6] Closing logger...")
+	if config.IsDebug() {
+		if dump := msgenvelope.DumpMetaPoolLeaks(20); dump != "" {
+			log.SysLogger.Warn(dump)
+		}
+	}
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
 	// 优雅退出

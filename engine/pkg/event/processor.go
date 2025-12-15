@@ -36,25 +36,25 @@ func (p *Processor) Init(listener inf.IListener) {
 	p.IListener = listener
 }
 
-func (p *Processor) safeExec(f func(e inf.IEvent), e inf.IEvent) {
+func (p *Processor) safeExec(f func(ctx context.Context, e inf.IEvent), ctx context.Context, e inf.IEvent) {
 	defer func() {
 		if err := recover(); err != nil {
 			//log.Error("event handler panic:", err)
 			log.SysLogger.Errorf("event handler panic: %v", err)
 		}
 	}()
-	f(e)
+	f(ctx, e)
 }
 
 // EventHandler 事件处理
-func (p *Processor) EventHandler(ev inf.IEvent) {
+func (p *Processor) EventHandler(ctx context.Context, ev inf.IEvent) {
 	eventType := ev.GetType()
 	mapCallBack, ok := p.mapBindHandlerEvent[eventType]
 	if !ok {
 		return
 	}
 	for _, callback := range mapCallBack {
-		p.safeExec(callback, ev)
+		p.safeExec(callback, ctx, ev)
 	}
 }
 
@@ -124,7 +124,7 @@ func (p *Processor) PublishSpecific(ctx context.Context, eventType int32, servic
 }
 
 // castEvent 广播事件
-func (p *Processor) CastEvent(event inf.IEvent) {
+func (p *Processor) CastEvent(ctx context.Context, event inf.IEvent) {
 	if p.mapListenerEvent == nil {
 		//log.Error("mapListenerEvent not init!")
 		return
@@ -136,7 +136,14 @@ func (p *Processor) CastEvent(event inf.IEvent) {
 	}
 
 	for proc := range eventProcessor {
-		proc.PushEvent(event)
+		if ev, ok := event.(*Event); ok {
+			clone := ev.Clone()
+			if err := proc.PushEvent(ctx, clone); err != nil {
+				clone.Release()
+			}
+			continue
+		}
+		_ = proc.PushEvent(ctx, event)
 	}
 }
 

@@ -12,6 +12,18 @@ NodeConf:
   ProfilerInterval: 10s
   # 线程池大小
   AntsPoolSize: 10000
+  # rpc监控配置
+  RpcMonitorConf:
+    # 定时器数量(用于监控rpc调用的timer)
+    MonitorTimerSize: 10000
+    # 定时器桶数量(决定锁的粒度)
+    MonitorBucketSize: 200
+  # 时间轮配置
+  TimingWheelConf:
+    # 时间精度
+    Interval: 500ms
+    # 槽位数
+    WheelSize: 2000
 
 ClusterConf:
   ETCDConf:
@@ -50,69 +62,112 @@ ServiceConf:
   StartServices:
     # 服务名称
     - ClassName: Service3
-      ServiceId: 2
       ServiceName: Service3
-      # 服务类型
       Type: test
-      # 服务器ID
       ServerId: 1
-      RpcType: "grpc"
+      ServiceId: 2
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
         # 定时器桶大小
         TimerBucketSize: 100
-      WorkerConf:
-        # 用户消息队列大小(默认128)
-        UserMailboxSize: 128
-        # 系统消息队列大小(默认16)
-        SystemMailboxSize: 16
-        # 工作线程数量(初始线程数,默认1)
-        WorkerNum: 1
-        # 最大工作线程数量(默认1)
-        MaxWorkerNum: 10
-        # 是否开启动态线程数调整(默认不开启)
-        DynamicWorkerScaling: true
-        # 虚拟线程比例(默认10)(当workerNum大于1时,虚拟线程倍率用来控制虚拟线程的数量 哈希环上的节点数量=workernum*rate)
-        VirtualWorkerRate: 10
-        # 线程池增长因子(默认1.5)(当负载大于最大负载时,则启动新的线程)
-        GrowthFactor: 1.5
-        # 线程池收缩因子(默认0.5)(当负载小于最小负载时,则收缩线程)
-        ShrinkFactor: 0.5
-        # 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
-        ResizeCoolDown: 1s
-        # 扩容策略名称(默认default,根据worker负载扩容)
-        Strategy:
-          # 策略名称
-          Name: default
-          Params:
-            # 最大负载(默认10,超过就会启动动态扩容,扩容后超过半数无负载则开启缩容)
-            max_load_threshold: 10
-          Subs: # 子策略
+      # 空闲控制配置(控制Worker在无消息时的等待策略)
+      IdlerConf:
+        # 是否启用条件变量等待
+        # - true:  空闲时使用条件变量阻塞(节省CPU，但唤醒有开销)
+        # - false: 空闲时使用指数退避睡眠(CPU占用略高，但响应更快)
+        EnableCond: false
+        # 退避基础延迟(第一次空闲时的睡眠时间)
+        BackoffBaseDelay: 1us
+        # 退避最大延迟(连续空闲时睡眠时间的上限)
+        BackoffMaxDelay: 8us
+        # 开始退避前的最大空闲次数(前N次空闲不睡眠，直接重试)
+        MaxIdleBeforeBackoff: 1000
+        # 退避最大重试次数(睡眠时间翻倍的最大次数)
+        BackoffMaxRetries: 2
+
+      # 多优先级队列配置(仅在QueueMode="priority"时生效)
+      # 如果使用双队列模式(QueueMode="dual")，此配置可省略
+      MultiLevelQueueConf:
+        # 调度策略
+        # - "absolute": 绝对优先策略(始终优先处理高优先级，可能导致低优先级饥饿)
+        # - "weighted": 加权策略(按权重分配处理机会，兼顾各优先级)
+        # - "fairness": 公平策略(确保所有优先级都有处理机会，防止饥饿)
+        Strategy: "absolute"
+
+        # 单次循环最多处理的消息总数(避免长时间阻塞)
+        TotalBatchLimit: 64
+
+        # 各优先级的批量处理配置
+        # 格式: priority: {BatchSize: 单次最多处理数, Weight: 权重(仅weighted策略使用)}
+        PriorityBatches:
+          -3: # PrioritySys - 系统消息
+            BatchSize: 32
+            Weight: 20
+          -2: # PriorityUrgent - 紧急消息
+            BatchSize: 16
+            Weight: 10
+          -1: # PriorityHigh - 高优先级消息
+            BatchSize: 12
+            Weight: 5
+          0: # PriorityNormal - 普通消息
+            BatchSize: 8
+            Weight: 3
+          1: # PriorityLow - 低优先级消息
+            BatchSize: 4
+            Weight: 2
+          2: # PriorityBatch - 批量消息
+            BatchSize: 2
+            Weight: 1
+      # 是否开启主从模式
+      IsPrimarySecondaryMode: false
 
 # 日志配置
 SystemLogger:
-  Path: ./example/data/logs
+  Dir: ./example/data/logs
+  # 输出格式(text/json)
+  OutputFormat: text
   # 日志文件名
-  Name: "system-3"
+  PrefixName: "node1"
   # 日志级别
   Level: debug
+  # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
+  Stdout: true
   # 是否打印调用文件信息
   Caller: true
-  # 是否打印完整调用文件信息
+  # 是否打印完整调用文件信息(默认false,完整路径是绝对路径,否则打印以项目根目录为基准的相对路径)
   FullCaller: false
   # 是否显示日志颜色
   Color: true
-  # 日志最大保存时间(默认15天)
-  MaxAge: 720h
-  # 日志切分周期(默认24h)
-  RotationTime: 24h
-  AsyncMode:
-    # 开启异步模式(内部调试时可以关闭)
-    Enable: true
-    Config:
-      # 刷新间隔
-      FlushInterval: 1s
-      # 缓冲区大小(满时会立即写入)
-      BufferSize: 1048576  # 1MB
+  # 日志切割配置
+  Rotation:
+    # 日志最大保存时间(默认15天)
+    MaxAge: 720h
+    # 日志切分周期(默认24h)
+    Every: 24h
+    # 文件切分精度(系统会根据切分周期自动推导)
+    Pattern: "%Y%m%d"
+  Routing:
+    AsyncMode:
+      # 开启异步模式(默认不开启,内部调试时可以关闭)
+      Enable: true
+      Config:
+        # 刷新间隔(默认1s)
+        FlushInterval: 1s
+        # 缓冲区大小(默认1M,满时会立即写入)
+        BufferSize: 512
+    # 路由规则
+    Routes:
+      # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName.log_Pattern)
+      - Name: "access"
+        Levels:
+          - info
+          - debug
+          - trace
+          - warn
+      - Name: "error"
+        Levels:
+          - error
+          - fatal
+          - panic
 

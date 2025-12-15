@@ -18,6 +18,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 )
 
 var (
@@ -307,12 +309,12 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 	}
 }
 
-func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
+func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) {
 	meta := envelope.GetMeta()
 	data := envelope.GetData()
 	defer func() {
 		if r := recover(); r != nil {
-			h.WithContext(envelope.GetContext()).
+			h.WithContext(ctx).
 				WithField("caller", meta.GetSenderPid().String()).
 				WithField("method", data.GetMethod()).
 				WithField("error", r).
@@ -320,7 +322,7 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 			data.SetResponse(nil)
 			data.SetError(def.ErrHandleMessagePanic)
 		}
-		h.doResponse(envelope)
+		h.doResponse(ctx, envelope)
 	}()
 
 	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
@@ -328,43 +330,78 @@ func (h *Handler) HandleRequest(envelope inf.IEnvelope) {
 		data.SetError(def.ErrMethodNotFound)
 		return
 	}
-	resp, err := call(envelope.GetContext(), data.GetRequest())
+	resp, err := call(ctx, data.GetRequest())
 	if err != nil {
-		h.WithContext(envelope.GetContext()).Errorf("method call failed:%v", err)
+		h.WithContext(ctx).Errorf("method call failed:%v", err)
 		data.SetError(err)
 		return
 	}
 	data.SetResponse(resp)
 }
 
-func (h *Handler) doResponse(envelope inf.IEnvelope) {
-	if !envelope.IsRef() {
+func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
+	data := envelope.GetData()
+	meta := envelope.GetMeta()
+	if data == nil || meta == nil {
+		return
+	}
+	if !data.NeedResponse() {
 		return
 	}
 
-	data := envelope.GetData()
-	if data.NeedResponse() {
-		data.SetReply()
-		data.SetRequest(nil)
-		meta := envelope.GetMeta()
-		// 将receiver设置为sender,防止nats那里找不到对应的topic
-		sender := meta.GetSenderPid()
-		meta.SetReceiverPid(sender)
-		if err := meta.GetDispatcher().SendResponse(envelope); err != nil {
-			h.WithContext(envelope.GetContext()).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
-		}
+	dispatcher := meta.GetDispatcher()
+	if dispatcher == nil {
+		h.WithContext(ctx).Errorf("service[%s] send response failed: dispatcher is nil", h.GetModuleName())
+		return
+	}
+
+	// 回复不能复用“当前正在处理的请求 envelope”。
+	// 原 envelope 的生命周期由接收方 mailbox 管理；若这里复用并走远端 sender（其内部会 Release），
+	// 会导致请求 envelope 过早回收到池里，引发并发复用污染（Request 丢失 / meta,data=nil 等）。
+	respEnv := msgenvelope.NewMsgEnvelope()
+
+	respData := msgenvelope.NewData()
+	respData.SetMethod(data.GetMethod())
+	respData.SetReply()
+	respData.SetRequest(nil)
+	respData.SetResponse(data.GetResponse())
+	respData.SetError(data.GetError())
+	respData.SetNeedResponse(false)
+	respEnv.SetData(respData)
+
+	respMeta := msgenvelope.NewMeta()
+	respMeta.SetReqId(meta.GetReqId())
+	respMeta.SetSenderPid(meta.GetReceiverPid())
+	respMeta.SetReceiverPid(meta.GetSenderPid())
+	respMeta.SetDispatcher(dispatcher)
+	respEnv.SetMeta(respMeta)
+
+	if err := dispatcher.Deliver(ctx, respEnv); err != nil {
+		h.WithContext(ctx).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 	}
 }
 
-func (h *Handler) HandleResponse(envelope inf.IEnvelope) {
+func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) {
 	defer func() {
 		if r := recover(); r != nil {
-			h.WithContext(envelope.GetContext()).Errorf("service[%s] handle message panic: %v\n trace:%s",
+			h.WithContext(ctx).Errorf("service[%s] handle message panic: %v\n trace:%s",
 				h.GetModuleName(), r, debug.Stack())
 		}
 	}()
 
-	envelope.RunCompletions()
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
+	if meta == nil || data == nil {
+		return
+	}
+
+	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
+	if state == nil {
+		return
+	}
+
+	state.SetResult(data.GetResponse(), data.GetError())
+	state.Complete()
 }
 
 func (h *Handler) GetMethods() []string {

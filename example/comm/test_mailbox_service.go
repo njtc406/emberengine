@@ -93,7 +93,7 @@ func (s *MailboxTestService) OnInit() error {
 // registerEventHandlers 注册事件处理器
 func (s *MailboxTestService) registerEventHandlers() {
 	// 注册系统消息处理器
-	s.RegisterUserHandler(EventTypeSystem, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeSystem, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleSystemMessage(data)
@@ -102,7 +102,7 @@ func (s *MailboxTestService) registerEventHandlers() {
 	})
 
 	// 注册紧急消息处理器
-	s.RegisterUserHandler(EventTypeUrgent, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeUrgent, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleUrgentMessage(data)
@@ -111,7 +111,7 @@ func (s *MailboxTestService) registerEventHandlers() {
 	})
 
 	// 注册高优先级消息处理器
-	s.RegisterUserHandler(EventTypeHigh, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeHigh, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleHighPriorityMessage(data)
@@ -120,7 +120,7 @@ func (s *MailboxTestService) registerEventHandlers() {
 	})
 
 	// 注册普通消息处理器
-	s.RegisterUserHandler(EventTypeNormal, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeNormal, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleNormalMessage(data)
@@ -129,7 +129,7 @@ func (s *MailboxTestService) registerEventHandlers() {
 	})
 
 	// 注册低优先级消息处理器
-	s.RegisterUserHandler(EventTypeLow, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeLow, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleLowPriorityMessage(data)
@@ -138,7 +138,7 @@ func (s *MailboxTestService) registerEventHandlers() {
 	})
 
 	// 注册批量消息处理器
-	s.RegisterUserHandler(EventTypeBatch, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeBatch, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleBatchMessage(data)
@@ -147,7 +147,7 @@ func (s *MailboxTestService) registerEventHandlers() {
 	})
 
 	// 注册后台消息处理器
-	s.RegisterUserHandler(EventTypeBackground, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.RegisterUserHandler(EventTypeBackground, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 		if msg, ok := ev.(*event.Event); ok {
 			if data, ok := msg.Data.(string); ok {
 				s.HandleBackgroundMessage(data)
@@ -494,10 +494,9 @@ func (s *MailboxTestService) PostSystemPriorityMessage(ctx context.Context, mess
 	evt := event.NewEvent()
 	evt.Type = EventTypeSystem
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
+	evt.Priority = def.PrioritySys
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleSystemMessage(message string) {
@@ -517,10 +516,9 @@ func (s *MailboxTestService) PostUrgentMessage(ctx context.Context, message stri
 	evt := event.NewEvent()
 	evt.Type = EventTypeUrgent
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityUrgent)
+	evt.Priority = def.PriorityUrgent
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleUrgentMessage(message string) {
@@ -539,10 +537,9 @@ func (s *MailboxTestService) PostHighPriorityMessage(ctx context.Context, messag
 	evt := event.NewEvent()
 	evt.Type = EventTypeHigh
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityHigh)
+	evt.Priority = def.PriorityHigh
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleHighPriorityMessage(message string) {
@@ -561,10 +558,9 @@ func (s *MailboxTestService) PostNormalMessage(ctx context.Context, message stri
 	evt := event.NewEvent()
 	evt.Type = EventTypeNormal
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityNormal)
+	evt.Priority = def.PriorityNormal
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleNormalMessage(message string) {
@@ -583,10 +579,9 @@ func (s *MailboxTestService) PostLowPriorityMessage(ctx context.Context, message
 	evt := event.NewEvent()
 	evt.Type = EventTypeLow
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityLow)
+	evt.Priority = def.PriorityLow
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleLowPriorityMessage(message string) {
@@ -605,10 +600,9 @@ func (s *MailboxTestService) PostBatchMessage(ctx context.Context, message strin
 	evt := event.NewEvent()
 	evt.Type = EventTypeBatch
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityBatch)
+	evt.Priority = def.PriorityBatch
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleBatchMessage(message string) {
@@ -627,10 +621,9 @@ func (s *MailboxTestService) PostBackgroundMessage(ctx context.Context, message 
 	evt := event.NewEvent()
 	evt.Type = EventTypeBackground
 	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityBackground)
+	evt.Priority = def.PriorityBackground
 
-	s.GetMailbox().PostMessage(evt)
+	s.GetMailbox().PostMessage(ctx, evt)
 }
 
 func (s *MailboxTestService) HandleBackgroundMessage(message string) {

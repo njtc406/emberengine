@@ -22,21 +22,13 @@ type CriteriaBuilder func(*FilterCriteria)
 type CriteriaFunc = CriteriaBuilder
 
 type ISelector interface {
-	//FindOne(sender *actor.PID, serviceUid string) IBus
-
-	//Select(sender *actor.PID, options ...CriteriaBuilder) IBus
-
-	// TODO 暂时这么写,后续把条件做成query条件
-
-	// 只用于搜索从服务
-	SelectSlavers(sender *actor.PID, options ...SelectParamBuilder) IBus
-
 	//Select 选择服务
 	Select(sender *actor.PID, options ...SelectParamBuilder) IBus
 
 	// SelectByRule 根据自定义规则选择服务
 	SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus
 
+	// SelectByPid 根据PID选择服务
 	SelectByPid(sender, receiver *actor.PID) IBus
 
 	SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) IBus

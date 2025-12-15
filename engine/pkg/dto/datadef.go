@@ -19,6 +19,6 @@ func (d *DataRef) Ref() {
 	atomic.StoreInt32(&d.ref, 1)
 }
 
-func (d *DataRef) UnRef() {
-	atomic.StoreInt32(&d.ref, 0)
+func (d *DataRef) UnRef() bool {
+	return atomic.CompareAndSwapInt32(&d.ref, 1, 0)
 }

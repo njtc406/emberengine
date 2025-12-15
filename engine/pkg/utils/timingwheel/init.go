@@ -37,7 +37,12 @@ func Start(interval time.Duration, wheelSize int64, logger *log.Logger) {
 	}
 
 	if logger == nil {
-		l, err := log.NewDefaultLogger(nil)
+		l, err := log.NewDefaultLogger(&log.LoggerConf{
+			OutputFormat: log.TextFormat,
+			Dir:          "./logs",
+			PrefixName:   "timingwheel",
+			Level:        log.InfoLevelStr,
+		})
 		if err != nil {
 			panic(fmt.Sprintf("create logger failed: %v", err))
 		}

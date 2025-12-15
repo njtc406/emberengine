@@ -1,9 +1,9 @@
 ## 系统基础配置
 
 NodeConf:
-  NodeId: 1
+  NodeId: 2
   # 系统状态(debug/release)
-  SystemStatus: debug
+  SystemStatus: release
   # 系统数据目录(持久化)
   PVCPath: ./example/data
   # 系统缓存目录
@@ -63,7 +63,7 @@ ServiceConf:
     - ClassName: ConcurrencyTest1
       ServiceName: ConcurrencyTest1
       Type: test
-      ServerId: 1
+      ServerId: 10001
       RpcType: "nats"
       TimerConf:
         # 定时器队列长度
@@ -142,17 +142,24 @@ ServiceConf:
       # 是否开启主从模式
       IsPrimarySecondaryMode: false
 
+    - ClassName: PprofService
+      ServiceName: PprofService
+      Type: test
+      ServerId: 10001
+
 
 
 # 日志配置
 SystemLogger:
   Dir: ./example/data/logs
+  # 输出格式(text/json)
+  OutputFormat: text
   # 日志文件名
   PrefixName: "concurrency_test1"
   # 日志级别
   Level: debug
   # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
-  Stdout: true
+  Stdout: false
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息(默认false,完整路径是绝对路径,否则打印以项目根目录为基准的相对路径)
@@ -179,13 +186,13 @@ SystemLogger:
     # 路由规则
     Routes:
       # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName.log_Pattern)
-      - Name: "access"
+      - Name: "access.log"
         Levels:
           - info
           - debug
           - trace
           - warn
-      - Name: "error"
+      - Name: "error.log"
         Levels:
           - error
           - fatal

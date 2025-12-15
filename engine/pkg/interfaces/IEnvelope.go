@@ -6,17 +6,15 @@
 package interfaces
 
 import (
-	"time"
+	"context"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type IEnvelope interface {
 	IDataDef
 	IEvent
-	IContext
 
 	// Set
 
@@ -29,12 +27,7 @@ type IEnvelope interface {
 	GetData() IEnvelopeData
 
 	// Option
-
-	SetDone()
-	RunCompletions()
-	Wait()
-	ToProtoMsg() (*actor.Message, error)
-	Clone() IEnvelope
+	ToProtoMsg(ctx context.Context) (*actor.Message, error)
 }
 
 type IEnvelopeMeta interface {
@@ -44,32 +37,14 @@ type IEnvelopeMeta interface {
 	SetSenderPid(sender *actor.PID)
 	SetReceiverPid(receiver *actor.PID)
 	SetDispatcher(client IRpcDispatcher)
-	SetTimeout(timeout time.Duration)
 	SetReqId(reqId uint64)
-	SetCallback(cbs []dto.CompletionFunc)
-	SetTimerId(id uint64)
-	SetCallbackParams(params []interface{})
-	SetDone()
 
 	// Get
 
 	GetSenderPid() *actor.PID
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher
-	GetTimeout() time.Duration
 	GetReqId() uint64
-	GetTimerId() uint64
-	GetCallBacks() []dto.CompletionFunc
-	GetCallbackParams() []interface{}
-	GetDone() <-chan struct{}
-
-	// check
-
-	NeedCallback() bool // 是否需要回调
-
-	// Option
-
-	Clone() IEnvelopeMeta
 }
 
 type IEnvelopeData interface {

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -57,21 +58,20 @@ func (rc *grpcSender) Close() {
 	rc.rpcClients = nil
 }
 
-func (rc *grpcSender) send(envelope inf.IEnvelope) error {
+func (rc *grpcSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	if rc.IsClosed() {
 		return def.ErrRPCHadClosed
 	}
 
-	ctx := envelope.GetContext()
 	_, ok := ctx.Deadline()
 	if !ok {
-		newCtx, cancel := context.WithTimeout(ctx, def.DefaultRpcTimeout)
+		newCtx, cancel := context.WithTimeout(ctx, config.GetDefaultRpcTimeout())
 		defer cancel()
 		ctx = newCtx
 	}
 
 	// 构建发送消息
-	msg, err := envelope.ToProtoMsg()
+	msg, err := envelope.ToProtoMsg(ctx)
 	if err != nil {
 		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
@@ -91,18 +91,9 @@ func (rc *grpcSender) send(envelope inf.IEnvelope) error {
 	return nil
 }
 
-func (rc *grpcSender) SendRequest(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	// 这里不能释放envelope,因为调用方需要使用
-	return rc.send(envelope)
-}
-
-func (rc *grpcSender) SendRequestAndRelease(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *grpcSender) Deliver(ctx context.Context, _ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
-	return rc.send(envelope)
-}
-
-func (rc *grpcSender) SendResponse(_ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	return rc.send(envelope)
+	return rc.send(ctx, envelope)
 }
 
 func (rc *grpcSender) IsClosed() bool {

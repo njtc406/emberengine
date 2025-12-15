@@ -8,10 +8,6 @@ func Init(conf *LoggerConf, isDebug bool) {
 	}
 	conf = fixConf(conf)
 	conf.Stdout = conf.Stdout || isDebug
-	// Debug mode 默认更详细
-	if isDebug && conf.Level == "info" {
-		conf.Level = "debug"
-	}
 	logger, err := NewDefaultLogger(
 		conf,
 	)

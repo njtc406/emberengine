@@ -24,6 +24,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // EventMetrics 事件指标统计
@@ -62,12 +63,12 @@ type Bus struct {
 	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
 
 	// 新增的事件分类和限流系统
-	eventRegistry   *EventRegistry           // 事件注册表
-	throttleManager *ThrottleManager         // 限流管理器
-	eventBuffer     map[int32][]*actor.Event // 事件缓冲区 (按类型批处理)
-	bufferMutex     sync.RWMutex             // 缓冲区锁
-	batchTicker     *time.Ticker             // 批处理定时器
-	metrics         *EventMetrics            // 事件指标
+	eventRegistry   *EventRegistry        // 事件注册表
+	throttleManager *ThrottleManager      // 限流管理器
+	eventBuffer     map[int32][]*busEvent // 事件缓冲区 (按类型批处理)
+	bufferMutex     sync.RWMutex          // 缓冲区锁
+	batchTicker     *time.Ticker          // 批处理定时器
+	metrics         *EventMetrics         // 事件指标
 }
 
 func GetEventBus() *Bus {
@@ -132,7 +133,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	// 初始化事件分类和限流系统
 	eb.eventRegistry = NewEventRegistry()
 	eb.throttleManager = NewThrottleManager(eb.eventRegistry)
-	eb.eventBuffer = make(map[int32][]*actor.Event)
+	eb.eventBuffer = make(map[int32][]*busEvent)
 	eb.metrics = &EventMetrics{}
 
 	// 启动批处理定时器 (每100ms处理一次缓冲)
@@ -213,7 +214,7 @@ func (eb *Bus) flushAllBuffers() {
 }
 
 // flushEventBatch 刷新指定类型的事件批量
-func (eb *Bus) flushEventBatch(eventType int32, events []*actor.Event) {
+func (eb *Bus) flushEventBatch(eventType int32, events []*busEvent) {
 	if len(events) == 0 {
 		return
 	}
@@ -223,17 +224,17 @@ func (eb *Bus) flushEventBatch(eventType int32, events []*actor.Event) {
 	// 按照事件范围选择批量处理策略
 	switch classification.Scope {
 	case ScopeGlobal:
-		for _, event := range events {
-			eb.publishGlobal(event)
+		for _, be := range events {
+			eb.publishGlobal(be.ctx, be.event)
 		}
 	case ScopeCluster, ScopeRegion, ScopeNode:
-		for _, event := range events {
-			eb.publishServer(event)
+		for _, be := range events {
+			eb.publishServer(be.ctx, be.event)
 		}
 	default:
 		// 本地事件直接处理
-		for _, event := range events {
-			eb.publishGlobal(event) // 默认作为全局事件处理
+		for _, be := range events {
+			eb.publishGlobal(be.ctx, be.event) // 默认作为全局事件处理
 		}
 	}
 
@@ -258,41 +259,56 @@ func (eb *Bus) genKey(format string, args ...interface{}) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serviceUid string, data proto.Message) (*actor.Event, error) {
+// marshalEvent 将数据封装为 actor.Event，返回 ctx 和 event 分离的形式
+func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serviceUid string, data proto.Message) (*busEvent, error) {
 	// 组装数据
-	rawData, err := proto.Marshal(data)
+	rawData, err := anypb.New(data)
 	if err != nil {
 		return nil, err
 	}
 
-	if emberctx.GetHeaderValue(ctx, def.DefaultTraceIdKey) == "" {
-		emberctx.AddHeader(ctx, def.DefaultDispatcherKey, uuid.NewString())
+	// 确保有 DispatcherKey
+	if dispatcherKey, _ := emberctx.GetHeaderValue(ctx, def.DefaultDispatcherKey).(string); dispatcherKey == "" {
+		ctx = emberctx.AddHeader(ctx, def.DefaultDispatcherKey, uuid.NewString())
 	}
 
-	// TODO 事件中可能还需要带上一个节点信息,好区分是发给哪个从服务的
+	// actor.Event 作为纯数据载体
+	// Priority 和 DispatcherKey 是显式字段
+	// ContextHeaders 仅用于 tracing/metadata
+	dispatcherKey, _ := emberctx.GetHeaderValue(ctx, def.DefaultDispatcherKey).(string)
 	e := &actor.Event{
-		EventType: eventType,
-		Data: &actor.EventData{
-			Header:  emberctx.ToHeaders(ctx),
-			RawData: rawData,
-		},
-		ServerId:   serverId,
-		ServiceUid: serviceUid,
+		EventType:      eventType,
+		Priority:       int32(def.PriorityNormal), // 默认优先级，可由调用方覆盖
+		DispatcherKey:  dispatcherKey,
+		ServerId:       serverId,
+		ServiceUid:     serviceUid,
+		Data:           rawData,
+		ContextHeaders: emberctx.ToHeaders(ctx),
 	}
 
-	return e, nil
+	return newBusEvent(ctx, e), nil
 }
 
 func (eb *Bus) isNatsEnabled() bool {
 	return eb.enable.Load() == 1
 }
 
-func (eb *Bus) unmarshalEvent(eventData []byte) (*actor.Event, error) {
+// unmarshalEvent 反序列化事件，从 ContextHeaders 重建 context
+func (eb *Bus) unmarshalEvent(eventData []byte) (*busEvent, error) {
 	e := &actor.Event{}
 	if err := proto.Unmarshal(eventData, e); err != nil {
 		return nil, err
 	}
-	return e, nil
+	// 从 ContextHeaders 重建 context
+	ctx := buildContextFromHeaders(e.ContextHeaders)
+	// 从显式字段恢复调度信息到 context
+	if e.DispatcherKey != "" {
+		ctx = emberctx.AddHeader(ctx, def.DefaultDispatcherKey, e.DispatcherKey)
+	}
+	if e.Priority != 0 {
+		ctx = emberctx.AddHeader(ctx, def.DefaultPriorityKey, def.Priority(e.Priority))
+	}
+	return newBusEvent(ctx, e), nil
 }
 
 // TODO 全局事件这里可以考虑订阅指定服务的事件，比如当处于某个场景服时，可以只订阅该场景服的事件，就可以实现广播功能，可以通过广播减少rpc寻址调用
@@ -306,7 +322,7 @@ func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Me
 	}
 
 	// 2. 封装事件
-	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
+	be, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
@@ -320,23 +336,22 @@ func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Me
 			classification.Category == CategoryStatistics ||
 			classification.Category == CategoryBusinessBatch) {
 		// 需要批处理的事件
-		return eb.addToBatch(eventType, e)
+		return eb.addToBatch(eventType, be)
 	} else {
 		// 立即处理的事件
-		return eb.publishImmediately(e)
+		return eb.publishImmediately(be)
 	}
 }
 
 // addToBatch 添加到批处理缓冲区
-func (eb *Bus) addToBatch(eventType int32, event *actor.Event) error {
+func (eb *Bus) addToBatch(eventType int32, be *busEvent) error {
 	eb.bufferMutex.Lock()
 	defer eb.bufferMutex.Unlock()
 
 	if eb.eventBuffer[eventType] == nil {
-		eb.eventBuffer[eventType] = make([]*actor.Event, 0)
+		eb.eventBuffer[eventType] = make([]*busEvent, 0)
 	}
-
-	eb.eventBuffer[eventType] = append(eb.eventBuffer[eventType], event)
+	eb.eventBuffer[eventType] = append(eb.eventBuffer[eventType], be)
 	atomic.AddInt64(&eb.metrics.TotalPublished, 1)
 
 	// 检查是否达到批量大小限制
@@ -354,40 +369,43 @@ func (eb *Bus) addToBatch(eventType int32, event *actor.Event) error {
 }
 
 // publishImmediately 立即发布事件
-func (eb *Bus) publishImmediately(event *actor.Event) error {
+func (eb *Bus) publishImmediately(be *busEvent) error {
 	atomic.AddInt64(&eb.metrics.TotalPublished, 1)
 	atomic.StoreInt64(&eb.metrics.LastEventTime, time.Now().UnixNano())
 
 	if eb.isNatsEnabled() {
 		// 发到nats
-		eventData, err := event.Marshal()
+		eventData, err := proto.Marshal(be.event)
 		if err != nil {
 			return err
 		}
 
-		return eb.nc.Publish(eb.genKey(eb.globalPrefix, event.EventType), eventData)
+		return eb.nc.Publish(eb.genKey(eb.globalPrefix, be.event.EventType), eventData)
 	} else {
 		// 没有使用nats,那么直接触发本地事件
-		eb.publishGlobal(event)
+		eb.publishGlobal(be.ctx, be.event)
 		return nil
 	}
 }
 
-func (eb *Bus) publishGlobal(e *actor.Event) {
+// publishGlobal 发布全局事件到本地订阅者
+// ctx: 上下文，用于追踪和传递元数据
+// e: actor.Event 纯数据载体
+func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 	key := eb.genKey(eb.globalPrefix, e.EventType)
 	eb.globalLock.RLock(key)
 	defer eb.globalLock.RUnlock(key)
 	if subMap, ok := eb.globalSubscribers[e.EventType]; ok {
-		ev := NewEvent()
-		ev.Type = ServiceGlobalEventTrigger
-		ev.Data = e
-		ev.SetHeader(def.DefaultDispatcherKey, e.GetDispatcherKey())
-		ev.SetHeader(def.DefaultPriorityKey, e.GetPriority())
-
 		for _, ch := range subMap {
-			if err := ch.PushEvent(ev); err != nil {
-				log.SysLogger.Errorf("push global event error: %v", err)
-				//fmt.Println("push global event error:", err)
+			ev := NewEvent()
+			ev.Type = ServiceGlobalEventTrigger
+			ev.Data = e // 直接存储 *actor.Event
+			ev.DispatcherKey = e.DispatcherKey
+			ev.Priority = def.Priority(e.Priority)
+
+			if err := ch.PushEvent(ctx, ev); err != nil {
+				log.SysLogger.WithContext(ctx).Errorf("push global event error: %v", err)
+				ev.Release()
 			}
 		}
 	}
@@ -395,23 +413,23 @@ func (eb *Bus) publishGlobal(e *actor.Event) {
 
 // PublishGlobalLocal 发布本地全局事件
 func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, "", data)
+	be, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
 	}
 
-	eb.publishGlobal(e)
+	eb.publishGlobal(be.ctx, be.event)
 	return nil
 }
 
 func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
+	be, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
 	if err != nil {
 		return err
 	}
 	if eb.isNatsEnabled() {
 		// 发到nats
-		eventData, err := proto.Marshal(e)
+		eventData, err := proto.Marshal(be.event)
 		if err != nil {
 			return err
 		}
@@ -419,26 +437,28 @@ func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, dat
 		return eb.nc.Publish(eb.genKey(eb.serverPrefix, eventType, serverId), eventData)
 	} else {
 		// 没有使用nats,那么直接触发本地事件
-		eb.publishServer(e)
+		eb.publishServer(be.ctx, be.event)
 		return nil
 	}
 }
 
-func (eb *Bus) publishServer(e *actor.Event) {
+// publishServer 发布服务器事件到本地订阅者
+func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 	key := eb.genKey(eb.serverPrefix, e.EventType, e.ServerId)
 	eb.serverLock.RLock(key)
 	defer eb.serverLock.RUnlock(key)
 	if serverMap, ok := eb.serverSubscribers[e.EventType]; ok {
-		ev := NewEvent()
-		ev.Type = ServiceGlobalEventTrigger
-		ev.Data = e
-		ev.SetHeader(def.DefaultDispatcherKey, e.GetDispatcherKey())
-		ev.SetHeader(def.DefaultPriorityKey, e.GetPriority())
-
 		if subMap, ok := serverMap[e.ServerId]; ok {
 			for _, ch := range subMap {
-				if err := ch.PushEvent(ev); err != nil {
+				ev := NewEvent()
+				ev.Type = ServiceGlobalEventTrigger
+				ev.Data = e // 直接存储 *actor.Event
+				ev.DispatcherKey = e.DispatcherKey
+				ev.Priority = def.Priority(e.Priority)
+
+				if err := ch.PushEvent(ctx, ev); err != nil {
 					log.SysLogger.Errorf("push server event error: %v", err)
+					ev.Release()
 				}
 			}
 		}
@@ -446,11 +466,11 @@ func (eb *Bus) publishServer(e *actor.Event) {
 }
 
 func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
+	be, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
 	if err != nil {
 		return err
 	}
-	eb.publishServer(e)
+	eb.publishServer(be.ctx, be.event)
 	return nil
 }
 
@@ -469,20 +489,17 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 		if eb.isNatsEnabled() {
 			if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
 				// 解析数据
-				e, err := eb.unmarshalEvent(msg.Data)
+				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
 					log.SysLogger.Errorf("unmarshal global event error: %v", err)
-					//fmt.Println("unmarshal global event error:", err)
 					return
 				}
 
-				eb.publishGlobal(e)
+				eb.publishGlobal(be.ctx, be.event)
 			}); err == nil {
-				//fmt.Println("subscribe global event from nats success")
 				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe global event from nats failed, error: %v", err)
-				//fmt.Println("subscribe global event from nats failed, error:", err)
 			}
 		}
 	}
@@ -490,13 +507,13 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 
 // PublishSpecific 发布指定服务的事件(只有订阅了该服务事件的服务会收到)
 func (eb *Bus) PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
+	be, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
 	if err != nil {
 		return err
 	}
 	if eb.isNatsEnabled() {
 		// 发到nats
-		eventData, err := proto.Marshal(e)
+		eventData, err := proto.Marshal(be.event)
 		if err != nil {
 			return err
 		}
@@ -504,37 +521,38 @@ func (eb *Bus) PublishSpecific(ctx context.Context, eventType int32, serviceUid 
 		return eb.nc.Publish(eb.genKey(eb.specificPrefix, eventType, serviceUid), eventData)
 	} else {
 		// 没有使用nats,那么直接触发本地事件
-		eb.publishSpecific(e)
+		eb.publishSpecific(be.ctx, be.event)
 		return nil
 	}
 }
 
 // PublishSpecificLocal 发布本地指定服务事件
 func (eb *Bus) PublishSpecificLocal(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
-	e, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
+	be, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
 	if err != nil {
 		return err
 	}
-	eb.publishSpecific(e)
+	eb.publishSpecific(be.ctx, be.event)
 	return nil
 }
 
 // publishSpecific 发布特定服务事件
-func (eb *Bus) publishSpecific(e *actor.Event) {
+func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 	key := eb.genKey(eb.specificPrefix, e.EventType, e.ServiceUid)
 	eb.specificLock.RLock(key)
 	defer eb.specificLock.RUnlock(key)
 	if eventMap, ok := eb.specificSubscribers[e.EventType]; ok {
 		if subMap, ok := eventMap[e.ServiceUid]; ok {
-			ev := NewEvent()
-			ev.Type = ServiceGlobalEventTrigger
-			ev.Data = e
-			ev.SetHeader(def.DefaultDispatcherKey, e.GetDispatcherKey())
-			ev.SetHeader(def.DefaultPriorityKey, e.GetPriority())
-
 			for _, ch := range subMap {
-				if err := ch.PushEvent(ev); err != nil {
+				ev := NewEvent()
+				ev.Type = ServiceGlobalEventTrigger
+				ev.Data = e // 直接存储 *actor.Event
+				ev.DispatcherKey = e.DispatcherKey
+				ev.Priority = def.Priority(e.Priority)
+
+				if err := ch.PushEvent(ctx, ev); err != nil {
 					log.SysLogger.Errorf("push specific event error: %v", err)
+					ev.Release()
 				}
 			}
 		}
@@ -563,13 +581,13 @@ func (eb *Bus) SubscribeSpecific(eventType int32, serviceUid string, svc inf.ILi
 		if eb.isNatsEnabled() {
 			if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
 				// 解析数据
-				e, err := eb.unmarshalEvent(msg.Data)
+				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
 					log.SysLogger.Errorf("unmarshal specific event error: %v", err)
 					return
 				}
 
-				eb.publishSpecific(e)
+				eb.publishSpecific(be.ctx, be.event)
 			}); err == nil {
 				eb.addSub(key, subscription)
 			} else {
@@ -620,19 +638,16 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 		if eb.isNatsEnabled() {
 			if subscription, err := eb.nc.Subscribe(key, func(msg *nats.Msg) {
 				// 解析数据
-				e, err := eb.unmarshalEvent(msg.Data)
+				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
 					log.SysLogger.Errorf("unmarshal server[%d] event error: %v", svc.GetServerId(), err)
-					//fmt.Println("unmarshal server[", svc.GetServerId(), "] event error:", err)
 					return
 				}
-				eb.publishServer(e)
+				eb.publishServer(be.ctx, be.event)
 			}); err == nil {
-				//fmt.Println("subscribe server[", svc.GetServerId(), "] event success")
 				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe server[%d] event error: %v", svc.GetServerId(), err)
-				//fmt.Println("subscribe server[", svc.GetServerId(), "] event error:", err)
 			}
 		}
 	}

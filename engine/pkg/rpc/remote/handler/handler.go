@@ -6,86 +6,79 @@
 package handler
 
 import (
+	"context"
+	"errors"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
+	headers := make(map[string]any, len(req.ContextHeaders)+2)
+	for k, v := range req.ContextHeaders {
+		headers[k] = v
+	}
+	// 从显式字段恢复调度信息到 headers
+	if req.DispatcherKey != "" {
+		headers[def.DefaultDispatcherKey] = req.DispatcherKey
+	}
+	if req.Priority != 0 {
+		headers[def.DefaultPriorityKey] = def.Priority(req.Priority)
+	}
 	if req.Reply {
 		// 回复
 		// 需要回复的信息都会加入monitor中,找到对应的信封数据
-		if envelope := monitor.GetRpcMonitor().Remove(req.ReqId); envelope != nil {
-			meta := envelope.GetMeta()
-			data := envelope.GetData()
-
-			// 异步回调,直接发送到对应服务处理,服务处理完后会自己释放envelope
-			sender := meta.GetDispatcher()
-			if sender != nil && sender.IsClosed() {
-				// 调用者已经下线,丢弃回复
-				// TODO 这里需要想想能不能直接丢弃,看要不要带一个标记,比如true时表示这个回复必须处理,那么可能就需要重新加载service
-				envelope.Release()
-				return nil
-			}
-			// 解析回复数据
+		if state := monitor.GetRpcMonitor().Remove(req.ReqId); state != nil {
 			response, err := codec.DecodeFromAny(req.Response)
-			defer func() {
-				if err != nil {
-					envelope.GetData().SetError(err)
-				}
-				if meta.NeedCallback() {
-					if err = sender.PostMessage(envelope); err != nil {
-						envelope.Release()
-						log.SysLogger.WithContext(envelope.GetContext()).Errorf("call back envelope error: %s", err)
-					}
-				} else {
-					// 同步回调,回复结果
-					envelope.SetDone()
-				}
-			}()
-			if err != nil {
-				envelope.Release()
-				return err
+			if err == nil && req.Err != "" {
+				err = errors.New(req.Err)
 			}
-
-			// TODO 这里需要注意,当相同的data被重复使用时,response可能被下一个覆盖,虽然按理说如果是call那么一定是排队的,但是怕以后忘记了,先注释一下
-			// 后续如果有了其他的需求,再来考虑这里的覆盖问题
-			data.SetReply()
-			data.SetRequest(nil)
-			data.SetNeedResponse(false) // 已经是回复了
-			data.SetResponse(response)
-			data.SetErrStr(req.Err)
-
-			//log.SysLogger.Debugf("call back envelope: %+v", envelope)
-			return err
+			state.XContext.AddHeaders(headers)
+			state.SetResult(response, err)
+			state.Complete()
+			return nil
 		} else {
 			// 已经超时,丢弃返回
-			log.SysLogger.Warnf("rpc call timeout, envelope not found: %s", req.String())
+			// 迟到的回复：通常是调用方已超时/取消后的正常现象，避免刷屏按 debug 处理。
+			log.SysLogger.Debugf("rpc call late reply dropped (state not found): %s", req.String())
 			return nil
 		}
 	} else {
-		// 检查重复
-		senderServiceUid := req.GetSenderPid().GetServiceUid()
-		// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
-		if dedup.GetDeDuplicator().Seen(senderServiceUid, req.ReqId) {
-			log.SysLogger.Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
-			return nil
+		// 去重只对“有ReqId”的请求有意义（通常是 NeedResp=true 的 call/asyncCall）。
+		// fire-and-forget 的 send 使用 ReqId=0，跳过去重以减少热路径开销。
+		if req.ReqId != 0 {
+			senderServiceUid := req.GetSenderPid().GetServiceUid()
+			// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
+			if dedup.GetDeDuplicator().Seen(senderServiceUid, req.ReqId) {
+				log.SysLogger.Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
+				return nil
+			}
 		}
 
-		// 调用
-		request, err := codec.DecodeFromAny(req.Request)
-		//request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
-		if err != nil {
-			return err
+		// 调用：Request 为空时无需解码 Any（nil payload 的 send 是常见场景）
+		var request interface{}
+		if req.Request != nil {
+			var err error
+			request, err = codec.DecodeFromAny(req.Request)
+			//request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
+			if err != nil {
+				return err
+			}
 		}
+
+		// 从 headers 构建 context
+		ctx := xcontext.New(context.Background())
+		ctx.AddHeaders(headers)
 
 		// 构建消息
-		envelope := msgenvelope.NewMsgEnvelope(nil)
-		envelope.SetHeadersWithMap(req.MessageHeader)
+		envelope := msgenvelope.NewMsgEnvelope()
 
 		data := msgenvelope.NewData()
 		data.SetMethod(req.Method)
@@ -105,7 +98,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		envelope.SetMeta(meta)
 		envelope.SetData(data)
 
-		err = sf.GetDispatcher(req.ReceiverPid).SendRequest(envelope)
+		err := sf.GetDispatcher(req.ReceiverPid).Deliver(ctx, envelope)
 		if err != nil {
 			return err
 		}

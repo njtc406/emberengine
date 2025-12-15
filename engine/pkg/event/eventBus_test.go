@@ -1,6 +1,7 @@
 package event
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type testService struct {
@@ -39,13 +41,13 @@ func (s *testService) GetPid() *actor.PID {
 	return s.pid
 }
 
-func (s *testService) PushEvent(e inf.IEvent) error {
+func (s *testService) PushEvent(ctx context.Context, e inf.IEvent) error {
 	ev, ok := e.(*Event)
 	if !ok {
-		return fmt.Errorf("event type is not actor.Event")
+		return fmt.Errorf("event type is not Event")
 	}
 	globalEvent := ev.Data.(*actor.Event)
-	fmt.Println("service ", s.name, " eventBus receive ", ev.GetType(), " event type:", globalEvent.GetType())
+	fmt.Println("service ", s.name, " eventBus receive ", ev.GetType(), " event type:", globalEvent.EventType)
 	return nil
 }
 
@@ -66,8 +68,8 @@ func TestEventBus(t *testing.T) {
 	)
 	defer eb.Stop()
 	ctx := xcontext.New(nil)
-	ctx.SetHeader(def.DefaultDispatcherKey, "111")
-	ctx.SetHeader(def.DefaultPriorityKey, def.PriorityNormal)
+	ctx.AddHeader(def.DefaultDispatcherKey, "111")
+	ctx.AddHeader(def.DefaultPriorityKey, def.PriorityNormal)
 
 	service1 := &testService{}
 	service2 := &testService{}
@@ -98,10 +100,11 @@ func TestEventBus(t *testing.T) {
 		time.Sleep(time.Second * 1)
 
 		fmt.Println("publish goroutine start")
-		if err := eb.PublishGlobalLocal(ctx, 1, nil); err != nil {
+		testData := wrapperspb.String("test-event-data")
+		if err := eb.PublishGlobalLocal(ctx, 1, testData); err != nil {
 			t.Error(err)
 		}
-		if err := eb.PublishServerLocal(ctx, 2, 1, nil); err != nil {
+		if err := eb.PublishServerLocal(ctx, 2, 1, testData); err != nil {
 			t.Error(err)
 		}
 		fmt.Println("publish done")
@@ -127,8 +130,8 @@ func TestSpecificEvent(t *testing.T) {
 	defer eb.Stop()
 
 	ctx := xcontext.New(nil)
-	ctx.SetHeader(def.DefaultDispatcherKey, "test-dispatcher")
-	ctx.SetHeader(def.DefaultPriorityKey, def.PriorityNormal)
+	ctx.AddHeader(def.DefaultDispatcherKey, "test-dispatcher")
+	ctx.AddHeader(def.DefaultPriorityKey, def.PriorityNormal)
 
 	// 创建测试服务
 	targetService := &testService{
@@ -166,7 +169,8 @@ func TestSpecificEvent(t *testing.T) {
 
 	// 发布特定服务事件
 	fmt.Println("\n=== 发布特定服务事件 ===")
-	if err := eb.PublishSpecificLocal(ctx, 100, targetService.GetPid().GetServiceUid(), nil); err != nil {
+	testData := wrapperspb.String("specific-event-data")
+	if err := eb.PublishSpecificLocal(ctx, 100, targetService.GetPid().GetServiceUid(), testData); err != nil {
 		t.Errorf("发布特定服务事件失败: %v", err)
 	}
 	fmt.Println("targetService 发布事件完成")

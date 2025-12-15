@@ -125,8 +125,8 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, t *TimingWheel, l
 			pool.WithRef(func(t *Timer) {
 				t.Ref()
 			}),
-			pool.WithUnRef(func(t *Timer) {
-				t.UnRef()
+			pool.WithUnRef(func(t *Timer) bool {
+				return t.UnRef()
 			}),
 			pool.WithReset(func(t *Timer) {
 				t.Reset()

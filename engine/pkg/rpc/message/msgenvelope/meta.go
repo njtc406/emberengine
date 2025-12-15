@@ -6,24 +6,35 @@
 package msgenvelope
 
 import (
+	"fmt"
+	"os"
+	"runtime"
+	"strings"
+	"sync"
+	"unsafe"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"sync"
-	"time"
 )
 
 var metaPool = pool.NewSyncPoolWrapper(
 	func() *Meta {
 		return &Meta{}
 	},
-	pool.NewStatsRecorder("metaPool"),
+	func() pool.IStatsRecorder {
+		if config.IsDebug() {
+			return pool.NewStatsRecorder("metaPool")
+		}
+		return pool.NewNoStatsRecorder()
+	}(),
 	pool.WithRef(func(t *Meta) {
 		t.Ref()
 	}),
-	pool.WithUnRef(func(t *Meta) {
-		t.UnRef()
+	pool.WithUnRef(func(t *Meta) bool {
+		return t.UnRef()
 	}),
 	pool.WithReset(func(t *Meta) {
 		t.Reset()
@@ -31,7 +42,118 @@ var metaPool = pool.NewSyncPoolWrapper(
 )
 
 func NewMeta() inf.IEnvelopeMeta {
-	return metaPool.Get()
+	m := metaPool.Get()
+	trackMetaBorrow(m)
+	return m
+}
+
+func putMeta(m *Meta) {
+	if m == nil {
+		return
+	}
+	trackMetaReturn(m)
+	metaPool.Put(m)
+}
+
+type metaBorrow struct {
+	stack string
+}
+
+var metaBorrowTracker = struct {
+	sync.Mutex
+	borrows map[uintptr]metaBorrow
+}{
+	borrows: make(map[uintptr]metaBorrow),
+}
+
+var metaLeakTrackEnabledOnce sync.Once
+var metaLeakTrackEnabledCached bool
+
+func metaLeakTrackEnabled() bool {
+	// Stack capture is extremely expensive (especially on Windows). Keep it strictly opt-in.
+	// IMPORTANT: Avoid calling os.Getenv per message; on Windows it can be a cgocall hotspot.
+	if !config.IsDebug() {
+		return false
+	}
+	metaLeakTrackEnabledOnce.Do(func() {
+		metaLeakTrackEnabledCached = os.Getenv("META_LEAK_TRACK") == "1"
+	})
+	return metaLeakTrackEnabledCached
+}
+
+func trackMetaBorrow(m *Meta) {
+	if m == nil || !metaLeakTrackEnabled() {
+		return
+	}
+	ptr := uintptr(unsafe.Pointer(m))
+	stack := captureStack(3)
+	metaBorrowTracker.Lock()
+	metaBorrowTracker.borrows[ptr] = metaBorrow{stack: stack}
+	metaBorrowTracker.Unlock()
+}
+
+func trackMetaReturn(m *Meta) {
+	if m == nil || !metaLeakTrackEnabled() {
+		return
+	}
+	ptr := uintptr(unsafe.Pointer(m))
+	metaBorrowTracker.Lock()
+	delete(metaBorrowTracker.borrows, ptr)
+	metaBorrowTracker.Unlock()
+}
+
+func DumpMetaPoolLeaks(max int) string {
+	if !metaLeakTrackEnabled() {
+		return ""
+	}
+	if max <= 0 {
+		max = 10
+	}
+	metaBorrowTracker.Lock()
+	defer metaBorrowTracker.Unlock()
+	if len(metaBorrowTracker.borrows) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("metaPool leak tracker: %d Meta still borrowed\n", len(metaBorrowTracker.borrows)))
+	i := 0
+	for ptr, info := range metaBorrowTracker.borrows {
+		i++
+		b.WriteString(fmt.Sprintf("\n[%d] Meta@0x%x borrowed at:\n%s\n", i, ptr, info.stack))
+		if i >= max {
+			if len(metaBorrowTracker.borrows) > max {
+				b.WriteString(fmt.Sprintf("\n... and %d more\n", len(metaBorrowTracker.borrows)-max))
+			}
+			break
+		}
+	}
+	return b.String()
+}
+
+func captureStack(skip int) string {
+	const maxFrames = 64
+	pcs := make([]uintptr, maxFrames)
+	n := runtime.Callers(skip, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+
+	var b strings.Builder
+	for {
+		frame, more := frames.Next()
+		// 过滤掉本包内部的追踪函数栈，减少噪音
+		if strings.Contains(frame.Function, "msgenvelope.captureStack") ||
+			strings.Contains(frame.Function, "msgenvelope.trackMeta") {
+			if !more {
+				break
+			}
+			continue
+		}
+		b.WriteString(fmt.Sprintf("%s\n\t%s:%d\n", frame.Function, frame.File, frame.Line))
+		if !more {
+			break
+		}
+	}
+	return b.String()
 }
 
 type Meta struct {
@@ -40,29 +162,15 @@ type Meta struct {
 
 	senderPid   *actor.PID         // 发送者
 	receiverPid *actor.PID         // 接收者
-	sender      inf.IRpcDispatcher // 发送者客户端(用于回调)
-	// 缓存信息
-	timeout        time.Duration        // 请求超时时间
-	done           chan struct{}        // 完成信号
-	reqID          uint64               // 请求ID(主要用于monitor区分不同的call)
-	timerId        uint64               // 定时器ID
-	callbacks      []dto.CompletionFunc // 完成回调
-	callbackParams []interface{}        // 回调透传参数
+	sender      inf.IRpcDispatcher // 发送者客户端(用于回复)
+	reqID       uint64             // 请求ID(主要用于monitor区分不同的call)
 }
 
 func (e *Meta) Reset() {
 	e.senderPid = nil
 	e.receiverPid = nil
 	e.sender = nil
-	e.timeout = 0
 	e.reqID = 0
-	if e.done == nil {
-		e.done = make(chan struct{}, 1)
-	}
-	if len(e.done) > 0 {
-		<-e.done
-	}
-	e.callbacks = e.callbacks[:0]
 }
 
 func (e *Meta) SetSenderPid(senderPid *actor.PID) {
@@ -83,38 +191,10 @@ func (e *Meta) SetDispatcher(client inf.IRpcDispatcher) {
 	e.sender = client
 }
 
-func (e *Meta) SetTimeout(timeout time.Duration) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.timeout = timeout
-}
-
 func (e *Meta) SetReqId(reqId uint64) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.reqID = reqId
-}
-
-func (e *Meta) SetCallback(cbs []dto.CompletionFunc) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.callbacks = cbs
-}
-
-func (e *Meta) SetTimerId(id uint64) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.timerId = id
-}
-
-func (e *Meta) SetCallbackParams(params []interface{}) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.callbackParams = params
-}
-
-func (e *Meta) SetDone() {
-	e.done <- struct{}{}
 }
 
 func (e *Meta) GetSenderPid() *actor.PID {
@@ -135,59 +215,8 @@ func (e *Meta) GetDispatcher() inf.IRpcDispatcher {
 	return e.sender
 }
 
-func (e *Meta) GetTimeout() time.Duration {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.timeout
-}
-
 func (e *Meta) GetReqId() uint64 {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.reqID
-}
-
-func (e *Meta) GetTimerId() uint64 {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.timerId
-}
-
-func (e *Meta) GetCallBacks() []dto.CompletionFunc {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.callbacks[:] // 返回一个快照
-}
-
-func (e *Meta) GetCallbackParams() []interface{} {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return e.callbackParams[:]
-}
-
-func (e *Meta) GetDone() <-chan struct{} {
-	return e.done
-}
-
-func (e *Meta) NeedCallback() bool {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-	return len(e.callbacks) > 0
-}
-
-func (e *Meta) Clone() inf.IEnvelopeMeta {
-	e.locker.RLock()
-	defer e.locker.RUnlock()
-
-	meta := NewMeta().(*Meta)
-	meta.senderPid = e.senderPid
-	meta.receiverPid = e.receiverPid
-	meta.sender = e.sender
-	meta.timeout = e.timeout
-	meta.reqID = e.reqID
-	meta.timerId = e.timerId
-	meta.callbacks = e.callbacks
-	meta.callbackParams = e.callbackParams
-
-	return meta
 }

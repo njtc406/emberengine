@@ -9,21 +9,31 @@ import (
 	"time"
 
 	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
+	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 	clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+// 默认恢复配置常量
+const (
+	defaultBackoffBaseDelay = 1 * time.Second  // 默认退避基础延迟
+	defaultBackoffMaxDelay  = 30 * time.Second // 默认退避最大延迟
+	defaultVerboseLogCount  = 5                // 默认前N次详细日志
+	defaultLogInterval      = 10               // 默认日志间隔
 )
 
 type watcher struct {
 	svc inf.IService
 	d   *EtcdDiscovery
 
-	leaseRef disc.LeaseRef
-	isMaster atomic.Bool
-	started  atomic.Bool
+	leaseRef    disc.LeaseRef
+	isMaster    atomic.Bool
+	masterEpoch atomic.Int64
+	started     atomic.Bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -37,6 +47,38 @@ type watcher struct {
 func newWatcher(svc inf.IService, d *EtcdDiscovery) *watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &watcher{svc: svc, d: d, ctx: ctx, cancel: cancel}
+}
+
+// getRecoveryConf 获取故障恢复配置，如果未配置则返回默认值
+func (w *watcher) getRecoveryConf() *config.DiscoveryRecoveryConf {
+	if w.d.conf.RecoveryConf != nil {
+		return w.d.conf.RecoveryConf
+	}
+	// 返回默认配置
+	return &config.DiscoveryRecoveryConf{
+		BackoffBaseDelay: defaultBackoffBaseDelay,
+		BackoffMaxDelay:  defaultBackoffMaxDelay,
+		VerboseLogCount:  defaultVerboseLogCount,
+		LogInterval:      defaultLogInterval,
+	}
+}
+
+// newBackoff 根据配置创建退避策略
+func (w *watcher) newBackoff() *idle.ExponentialBackoff {
+	conf := w.getRecoveryConf()
+	baseDelay := conf.BackoffBaseDelay
+	maxDelay := conf.BackoffMaxDelay
+
+	// 确保有效值
+	if baseDelay <= 0 {
+		baseDelay = defaultBackoffBaseDelay
+	}
+	if maxDelay <= 0 {
+		maxDelay = defaultBackoffMaxDelay
+	}
+
+	// maxRetries=0 表示无限重试
+	return idle.NewExponentialBackoff(baseDelay, maxDelay, 0)
 }
 
 func (w *watcher) Start() error {
@@ -62,33 +104,64 @@ func (w *watcher) Stop() {
 
 func (w *watcher) Restart() {
 	go func() {
-		const maxBackoff = 30 * time.Second
-		const maxRetry = 5
-		for retryCount := 0; retryCount < maxRetry; retryCount++ {
+		// 从配置获取退避参数
+		recoveryConf := w.getRecoveryConf()
+		backoff := w.newBackoff()
+
+		// 日志控制参数
+		verboseLogCount := recoveryConf.VerboseLogCount
+		logInterval := recoveryConf.LogInterval
+		if verboseLogCount <= 0 {
+			verboseLogCount = defaultVerboseLogCount
+		}
+		if logInterval <= 0 {
+			logInterval = defaultLogInterval
+		}
+
+		var retryCount int
+
+		for {
+			// 检查是否应该退出
+			select {
+			case <-w.ctx.Done():
+				log.SysLogger.Infof("watcher[%s] restart cancelled", w.svc.GetPid().GetServiceUid())
+				return
+			default:
+			}
+
 			w.Stop()
 			err := w.Start()
 			if err == nil {
+				if retryCount > 0 {
+					log.SysLogger.Infof("watcher[%s] reconnected successfully after %d retries", w.svc.GetPid().GetServiceUid(), retryCount)
+				}
 				return
 			}
-			log.SysLogger.Warnf("watcher start failed, retry %d/%d: %v", retryCount+1, maxRetry, err)
-			backoff := time.Duration(1<<retryCount) * time.Second
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+
+			retryCount++
+			delay := backoff.NextDelay()
+
+			// 控制日志频率：前 verboseLogCount 次每次都打印，之后每 logInterval 次打印一次
+			if retryCount <= verboseLogCount || retryCount%logInterval == 0 {
+				log.SysLogger.Warnf("watcher[%s] start failed (retry #%d), next attempt in %v: %v",
+					w.svc.GetPid().GetServiceUid(), retryCount, delay, err)
 			}
-			backoff += time.Duration(util.RandN(1000)) * time.Millisecond
-			time.Sleep(backoff)
-		}
-		log.SysLogger.Errorf("watcher start failed after %d retries", maxRetry)
-		evt := event.NewEvent()
-		evt.Type = event.ServiceDisconnected
-		evt.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
-		if pushErr := w.svc.PushEvent(evt); pushErr != nil {
-			log.SysLogger.Errorf("failed to notify service disconnection: %v", pushErr)
+
+			// 带超时的等待，支持提前退出
+			select {
+			case <-w.ctx.Done():
+				log.SysLogger.Infof("watcher[%s] restart cancelled during backoff", w.svc.GetPid().GetServiceUid())
+				return
+			case <-time.After(delay):
+				// 继续重试
+			}
 		}
 	}()
 }
 
 func (w *watcher) IsMaster() bool { return w.isMaster.Load() }
+
+func (w *watcher) MasterEpoch() int64 { return w.masterEpoch.Load() }
 
 func (w *watcher) initLease() error {
 	if !w.d.provider.IsConnected() {
@@ -112,33 +185,42 @@ func (w *watcher) releaseLease() {
 
 func (w *watcher) keepaliveLoop() {
 	defer w.wg.Done()
-	var retryCount int
-	const maxBackoff = 30 * time.Second
+
+	// 使用指数退避策略处理 lease 初始化失败的情况
+	backoff := w.newBackoff()
+
 	for {
 		select {
 		case <-w.ctx.Done():
 			log.SysLogger.Debugf("watcher[%s] exit", w.svc.GetPid().GetServiceUid())
 			return
 		default:
+			// 执行 keepalive，内部会阻塞直到 lease 过期或出错
 			w.keepalive()
+
+			// 检查是否已停止
 			if !w.started.Load() {
 				return
 			}
+
+			// 尝试重新初始化 lease
 			if err := w.initLease(); err != nil {
 				log.SysLogger.Warnf("init pid[%s] lease error: %v", w.svc.GetPid().GetServiceUid(), err)
-				retryCount++
-				backoff := time.Duration(1<<retryCount) * time.Second
-				if backoff > maxBackoff {
-					backoff = maxBackoff
+				delay := backoff.NextDelay()
+
+				// 带超时的等待，支持提前退出
+				select {
+				case <-w.ctx.Done():
+					return
+				case <-time.After(delay):
+					continue
 				}
-				backoff += time.Duration(util.RandN(1000)) * time.Millisecond
-				time.Sleep(backoff)
-				continue
 			}
+
+			// lease 初始化成功，重置退避计数器并重新选举
+			backoff.Reset()
 			if err := w.electMaster(); err != nil {
 				log.SysLogger.Errorf("elect master error: %v", err)
-			} else {
-				retryCount = 0
 			}
 		}
 	}
@@ -153,6 +235,15 @@ func (w *watcher) keepalive() {
 	}
 	if err := w.d.leaseMgr.KeepAliveLoop(w.ctx, w.leaseRef); err != nil {
 		log.SysLogger.Errorf("etcd keepalive failed: %v", err)
+		// If we were master, step down immediately to minimize overlapping work windows.
+		if w.IsMaster() {
+			pid := w.svc.GetPid()
+			prevEpoch := w.MasterEpoch()
+			w.isMaster.Store(false)
+			w.masterEpoch.Store(0)
+			pid.SetMaster(false)
+			w.notifyService(event.ServiceLoseMaster, true, prevEpoch, 0)
+		}
 		return
 	}
 }
@@ -160,6 +251,7 @@ func (w *watcher) keepalive() {
 func (w *watcher) electMaster() (err error) {
 	if !w.svc.IsPrimarySecondaryMode() {
 		w.isMaster.Store(true)
+		w.masterEpoch.Store(0)
 		w.svc.GetPid().SetMaster(true)
 		if err = w.registerService(); err != nil {
 			log.SysLogger.Errorf("register service to etcd failed: %v\n stack:%s", err, debug.Stack())
@@ -170,11 +262,13 @@ func (w *watcher) electMaster() (err error) {
 	pid := w.svc.GetPid()
 	masterKey := w.d.registry.MasterKey(pid.GetServiceGroup())
 	w.stopWatchMaster()
-	isMaster := w.IsMaster()
+	wasMaster := w.IsMaster()
+	prevEpoch := w.MasterEpoch()
 	w.isMaster.Store(false)
+	w.masterEpoch.Store(0)
 	pid.SetMaster(false)
-	if isMaster {
-		w.notifyService(event.ServiceLoseMaster, isMaster)
+	if wasMaster {
+		w.notifyService(event.ServiceLoseMaster, true, prevEpoch, 0)
 	}
 	if !w.d.provider.IsConnected() {
 		return fmt.Errorf("discovery registerService: etcd connect failed")
@@ -184,30 +278,35 @@ func (w *watcher) electMaster() (err error) {
 			log.SysLogger.Errorf("register service to etcd failed: %v", err)
 		}
 	}()
-	succeeded, respErr := w.d.election.TryAcquireMaster(w.ctx, masterKey, pid.GetServiceGroup(), w.leaseRef)
+	succeeded, epoch, respErr := w.d.election.TryAcquireMaster(w.ctx, masterKey, pid.GetServiceGroup(), w.leaseRef)
 	if respErr != nil {
 		log.SysLogger.Errorf("master election txn error: %v", respErr)
 		goto Slave
 	}
 	if succeeded {
 		w.isMaster.Store(true)
+		w.masterEpoch.Store(epoch)
 		pid.SetMaster(true)
-		w.notifyService(event.ServiceBecomeMaster, isMaster)
+		w.notifyService(event.ServiceBecomeMaster, wasMaster, prevEpoch, epoch)
 		return
 	}
 Slave:
 	w.watchMasterWg.Add(1)
 	go w.startWatchMaster(masterKey)
-	w.notifyService(event.ServiceBecomeSlaver, isMaster)
+	w.notifyService(event.ServiceBecomeSlaver, wasMaster, prevEpoch, 0)
 	return
 }
 
-func (w *watcher) notifyService(evtType int32, oldStateIsMaster bool) {
+func (w *watcher) notifyService(evtType int32, oldStateIsMaster bool, prevEpoch, newEpoch int64) {
 	evt := event.NewEvent()
 	evt.Type = evtType
-	evt.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
-	evt.Data = oldStateIsMaster
-	if err := w.svc.PushEvent(evt); err != nil {
+	evt.Priority = def.PrioritySys
+	evt.Data = &event.MasterStateData{
+		OldStateIsMaster: oldStateIsMaster,
+		PrevEpoch:        prevEpoch,
+		NewEpoch:         newEpoch,
+	}
+	if err := w.svc.PushEvent(w.ctx, evt); err != nil {
 		log.SysLogger.Errorf("push event[%d] error: %v", evtType, err)
 	}
 }
@@ -217,6 +316,9 @@ func (w *watcher) registerService() error {
 		return fmt.Errorf("etcd client not connected")
 	}
 	pid := w.svc.GetPid()
+	if pid == nil {
+		return fmt.Errorf("service PID is nil")
+	}
 	return w.d.registry.RegisterService(w.ctx, pid, w.leaseRef)
 }
 

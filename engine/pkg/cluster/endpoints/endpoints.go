@@ -6,6 +6,8 @@
 package endpoints
 
 import (
+	"context"
+
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
@@ -83,7 +85,7 @@ func (em *EndpointManager) SetClusterMode(isClusterMode bool) {
 }
 
 // updateServiceInfo 更新远程服务信息事件
-func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
+func (em *EndpointManager) updateServiceInfo(ctx context.Context, e inf.IEvent) {
 	log.SysLogger.Debugf("endpoints receive update service event: %+v", e.GetType())
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
@@ -109,7 +111,7 @@ type delKey struct {
 }
 
 // removeServiceInfo 删除远程服务信息事件
-func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
+func (em *EndpointManager) removeServiceInfo(ctx context.Context, e inf.IEvent) {
 	ev := e.(*event.Event)
 	kv := ev.Data.(*mvccpb.KeyValue)
 	if kv.Key != nil {
@@ -148,7 +150,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	defer ev.Release()
 	ev.Type = event.SysEventServiceReg
 	ev.Data = svc
-	em.IEventProcessor.EventHandler(ev)
+	em.IEventProcessor.EventHandler(context.Background(), ev)
 
 	return
 }
@@ -168,7 +170,7 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 	defer ev.Release()
 	ev.Type = event.SysEventServiceDis
 	ev.Data = pid
-	em.IEventProcessor.EventHandler(ev)
+	em.IEventProcessor.EventHandler(context.Background(), ev)
 }
 
 func (em *EndpointManager) ToPrivateService(svc inf.IService) {
@@ -176,7 +178,7 @@ func (em *EndpointManager) ToPrivateService(svc inf.IService) {
 	defer ev.Release()
 	ev.Type = event.SysEventServiceDis
 	ev.Data = svc.GetPid()
-	em.IEventProcessor.EventHandler(ev)
+	em.IEventProcessor.EventHandler(context.Background(), ev)
 }
 
 func (em *EndpointManager) GetRepository() *repository.Repository {

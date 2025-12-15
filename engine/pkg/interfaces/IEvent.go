@@ -8,22 +8,24 @@ package interfaces
 import (
 	"context"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"google.golang.org/protobuf/proto"
 )
 
 // EventCallBack 事件接受器
-type EventCallBack func(event IEvent)
+type EventCallBack func(ctx context.Context, event IEvent)
 type EventOption func(eventType int32, processor IEventProcessor) int
 
 type IEvent interface {
 	IDataDef
-	IContext
+	GetType() int32
+	GetPriority() def.Priority
+	GetDispatcherKey() string
 	Release()
-	IncRef()
 }
 
 type IEventChannel interface {
-	PushEvent(ev IEvent) error // 使用接口时,请注意数据引用问题!!
+	PushEvent(ctx context.Context, ev IEvent) error // 使用接口时,请注意数据引用问题!!
 }
 
 type IListener interface {
@@ -35,7 +37,7 @@ type IEventProcessor interface {
 	IEventChannel
 
 	Init(eventChannel IListener)
-	EventHandler(ev IEvent)
+	EventHandler(ctx context.Context, ev IEvent)
 	// 普通事件
 	RegEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
 	UnRegEventReceiverFun(eventType int32, receiver IEventHandler)
@@ -57,7 +59,7 @@ type IEventProcessor interface {
 	// 发布特定服务事件
 	PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error
 
-	CastEvent(event IEvent) //广播事件
+	CastEvent(ctx context.Context, event IEvent) //广播事件
 	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)
 	AddListen(eventType int32, receiver IEventHandler)
 	RemoveBindEvent(eventType int32, receiver IEventHandler)
@@ -67,7 +69,7 @@ type IEventProcessor interface {
 type IEventHandler interface {
 	Init(p IEventProcessor)
 	GetEventProcessor() IEventProcessor
-	NotifyEvent(IEvent)
+	NotifyEvent(ctx context.Context, ev IEvent)
 	Destroy()
 	//注册了事件
 	AddRegInfo(eventType int32, eventProcessor IEventProcessor)

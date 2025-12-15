@@ -42,7 +42,7 @@ const (
 // - one (optional) stdout core for all levels
 // - N file cores according to Routing.Routes, with "last route wins" semantics per level
 // - optional async buffering via zapcore.BufferedWriteSyncer
-func buildZapTeeCore(conf *LoggerConf, minLevel Level, addCaller, fullCaller, color bool, isDebug bool) (zapcore.Core, []closeFn, error) {
+func buildZapTeeCore(conf *LoggerConf, minLevel Level, addCaller, fullCaller, color bool, enablePoolStats bool) (zapcore.Core, []closeFn, error) {
 	if conf == nil {
 		conf = &LoggerConf{}
 	}
@@ -53,8 +53,8 @@ func buildZapTeeCore(conf *LoggerConf, minLevel Level, addCaller, fullCaller, co
 
 	// Stdout core (all levels)
 	if conf.Stdout {
-		// Production mode never uses ANSI colors.
-		useColor := color && !conf.Production
+		// JSON output never uses ANSI colors.
+		useColor := color && strings.ToLower(conf.OutputFormat) != "json"
 		cm := colorNone
 		if useColor {
 			cm = colorLegacy
@@ -68,7 +68,7 @@ func buildZapTeeCore(conf *LoggerConf, minLevel Level, addCaller, fullCaller, co
 			addCaller,
 			fullCaller,
 			cm,
-			isDebug,
+			enablePoolStats,
 		))
 	}
 
@@ -76,7 +76,7 @@ func buildZapTeeCore(conf *LoggerConf, minLevel Level, addCaller, fullCaller, co
 	if conf.PrefixName == "" || conf.Routing == nil || len(conf.Routing.Routes) == 0 {
 		if len(cores) == 0 {
 			cores = append(cores, newOutputCore(conf, zapcore.AddSync(io.Discard), minLevel, levelEnablerAll(minLevel), addCaller, fullCaller,
-				colorNone, isDebug))
+				colorNone, enablePoolStats))
 		}
 		return zapcore.NewTee(cores...), closers, nil
 	}
@@ -114,18 +114,18 @@ func buildZapTeeCore(conf *LoggerConf, minLevel Level, addCaller, fullCaller, co
 
 		enabler := levelEnablerSet(minLevel, lvls)
 		// Never write ANSI colors into files.
-		cores = append(cores, newOutputCore(conf, ws, minLevel, enabler, addCaller, fullCaller, colorNone, isDebug))
+		cores = append(cores, newOutputCore(conf, ws, minLevel, enabler, addCaller, fullCaller, colorNone, enablePoolStats))
 	}
 
 	if len(cores) == 0 {
-		cores = append(cores, newOutputCore(conf, zapcore.AddSync(io.Discard), minLevel, levelEnablerAll(minLevel), addCaller, fullCaller, colorNone, isDebug))
+		cores = append(cores, newOutputCore(conf, zapcore.AddSync(io.Discard), minLevel, levelEnablerAll(minLevel), addCaller, fullCaller, colorNone, enablePoolStats))
 	}
 
 	return zapcore.NewTee(cores...), closers, nil
 }
 
-func newOutputCore(conf *LoggerConf, ws zapcore.WriteSyncer, min zapcore.Level, enabler levelEnabler, addCaller, fullCaller bool, colorMode colorMode, isDebug bool) zapcore.Core {
-	if conf != nil && conf.Production {
+func newOutputCore(conf *LoggerConf, ws zapcore.WriteSyncer, min zapcore.Level, enabler levelEnabler, addCaller, fullCaller bool, colorMode colorMode, enablePoolStats bool) zapcore.Core {
+	if conf != nil && strings.ToLower(conf.OutputFormat) == "json" {
 		enc := newJSONEncoder(addCaller, fullCaller)
 		return zapcore.NewCore(enc, ws, zapLevelEnablerAdapter{f: func(l zapcore.Level) bool {
 			if enabler == nil {
@@ -134,7 +134,7 @@ func newOutputCore(conf *LoggerConf, ws zapcore.WriteSyncer, min zapcore.Level, 
 			return enabler.Enabled(l)
 		}})
 	}
-	return newFormatCore(ws, min, enabler, addCaller, fullCaller, colorMode, isDebug)
+	return newFormatCore(ws, min, enabler, addCaller, fullCaller, colorMode, enablePoolStats)
 }
 
 type zapLevelEnablerAdapter struct {
@@ -285,17 +285,17 @@ func levelEnablerSet(min zapcore.Level, allowed []zapcore.Level) levelEnablerFun
 // formatCore is a small zapcore.Core implementation that only focuses on formatting.
 // Routing/level filtering is done via the provided enabler.
 type formatCore struct {
-	ws         zapcore.WriteSyncer
-	minLevel   zapcore.Level
-	enabler    levelEnabler
-	addCaller  bool
-	fullCaller bool
-	colorMode  colorMode
-	baseFields []zapcore.Field
-	isDebug    bool
+	ws              zapcore.WriteSyncer
+	minLevel        zapcore.Level
+	enabler         levelEnabler
+	addCaller       bool
+	fullCaller      bool
+	colorMode       colorMode
+	baseFields      []zapcore.Field
+	enablePoolStats bool
 }
 
-func newFormatCore(ws zapcore.WriteSyncer, min zapcore.Level, enabler levelEnabler, addCaller, fullCaller bool, colorMode colorMode, isDebug bool) zapcore.Core {
+func newFormatCore(ws zapcore.WriteSyncer, min zapcore.Level, enabler levelEnabler, addCaller, fullCaller bool, colorMode colorMode, enablePoolStats bool) zapcore.Core {
 	if ws == nil {
 		ws = zapcore.AddSync(io.Discard)
 	}
@@ -303,13 +303,13 @@ func newFormatCore(ws zapcore.WriteSyncer, min zapcore.Level, enabler levelEnabl
 		enabler = levelEnablerAll(min)
 	}
 	return &formatCore{
-		ws:         ws,
-		minLevel:   min,
-		enabler:    enabler,
-		addCaller:  addCaller,
-		fullCaller: fullCaller,
-		colorMode:  colorMode,
-		isDebug:    isDebug,
+		ws:              ws,
+		minLevel:        min,
+		enabler:         enabler,
+		addCaller:       addCaller,
+		fullCaller:      fullCaller,
+		colorMode:       colorMode,
+		enablePoolStats: enablePoolStats,
 	}
 }
 
@@ -322,13 +322,14 @@ func (c *formatCore) Enabled(lvl zapcore.Level) bool {
 
 func (c *formatCore) With(fields []zapcore.Field) zapcore.Core {
 	nc := &formatCore{
-		ws:         c.ws,
-		minLevel:   c.minLevel,
-		enabler:    c.enabler,
-		addCaller:  c.addCaller,
-		fullCaller: c.fullCaller,
-		colorMode:  c.colorMode,
-		baseFields: append(append([]zapcore.Field{}, c.baseFields...), fields...),
+		ws:              c.ws,
+		minLevel:        c.minLevel,
+		enabler:         c.enabler,
+		addCaller:       c.addCaller,
+		fullCaller:      c.fullCaller,
+		colorMode:       c.colorMode,
+		baseFields:      append(append([]zapcore.Field{}, c.baseFields...), fields...),
+		enablePoolStats: c.enablePoolStats,
 	}
 	return nc
 }
@@ -364,12 +365,12 @@ func (c *formatCore) Write(ent zapcore.Entry, fields []zapcore.Field) error {
 	}
 	sort.Strings(keys)
 
-	b := getBufferPool(c.isDebug).Get()
+	b := getBufferPool(c.enablePoolStats).Get()
 	b.Grow(256)
 	defer func() {
 		// Avoid retaining very large buffers in the pool.
 		if b.Cap() <= 64*1024 {
-			getBufferPool(c.isDebug).Put(b)
+			getBufferPool(c.enablePoolStats).Put(b)
 		}
 	}()
 

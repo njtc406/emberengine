@@ -6,6 +6,7 @@
 package core
 
 import (
+	"context"
 	"reflect"
 	"sync/atomic"
 
@@ -226,8 +227,8 @@ func (m *Module) reset() {
 	m.ILoggerX = nil
 }
 
-func (m *Module) NotifyEvent(e inf.IEvent) {
-	m.eventHandler.NotifyEvent(e)
+func (m *Module) NotifyEvent(ctx context.Context, ev inf.IEvent) {
+	m.eventHandler.NotifyEvent(ctx, ev)
 }
 
 func (m *Module) GetLogger() *log.Logger {

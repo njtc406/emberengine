@@ -6,10 +6,12 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"runtime/debug"
 	"sync/atomic"
+	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
@@ -24,6 +26,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 // TODO 还需要给部分可自定义的组件增加一个设置的入口,不然需要覆写整个init太麻烦
@@ -58,11 +61,16 @@ type Service struct {
 	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用)
 
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
+
+	stopGraceTimeout time.Duration // 关闭时等待窗口
 }
 
 func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 	if serviceInitConf.Type == "" {
 		serviceInitConf.Type = "Normal"
+	}
+	if serviceInitConf.StopGraceTimeout < 0 {
+		serviceInitConf.StopGraceTimeout = 0
 	}
 	if serviceInitConf.RpcType == "" {
 		// 优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
@@ -93,12 +101,21 @@ func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 }
 
 func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{}) {
+	if svc == nil {
+		log.SysLogger.Fatalf("service impl is nil, trace: %s", debug.Stack())
+		return
+	}
 	if !atomic.CompareAndSwapInt32(&s.status, def.SvcStatusUnknown, def.SvcStatusInit) {
 		return
 	}
+
+	if s.name == "" {
+		s.name = reflect.Indirect(reflect.ValueOf(svc)).Type().Name()
+	}
+
 	// 整理配置参数
 	if serviceInitConf == nil {
-		log.SysLogger.Fatalf("service init conf is nil, service name: %s", s.GetName())
+		log.SysLogger.WithField("sName", s.GetName()).Fatal("service init conf is nil")
 		return
 	}
 	serviceInitConf = fixConf(serviceInitConf)
@@ -128,10 +145,15 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		"sId":   serviceInitConf.ServerId,
 	})
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
+	s.stopGraceTimeout = serviceInitConf.StopGraceTimeout
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize,
 		timingwheel.GetTimingWheel(), s.ILoggerX, config.IsDebug())
+	// Debug-only mailbox diagnostics
+	if config.IsDebug() {
+		s.mailboxMiddlewares = append(s.mailboxMiddlewares, mailbox.NewDispatchKeyStatsMiddleware(s.ILoggerX, 10*time.Second, 10))
+	}
 	// 创建邮箱
 	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
 
@@ -223,14 +245,14 @@ func (s *Service) startListenCallback() {
 			if !ok {
 				return
 			}
-			if err := s.pushConcurrentCallback(t); err != nil {
+			if err := s.pushConcurrentCallback(xcontext.New(nil), t); err != nil {
 				s.Errorf("submit concurrent callback error: %v", err)
 			}
 		case t, ok := <-s.ITimerScheduler.GetTimerCbChannel():
 			if !ok {
 				return
 			}
-			if err := s.pushTimerCallback(t); err != nil {
+			if err := s.pushTimerCallback(xcontext.New(nil), t); err != nil {
 				s.Errorf("submit timer callback error: %v", err)
 			}
 		}
@@ -245,7 +267,7 @@ func (s *Service) Stop() {
 	//s.Debugf("service[%s] begin stop", s.GetName())
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
 
-	// 挂起邮箱
+	// 挂起邮箱(防止有新的请求消息进来)
 	s.mailbox.Suspend()
 
 	// 关闭定时器
@@ -257,7 +279,13 @@ func (s *Service) Stop() {
 	// 释放资源(这里面可能还会有call类型的调用,所以先执行)
 	s.release()
 
-	// 关闭邮箱(完全关闭所有的工作线程,不再接收新的消息)
+	// 等待窗口：允许短延迟回调/回复在关闭前最后进入并处理。
+	// 超过窗口不再等待，直接停止 mailbox。
+	if s.stopGraceTimeout > 0 {
+		time.Sleep(s.stopGraceTimeout)
+	}
+
+	// 关闭邮箱(完全关闭所有的工作线程,不再接收任何消息)
 	s.mailbox.Stop()
 
 	if s.enableLogging && s.logger != nil {
@@ -285,31 +313,32 @@ func (s *Service) release() {
 
 }
 
-func (s *Service) PushEvent(evt inf.IEvent) error {
+func (s *Service) PushEvent(ctx context.Context, evt inf.IEvent) error {
 	//if !s.isRunning() {
 	//	return def.ErrServiceIsUnavailable
 	//}
-	evt.IncRef()
-	return s.mailbox.PostMessage(evt)
+	// 所有权转移：调用方在 PushEvent 后不得再使用 evt。
+	// mailbox/service 会在处理完毕后 Release；若入队失败，这里负责释放避免泄露。
+	err := s.mailbox.PostMessage(ctx, evt)
+	if err != nil {
+		evt.Release()
+	}
+	return err
 }
 
-func (s *Service) PushRequest(c inf.IEnvelope) error {
-	return s.mailbox.PostMessage(c)
-}
-
-func (s *Service) pushConcurrentCallback(evt concurrent.IConcurrentCallback) error {
+func (s *Service) pushConcurrentCallback(ctx context.Context, evt concurrent.IConcurrentCallback) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceConcurrentCallback
 	ev.Data = evt
-	return s.mailbox.PostMessage(ev)
+	return s.mailbox.PostMessage(ctx, ev)
 }
 
-func (s *Service) pushTimerCallback(t timingwheel.ITimer) error {
+func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) error {
 	ev := event.NewEvent()
 	ev.Type = event.ServiceTimerCallback
-	ev.SetHeader(def.DefaultDispatcherKey, t.GetName()) // 保证相同的回调在同一个worker处理
+	ev.DispatcherKey = t.GetName() // 保证相同的回调在同一个worker处理
 	ev.Data = t
-	return s.mailbox.PostMessage(ev)
+	return s.mailbox.PostMessage(ctx, ev)
 }
 
 func (s *Service) SetName(name string) {
@@ -318,6 +347,10 @@ func (s *Service) SetName(name string) {
 
 func (s *Service) GetName() string {
 	return s.name
+}
+
+func (s *Service) SetPid(pid *actor.PID) {
+	s.pid = pid
 }
 
 func (s *Service) GetServerId() int32 {
@@ -345,12 +378,6 @@ func (s *Service) OnStarted() error {
 }
 
 func (s *Service) OnRelease() {}
-
-func (s *Service) OnSetup(svc inf.IService) {
-	if svc.GetName() == "" {
-		s.name = reflect.Indirect(reflect.ValueOf(svc)).Type().Name()
-	}
-}
 
 func (s *Service) IsClosed() bool {
 	return atomic.LoadInt32(&s.status) > def.SvcStatusRunning
@@ -408,8 +435,8 @@ func (s *Service) GetRpcHandler() inf.IRpcHandler {
 	return s.IRpcHandler
 }
 
-func (s *Service) EscalateFailure(reason interface{}, evt inf.IEvent) {
-	s.Errorf("event[%d] EscalateFailure: %v", evt.GetType(), reason)
+func (s *Service) EscalateFailure(ctx context.Context, reason interface{}, evt inf.IEvent) {
+	s.WithContext(ctx).Errorf("event[%d] EscalateFailure: %v", evt.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {

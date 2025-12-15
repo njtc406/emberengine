@@ -18,17 +18,26 @@ message PID {
 }
 
 message Message {
-  PID SenderPid                       = 1; // 发送者
-  PID ReceiverPid                     = 2; // 接收者
-  string Method                       = 3; // 调用方法
-  google.protobuf.Any Request         = 4; // 方法参数
-  google.protobuf.Any Response        = 5; // 方法返回值
-  string Err                          = 6; // 错误信息
-  map<string, string> MessageHeader   = 7; // 消息头(额外信息)
-  bool Reply                          = 8; // 是否是回复
-  uint64 ReqId                        = 9; // 请求ID
-  bool NeedResp                       = 10; // 是否需要回复
-  int32 CompressType                  = 11; // 压缩类型(0无压缩)
+  // === 路由信息 ===
+  PID SenderPid                       = 1;  // 发送者
+  PID ReceiverPid                     = 2;  // 接收者
+  
+  // === 调度属性（显式字段） ===
+  int32 Priority                      = 3;  // 优先级
+  string DispatcherKey                = 4;  // 分发键（用于分区/顺序保证）
+  
+  // === RPC 信息 ===
+  string Method                       = 5;  // 调用方法
+  google.protobuf.Any Request         = 6;  // 方法参数
+  google.protobuf.Any Response        = 7;  // 方法返回值
+  string Err                          = 8;  // 错误信息
+  bool Reply                          = 9;  // 是否是回复
+  uint64 ReqId                        = 10; // 请求ID
+  bool NeedResp                       = 11; // 是否需要回复
+  int32 CompressType                  = 12; // 压缩类型(0无压缩)
+  
+  // === 上下文元数据（仅用于 tracing/metadata） ===
+  map<string, string> ContextHeaders  = 13; // 上下文头（traceId 等）
 }
 
 service GrpcListener {
@@ -39,14 +48,20 @@ message RpcCallResponse{
 }
 
 message Event {
-  int32 EventType = 1; // 事件类型
-  EventData Data = 2; // 事件数据
-  int32 ServerId = 3; // 服务器ID
-  string TraceId = 4; // 链路追踪ID
-  string ServiceUid = 5; // 服务实例唯一id
-}
-
-message EventData {
-  map<string, string> Header = 1;
-  bytes RawData = 2;
+  // === 事件标识 ===
+  int32 EventType                     = 1;  // 事件类型
+  
+  // === 调度属性（显式字段） ===
+  int32 Priority                      = 2;  // 优先级
+  string DispatcherKey                = 3;  // 分发键（用于分区/顺序保证）
+  
+  // === 路由信息 ===
+  int32 ServerId                      = 4;  // 目标服务器ID
+  string ServiceUid                   = 5;  // 目标服务实例唯一id
+  
+  // === 数据 ===
+  google.protobuf.Any Data            = 6;  // 实际事件数据
+  
+  // === 上下文元数据（仅用于 tracing/metadata） ===
+  map<string, string> ContextHeaders  = 7;  // 上下文头（traceId 等）
 }

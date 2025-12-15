@@ -8,7 +8,7 @@ package interfaces
 type IDataDef interface {
 	IsRef() bool
 	Ref()
-	UnRef()
+	UnRef() bool
 }
 
 type IReset interface {

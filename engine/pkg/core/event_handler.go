@@ -6,6 +6,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -18,7 +19,7 @@ import (
 
 // TODO 这个函数需要修改,如果pprof做成了模块,那么这里就不需要什么open这些字段了
 // EventHandler 定义事件处理函数类型
-type EventHandler func(ev inf.IEvent, open bool, analyzer *profiler.Analyzer)
+type EventHandler func(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer)
 
 // 初始化事件处理器
 func (s *Service) initEventHandlers() {
@@ -40,7 +41,7 @@ func (s *Service) RegisterUserHandler(tp int32, handler EventHandler) {
 }
 
 // InvokeMessage 处理事件(这个函数是在mailbox的线程中被调用的)
-func (s *Service) InvokeMessage(ev inf.IEvent) {
+func (s *Service) InvokeMessage(ctx context.Context, ev inf.IEvent) {
 	if !ev.IsRef() {
 		// 前面的超时之后导致后面的已经被丢弃
 		return
@@ -54,7 +55,7 @@ func (s *Service) InvokeMessage(ev inf.IEvent) {
 	}
 
 	tp := ev.GetType()
-	//s.logger.WithContext(ev.GetContext()).Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>service[%s] receive user event[%d]", s.GetName(), tp)
+	//s.logger.WithContext(ctx).Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>service[%s] receive user event[%d]", s.GetName(), tp)
 
 	var analyzer *profiler.Analyzer
 	open := s.profiler != nil
@@ -70,7 +71,7 @@ func (s *Service) InvokeMessage(ev inf.IEvent) {
 			if open {
 				analyzer = s.profiler.Push(fmt.Sprintf("[EVENT] type:%d", tp))
 			}
-			handler(ev, open, analyzer)
+			handler(ctx, ev, open, analyzer)
 		})
 	} else {
 		// 默认处理器
@@ -78,42 +79,42 @@ func (s *Service) InvokeMessage(ev inf.IEvent) {
 			if open {
 				analyzer = s.profiler.Push(fmt.Sprintf("[OTHER_EVENT] type:%d", tp))
 			}
-			s.eventProcessor.EventHandler(ev)
+			s.eventProcessor.EventHandler(ctx, ev)
 		})
 	}
 }
 
 // 具体的系统消息处理器实现
-func (s *Service) handleServiceSuspended(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+func (s *Service) handleServiceSuspended(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 	// 服务挂起
 	s.mailbox.Suspend()
 }
 
-func (s *Service) handleServiceResumed(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+func (s *Service) handleServiceResumed(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 	// 服务恢复
 	s.mailbox.Resume()
 }
 
-func (s *Service) handleServiceClose(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+func (s *Service) handleServiceClose(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 	// 服务关闭
-	s.Stop()
+	go s.Stop()
 }
 
-func (s *Service) handleServiceHeartbeat(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+func (s *Service) handleServiceHeartbeat(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
 	// 服务健康检查
 	// TODO 需要回复服务负载等等信息
 }
 
 // handleUserRpcMsg 处理用户RPC消息事件
-func (s *Service) handleUserRpcMsg(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
+func (s *Service) handleUserRpcMsg(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	c := ev.(inf.IEnvelope)
 	meta := c.GetMeta()
 	data := c.GetData()
 
 	if meta == nil || data == nil {
-		s.logger.WithContext(c.GetContext()).Errorf("service[%s] receive rpc msg call error, meta or data is nil", s.GetName())
-		s.logger.WithContext(c.GetContext()).Errorf("meta: %v", meta)
-		s.logger.WithContext(c.GetContext()).Errorf("data: %v", data)
+		s.logger.WithContext(ctx).Errorf("service[%s] receive rpc msg call error, meta or data is nil", s.GetName())
+		s.logger.WithContext(ctx).Errorf("meta: %v", meta)
+		s.logger.WithContext(ctx).Errorf("data: %v", data)
 		return
 	}
 
@@ -122,18 +123,18 @@ func (s *Service) handleUserRpcMsg(ev inf.IEvent, open bool, analyzer *profiler.
 			analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_RESP] service:%s method:%s",
 				meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 		}
-		s.HandleResponse(c)
+		s.HandleResponse(ctx, c)
 	} else {
 		if open {
 			analyzer = s.profiler.Push(fmt.Sprintf("[USER_RPC_REQ] service:%s method:%s",
 				meta.GetReceiverPid().GetServiceUid(), data.GetMethod()))
 		}
-		s.HandleRequest(c)
+		s.HandleRequest(ctx, c)
 	}
 }
 
 // handleTimerCallback 处理定时器回调事件
-func (s *Service) handleTimerCallback(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
+func (s *Service) handleTimerCallback(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	evt := ev.(*event.Event)
 	t := evt.Data.(timingwheel.ITimer)
 	if open {
@@ -141,26 +142,42 @@ func (s *Service) handleTimerCallback(ev inf.IEvent, open bool, analyzer *profil
 	}
 
 	if err := t.Do(); err != nil {
-		s.WithContext(evt.GetContext()).Errorf("timer callback error: %v", err)
+		s.WithContext(ctx).Errorf("timer callback error: %v", err)
 	}
 }
 
 // handleConcurrentCallback 处理并发回调事件
-func (s *Service) handleConcurrentCallback(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
-	evt := ev.(*event.Event)
-	t := evt.Data.(concurrent.IConcurrentCallback)
-	if open {
-		analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", t.GetName()))
+func (s *Service) handleConcurrentCallback(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
+	var cb concurrent.IConcurrentCallback
+	if e, ok := ev.(*event.Event); ok {
+		cb = e.Data.(concurrent.IConcurrentCallback)
+	} else if c, ok := ev.(concurrent.IConcurrentCallback); ok {
+		cb = c
+	} else {
+		return
 	}
-	t.DoCallback(evt.GetContext())
+	if open {
+		analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", cb.GetName()))
+	}
+	cb.DoCallback(ctx)
 }
 
 // handleGlobalEvent 处理用户全局事件
-func (s *Service) handleGlobalEvent(ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
+// ev.Data 中存储的是 *actor.Event（EventBus 传递过来的原始事件数据载体）
+func (s *Service) handleGlobalEvent(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
 	evt := ev.(*event.Event)
-	t := evt.Data.(*actor.Event)
+	actorEvt := evt.Data.(*actor.Event)
+
+	// 创建一个本地 Event 传递给 processor
+	// Type 使用 actor.Event 的原始事件类型
+	// Data 使用 actor.Event.Data（Any 类型，包含实际业务数据）
+	localEvt := event.NewEvent()
+	localEvt.Type = actorEvt.EventType
+	localEvt.Data = actorEvt.Data // *anypb.Any
+	defer localEvt.Release()
+
 	if open {
-		analyzer = s.profiler.Push(fmt.Sprintf("[USER_GLB_EVENT] type:%d", t.GetType()))
+		analyzer = s.profiler.Push(fmt.Sprintf("[USER_GLB_EVENT] type:%d", localEvt.Type))
 	}
-	s.globalEventProcessor.EventHandler(t)
+	s.globalEventProcessor.EventHandler(ctx, localEvt)
 }

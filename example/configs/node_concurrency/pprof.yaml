@@ -1,5 +1,5 @@
 PprofConf:
-  Addr: 0.0.0.0:99
+  Addr: 0.0.0.0:6060
   ReadHeaderTimeout: 10s
   IdleTimeout: 30s
   #CachePath: http_cache

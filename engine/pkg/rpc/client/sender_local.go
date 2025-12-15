@@ -6,6 +6,7 @@
 package client
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -26,39 +27,40 @@ func (lc *localSender) Close() {
 	atomic.StoreInt32(&lc.closed, 1)
 }
 
-func (lc *localSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if lc == nil || lc.IsClosed() {
+		if envelope != nil {
+			envelope.Release()
+		}
 		return def.ErrServiceIsClosedOrExited
 	}
-
-	// clone一个envelope,保持envelope本身的归属性,不然释放很麻烦
-	return dispatcher.PostMessage(envelope.Clone())
-}
-
-func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	originEnvelope := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
-	if originEnvelope == nil {
-		return def.ErrEnvelopeNotFound
+	if envelope == nil {
+		return nil
 	}
 
-	if lc == nil || lc.IsClosed() {
-		originEnvelope.Release() // 调用者已经下线,丢弃回复
-		return def.ErrServiceIsClosedOrExited
+	data := envelope.GetData()
+	if data != nil && data.IsReply() {
+		// 本地回复：reply 复用的是“当前正在处理的请求 envelope”，
+		// envelope 的最终释放由对端 mailbox 的 InvokeMessage 统一负责。
+		// 这里提前 Release 会导致对象过早回到池里，被并发复用后出现 meta/data=nil 等异常。
+		state := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId())
+		if state == nil {
+			return def.ErrEnvelopeNotFound
+		}
+		state.SetResult(data.GetResponse(), data.GetError())
+		state.Complete()
+		envelope.Release()
+		return nil
 	}
 
-	if originEnvelope.GetMeta().NeedCallback() {
-		// 本地调用的回复消息,直接发送到对应service的邮箱处理
-		return dispatcher.PostMessage(originEnvelope)
-	} else {
-		// 同步调用,直接设置调用结束
-		originEnvelope.SetDone()
+	// 本地请求：投递到对端 mailbox。
+	// envelope 的最终 Release 由对端 mailbox 统一处理。
+	if err := dispatcher.PostMessage(ctx, envelope); err != nil {
+		// PostMessage 失败说明未能把 envelope 交给对端 mailbox，当前方需要负责回收。
+		envelope.Release()
+		return err
 	}
 	return nil
-}
-
-func (lc *localSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
-	return lc.SendRequest(dispatcher, envelope)
 }
 
 func (lc *localSender) IsClosed() bool {

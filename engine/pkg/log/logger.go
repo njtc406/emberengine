@@ -19,8 +19,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+)
+
+const (
+	TextFormat = "text"
+	JsonFormat = "json"
 )
 
 type AsyncMode struct {
@@ -57,8 +63,10 @@ type RoutingConf struct {
 }
 
 type LoggerConf struct {
-	// 生产模式：开启时日志以 JSON 格式输出（适合采集/检索）；同时会禁用 Color。
-	Production bool `binding:""`
+	// 输出格式：
+	// - text: 传统控制台文本格式（默认）
+	// - json: 结构化 JSON（便于采集/检索）；同时会强制禁用 Color
+	OutputFormat string `binding:"oneof=text json"`
 	// 统一命名
 	Dir string `binding:""`
 	// 日志文件名前缀
@@ -88,19 +96,19 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 	if conf.Routing == nil {
 		conf.Routing = &RoutingConf{}
 	}
-	// 生产模式强制结构化输出，不使用颜色
-	if conf.Production {
+	// 输出格式默认值与归一化
+	conf.OutputFormat = strings.ToLower(strings.TrimSpace(conf.OutputFormat))
+	if conf.OutputFormat == "" {
+		conf.OutputFormat = TextFormat
+	}
+	// json 输出强制禁用颜色（避免污染结构化输出）
+	if conf.OutputFormat == JsonFormat {
 		conf.Color = false
 	}
-	// 默认值
-	if conf.Stdout == false {
-		conf.Stdout = true
-	}
-	if conf.Caller == false {
-		conf.Caller = true
-	}
+	// 默认值：不要强制覆盖布尔字段。
+	// Stdout/Caller 的默认值由上层 config.SetDefaultValues 和 debug 模式逻辑决定。
 	if conf.Level == "" {
-		conf.Level = "info"
+		conf.Level = InfoLevelStr
 	}
 	if conf.Rotation.MaxAge == 0 {
 		conf.Rotation.MaxAge = time.Hour * 24 * 15
@@ -147,9 +155,6 @@ type loggerShared struct {
 // conf 日志配置：
 //   - 通过 Routing.Routes 将不同级别写入不同文件；
 //   - 如果未显式配置 Routing，则默认所有级别写入同一个文件（单文件）。
-//
-// openStdout 是否开启标准输出(如果Name为空,且openStdout未开启,那么将不会有任何日志信息被记录)
-// TODO 如果需要远程日志,增加一个firehook,比如当日志等级为error时,将日志发送到远程服务器
 func NewDefaultLogger(conf *LoggerConf) (*Logger, error) {
 	conf = fixConf(conf)
 
@@ -159,7 +164,7 @@ func NewDefaultLogger(conf *LoggerConf) (*Logger, error) {
 		minLevel = ErrorLevel
 	}
 
-	core, closers, err := buildZapTeeCore(conf, minLevel, conf.Caller, conf.FullCaller, conf.Color, conf.Production)
+	core, closers, err := buildZapTeeCore(conf, minLevel, conf.Caller, conf.FullCaller, conf.Color, false)
 	if err != nil {
 		for _, c := range closers {
 			_ = c()
@@ -223,15 +228,36 @@ func (w *loggerOutputWriter) Write(p []byte) (n int, err error) {
 	}
 	// Skip this writer frame so caller points to the library using the writer.
 	zl := w.l.z.WithOptions(zap.AddCallerSkip(1))
-	ce := zl.Check(zapcore.Level(InfoLevel), msg)
+	ce := zl.Check(InfoLevel, msg)
 	if ce != nil {
 		ce.Write()
 	}
 	return len(p), nil
 }
 
-func (l *Logger) WithContext(_ context.Context) ILoggerX {
-	return l
+func (l *Logger) WithContext(ctx context.Context) ILoggerX {
+	if l == nil {
+		return nil
+	}
+	if ctx == nil {
+		return l
+	}
+
+	headers := emberctx.GetHeader(ctx)
+	if len(headers) == 0 {
+		return l
+	}
+
+	fields := make([]zap.Field, 0, len(headers))
+
+	for k, v := range headers {
+		fields = append(fields, zap.Any(k, v))
+	}
+
+	if len(fields) == 0 {
+		return l
+	}
+	return &Logger{shared: l.shared, z: l.z.With(fields...)}
 }
 
 func (l *Logger) WithField(key string, value interface{}) ILoggerX {

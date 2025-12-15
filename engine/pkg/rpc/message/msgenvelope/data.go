@@ -60,6 +60,9 @@ func (e *Data) SetRequest(req interface{}) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.request = req
+	// request 改变后，缓存的 Any 需要失效，避免复用旧编码。
+	e.requestBuff = nil
+	e.err = nil
 }
 
 func (e *Data) SetResponse(res interface{}) {

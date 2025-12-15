@@ -5,7 +5,6 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"testing"
 
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -28,10 +27,9 @@ func TestRpcMonitor_Add(t *testing.T) {
 	rm.Init()
 	rm.Start()
 	defer rm.Stop()
-	f := msgenvelope.NewMsgEnvelope(nil)
-	f.SetMeta(msgenvelope.NewMeta())
-	f.GetMeta().SetTimeout(time.Second)
-	rm.Add(f)
+	reqId := rm.GenSeq()
+	state := NewCallState(nil, reqId, "test", time.Second, nil, nil, nil)
+	rm.Add(state)
 }
 
 func TestRpcMonitor_Remove(t *testing.T) {
@@ -51,13 +49,14 @@ func TestRpcMonitor_Remove(t *testing.T) {
 	rm.Init()
 	rm.Start()
 	defer rm.Stop()
-	f := msgenvelope.NewMsgEnvelope(nil)
-	f.SetMeta(msgenvelope.NewMeta())
-	f.GetMeta().SetReqId(1)
-	f.GetMeta().SetTimeout(time.Second)
-	rm.Add(f)
-	rm.Remove(rm.GenSeq())
-	nf := rm.Get(rm.GenSeq())
+	const reqId = 1
+	state := NewCallState(nil, reqId, "test", time.Second, nil, nil, nil)
+	rm.Add(state)
+	st := rm.Remove(reqId)
+	if st != nil {
+		st.Release()
+	}
+	nf := rm.Get(reqId)
 	if nf != nil {
 		t.Error("remove failed")
 	}

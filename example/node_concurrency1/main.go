@@ -6,9 +6,12 @@
 package main
 
 import (
+	"os"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
+	_ "github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
 	"github.com/njtc406/emberengine/example/comm"
 )
 
@@ -21,5 +24,16 @@ func init() {
 func main() {
 	//runtime.GOMAXPROCS(16) // 匹配CPU核心数
 	//runtime.SetMutexProfileFraction(1)
+
+	if _, ok := os.LookupEnv("EMBER_LOG_STDOUT"); !ok {
+		_ = os.Setenv("EMBER_LOG_STDOUT", "0")
+	}
+
+	if _, ok := os.LookupEnv("BENCH_BIZ_DELAY_US"); !ok {
+		_ = os.Setenv("BENCH_BIZ_DELAY_US", "100")
+	}
+
+	// REMOTE_HOST 由 example/configs/**/.env 或启动前环境变量提供。
+	// 不要在这里设置默认值，否则会覆盖 .env（.env 在 node.Start 内部才加载）。
 	node.Start(node.WithConfPath("./example/configs/node_concurrency1"))
 }

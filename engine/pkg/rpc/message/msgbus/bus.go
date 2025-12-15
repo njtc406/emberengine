@@ -9,9 +9,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -20,8 +22,32 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/errorlib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
+
+var busPool pool.IPool[*MessageBus]
+var busPoolOnce sync.Once
+
+func getBusPool() pool.IPool[*MessageBus] {
+	busPoolOnce.Do(func() {
+		busPool = pool.NewPerPPoolWrapper(
+			config.Conf.NodeConf.BusPoolSize,
+			func() *MessageBus {
+				return &MessageBus{}
+			},
+			pool.NewStatsRecorder("busPool"),
+			pool.WithPRef(func(t *MessageBus) {
+				t.Ref()
+			}),
+			pool.WithPUnref(func(t *MessageBus) bool {
+				return t.UnRef()
+			}),
+			pool.WithPReset(func(mb *MessageBus) {
+				mb.Reset()
+			}),
+		)
+	})
+	return busPool
+}
 
 type MessageBus struct {
 	dto.DataRef
@@ -33,26 +59,14 @@ type MessageBus struct {
 func (mb *MessageBus) Reset() {
 	mb.sender = nil
 	mb.receiver = nil
+	mb.err = nil
 }
 
-var busPool = pool.NewSyncPoolWrapper(
-	func() *MessageBus {
-		return &MessageBus{}
-	},
-	pool.NewStatsRecorder("busPool"),
-	pool.WithRef(func(t *MessageBus) {
-		t.Ref()
-	}),
-	pool.WithUnRef(func(t *MessageBus) {
-		t.UnRef()
-	}),
-	pool.WithReset(func(mb *MessageBus) {
-		mb.Reset()
-	}),
-)
-
+// NewMessageBus 创建一个消息总线
+//
+// tips: 非常重要! 请勿跨协程传递,否则会导致pool错误,具体参考NewPerPPoolWrapper注释
 func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
-	mb := busPool.Get()
+	mb := getBusPool().Get()
 	mb.sender = sender
 	mb.receiver = receiver
 	mb.err = err
@@ -60,7 +74,7 @@ func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err e
 }
 
 func ReleaseMessageBus(mb *MessageBus) {
-	busPool.Put(mb)
+	getBusPool().Put(mb)
 }
 
 func (mb *MessageBus) GetReceiverPid() *actor.PID {
@@ -106,7 +120,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	if ctx != nil {
 		deadline, ok := ctx.Deadline()
 		if ok {
-			timeout = deadline.Sub(timelib.Now())
+			timeout = time.Until(deadline)
 		}
 	}
 
@@ -115,48 +129,44 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, out inte
 	}
 
 	mt := monitor.GetRpcMonitor()
+	reqId := mt.GenSeq()
+	state := monitor.NewCallState(ctx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope(ctx)
+	envelope := msgenvelope.NewMsgEnvelope()
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
-	meta.SetReqId(mt.GenSeq())
+	meta.SetReqId(reqId)
 	meta.SetSenderPid(mb.sender.GetPid())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
-	meta.SetTimeout(timeout)
 	envelope.SetMeta(meta)
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
-	// 加入等待队列
-	mt.Add(envelope)
+	// 加入等待队列（仅保存 CallState，不再跨 goroutine 传递可释放 envelope）
+	mt.Add(state)
 
-	// 发送消息
-	if err := mb.receiver.SendRequest(envelope); err != nil {
-		// 发送失败,释放资源
-		mt.Remove(meta.GetReqId())
-
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", envelope.GetMeta().GetSenderPid().GetName(), data.GetMethod(), err)
-		envelope.Release()
+	// 发送消息：调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
+	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+		_ = mt.Remove(reqId)
+		state.Release()
+		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(),
+			data.GetMethod(), err)
 		return def.ErrRPCCallFailed
 	}
 
-	// 等待回复
-	envelope.Wait()
+	// 等待回复（由 CallState 唤醒）
+	state.Wait()
 
-	mt.Remove(meta.GetReqId()) // 容错,不管有没有释放,都释放一次(实际上在所有设置done之前都会释放)
-
-	if err := data.GetError(); err != nil {
-		envelope.Release()
+	if err := state.Error(); err != nil {
+		state.Release()
 		return err
 	}
 
-	resp := data.GetResponse()
-
-	// 获取到返回后直接释放
-	envelope.Release()
+	resp := state.Response()
+	state.Release()
 
 	// 如果out为nil表示丢弃返回值
 	if out == nil {
@@ -273,48 +283,48 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, par
 	if ctx != nil {
 		deadline, ok := ctx.Deadline()
 		if ok {
-			timeout = deadline.Sub(timelib.Now())
+			timeout = time.Until(deadline)
 		}
 	}
 
 	if timeout <= 0 {
-		timeout = def.DefaultRpcTimeout
+		timeout = config.GetDefaultRpcTimeout()
 	}
 
 	mt := monitor.GetRpcMonitor()
+	reqId := mt.GenSeq()
+	var cbParams []interface{}
+	if param != nil {
+		cbParams = param.Params
+	}
+	state := monitor.NewCallState(ctx, reqId, data.GetMethod(), timeout, mb.sender, callbacks, cbParams)
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope(ctx)
+	envelope := msgenvelope.NewMsgEnvelope()
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
-	meta.SetReqId(mt.GenSeq())
+	meta.SetReqId(reqId)
 	meta.SetSenderPid(mb.sender.GetPid())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
-	meta.SetTimeout(timeout)
-	meta.SetCallback(callbacks)
-	if param != nil {
-		meta.SetCallbackParams(param.Params)
-	}
 
 	envelope.SetMeta(meta)
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
-	// 加入等待队列
-	mt.Add(envelope)
+	// 加入等待队列（仅保存 CallState）
+	mt.Add(state)
 
-	// 发送消息,最终callback调用将在response中被执行,所以envelope会在callback执行完后自动回收
-	if err := mb.receiver.SendRequest(envelope); err != nil {
-		// 发送失败,释放资源
-		mt.Remove(meta.GetReqId())
-		envelope.Release()
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
+	// 发送消息：调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
+	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+		_ = mt.Remove(reqId)
+		state.Release()
+		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
 		return 0, def.ErrRPCCallFailed
 	}
 
-	return meta.GetReqId(), nil
+	return reqId, nil
 }
 
 // AsyncCall 异步调用服务
@@ -400,7 +410,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, in interface{}) e
 	}
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope(ctx)
+	envelope := msgenvelope.NewMsgEnvelope()
 
 	data := msgenvelope.NewData()
 	data.SetMethod(method)
@@ -410,13 +420,13 @@ func (mb *MessageBus) send(ctx context.Context, method string, in interface{}) e
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
-	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
+	meta.SetReqId(monitor.GetRpcMonitor().GenSeq()) // 必须创建reqId，否则会导致重复调用
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	envelope.SetMeta(meta)
 
-	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
-	return mb.receiver.SendRequestAndRelease(envelope)
+	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
+	return mb.receiver.Deliver(ctx, envelope)
 }
 
 // Send 无返回调用
@@ -447,17 +457,18 @@ func (mb *MessageBus) sendInternal(ctx context.Context, data inf.IEnvelopeData, 
 	}
 
 	// 创建请求
-	envelope := msgenvelope.NewMsgEnvelope(ctx)
+	envelope := msgenvelope.NewMsgEnvelope()
 	envelope.SetData(data)
 
 	meta := msgenvelope.NewMeta()
-	meta.SetReqId(monitor.GetRpcMonitor().GenSeq())
+	// Send() internal fire-and-forget：不需要 ReqId
+	meta.SetReqId(0)
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	envelope.SetMeta(meta)
 
-	// 如果是远程调用, 则由远程调用释放资源,如果是本地调用,则由接收者自行回收
-	return mb.receiver.SendRequestAndRelease(envelope)
+	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
+	return mb.receiver.Deliver(ctx, envelope)
 }
 
 func (mb *MessageBus) Release() {

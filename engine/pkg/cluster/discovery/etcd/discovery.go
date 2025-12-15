@@ -149,13 +149,13 @@ func (e *EtcdDiscovery) syncInitialState() {
 		ent := event.NewEvent()
 		ent.Type = event.SysEventETCDPut
 		ent.Data = &data
-		if err = e.proc.PushEvent(ent); err != nil {
+		if err = e.proc.PushEvent(e.ctx, ent); err != nil {
 			log.SysLogger.Errorf("sync service error: %v", err)
 		}
 	}
 }
 
-func (e *EtcdDiscovery) onRegister(ev inf.IEvent) {
+func (e *EtcdDiscovery) onRegister(ctx context.Context, ev inf.IEvent) {
 	if !e.started.Load() {
 		return
 	}
@@ -176,7 +176,7 @@ func (e *EtcdDiscovery) onRegister(ev inf.IEvent) {
 	}
 }
 
-func (e *EtcdDiscovery) onUnregister(ev inf.IEvent) {
+func (e *EtcdDiscovery) onUnregister(ctx context.Context, ev inf.IEvent) {
 	if !e.started.Load() {
 		return
 	}
@@ -217,7 +217,7 @@ func (e *EtcdDiscovery) watchLoop() {
 				ent := event.NewEvent()
 				ent.Type = int32(evType)
 				ent.Data = &data
-				if err := e.proc.PushEvent(ent); err != nil {
+				if err := e.proc.PushEvent(e.ctx, ent); err != nil {
 					log.SysLogger.Errorf("etcd event error: %v", err)
 				}
 			}

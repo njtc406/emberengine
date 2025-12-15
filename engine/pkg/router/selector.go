@@ -35,7 +35,3 @@ func SelectByServiceType(sender *actor.PID, serverId int32, serviceType, service
 func SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) inf.IBus {
 	return endpoints.GetEndpointManager().GetRepository().SelectByFilterAndChoice(sender, filter, choice)
 }
-
-func SelectSlavers(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
-	return endpoints.GetEndpointManager().GetRepository().SelectSlavers(sender, options...)
-}

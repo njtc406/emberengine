@@ -7,7 +7,9 @@ package mailbox
 
 import (
 	"context"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -17,6 +19,22 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
 )
+
+func formatFloat1(v float64) string {
+	// keep it short: 1 decimal, no fmt
+	neg := false
+	if v < 0 {
+		neg = true
+		v = -v
+	}
+	whole := int(v)
+	frac := int((v - float64(whole)) * 10)
+	s := itoa(whole) + "." + itoa(frac)
+	if neg {
+		return "-" + s
+	}
+	return s
+}
 
 type IScaler interface {
 	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int, reason string, ok bool)
@@ -36,6 +54,11 @@ type WorkerPool struct {
 	autoScaler  IScaler                    // 自动扩容器
 	logger      log.ILoggerX
 	workerCount int // 当前 worker 数量（用于扩缩容）
+
+	// Debug-only dispatch distribution stats.
+	statsEnabled  bool
+	statsInterval time.Duration
+	dispatchCnt   map[int]*atomic.Uint64
 }
 
 func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
@@ -45,14 +68,17 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
-		conf:        conf,
-		workers:     make(map[int]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
-		invoker:     invoker,
-		ring:        hashring.NewHashRing[int](conf.SchedulePolicy.VirtualWorkerRate),
-		middlewares: middlewares,
-		ctx:         ctx,
-		cancel:      cancel,
-		logger:      logger,
+		conf:          conf,
+		workers:       make(map[int]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
+		invoker:       invoker,
+		ring:          hashring.NewHashRing[int](conf.SchedulePolicy.VirtualWorkerRate),
+		middlewares:   middlewares,
+		ctx:           ctx,
+		cancel:        cancel,
+		logger:        logger,
+		statsEnabled:  config.IsDebug(),
+		statsInterval: 10 * time.Second,
+		dispatchCnt:   make(map[int]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
 	}
 }
 
@@ -67,6 +93,9 @@ func (p *WorkerPool) Start() {
 		worker.Start()
 		// 将 worker 加入到哈希环中（这里每个都加进入,但是单线程时可能不会使用）
 		p.ring.Add(i)
+		if p.statsEnabled {
+			p.dispatchCnt[i] = &atomic.Uint64{}
+		}
 	}
 	p.workerCount = p.conf.SchedulePolicy.InitialWorkerNum
 	p.mu.Unlock()
@@ -78,6 +107,11 @@ func (p *WorkerPool) Start() {
 	if p.conf.SchedulePolicy.EnableAutoScaling {
 		p.wg.Add(1)
 		go p.autoScaleWorkers()
+	}
+
+	if p.statsEnabled {
+		p.wg.Add(1)
+		go p.logDispatchStatsLoop()
 	}
 
 	p.logger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.SchedulePolicy.InitialWorkerNum)
@@ -98,6 +132,11 @@ func (p *WorkerPool) Stop() {
 	for _, worker := range p.workers {
 		worker.Stop()
 	}
+	for _, middleware := range p.middlewares {
+		if c, ok := middleware.(interface{ Close() }); ok {
+			c.Close()
+		}
+	}
 	p.ring.Clear()
 	p.workers = nil
 }
@@ -106,7 +145,7 @@ func (p *WorkerPool) Stop() {
 //
 //   - 多 worker 模式：通过 ring.Get(evt.GetDispatcherKey()) 选择 worker，保证相同 dispatcherKey 的事件落到同一 worker；
 //   - 单 worker 模式：固定使用 workerID=0，行为接近 Actor 模型的串行执行。
-func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
+func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
 	var worker inf.IMailboxWorker
 	var exists bool
@@ -117,7 +156,7 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 		var ok bool
 		workerID, ok = p.ring.Get(evt.GetDispatcherKey())
 		if !ok {
-			p.logger.WithContext(evt.GetContext()).Errorf("No worker available in hash ring")
+			p.logger.WithContext(ctx).Errorf("No worker available in hash ring")
 			p.mu.RUnlock()
 			return def.ErrMailboxWorkerIsFull
 		}
@@ -127,14 +166,22 @@ func (p *WorkerPool) DispatchEvent(evt inf.IEvent) error {
 		workerID = 0
 		worker, exists = p.workers[workerID]
 	}
-	p.mu.RUnlock()
 
 	if !exists {
-		p.logger.WithContext(evt.GetContext()).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
+		p.logger.WithContext(ctx).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
+		p.mu.RUnlock()
 		return def.ErrMailboxWorkerNotFound
 	}
 
-	return worker.SubmitEvent(evt)
+	if p.statsEnabled {
+		cnt := p.dispatchCnt[workerID]
+		if cnt != nil {
+			cnt.Add(1)
+		}
+	}
+
+	p.mu.RUnlock()
+	return worker.SubmitEvent(ctx, evt)
 }
 
 func (p *WorkerPool) resizeWorkers(newSize int) {
@@ -161,6 +208,9 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 			p.workers[i] = worker
 			worker.Start()
 			p.ring.Add(i)
+			if p.statsEnabled {
+				p.dispatchCnt[i] = &atomic.Uint64{}
+			}
 		}
 	} else {
 		// 缩容：关闭并移除多余 worker
@@ -171,6 +221,9 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 				worker.Stop()
 				delete(p.workers, i)
 				removeMap[i] = struct{}{}
+				if p.statsEnabled {
+					delete(p.dispatchCnt, i)
+				}
 			}
 		}
 		// 一次性移除哈希环上的节点
@@ -179,6 +232,100 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 
 	// 更新当前 worker 数量
 	p.workerCount = newSize
+}
+
+func (p *WorkerPool) logDispatchStatsLoop() {
+	defer p.wg.Done()
+	interval := p.statsInterval
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			p.logDispatchStatsOnce()
+			return
+		case <-ticker.C:
+			p.logDispatchStatsOnce()
+		}
+	}
+}
+
+func (p *WorkerPool) logDispatchStatsOnce() {
+	if p == nil || p.logger == nil || !p.statsEnabled {
+		return
+	}
+
+	p.mu.RLock()
+	if len(p.dispatchCnt) == 0 {
+		p.mu.RUnlock()
+		return
+	}
+
+	type wc struct {
+		id    int
+		count uint64
+	}
+	items := make([]wc, 0, len(p.dispatchCnt))
+	var total uint64
+	var max uint64
+	var min uint64
+	var idle int
+	first := true
+	for id, c := range p.dispatchCnt {
+		v := uint64(0)
+		if c != nil {
+			// per-interval stats: take-and-reset
+			v = c.Swap(0)
+		}
+		items = append(items, wc{id: id, count: v})
+		total += v
+		if v == 0 {
+			idle++
+		}
+		if first {
+			min = v
+			max = v
+			first = false
+		} else {
+			if v < min {
+				min = v
+			}
+			if v > max {
+				max = v
+			}
+		}
+	}
+	workerN := len(items)
+	p.mu.RUnlock()
+
+	if workerN == 0 {
+		return
+	}
+
+	// Sort descending to show hot workers.
+	sort.Slice(items, func(i, j int) bool { return items[i].count > items[j].count })
+
+	avg := float64(total) / float64(workerN)
+	msg := "dispatch worker dist: workers=" + itoa(workerN) + " active=" + itoa(workerN-idle) + " idle=" + itoa(idle) + " total=" + itoaU64(total) + " max=" + itoaU64(max) + " min=" + itoaU64(min) + " avg=" + formatFloat1(avg)
+
+	// Append top 5.
+	limit := 5
+	if workerN < limit {
+		limit = workerN
+	}
+	msg += " top="
+	for i := 0; i < limit; i++ {
+		if i > 0 {
+			msg += ", "
+		}
+		msg += "w" + itoa(items[i].id) + "=" + itoaU64(items[i].count)
+	}
+
+	p.logger.Infof(msg)
 }
 
 // 自动调整 worker 数量

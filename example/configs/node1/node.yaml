@@ -144,7 +144,7 @@ ServiceConf:
         # 退避基础延迟(第一次空闲时的睡眠时间)
         BackoffBaseDelay: 1us
         # 退避最大延迟(连续空闲时睡眠时间的上限)
-        BackoffMaxDelay: 4us
+        BackoffMaxDelay: 8us
         # 开始退避前的最大空闲次数(前N次空闲不睡眠，直接重试)
         MaxIdleBeforeBackoff: 1000
         # 退避最大重试次数(睡眠时间翻倍的最大次数)
@@ -187,6 +187,8 @@ ServiceConf:
 # 日志配置
 SystemLogger:
   Dir: ./example/data/logs
+  # 输出格式(text/json)
+  OutputFormat: text
   # 日志文件名
   PrefixName: "node1"
   # 日志级别

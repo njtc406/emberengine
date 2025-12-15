@@ -6,6 +6,8 @@
 package cluster
 
 import (
+	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
@@ -34,12 +36,18 @@ type Cluster struct {
 
 	// 事件
 	eventProcessor *event.Processor
-	eventChannel   chan inf.IEvent
+	eventChannel   chan ctxEvent
+}
+
+// ctxEvent 包装 ctx 和 event
+type ctxEvent struct {
+	ctx context.Context
+	ev  inf.IEvent
 }
 
 func (c *Cluster) Init() {
 	c.closed = make(chan struct{})
-	c.eventChannel = make(chan inf.IEvent, 1024)
+	c.eventChannel = make(chan ctxEvent, 1024)
 	c.eventProcessor = event.NewProcessor()
 	c.eventProcessor.Init(c)
 
@@ -72,10 +80,9 @@ func (c *Cluster) Close() {
 	}
 }
 
-func (c *Cluster) PushEvent(ev inf.IEvent) error {
-	ev.IncRef() // 增加引用
+func (c *Cluster) PushEvent(ctx context.Context, ev inf.IEvent) error {
 	select {
-	case c.eventChannel <- ev: // 发送成功则里面释放
+	case c.eventChannel <- ctxEvent{ctx: ctx, ev: ev}: // 发送成功则里面释放
 
 	default:
 		ev.Release() // 发送不成功直接释放
@@ -88,16 +95,20 @@ func (c *Cluster) PushEvent(ev inf.IEvent) error {
 func (c *Cluster) run() {
 	for {
 		select {
-		case ev := <-c.eventChannel:
-			if ev != nil {
-				c.eventProcessor.EventHandler(ev)
-				ev.Release()
+		case ce := <-c.eventChannel:
+			if ce.ev != nil {
+				c.executeEvent(ce.ctx, ce.ev)
 			}
 		case <-c.closed:
 			log.SysLogger.Info("cluster closed")
 			return
 		}
 	}
+}
+
+func (c *Cluster) executeEvent(ctx context.Context, ev inf.IEvent) {
+	defer ev.Release()
+	c.eventProcessor.EventHandler(ctx, ev)
 }
 
 func (c *Cluster) SetPid(pid *actor.PID) {

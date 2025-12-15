@@ -20,6 +20,12 @@ NodeConf:
     MonitorTimerSize: 10000
     # 定时器桶数量(决定锁的粒度)
     MonitorBucketSize: 20
+    # RPC 调用默认超时时间(不配置则默认1秒)
+    # 这是业务层 RPC 调用的超时时间，应设置得较严格以快速失败
+    DefaultRpcTimeout: 1s
+    # RPC 超时检查间隔(不配置则默认1秒)
+    # Monitor 检查超时的周期，建议不大于 DefaultRpcTimeout
+    CheckTimeoutInterval: 1s
   EventBusConf:
     # 全局事件前缀
     GlobalPrefix: "ember.global"
@@ -82,15 +88,37 @@ ClusterConf:
       Protoc: "tcp"
       # rpc类型
       Type: rpcx
+      # 网络层读超时(仅 TCP 类型生效，默认30秒)
+      # 用于底层 TCP 连接管理，应设置得比 RPC 超时宽松
+      ReadDeadline: 30s
+      # 网络层写超时(仅 TCP 类型生效，默认30秒)
+      WriteDeadline: 30s
     - Addr: 0.0.0.0:6611
       Protoc: tcp
       Type: grpc
+      ReadDeadline: 30s
+      WriteDeadline: 30s
     - Addr: nats://192.168.145.188:4222
       Type: nats
   DiscoveryType: etcd
   RemoteConfPath: ""
   DiscoveryConf:
+    # 服务发现路径
     Path: /ember/rpc
+    # 租约 TTL（秒）
+    TTL: 10
+    # 主从选举路径
+    MasterPath: /ember/master
+    # 恢复机制配置（可选，不配置则使用默认值）
+    RecoveryConf:
+      # 退避基础延迟，默认 1s
+      BackoffBaseDelay: 1s
+      # 退避最大延迟，默认 30s
+      BackoffMaxDelay: 30s
+      # 详细日志输出次数（前N次每次都输出），默认 5
+      VerboseLogCount: 5
+      # 日志输出间隔（之后每N次输出一次），默认 10
+      LogInterval: 10
 
 ServiceConf:
   OpenRemote: false

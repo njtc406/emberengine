@@ -6,6 +6,7 @@
 package event
 
 import (
+	"context"
 	"sync"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -32,8 +33,8 @@ func (h *Handler) GetEventProcessor() inf.IEventProcessor {
 	return h.processor
 }
 
-func (h *Handler) NotifyEvent(ev inf.IEvent) {
-	h.GetEventProcessor().CastEvent(ev)
+func (h *Handler) NotifyEvent(ctx context.Context, ev inf.IEvent) {
+	h.GetEventProcessor().CastEvent(ctx, ev)
 }
 
 func (h *Handler) Destroy() {

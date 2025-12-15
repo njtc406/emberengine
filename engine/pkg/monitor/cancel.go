@@ -14,13 +14,12 @@ type RpcCancel struct {
 }
 
 func (rc *RpcCancel) CancelRpc() {
-	envelope := GetRpcMonitor().Remove(rc.CallSeq)
-	if envelope != nil {
-		if envelope.GetData().IsReply() {
-			// 已经回复回来了,可能已经放入了待执行队列,重置callback,防止继续执行
-			envelope.GetMeta().SetCallback(nil)
-		}
-		envelope.Release() //取消成功,释放资源
+	state := GetRpcMonitor().Remove(rc.CallSeq)
+	if state != nil {
+		// 取消后不再触发回调
+		state.callbacks = nil
+		state.cbParams = nil
+		state.Release()
 	}
 }
 

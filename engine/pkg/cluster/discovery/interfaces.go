@@ -37,7 +37,11 @@ type IServiceRegistry interface {
 
 // IMasterElection 主选举接口
 type IMasterElection interface {
-	TryAcquireMaster(ctx context.Context, masterKey, group string, leaseRef LeaseRef) (bool, error)
+	// TryAcquireMaster tries to acquire the master role for the given group.
+	//
+	// If succeeded is true, fencingToken is a monotonic token (backend-specific)
+	// that can be used by upper layers to fence side effects.
+	TryAcquireMaster(ctx context.Context, masterKey, group string, leaseRef LeaseRef) (succeeded bool, fencingToken int64, err error)
 }
 
 // IClientProvider 统一的客户端适配器

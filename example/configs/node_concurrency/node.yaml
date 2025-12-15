@@ -3,7 +3,7 @@
 NodeConf:
   NodeId: 1
   # 系统状态(debug/release)
-  SystemStatus: debug
+  SystemStatus: release
   # 系统数据目录(持久化)
   PVCPath: ./example/data
   # 系统缓存目录
@@ -65,7 +65,7 @@ ServiceConf:
       # 服务类型
       Type: test
       # 服务器ID
-      ServerId: 1
+      ServerId: 10001
       RpcType: "nats"
       # 定时器配置
       TimerConf:
@@ -85,11 +85,11 @@ ServiceConf:
           # 如果没有开启自动扩容,配置为1表示单线程模型actor
           # 如果开启了自动扩容,那么只代表初始的线程数量
           # 如果直接设置为>1,表示直接开启并发模型,服务会以多线程方式运行
-          InitialWorkerNum: 10
+          InitialWorkerNum: 100
 
           # 虚拟节点倍率(用于一致性哈希)
           # 建议: 10-24之间，值越大消息分布越均匀，但哈希计算开销越大
-          VirtualWorkerRate: 16
+          VirtualWorkerRate: 20
 
           # 是否开启自动扩缩容
           EnableAutoScaling: false
@@ -142,6 +142,11 @@ ServiceConf:
               2: # PriorityBatch - 批量消息
                 BatchSize: 2
                 Weight: 1
+
+    - ClassName: PprofService
+      ServiceName: PprofService
+      Type: test
+      ServerId: 10001
 #    - ClassName: PprofService
 #      ServiceName: PprofService
 #      Type: test
@@ -160,13 +165,16 @@ ServiceConf:
 
 # 日志配置
 SystemLogger:
+  # 日志目录
   Dir: ./example/data/logs
+  # 输出格式(text/json)
+  OutputFormat: text
   # 日志文件名
-  PrefixName: "concurrency_test"
+  PrefixName: concurrency_test
   # 日志级别
   Level: debug
   # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
-  Stdout: true
+  Stdout: false
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息(默认false,完整路径是绝对路径,否则打印以项目根目录为基准的相对路径)
@@ -193,13 +201,13 @@ SystemLogger:
     # 路由规则
     Routes:
       # 路由文件名(最终生成的文件名称为 Dir/Name_RoutesName.log_Pattern)
-      - Name: "access"
+      - Name: "access.log"
         Levels:
           - info
           - debug
           - trace
           - warn
-      - Name: "error"
+      - Name: "error.log"
         Levels:
           - error
           - fatal

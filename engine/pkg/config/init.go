@@ -304,19 +304,54 @@ func parseSystemConfig(parser *viper.Viper, c interface{}) {
 
 // IsDebug 返回是否为调试模式
 func IsDebug() bool {
+	// 注意：很多单元测试不会先调用 config.Init()。
+	// 这里必须做到“未初始化也安全”，否则对象池/监控等在 init/once 中会直接 panic。
+	if Conf == nil || Conf.NodeConf == nil {
+		return false
+	}
 	return Conf.NodeConf.SystemStatus == Debug
 }
 
 // SetStatus 设置系统状态
 func SetStatus(status string) {
+	if Conf == nil {
+		return
+	}
 	stat := strings.ToLower(status)
 	if stat != Debug && stat != Release {
 		return
 	}
-
+	if Conf.NodeConf == nil {
+		Conf.NodeConf = &NodeConf{}
+	}
 	Conf.NodeConf.SystemStatus = stat
 }
 
 func GetStatus() string {
+	if Conf == nil || Conf.NodeConf == nil {
+		return ""
+	}
 	return Conf.NodeConf.SystemStatus
+}
+
+// GetDefaultRpcTimeout 获取 RPC 调用默认超时时间
+// 优先使用配置文件中的值，未配置则返回默认值（1秒）
+func GetDefaultRpcTimeout() time.Duration {
+	if Conf != nil && Conf.NodeConf != nil && Conf.NodeConf.RpcMonitorConf != nil {
+		if Conf.NodeConf.RpcMonitorConf.DefaultRpcTimeout > 0 {
+			return Conf.NodeConf.RpcMonitorConf.DefaultRpcTimeout
+		}
+	}
+	return def.DefaultRpcTimeout
+}
+
+// GetCheckTimeoutInterval 获取 RPC 超时检查间隔
+// 优先使用配置文件中的值，未配置则返回默认值（1秒）
+func GetCheckTimeoutInterval() time.Duration {
+	if Conf != nil && Conf.NodeConf != nil && Conf.NodeConf.RpcMonitorConf != nil {
+		if Conf.NodeConf.RpcMonitorConf.CheckTimeoutInterval > 0 {
+			return Conf.NodeConf.RpcMonitorConf.CheckTimeoutInterval
+		}
+	}
+	return def.DefaultCheckRpcCallTimeoutInterval
 }

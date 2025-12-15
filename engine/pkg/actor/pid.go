@@ -32,8 +32,12 @@ func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, ser
 	}
 }
 
+// IsRetired 检查服务是否已退休（不再参与负载均衡）
 func IsRetired(pid *PID) bool {
-	return atomic.LoadInt32(&pid.State) == def.ServiceStatusRetired // TODO 状态需要重新定,需要区分服务状态和节点状态,节点状态的退休是不再参与负载均衡那种,服务退休就是不再接收新信息
+	if pid == nil {
+		return true
+	}
+	return atomic.LoadInt32(&pid.State) == def.ServiceStatusRetired
 }
 
 func (pid *PID) SetMaster(master bool) {
@@ -43,5 +47,3 @@ func (pid *PID) SetMaster(master bool) {
 func (pid *PID) GetServiceGroup() string {
 	return fmt.Sprintf("%s.%s.%d", pid.GetName(), pid.GetServiceId(), pid.GetServerId())
 }
-
-func (e *Event) IncRef() {}

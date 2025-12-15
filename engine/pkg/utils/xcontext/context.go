@@ -7,10 +7,12 @@ package xcontext
 
 import (
 	"context"
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
-	"time"
 )
 
 type XContext struct {
@@ -50,20 +52,28 @@ func (x *XContext) Reset() {
 	x.Context = nil
 }
 
-func (x *XContext) SetHeaders(headers map[string]any) {
+func (x *XContext) SetHeaders(headers map[string]any) inf.IContext {
 	x.Context = emberctx.AddHeaders(x.Context, headers)
+	return x
 }
 
-func (x *XContext) SetHeadersWithMap(headers map[string]string) {
+func (x *XContext) SetHeadersWithMap(headers map[string]string) inf.IContext {
 	m := make(map[string]any, len(headers))
 	for k, v := range headers {
 		m[k] = v
 	}
-	x.Context = emberctx.WithHeader(x.Context, m)
+	x.Context = emberctx.AddHeaders(x.Context, m)
+	return x
 }
 
-func (x *XContext) SetHeader(key string, value any) {
+func (x *XContext) AddHeader(key string, value any) inf.IContext {
 	x.Context = emberctx.AddHeader(x.Context, key, value)
+	return x
+}
+
+func (x *XContext) AddHeaders(headers map[string]any) inf.IContext {
+	x.Context = emberctx.AddHeaders(x.Context, headers)
+	return x
 }
 
 func (x *XContext) GetHeader(key string) any {
@@ -81,12 +91,15 @@ func (x *XContext) GetHeaders() map[string]any {
 }
 
 func (x *XContext) ToHeaders() map[string]string {
-	headers := x.GetHeaders()
-	ret := make(map[string]string)
-	for k, v := range headers {
-		ret[k] = util.ToString(v)
+	if x.Context == nil {
+		return map[string]string{}
 	}
-	return ret
+	// 热路径：避免 GetHeaders() 的 map 拷贝，直接一次性转换。
+	headers := emberctx.ToHeadersFast(x.Context)
+	if headers == nil {
+		return map[string]string{}
+	}
+	return headers
 }
 
 func (x *XContext) GetContext() context.Context {
@@ -139,4 +152,54 @@ func (x *XContext) Clone() *XContext {
 	return &XContext{
 		Context: x.Context,
 	}
+}
+
+// ContextFactory 高性能 context 工厂，用于批量创建相似 context 的场景。
+// 适用于：固定 dispatcher key + 每请求独立 traceID 的高并发压测场景。
+//
+// 用法：
+//
+//	factory := xcontext.NewFactory(map[string]any{
+//	    def.DefaultDispatcherKey: "worker-1",
+//	})
+//	for i := 0; i < total; i++ {
+//	    ctx := factory.NewContext()  // 每次都有新 traceID，但复用 base headers
+//	    doRPC(ctx)
+//	}
+type ContextFactory struct {
+	baseHeaders map[string]any
+}
+
+// NewFactory 创建 context 工厂，baseHeaders 是每次创建时都会包含的固定 header。
+func NewFactory(baseHeaders map[string]any) *ContextFactory {
+	if baseHeaders == nil {
+		baseHeaders = make(map[string]any)
+	}
+	return &ContextFactory{baseHeaders: baseHeaders}
+}
+
+// NewContext 创建新 context，包含 base headers + 新生成的 traceID。
+// 该方法是并发安全的（Copy-on-Write）。
+func (f *ContextFactory) NewContext() XContext {
+	// 预分配容量：base headers + traceID
+	headers := make(map[string]any, len(f.baseHeaders)+1)
+	for k, v := range f.baseHeaders {
+		headers[k] = v
+	}
+	headers[def.DefaultTraceIdKey] = emberctx.NewTraceID()
+
+	ctx := emberctx.WithHeader(context.Background(), headers)
+	return XContext{Context: ctx}
+}
+
+// NewContextWithoutTrace 创建新 context，只包含 base headers，不生成 traceID。
+// 用于不需要追踪的高吞吐场景，避免 time.Now() 开销。
+func (f *ContextFactory) NewContextWithoutTrace() XContext {
+	headers := make(map[string]any, len(f.baseHeaders))
+	for k, v := range f.baseHeaders {
+		headers[k] = v
+	}
+
+	ctx := emberctx.WithHeader(context.Background(), headers)
+	return XContext{Context: ctx}
 }

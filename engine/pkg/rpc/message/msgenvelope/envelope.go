@@ -6,42 +6,55 @@
 package msgenvelope
 
 import (
+	"context"
+	"sync"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"golang.org/x/net/context"
 	"google.golang.org/protobuf/types/known/anypb"
-
-	"sync"
 )
 
-var msgEnvelopePool = pool.NewSyncPoolWrapper(
-	func() *MsgEnvelope {
-		return &MsgEnvelope{}
-	},
-	pool.NewStatsRecorder("msgEnvelopePool"),
-	pool.WithRef(func(t *MsgEnvelope) {
-		t.Ref()
-	}),
-	pool.WithUnRef(func(t *MsgEnvelope) {
-		t.UnRef()
-	}),
-	pool.WithReset(func(t *MsgEnvelope) {
-		t.Reset()
-	}),
-)
+var msgEnvelopePool pool.IPool[*MsgEnvelope]
+var msgEnvelopePoolOnce sync.Once
+
+func getMsgEnvelopePool() pool.IPool[*MsgEnvelope] {
+	msgEnvelopePoolOnce.Do(func() {
+		msgEnvelopePool = pool.NewSyncPoolWrapper(
+			func() *MsgEnvelope {
+				return &MsgEnvelope{}
+			},
+			func() pool.IStatsRecorder {
+				if config.IsDebug() {
+					return pool.NewStatsRecorder("msgEnvelopePool")
+				} else {
+					return pool.NewNoStatsRecorder()
+				}
+			}(),
+			pool.WithRef(func(t *MsgEnvelope) {
+				t.Ref()
+			}),
+			pool.WithUnRef(func(t *MsgEnvelope) bool {
+				return t.UnRef()
+			}),
+			pool.WithReset(func(t *MsgEnvelope) {
+				t.Reset()
+			}),
+		)
+	})
+	return msgEnvelopePool
+}
 
 type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!
 	locker *sync.RWMutex
-	xcontext.XContext
 
 	meta *Meta
 	data *Data
@@ -52,7 +65,6 @@ func (e *MsgEnvelope) Reset() {
 		e.locker = &sync.RWMutex{}
 	}
 
-	e.XContext.Reset()
 	e.meta = nil
 	e.data = nil
 }
@@ -84,49 +96,48 @@ func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 func (e *MsgEnvelope) GetMeta() inf.IEnvelopeMeta {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+	if e.meta == nil {
+		return nil
+	}
 	return e.meta
 }
 
 func (e *MsgEnvelope) GetData() inf.IEnvelopeData {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+	if e.data == nil {
+		return nil
+	}
 	return e.data
 }
 
 func (e *MsgEnvelope) GetType() int32 {
-	tp := e.GetHeader(def.DefaultTypeKey)
-
-	tpV, ok := tp.(int32)
-	if ok {
-		return tpV
-	} else {
-		tpS, ok := tp.(string)
-		if ok {
-			return util.ToIntT[int32](tpS)
-		}
-	}
+	// MsgEnvelope 始终是 RPC 消息类型
 	return event.RpcMsg
+}
+
+func (e *MsgEnvelope) GetPriority() def.Priority {
+	// RPC 消息默认使用普通优先级
+	return def.PriorityNormal
+}
+
+func (e *MsgEnvelope) GetDispatcherKey() string {
+	// RPC 消息不使用分发键
+	return ""
 }
 
 //-----------------------------Option-----------------------------------
 
-func (e *MsgEnvelope) SetDone() {
-	e.meta.SetDone()
-}
-
-func (e *MsgEnvelope) RunCompletions() {
-	for _, cb := range e.meta.GetCallBacks() {
-		cb(e.data.GetResponse(), e.data.GetError(), e.meta.GetCallbackParams()...)
-	}
-}
-
-func (e *MsgEnvelope) Wait() {
-	<-e.meta.GetDone()
-}
-
-func (e *MsgEnvelope) ToProtoMsg() (*actor.Message, error) {
+func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+
+	if e.meta == nil || e.data == nil {
+		return nil, def.ErrMsgSerializeFailed
+	}
+	if e.meta.GetReceiverPid() == nil {
+		return nil, def.ErrServiceNotFound
+	}
 
 	var err error
 	msg := NewMessage()
@@ -137,13 +148,22 @@ func (e *MsgEnvelope) ToProtoMsg() (*actor.Message, error) {
 		}
 	}()
 
-	msg.SenderPid = e.meta.GetSenderPid()
-	msg.ReceiverPid = e.meta.GetReceiverPid()
+	if senderPid := e.meta.GetSenderPid(); senderPid != nil {
+		msg.SenderPid = senderPid
+	}
+	if receiverPid := e.meta.GetReceiverPid(); receiverPid != nil {
+		msg.ReceiverPid = receiverPid
+	}
+	// 从 ctx 获取调度信息
+	dispatcherKey, _ := emberctx.GetHeaderValue(ctx, def.DefaultDispatcherKey).(string)
+	priority, _ := emberctx.GetHeaderValue(ctx, def.DefaultPriorityKey).(def.Priority)
+	msg.Priority = int32(priority)
+	msg.DispatcherKey = dispatcherKey
 	msg.Method = e.data.GetMethod()
 	msg.Request = nil
 	msg.Response = nil
 	msg.Err = e.data.GetErrStr()
-	msg.MessageHeader = e.ToHeaders()
+	msg.ContextHeaders = emberctx.ToHeaders(ctx)
 	msg.Reply = e.data.IsReply()
 	msg.ReqId = e.meta.GetReqId()
 	msg.NeedResp = e.data.NeedResponse()
@@ -172,18 +192,6 @@ func (e *MsgEnvelope) ToProtoMsg() (*actor.Message, error) {
 	return msg, nil
 }
 
-func (e *MsgEnvelope) Clone() inf.IEnvelope {
-	envelope := NewMsgEnvelope(e.XContext.Clone())
-	envelope.meta = e.meta.Clone().(*Meta)
-	envelope.data = e.data
-	return envelope
-}
-
-func (e *MsgEnvelope) IncRef() {
-	// envelope不会被并发处理,每个envelope只会被唯一一个服务处理,只有data是共享
-	// 所以不需要引用计数
-}
-
 func (e *MsgEnvelope) Release() {
 	e.locker.Lock()
 	defer e.locker.Unlock()
@@ -191,15 +199,15 @@ func (e *MsgEnvelope) Release() {
 		// envelope/meta 是可复用资源，需要回收到对象池
 		// data 可能是外部创建并可能被多个服务共享的，不归 MsgEnvelope 释放
 		if e.meta != nil && e.meta.IsRef() {
-			metaPool.Put(e.meta)
+			putMeta(e.meta)
+			e.meta = nil
 		}
 
-		msgEnvelopePool.Put(e)
+		getMsgEnvelopePool().Put(e)
 	}
 }
 
-func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
-	ep := msgEnvelopePool.Get()
-	ep.XContext = xcontext.New(ctx)
+func NewMsgEnvelope() *MsgEnvelope {
+	ep := getMsgEnvelopePool().Get()
 	return ep
 }

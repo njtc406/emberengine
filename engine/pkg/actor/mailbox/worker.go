@@ -6,8 +6,10 @@
 package mailbox
 
 import (
+	"context"
 	"fmt"
 	"reflect"
+	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -34,6 +36,8 @@ const (
 type Worker struct {
 	workerId     int
 	closed       atomic.Bool
+	closing      atomic.Bool
+	submitters   atomic.Int64
 	pool         *WorkerPool
 	wg           sync.WaitGroup
 	queueManager IQueueManager            // 队列管理器（可以是双队列或多优先级队列）
@@ -97,7 +101,22 @@ func (w *Worker) GetWorkerId() int {
 }
 
 // SubmitEvent 提交事件到队列
-func (w *Worker) SubmitEvent(e inf.IEvent) error {
+func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent) error {
+	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
+	for {
+		if w.closing.Load() || w.closed.Load() {
+			return def.ErrMailboxWorkerClosed
+		}
+		w.submitters.Add(1)
+		// If Stop flipped closing concurrently, back out and refuse.
+		if w.closing.Load() || w.closed.Load() {
+			w.submitters.Add(-1)
+			return def.ErrMailboxWorkerClosed
+		}
+		break
+	}
+	defer w.submitters.Add(-1)
+
 	if w.closed.Load() {
 		return def.ErrMailboxWorkerClosed
 	}
@@ -106,13 +125,20 @@ func (w *Worker) SubmitEvent(e inf.IEvent) error {
 		return def.ErrMailboxWorkerChannelNotInit
 	}
 
+	// 使用 CtxEvent 包装 ctx 和 event
+	ctxEvt := NewCtxEvent(ctx, e)
+
 	// 提交到队列管理器
-	err := w.queueManager.Submit(e)
+	err := w.queueManager.Submit(ctxEvt)
 	if err != nil {
+		// 提交失败，释放包装器（但不释放内部 event，由调用方处理）
+		ctxEvt.Event = nil
+		ctxEvt.Ctx = nil
+		getCtxEventPool().Put(ctxEvt)
 		return err
 	}
 	// 增加事件计数
-	w.count.Add(1)
+	w.count.Add(1) // TODO 后续替换为一个计数器,设置一个开关,打开时才计数,release环境可以关闭
 
 	// 唤醒Worker
 	if w.idler != nil {
@@ -160,9 +186,19 @@ func (w *Worker) run() {
 
 // Stop 停止Worker
 func (w *Worker) Stop() {
-	// 标记为已关闭
+	// First, stop accepting new submissions.
+	if !w.closing.CompareAndSwap(false, true) {
+		return // already stopping/stopped
+	}
+
+	// Wait for in-flight SubmitEvent calls to finish.
+	for w.submitters.Load() != 0 {
+		runtime.Gosched()
+	}
+
+	// Now stop the run loop.
 	if !w.closed.CompareAndSwap(false, true) {
-		return // 已经关闭过了
+		return
 	}
 
 	// 唤醒可能在等待的Worker
@@ -181,29 +217,32 @@ func (w *Worker) Stop() {
 //   - 可选地通过 profiler.Analyzer 记录每类事件的处理耗时；
 //   - 在业务处理完成后，依次调用所有 mailbox 中间件的 MessageReceived 作为后置 hook。
 func (w *Worker) safeExec(e inf.IEvent) {
+	// 解包 CtxEvent 获取 ctx 和原始 event
+	ctx, evt := UnwrapCtxEvent(e)
+
 	defer func() {
 		if r := recover(); r != nil {
-			w.pool.logger.WithContext(e.GetContext()).Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
+			w.pool.logger.WithContext(ctx).Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
 
 			// 双重保护：EscalateFailure 可能也会 panic
 			func() {
 				defer func() {
 					if r2 := recover(); r2 != nil {
-						w.pool.logger.WithContext(e.GetContext()).Errorf("EscalateFailure also panicked: %v\ntrace:%s", r2, debug.Stack())
+						w.pool.logger.WithContext(ctx).Errorf("EscalateFailure also panicked: %v\ntrace:%s", r2, debug.Stack())
 					}
 				}()
-				w.pool.invoker.EscalateFailure(r, e)
+				w.pool.invoker.EscalateFailure(ctx, r, evt)
 			}()
 		}
 	}()
 
 	var analyzer *profiler.Analyzer
 	if w.pool.profiler != nil {
-		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE ]%s", reflect.TypeOf(e).String()))
+		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE ]%s", reflect.TypeOf(evt).String()))
 	}
 
 	// 调用消息处理器
-	w.pool.invoker.InvokeMessage(e)
+	w.pool.invoker.InvokeMessage(ctx, evt)
 
 	if analyzer != nil {
 		analyzer.Pop()
@@ -212,7 +251,14 @@ func (w *Worker) safeExec(e inf.IEvent) {
 
 	// 调用中间件
 	for _, ms := range w.pool.middlewares {
-		ms.MessageProcessed(e) // TODO 这里过于简单,后续考虑是否需要更复杂的处理逻辑
+		ms.MessageProcessed(ctx, evt) // TODO 这里过于简单,后续考虑是否需要更复杂的处理逻辑
+	}
+
+	// 释放 CtxEvent 包装器（内部 event 由 InvokeMessage 负责释放）
+	if ce, ok := e.(*CtxEvent); ok {
+		ce.Event = nil // 防止重复释放内部 event
+		ce.Ctx = nil
+		getCtxEventPool().Put(ce)
 	}
 }
 

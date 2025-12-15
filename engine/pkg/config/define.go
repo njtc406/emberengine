@@ -24,7 +24,7 @@ type conf struct {
 }
 
 func (c *conf) String() string {
-	jsonStr, _ := json.Marshal(c)
+	jsonStr, _ := json.MarshalIndent(c, "", "  ")
 	return string(jsonStr)
 }
 
@@ -38,6 +38,7 @@ type NodeConf struct {
 	EventBusConf     *EventBusConf     `binding:""`         // nats配置
 	DeDuplicatorConf *DeDuplicatorConf `binding:""`         // deDuplicator配置
 	TimingWheelConf  *TimingWheelConf  `binding:""`         // 定时器配置
+	BusPoolSize      int               `binding:""`         // 消息总线缓存池池大小(默认10000)
 }
 type TimingWheelConf struct {
 	Interval  time.Duration `binding:""` // 定时器间隔(默认10毫秒)
@@ -48,6 +49,10 @@ type TimingWheelConf struct {
 type RpcMonitorConf struct {
 	MonitorTimerSize  int `binding:""` // 定时器数量(用于监控rpc调用的timer)(默认10000)
 	MonitorBucketSize int `binding:""` // 定时器桶数量(默认20)
+
+	// RPC 超时配置
+	DefaultRpcTimeout    time.Duration `binding:""` // RPC 调用默认超时时间(默认1秒)
+	CheckTimeoutInterval time.Duration `binding:""` // RPC 超时检查间隔(默认1秒)
 }
 
 type ClusterConf struct {
@@ -80,6 +85,10 @@ type RPCServer struct {
 	Cert    string `binding:""` // 证书
 	CertKey string `binding:""` // 证书密钥
 	CAs     string `binding:""` // ca证书
+
+	// 网络层超时配置（仅 TCP 类型生效）
+	ReadDeadline  time.Duration `binding:""` // 读超时(默认30秒)
+	WriteDeadline time.Duration `binding:""` // 写超时(默认30秒)
 }
 
 type ServiceInitConf struct {
@@ -90,7 +99,8 @@ type ServiceInitConf struct {
 	Version                int64           `binding:""`         // 服务版本
 	ServerId               int32           `binding:"required"` // 服务ID
 	TimerConf              *TimerConf      `binding:""`         // 定时器配置
-	RpcType                string          `binding:""`         // 远程调用方式(默认使用rpcx)
+	StopGraceTimeout       time.Duration   `binding:""`         // 关闭时等待窗口(默认0,不等待; 仅用于等待回调/队列自然收敛)
+	RpcType                string          `binding:""`         // 远程调用方式(默认使用nats)
 	Mailbox                *MailboxConf    `binding:""`         // 邮箱配置
 	LogConf                *ServiceLogConf `binding:""`         // 日志配置
 	IsPrimarySecondaryMode bool            `binding:""`         // 是否是主从模式(默认不开启)
@@ -111,6 +121,22 @@ type DiscoveryConf struct {
 	Path       string // rpc注册路径
 	TTL        int64  // 证书有效期(默认3秒)
 	MasterPath string // 主从选举路径
+
+	// 故障恢复配置
+	RecoveryConf *DiscoveryRecoveryConf `binding:""` // 故障恢复配置
+}
+
+// DiscoveryRecoveryConf 服务发现故障恢复配置
+// 用于配置 watcher 重连和 keepalive 的退避策略
+type DiscoveryRecoveryConf struct {
+	// 退避策略基础延迟（默认1秒）
+	BackoffBaseDelay time.Duration `binding:""`
+	// 退避策略最大延迟（默认30秒）
+	BackoffMaxDelay time.Duration `binding:""`
+	// 详细日志输出的前N次重试（默认5次，前5次每次都打印日志）
+	VerboseLogCount int `binding:""`
+	// 日志输出间隔（默认10，之后每10次打印一次）
+	LogInterval int `binding:""`
 }
 
 type TimerConf struct {

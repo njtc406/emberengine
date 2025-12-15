@@ -36,7 +36,7 @@ func (m *mockProvider) GetPrefix(ctx context.Context, key string) (*clientv3.Get
 type mockProcessor struct{ got []inf.IEvent }
 
 func (p *mockProcessor) Init(_ inf.IListener)                                                   {}
-func (p *mockProcessor) EventHandler(_ inf.IEvent)                                              {}
+func (p *mockProcessor) EventHandler(ctx context.Context, ev inf.IEvent)                        {}
 func (p *mockProcessor) RegEventReceiverFunc(int32, inf.IEventHandler, inf.EventCallBack)       {}
 func (p *mockProcessor) UnRegEventReceiverFun(int32, inf.IEventHandler)                         {}
 func (p *mockProcessor) RegGlobalEventReceiverFunc(int32, inf.IEventHandler, inf.EventCallBack) {}
@@ -51,12 +51,15 @@ func (p *mockProcessor) UnRegSpecificEventReceiverFun(int32, string, inf.IEventH
 func (p *mockProcessor) PublishSpecific(context.Context, int32, string, proto.Message) error {
 	return nil
 }
-func (p *mockProcessor) CastEvent(inf.IEvent)                                     {}
+func (p *mockProcessor) CastEvent(ctx context.Context, ev inf.IEvent)             {}
 func (p *mockProcessor) AddBindEvent(int32, inf.IEventHandler, inf.EventCallBack) {}
 func (p *mockProcessor) AddListen(int32, inf.IEventHandler)                       {}
 func (p *mockProcessor) RemoveBindEvent(int32, inf.IEventHandler)                 {}
 func (p *mockProcessor) RemoveListen(int32, inf.IEventHandler)                    {}
-func (p *mockProcessor) PushEvent(ev inf.IEvent) error                            { p.got = append(p.got, ev); return nil }
+func (p *mockProcessor) PushEvent(ctx context.Context, ev inf.IEvent) error {
+	p.got = append(p.got, ev)
+	return nil
+}
 
 func TestWatchLoopPushesEvents(t *testing.T) {
 	if log.SysLogger == nil {

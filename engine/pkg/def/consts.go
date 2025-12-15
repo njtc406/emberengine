@@ -85,6 +85,11 @@ const (
 	NatsDefaultPingMaxOutstanding = 2
 	NatsDefaultReconnectBufSize   = 1024 * 1024 * 8
 	NatsDefaultTimeout            = 10 * time.Second
+	// NatsDefaultSubPendingMsgLimit / NatsDefaultSubPendingBytesLimit
+	// 用于提升异步订阅在高突发消息下的缓冲能力，避免默认 pending 限制触发 slow consumer 导致丢消息。
+	// 注意：这不是“无上限”，仍然需要结合业务吞吐与内存预算评估。
+	NatsDefaultSubPendingMsgLimit   = 200_000
+	NatsDefaultSubPendingBytesLimit = 256 * 1024 * 1024
 )
 
 const (
@@ -104,6 +109,12 @@ const (
 	DefaultDispatcherKey = "ember.dispatchKey"
 	DefaultTypeKey       = "ember.type"
 	DefaultPriorityKey   = "ember.priority"
+
+	// MasterEpochKey carries the current master fencing token (monotonic epoch) in event headers.
+	// It is intended to help upper layers fence side effects under network partitions.
+	MasterEpochKey = "ember.masterEpoch"
+	// MasterPrevEpochKey carries the previous master fencing token in event headers.
+	MasterPrevEpochKey = "ember.masterPrevEpoch"
 )
 
 const (

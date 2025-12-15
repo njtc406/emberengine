@@ -6,10 +6,12 @@
 package mailbox
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
@@ -61,25 +63,40 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 //  1. 如果 mailbox 已挂起（suspended=true），并且事件优先级低于紧急级别，则返回 ErrMailboxNotRunning；
 //  2. 依次调用所有中间件的 MessageReceived（入队前 hook，带 panic 防护）；
 //  3. 将事件交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
-func (m *Mailbox) PostMessage(e inf.IEvent) error {
+func (m *Mailbox) PostMessage(ctx context.Context, e inf.IEvent) error {
 	// TODO 这个是不是也可以做成一个中间件？还是直接写成是机制
 	if e.GetPriority() > def.PriorityUrgent && m.isSuspended() {
-		// 挂起后,不再接收紧急以下的任何消息
+		// 挂起后默认不再接收紧急以下消息，但会接收回调事件
+		// 需要放行：
+		// 1) RPC reply（若走 mailbox 路径）；
+		// 2) ServiceConcurrentCallback（monitor.AsyncCall 回调、以及其他回调事件）。
+		if env, ok := e.(inf.IEnvelope); ok {
+			data := env.GetData()
+			if data != nil && data.IsReply() {
+				// 允许回复进入，避免关闭过程中回调/等待永远不触发。
+				goto continuePost
+			}
+		}
+		if e.GetType() == event.ServiceConcurrentCallback {
+			goto continuePost
+		}
 		return def.ErrMailboxSuspended
 	}
+
+continuePost:
 
 	// TODO 中间件这块还需要仔细考虑一下怎么做,现在的太简陋了
 	// 调用所有中间件的 MessageReceived 方法(比如限流、熔断等)
 	for _, middleware := range m.workerPool.middlewares {
 		if err := safe.Do(func() error {
-			middleware.MessageReceived(e) // TODO 这里可能需要一些返回信息,不然无法中断
+			middleware.MessageReceived(ctx, e) // TODO 这里可能需要一些返回信息,不然无法中断
 			return nil
 		}); err != nil {
 			return err
 		}
 	}
 
-	return m.workerPool.DispatchEvent(e)
+	return m.workerPool.DispatchEvent(ctx, e)
 }
 
 func (m *Mailbox) isSuspended() bool {

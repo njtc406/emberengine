@@ -7,6 +7,7 @@ package interfaces
 
 import (
 	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
@@ -16,9 +17,10 @@ type IContext interface {
 
 	GetContext() context.Context
 
-	SetHeaders(headers map[string]any)
-	SetHeadersWithMap(headers map[string]string)
-	SetHeader(key string, value any)
+	SetHeaders(headers map[string]any) IContext
+	SetHeadersWithMap(headers map[string]string) IContext
+	AddHeader(key string, value any) IContext
+	AddHeaders(headers map[string]any) IContext
 
 	GetHeader(key string) any
 	GetHeaders() map[string]any

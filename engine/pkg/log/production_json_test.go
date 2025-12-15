@@ -21,12 +21,12 @@ func TestProductionOutputsJSON(t *testing.T) {
 	t.Cleanup(func() { stdoutWriteSyncerFactory = oldFactory })
 
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Production: true,
-		Stdout:     true,
-		PrefixName: "",
-		Level:      "info",
-		Caller:     false,
-		Color:      true, // should be ignored in Production
+		OutputFormat: "json",
+		Stdout:       true,
+		PrefixName:   "",
+		Level:        "info",
+		Caller:       false,
+		Color:        true, // should be ignored when OutputFormat=json
 	})
 	if err != nil {
 		t.Fatalf("NewDefaultLogger error: %v", err)
@@ -61,12 +61,12 @@ func TestNonProductionOutputsLegacyText(t *testing.T) {
 	t.Cleanup(func() { stdoutWriteSyncerFactory = oldFactory })
 
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Production: false,
-		Stdout:     true,
-		PrefixName: "",
-		Level:      "info",
-		Caller:     false,
-		Color:      false,
+		OutputFormat: "text",
+		Stdout:       true,
+		PrefixName:   "",
+		Level:        "info",
+		Caller:       false,
+		Color:        false,
 	})
 	if err != nil {
 		t.Fatalf("NewDefaultLogger error: %v", err)
@@ -86,13 +86,13 @@ func TestProductionOutputsJSONToFile(t *testing.T) {
 	dir := t.TempDir()
 
 	logger, err := NewDefaultLogger(&LoggerConf{
-		Production: true,
-		Stdout:     false,
-		Dir:        dir,
-		PrefixName: "app",
-		Level:      "info",
-		Caller:     false,
-		Color:      true, // should be ignored in Production
+		OutputFormat: "json",
+		Stdout:       false,
+		Dir:          dir,
+		PrefixName:   "app",
+		Level:        "info",
+		Caller:       false,
+		Color:        true, // should be ignored when OutputFormat=json
 		Rotation: &RotationConf{
 			MaxAge: 24 * time.Hour,
 			Every:  24 * time.Hour,
