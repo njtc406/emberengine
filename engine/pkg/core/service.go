@@ -150,12 +150,13 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize,
 		timingwheel.GetTimingWheel(), s.ILoggerX, config.IsDebug())
-	// Debug-only mailbox diagnostics
-	if config.IsDebug() {
-		s.mailboxMiddlewares = append(s.mailboxMiddlewares, mailbox.NewDispatchKeyStatsMiddleware(s.ILoggerX, 10*time.Second, 10))
-	}
+
+	// 根据配置创建中间件，并与用户自定义中间件合并
+	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.ILoggerX, config.IsDebug())
+	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
+
 	// 创建邮箱
-	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, s.mailboxMiddlewares...)
+	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares)
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)

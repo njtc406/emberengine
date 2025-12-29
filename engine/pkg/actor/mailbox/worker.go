@@ -101,7 +101,7 @@ func (w *Worker) GetWorkerId() int {
 }
 
 // SubmitEvent 提交事件到队列
-func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent) error {
+func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent, mctx inf.IMiddlewareContext) error {
 	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
 	for {
 		if w.closing.Load() || w.closed.Load() {
@@ -125,16 +125,14 @@ func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent) error {
 		return def.ErrMailboxWorkerChannelNotInit
 	}
 
-	// 使用 CtxEvent 包装 ctx 和 event
-	ctxEvt := NewCtxEvent(ctx, e)
+	// 使用 CtxEvent 包装 ctx、event 和中间件上下文
+	ctxEvt := NewCtxEventWithMiddleware(ctx, e, mctx)
 
 	// 提交到队列管理器
 	err := w.queueManager.Submit(ctxEvt)
 	if err != nil {
 		// 提交失败，释放包装器（但不释放内部 event，由调用方处理）
-		ctxEvt.Event = nil
-		ctxEvt.Ctx = nil
-		getCtxEventPool().Put(ctxEvt)
+		ctxEvt.Release()
 		return err
 	}
 	// 增加事件计数
@@ -215,13 +213,17 @@ func (w *Worker) Stop() {
 // safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析：
 //   - 捕获业务处理中的 panic，调用 invoker.EscalateFailure 上报错误；
 //   - 可选地通过 profiler.Analyzer 记录每类事件的处理耗时；
-//   - 在业务处理完成后，依次调用所有 mailbox 中间件的 MessageReceived 作为后置 hook。
+//   - 在业务处理完成后，调用中间件链的 OnComplete 回调。
 func (w *Worker) safeExec(e inf.IEvent) {
-	// 解包 CtxEvent 获取 ctx 和原始 event
-	ctx, evt := UnwrapCtxEvent(e)
+	// 解包 CtxEvent 获取 ctx、原始 event 和中间件上下文
+	ctx, evt, mctx := UnwrapCtxEventFull(e)
+
+	var execErr error
+	var panicVal interface{}
 
 	defer func() {
 		if r := recover(); r != nil {
+			panicVal = r
 			w.pool.logger.WithContext(ctx).Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
 
 			// 双重保护：EscalateFailure 可能也会 panic
@@ -234,6 +236,14 @@ func (w *Worker) safeExec(e inf.IEvent) {
 				w.pool.invoker.EscalateFailure(ctx, r, evt)
 			}()
 		}
+
+		// 调用中间件链的 OnComplete（逆序执行）
+		if mctx != nil {
+			w.pool.middlewareChain.ExecuteOnComplete(mctx, execErr, panicVal)
+		}
+
+		// 释放 CtxEvent 包装器（内部 event 由 InvokeMessage 负责释放）
+		e.Release()
 	}()
 
 	var analyzer *profiler.Analyzer
@@ -247,18 +257,6 @@ func (w *Worker) safeExec(e inf.IEvent) {
 	if analyzer != nil {
 		analyzer.Pop()
 		analyzer = nil
-	}
-
-	// 调用中间件
-	for _, ms := range w.pool.middlewares {
-		ms.MessageProcessed(ctx, evt) // TODO 这里过于简单,后续考虑是否需要更复杂的处理逻辑
-	}
-
-	// 释放 CtxEvent 包装器（内部 event 由 InvokeMessage 负责释放）
-	if ce, ok := e.(*CtxEvent); ok {
-		ce.Event = nil // 防止重复释放内部 event
-		ce.Ctx = nil
-		getCtxEventPool().Put(ce)
 	}
 }
 
