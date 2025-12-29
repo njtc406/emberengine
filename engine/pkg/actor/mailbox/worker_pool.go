@@ -41,19 +41,19 @@ type IScaler interface {
 }
 
 type WorkerPool struct {
-	conf        *config.MailboxConf
-	mu          sync.RWMutex
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	workers     map[int]inf.IMailboxWorker // 工作线程
-	ring        *hashring.HashRing[int]    // 一致性哈希环，用于分派事件
-	invoker     inf.IMessageInvoker        // 消息处理器
-	middlewares []inf.IMailboxMiddleware   // 中间件
-	profiler    *profiler.Profiler         // 性能分析（这个之后修改为性能数据采集器,只采集数据,分析放在采集器中自己去做）
-	autoScaler  IScaler                    // 自动扩容器
-	logger      log.ILoggerX
-	workerCount int // 当前 worker 数量（用于扩缩容）
+	conf            *config.MailboxConf
+	mu              sync.RWMutex
+	wg              sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
+	workers         map[int]inf.IMailboxWorker // 工作线程
+	ring            *hashring.HashRing[int]    // 一致性哈希环，用于分派事件
+	invoker         inf.IMessageInvoker        // 消息处理器
+	middlewareChain *MiddlewareChain           // 中间件链
+	profiler        *profiler.Profiler         // 性能分析
+	autoScaler      IScaler                    // 自动扩容器
+	logger          log.ILoggerX
+	workerCount     int // 当前 worker 数量（用于扩缩容）
 
 	// Debug-only dispatch distribution stats.
 	statsEnabled  bool
@@ -68,17 +68,17 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerPool{
-		conf:          conf,
-		workers:       make(map[int]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
-		invoker:       invoker,
-		ring:          hashring.NewHashRing[int](conf.SchedulePolicy.VirtualWorkerRate),
-		middlewares:   middlewares,
-		ctx:           ctx,
-		cancel:        cancel,
-		logger:        logger,
-		statsEnabled:  config.IsDebug(),
-		statsInterval: 10 * time.Second,
-		dispatchCnt:   make(map[int]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
+		conf:            conf,
+		workers:         make(map[int]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
+		invoker:         invoker,
+		ring:            hashring.NewHashRing[int](conf.SchedulePolicy.VirtualWorkerRate),
+		middlewareChain: NewMiddlewareChain(middlewares...),
+		ctx:             ctx,
+		cancel:          cancel,
+		logger:          logger,
+		statsEnabled:    config.IsDebug(),
+		statsInterval:   10 * time.Second,
+		dispatchCnt:     make(map[int]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
 	}
 }
 
@@ -100,9 +100,8 @@ func (p *WorkerPool) Start() {
 	p.workerCount = p.conf.SchedulePolicy.InitialWorkerNum
 	p.mu.Unlock()
 
-	for _, middleware := range p.middlewares {
-		middleware.MailboxStarted()
-	}
+	// 启动中间件链
+	p.middlewareChain.Start()
 
 	if p.conf.SchedulePolicy.EnableAutoScaling {
 		p.wg.Add(1)
@@ -132,11 +131,8 @@ func (p *WorkerPool) Stop() {
 	for _, worker := range p.workers {
 		worker.Stop()
 	}
-	for _, middleware := range p.middlewares {
-		if c, ok := middleware.(interface{ Close() }); ok {
-			c.Close()
-		}
-	}
+	// 停止中间件链
+	p.middlewareChain.Stop()
 	p.ring.Clear()
 	p.workers = nil
 }
@@ -145,7 +141,8 @@ func (p *WorkerPool) Stop() {
 //
 //   - 多 worker 模式：通过 ring.Get(evt.GetDispatcherKey()) 选择 worker，保证相同 dispatcherKey 的事件落到同一 worker；
 //   - 单 worker 模式：固定使用 workerID=0，行为接近 Actor 模型的串行执行。
-func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent) error {
+//   - mctx: 中间件上下文，用于在消息处理完成后调用 OnComplete 回调。
+func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent, mctx inf.IMiddlewareContext) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
 	var worker inf.IMailboxWorker
 	var exists bool
@@ -181,7 +178,7 @@ func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent) error {
 	}
 
 	p.mu.RUnlock()
-	return worker.SubmitEvent(ctx, evt)
+	return worker.SubmitEvent(ctx, evt, mctx)
 }
 
 func (p *WorkerPool) resizeWorkers(newSize int) {

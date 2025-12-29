@@ -11,36 +11,47 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
 )
 
 // Mailbox 是 IMailbox 的默认实现，用于承载一个 service 的消息入口。
 //
 // 运行时行为：
 //  1. 外部通过 PostMessage 投递 IEvent；
-//  2. 在入队前依次调用所有 IMailboxMiddleware 的 MessageReceived，用于限流/统计等；
-//  3. 调用 WorkerPool.DispatchEvent，将事件路由到具体 worker；
-//  4. Worker 从队列中取出事件并通过 IMessageInvoker 执行业务逻辑。
+//  2. 如果 mailbox 已挂起，通过 ISuspendPolicy 判断是否放行；
+//  3. 依次调用所有中间件的 OnReceive，支持限流/熔断/统计等；
+//  4. 调用 WorkerPool.DispatchEvent，将事件路由到具体 worker；
+//  5. Worker 从队列中取出事件并通过 IMessageInvoker 执行业务逻辑；
+//  6. 执行完成后，逆序调用所有中间件的 OnComplete。
 //
 // 挂起机制：
-//   - 调用 Suspend() 后，mailbox 进入“挂起”状态，此时仅接受紧急级别及以上的消息；
-//   - 普通优先级（低于 PriorityUrgent）的消息会被拒绝并返回 ErrMailboxNotRunning；
+//   - 调用 Suspend() 后，mailbox 进入"挂起"状态；
+//   - ISuspendPolicy 决定哪些消息可以在挂起时放行（默认：紧急及以上、RPC reply、回调）；
 //   - 调用 Resume() 可恢复正常接收。
 //
-// 注意：
-//   - 中间件 MessageReceived 当前会在 PostMessage 入口和 worker 执行后各被调用一次；
-//     如果中间件依赖调用时机，请在实现中自行区分上下文，或仅在一个阶段使用。
+// 中间件机制：
+//   - 采用洋葱模型，OnReceive 按顺序执行，OnComplete 按逆序执行；
+//   - 中间件可通过返回 Reject 拒绝消息入队；
+//   - 中间件可通过返回 Skip 跳过后续中间件直接入队。
 type Mailbox struct {
 	// 挂起标记
-	// mailbox 挂起后, 不再接收紧急以下的任何消息
-	// 如果想要在服务挂起后操作服务，需要使用紧急级别以上的消息来触发
 	suspended atomic.Bool
+	// 挂起策略（可自定义放行规则）
+	suspendPolicy inf.ISuspendPolicy
 	// 工作线程池
 	workerPool *WorkerPool
 	logger     log.ILoggerX
+}
+
+// MailboxOption 用于配置 Mailbox 的选项函数
+type MailboxOption func(*Mailbox)
+
+// WithSuspendPolicy 设置自定义的挂起策略
+func WithSuspendPolicy(policy inf.ISuspendPolicy) MailboxOption {
+	return func(m *Mailbox) {
+		m.suspendPolicy = policy
+	}
 }
 
 // NewMailbox 根据 MailboxConf 创建一个默认 mailbox 实例。
@@ -48,55 +59,46 @@ type Mailbox struct {
 //   - conf: 控制队列模式、worker 数量、扩缩容策略等；
 //   - logger: 用于记录 mailbox 运行日志；
 //   - invoker: 实际处理事件的 IMessageInvoker（通常由 Service 容器提供）；
-//   - middlewares: 可选的 mailbox 中间件，在消息入队和处理后被调用。
+//   - middlewares: 可选的 mailbox 中间件；
+//   - opts: 可选的配置选项，如自定义挂起策略。
 func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker,
-	middlewares ...inf.IMailboxMiddleware) *Mailbox {
-	return &Mailbox{
-		workerPool: NewWorkerPool(conf, logger, invoker, middlewares...),
-		logger:     logger,
+	middlewares []inf.IMailboxMiddleware, opts ...MailboxOption) *Mailbox {
+	m := &Mailbox{
+		workerPool:    NewWorkerPool(conf, logger, invoker, middlewares...),
+		suspendPolicy: NewDefaultSuspendPolicy(), // 默认挂起策略
+		logger:        logger,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // PostMessage 将事件投递到 mailbox。
 //
 // 行为：
-//  1. 如果 mailbox 已挂起（suspended=true），并且事件优先级低于紧急级别，则返回 ErrMailboxNotRunning；
-//  2. 依次调用所有中间件的 MessageReceived（入队前 hook，带 panic 防护）；
-//  3. 将事件交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
+//  1. 如果 mailbox 已挂起，通过 ISuspendPolicy 判断是否放行，不放行则返回 ErrMailboxSuspended；
+//  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
+//  3. 将事件和中间件上下文交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
 func (m *Mailbox) PostMessage(ctx context.Context, e inf.IEvent) error {
-	// TODO 这个是不是也可以做成一个中间件？还是直接写成是机制
-	if e.GetPriority() > def.PriorityUrgent && m.isSuspended() {
-		// 挂起后默认不再接收紧急以下消息，但会接收回调事件
-		// 需要放行：
-		// 1) RPC reply（若走 mailbox 路径）；
-		// 2) ServiceConcurrentCallback（monitor.AsyncCall 回调、以及其他回调事件）。
-		if env, ok := e.(inf.IEnvelope); ok {
-			data := env.GetData()
-			if data != nil && data.IsReply() {
-				// 允许回复进入，避免关闭过程中回调/等待永远不触发。
-				goto continuePost
-			}
-		}
-		if e.GetType() == event.ServiceConcurrentCallback {
-			goto continuePost
-		}
-		return def.ErrMailboxSuspended
-	}
-
-continuePost:
-
-	// TODO 中间件这块还需要仔细考虑一下怎么做,现在的太简陋了
-	// 调用所有中间件的 MessageReceived 方法(比如限流、熔断等)
-	for _, middleware := range m.workerPool.middlewares {
-		if err := safe.Do(func() error {
-			middleware.MessageReceived(ctx, e) // TODO 这里可能需要一些返回信息,不然无法中断
-			return nil
-		}); err != nil {
-			return err
+	// 挂起检查（内建机制，在所有中间件之前执行）
+	if m.isSuspended() {
+		if !m.suspendPolicy.ShouldAllow(ctx, e) {
+			return def.ErrMailboxSuspended
 		}
 	}
 
-	return m.workerPool.DispatchEvent(ctx, e)
+	// 执行中间件链的 OnReceive
+	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(ctx, e, m.workerPool.invoker.GetServiceName())
+	if result.Action == inf.ActionReject {
+		if result.Err != nil {
+			return result.Err
+		}
+		return def.ErrMailboxMiddlewareRejected
+	}
+
+	// 分发事件（携带中间件上下文，用于 OnComplete 回调）
+	return m.workerPool.DispatchEvent(ctx, e, mctx)
 }
 
 func (m *Mailbox) isSuspended() bool {

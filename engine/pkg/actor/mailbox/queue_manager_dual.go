@@ -1,6 +1,6 @@
 // Package mailbox
 // @Title  双队列管理器
-// @Description  实现系统队列（高优先级）+ 用户队列（普通优先级）的双队列模式
+// @Description  实现系统队列（高优先级）+ 用户队列（普通优先级）的双队列模式,性能更优
 // @Author  yr  2025/11/27
 // @Update  yr  2025/11/27
 package mailbox

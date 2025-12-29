@@ -20,6 +20,7 @@ import (
 type CtxEvent struct {
 	Ctx   context.Context
 	Event inf.IEvent
+	Mctx  inf.IMiddlewareContext // 中间件上下文，用于 OnComplete 回调
 }
 
 // 实现 IEvent 接口（委托给内部 Event）
@@ -53,6 +54,7 @@ func (c *CtxEvent) Release() {
 	// 内部 event 由使用方（如 InvokeMessage 之后的业务逻辑）负责释放
 	c.Event = nil
 	c.Ctx = nil
+	c.Mctx = nil
 	// 回收包装器本身
 	getCtxEventPool().Put(c)
 }
@@ -78,6 +80,7 @@ func getCtxEventPool() pool.IPool[*CtxEvent] {
 			pool.WithReset(func(t *CtxEvent) {
 				t.Ctx = nil
 				t.Event = nil
+				t.Mctx = nil
 			}),
 			pool.WithRef(func(t *CtxEvent) {
 				// CtxEvent 本身不需要引用计数，依赖内部 Event 的计数
@@ -96,6 +99,16 @@ func NewCtxEvent(ctx context.Context, evt inf.IEvent) *CtxEvent {
 	ce := getCtxEventPool().Get()
 	ce.Ctx = ctx
 	ce.Event = evt
+	ce.Mctx = nil
+	return ce
+}
+
+// NewCtxEventWithMiddleware 从对象池获取一个 CtxEvent，包含中间件上下文
+func NewCtxEventWithMiddleware(ctx context.Context, evt inf.IEvent, mctx inf.IMiddlewareContext) *CtxEvent {
+	ce := getCtxEventPool().Get()
+	ce.Ctx = ctx
+	ce.Event = evt
+	ce.Mctx = mctx
 	return ce
 }
 
@@ -106,4 +119,12 @@ func UnwrapCtxEvent(evt inf.IEvent) (context.Context, inf.IEvent) {
 		return ce.Ctx, ce.Event
 	}
 	return context.Background(), evt
+}
+
+// UnwrapCtxEventFull 解包 CtxEvent，返回 ctx、原始 event 和中间件上下文
+func UnwrapCtxEventFull(evt inf.IEvent) (context.Context, inf.IEvent, inf.IMiddlewareContext) {
+	if ce, ok := evt.(*CtxEvent); ok {
+		return ce.Ctx, ce.Event, ce.Mctx
+	}
+	return context.Background(), evt, nil
 }

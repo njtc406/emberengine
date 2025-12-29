@@ -155,6 +155,75 @@ type MailboxConf struct {
 
 	// SchedulePolicy 调度策略配置（包含Worker数量、扩缩容、空闲控制等）
 	SchedulePolicy *WorkerSchedulePolicy `binding:""`
+
+	// MiddlewareConf 中间件配置
+	MiddlewareConf *MailboxMiddlewareConf `binding:""`
+}
+
+// MailboxMiddlewareConf 邮箱中间件配置
+type MailboxMiddlewareConf struct {
+	// EnableDispatchKeyStats 是否启用 DispatchKey 统计中间件（仅 debug 模式生效）
+	// 用于统计热点 dispatcherKey，帮助发现消息分布不均问题
+	// 默认: true（debug 模式下）
+	EnableDispatchKeyStats bool `binding:""`
+
+	// DispatchKeyStatsInterval 统计输出间隔
+	// 默认: 10s
+	DispatchKeyStatsInterval time.Duration `binding:""`
+
+	// DispatchKeyStatsTopN 统计输出 TopN
+	// 默认: 10
+	DispatchKeyStatsTopN int `binding:""`
+
+	// RateLimitConf 限流中间件配置（nil 表示不启用）
+	RateLimitConf *RateLimitConf `binding:""`
+
+	// CircuitBreakerConf 熔断中间件配置（nil 表示不启用）
+	CircuitBreakerConf *CircuitBreakerConf `binding:""`
+}
+
+// RateLimitConf 限流中间件配置
+type RateLimitConf struct {
+	// Enable 是否启用限流
+	Enable bool `binding:""`
+
+	// Rate 每秒允许的请求数
+	// 默认: 10000
+	Rate float64 `binding:""`
+
+	// Burst 突发流量上限（令牌桶容量）
+	// 默认: 1000
+	Burst int `binding:""`
+
+	// SkipUrgent 是否跳过紧急及以上优先级的消息
+	// 默认: true
+	SkipUrgent bool `binding:""`
+}
+
+// CircuitBreakerConf 熔断中间件配置
+type CircuitBreakerConf struct {
+	// Enable 是否启用熔断
+	Enable bool `binding:""`
+
+	// FailureThreshold 触发熔断的连续失败次数
+	// 默认: 5
+	FailureThreshold int `binding:""`
+
+	// SuccessThreshold 半开状态下恢复的成功次数
+	// 默认: 3
+	SuccessThreshold int `binding:""`
+
+	// CooldownDuration 熔断冷却时间
+	// 默认: 30s
+	CooldownDuration time.Duration `binding:""`
+
+	// WindowDuration 统计窗口时间
+	// 默认: 60s
+	WindowDuration time.Duration `binding:""`
+
+	// HalfOpenMaxAllowed 半开状态允许的最大探测请求数
+	// 默认: 3
+	HalfOpenMaxAllowed int `binding:""`
 }
 
 type EventBusConf struct {

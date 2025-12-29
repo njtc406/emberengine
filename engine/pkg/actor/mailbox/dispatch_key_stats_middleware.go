@@ -1,7 +1,6 @@
 package mailbox
 
 import (
-	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -15,6 +14,7 @@ import (
 // It counts keys over an interval and logs top-N periodically.
 //
 // Designed to be enabled only in debug mode.
+// Implements IMailboxMiddleware interface.
 type DispatchKeyStatsMiddleware struct {
 	logger   log.ILoggerX
 	interval time.Duration
@@ -47,7 +47,13 @@ func NewDispatchKeyStatsMiddleware(logger log.ILoggerX, interval time.Duration, 
 	}
 }
 
-func (m *DispatchKeyStatsMiddleware) MailboxStarted() {
+// Name 返回中间件名称
+func (m *DispatchKeyStatsMiddleware) Name() string {
+	return "DispatchKeyStats"
+}
+
+// OnStart 当 Mailbox 启动时调用
+func (m *DispatchKeyStatsMiddleware) OnStart() {
 	if m == nil || m.logger == nil {
 		return
 	}
@@ -70,11 +76,20 @@ func (m *DispatchKeyStatsMiddleware) MailboxStarted() {
 	}()
 }
 
-func (m *DispatchKeyStatsMiddleware) MessageReceived(ctx context.Context, evt inf.IEvent) {
-	if m == nil || evt == nil {
+// OnStop 当 Mailbox 停止时调用
+func (m *DispatchKeyStatsMiddleware) OnStop() {
+	if m == nil {
 		return
 	}
-	key := evt.GetDispatcherKey()
+	m.stopOnce.Do(func() { close(m.stopCh) })
+}
+
+// OnReceive 消息入队前调用，记录 dispatcherKey 统计
+func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.MiddlewareResult {
+	if m == nil || mctx == nil || mctx.Event() == nil {
+		return inf.Continue()
+	}
+	key := mctx.Event().GetDispatcherKey()
 	if key == "" {
 		key = "<empty>"
 	}
@@ -85,21 +100,17 @@ func (m *DispatchKeyStatsMiddleware) MessageReceived(ctx context.Context, evt in
 	// Prevent unbounded growth in long-running debug sessions.
 	if len(m.counts) >= m.maxKeys {
 		m.total++
-		return
+		return inf.Continue()
 	}
 
 	m.counts[key]++
 	m.total++
+	return inf.Continue()
 }
 
-func (m *DispatchKeyStatsMiddleware) MessageProcessed(ctx context.Context, _ inf.IEvent) {}
-
-// Close stops the background reporter.
-func (m *DispatchKeyStatsMiddleware) Close() {
-	if m == nil {
-		return
-	}
-	m.stopOnce.Do(func() { close(m.stopCh) })
+// OnComplete 消息处理完成后调用
+func (m *DispatchKeyStatsMiddleware) OnComplete(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
+	// 此中间件只在入队时统计，不需要后置处理
 }
 
 type keyCount struct {
