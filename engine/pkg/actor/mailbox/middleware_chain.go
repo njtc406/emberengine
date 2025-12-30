@@ -34,7 +34,7 @@ func NewMiddlewareContext(ctx context.Context, evt inf.IEvent, serviceName strin
 		evt:         evt,
 		serviceName: serviceName,
 		startTime:   time.Now(),
-		data:        make(map[string]interface{}, 4),
+		data:        make(map[string]interface{}, 8), // 增加初始容量以减少扩容
 	}
 }
 

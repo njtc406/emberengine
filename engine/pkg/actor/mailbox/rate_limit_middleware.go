@@ -8,6 +8,7 @@ package mailbox
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -32,8 +33,8 @@ type RateLimitMiddleware struct {
 	mu         sync.Mutex
 
 	// 统计
-	accepted uint64
-	rejected uint64
+	accepted atomic.Uint64
+	rejected atomic.Uint64
 
 	// 可选：跳过限流的条件
 	skipFunc func(mctx inf.IMiddlewareContext) bool
@@ -87,7 +88,7 @@ func (m *RateLimitMiddleware) OnStart() {
 
 func (m *RateLimitMiddleware) OnStop() {
 	if m.logger != nil {
-		m.logger.Infof("RateLimitMiddleware stopped: accepted=%d, rejected=%d", m.accepted, m.rejected)
+		m.logger.Infof("RateLimitMiddleware stopped: accepted=%d, rejected=%d", m.accepted.Load(), m.rejected.Load())
 	}
 }
 
@@ -100,10 +101,11 @@ func (m *RateLimitMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Middlew
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 计算新增的令牌
+	// 使用纳秒计算，避免浮点数精度损失
 	now := time.Now()
-	elapsed := now.Sub(m.lastUpdate).Seconds()
-	m.tokens += elapsed * m.rate
+	elapsed := now.Sub(m.lastUpdate)
+	tokensToAdd := float64(elapsed.Nanoseconds()) * m.rate / 1e9 // rate 是每秒数量
+	m.tokens += tokensToAdd
 	if m.tokens > float64(m.burst) {
 		m.tokens = float64(m.burst)
 	}
@@ -112,12 +114,12 @@ func (m *RateLimitMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Middlew
 	// 尝试获取令牌
 	if m.tokens >= 1 {
 		m.tokens--
-		m.accepted++
+		m.accepted.Add(1)
 		return inf.Continue()
 	}
 
 	// 被限流
-	m.rejected++
+	m.rejected.Add(1)
 	return inf.Reject(ErrRateLimitExceeded)
 }
 
@@ -127,7 +129,5 @@ func (m *RateLimitMiddleware) OnComplete(mctx inf.IMiddlewareContext, err error,
 
 // GetStats 获取统计信息
 func (m *RateLimitMiddleware) GetStats() (accepted, rejected uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.accepted, m.rejected
+	return m.accepted.Load(), m.rejected.Load()
 }

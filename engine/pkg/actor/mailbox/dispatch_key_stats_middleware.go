@@ -97,13 +97,31 @@ func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Prevent unbounded growth in long-running debug sessions.
-	if len(m.counts) >= m.maxKeys {
+	// 如果 key 已存在，直接增加计数
+	if _, exists := m.counts[key]; exists {
+		m.counts[key]++
 		m.total++
 		return inf.Continue()
 	}
 
-	m.counts[key]++
+	// 如果未达到上限，添加新 key
+	if len(m.counts) < m.maxKeys {
+		m.counts[key] = 1
+		m.total++
+		return inf.Continue()
+	}
+
+	// 达到上限，淘汰计数最小的 key（LRU 策略）
+	minKey := ""
+	minCount := uint64(^uint64(0)) // max uint64
+	for k, c := range m.counts {
+		if c < minCount {
+			minKey = k
+			minCount = c
+		}
+	}
+	delete(m.counts, minKey)
+	m.counts[key] = 1
 	m.total++
 	return inf.Continue()
 }
