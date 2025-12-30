@@ -1,8 +1,8 @@
 // Package timingwheel
-// @Title  title
-// @Description  desc
-// @Author  yr  2025/1/13
-// @Update  yr  2025/1/13
+// 模块名: timingwheel
+// 说明: 定时器时间轮模块，提供全局启动/停止与时间偏移设置接口
+// 作者: yr
+// 更新: 2025/1/13
 package timingwheel
 
 import (
@@ -69,23 +69,22 @@ func GetTimingWheel() *TimingWheel {
 	return globTW
 }
 
-// AdjustTime adjusts all timers in the global timing wheel after time offset change.
-// This is designed for development/testing environments only.
-// offsetMs: the time offset in milliseconds (can be positive or negative)
+// SetTimeOffset 设置全局时间轮的时间偏移。
+// 这是统一的时间调整入口，offset 为可正可负的时间偏移量。
 //
-// WARNING: This operation is expensive and will block all timer operations.
-// DO NOT use in production environment.
+// 该操作为同步操作，会阻塞所有定时器操作直到完成。如果不使用该功能，偏移量保持为 0，
+// 不会对性能产生影响。
 //
-// Usage:
+// 示例：
 //
-//	timelib.SetTimeOffset(offset) // first adjust timelib
-//	timingwheel.AdjustTime(offset / time.Millisecond) // then adjust timing wheel
-func AdjustTime(offsetMs int64) {
+//	timingwheel.SetTimeOffset(time.Hour) // 向前调整 1 小时
+//	timingwheel.SetTimeOffset(-30 * time.Minute) // 向后调整 30 分钟
+func SetTimeOffset(offset time.Duration) {
 	twMutex.Lock()
 	tw := globTW
 	twMutex.Unlock()
 
 	if tw != nil {
-		tw.AdjustTime(offsetMs)
+		tw.SetTimeOffset(offset)
 	}
 }

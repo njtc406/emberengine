@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// SpecSchedule specifies a duty cycle (to the second granularity), based on a
-// traditional crontab specification. It is computed initially and stored as bit sets.
+// SpecSchedule 基于传统 crontab 规范，按秒粒度描述调度周期。
+// 该调度会在初始化时计算并以位集合的形式存储。
 type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 
@@ -14,7 +14,7 @@ type SpecSchedule struct {
 	Location *time.Location
 }
 
-// bounds provides a range of acceptable values (plus a map of name to value).
+// bounds 表示某个字段允许的取值范围（并可包含名称到数值的映射）。
 type bounds struct {
 	min, max uint
 	names    map[string]uint
@@ -56,8 +56,8 @@ const (
 	starBit = 1 << 63
 )
 
-// Next returns the next time this schedule is activated, greater than the given
-// time.  If no time can be found to satisfy the schedule, return the zero time.
+// Next 返回此调度在给定时间之后的下一次激活时间。
+// 如果找不到满足调度的时间，则返回零时间。
 func (s *SpecSchedule) Next(t time.Time) time.Time {
 	// General approach
 	//
@@ -178,8 +178,7 @@ WRAP:
 	return t.In(origLocation)
 }
 
-// dayMatches returns true if the schedule's day-of-week and day-of-month
-// restrictions are satisfied by the given time.
+// dayMatches 在给定时间满足调度的星期和日限制时返回 true。
 func dayMatches(s *SpecSchedule, t time.Time) bool {
 	var (
 		domMatch bool = 1<<uint(t.Day())&s.Dom > 0

@@ -8,10 +8,9 @@ import (
 	"time"
 )
 
-// Configuration options for creating a parser. Most options specify which
-// fields should be included, while others enable features. If a field is not
-// included the parser will assume a default value. These options do not change
-// the order fields are parse in.
+// ParseOption 表示创建解析器时的配置选项。大多数选项用于指定应包含哪些字段，
+// 其他选项用于启用额外特性。如果某个字段未包含，解析器会使用默认值。
+// 这些选项不会改变字段的解析顺序。
 type ParseOption int
 
 const (
@@ -49,22 +48,21 @@ type Parser struct {
 	options ParseOption
 }
 
-// NewParser creates a Parser with custom options.
+// NewParser 使用自定义选项创建一个 Parser。
 //
-// It panics if more than one Optional is given, since it would be impossible to
-// correctly infer which optional is provided or missing in general.
+// 如果指定了超过一个可选字段（Optional），函数会 panic，因为无法通用地推断哪个可选字段被提供或省略。
 //
-// Examples
+// 示例：
 //
-//	// Standard parser without descriptors
+//	// 标准解析器，不包含描述符
 //	specParser := NewParser(Minute | Hour | Dom | Month | Dow)
 //	sched, err := specParser.Parse("0 0 15 */3 *")
 //
-//	// Same as above, just excludes time fields
+//	// 仅包含日期相关字段
 //	subsParser := NewParser(Dom | Month | Dow)
 //	sched, err := specParser.Parse("15 */3 *")
 //
-//	// Same as above, just makes Dow optional
+//	// 使 Dow（星期字段）可选
 //	subsParser := NewParser(Dom | Month | DowOptional)
 //	sched, err := specParser.Parse("15 */3")
 func NewParser(options ParseOption) Parser {
@@ -81,9 +79,9 @@ func NewParser(options ParseOption) Parser {
 	return Parser{options}
 }
 
-// Parse returns a new crontab schedule representing the given spec.
-// It returns a descriptive error if the spec is not valid.
-// It accepts crontab specs and features configured by NewParser.
+// Parse 将给定的 spec 字符串解析为一个 crontab 调度对象。
+// 若 spec 无效，会返回描述性错误。
+// 解析器支持由 NewParser 配置的 crontab 特性。
 func (p Parser) Parse(spec string) (Scheduler, error) {
 	if len(spec) == 0 {
 		return nil, fmt.Errorf("empty spec string")
@@ -151,11 +149,8 @@ func (p Parser) Parse(spec string) (Scheduler, error) {
 	}, nil
 }
 
-// normalizeFields takes a subset set of the time fields and returns the full set
-// with defaults (zeroes) populated for unset fields.
-//
-// As part of performing this function, it also validates that the provided
-// fields are compatible with the configured options.
+// normalizeFields 将可能省略的字段补全为完整字段集合，并对未设置的字段填充默认值。
+// 同时验证提供的字段是否与解析器配置兼容。
 func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 	// Validate optionals & add their field to options
 	optionals := 0

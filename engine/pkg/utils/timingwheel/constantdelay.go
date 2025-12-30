@@ -2,15 +2,15 @@ package timingwheel
 
 import "time"
 
-// ConstantDelaySchedule represents a simple recurring duty cycle, e.g. "Every 5 minutes".
-// It does not support jobs more frequent than once a second.
+// ConstantDelaySchedule 表示简单的重复调度，例如“每 5 分钟执行一次”。
+// 不支持频率高于每秒一次的任务。
 type ConstantDelaySchedule struct {
 	Delay time.Duration
 }
 
-// Every returns a crontab Schedule that activates once every duration.
-// Delays of less than a second are not supported (will round up to 1 second).
-// Any fields less than a Second are truncated.
+// Every 返回一个按指定间隔重复激活的调度。
+// 小于 1 秒的间隔不支持（会向上取整为 1 秒）。
+// 所有小于秒的字段会被截断。
 func Every(duration time.Duration) ConstantDelaySchedule {
 	if duration < time.Second {
 		duration = time.Second
@@ -20,8 +20,7 @@ func Every(duration time.Duration) ConstantDelaySchedule {
 	}
 }
 
-// Next returns the next time this should be run.
-// This rounds so that the next activation time will be on the second.
+// Next 返回下一次应执行的时间，结果会向秒对齐。
 func (schedule ConstantDelaySchedule) Next(t time.Time) time.Time {
 	return t.Add(schedule.Delay - time.Duration(t.Nanosecond())*time.Nanosecond)
 }

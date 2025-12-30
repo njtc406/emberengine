@@ -5,8 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
 // TestTimeAdjustment 测试时间调整功能
@@ -34,8 +32,8 @@ func TestTimeAdjustment(t *testing.T) {
 	// 创建一个2秒后执行的任务 (缩短时间以便测试)
 	timerId, err := scheduler.AfterFunc(2*time.Second, "test_task", func(timer *Timer, args ...interface{}) error {
 		executionCount.Add(1)
-		lastExecutionTime.Store(timelib.Now().Unix())
-		fmt.Printf("[%s] Task executed, count: %d\n", timelib.Now().Format("2006-01-02 15:04:05"), executionCount.Load())
+		lastExecutionTime.Store(time.Now().Unix())
+		fmt.Printf("[%s] Task executed, count: %d\n", time.Now().Format("2006-01-02 15:04:05"), executionCount.Load())
 		return nil
 	})
 
@@ -43,7 +41,7 @@ func TestTimeAdjustment(t *testing.T) {
 		t.Fatalf("AfterFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Task created (delay: 2s)\n", timelib.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("[%s] Task created (delay: 2s)\n", time.Now().Format("2006-01-02 15:04:05"))
 	js := scheduler.(*jobScheduler)
 	originalExpiration := js.getShard(timerId).tasks[timerId].GetExpiration()
 	fmt.Printf("[DEBUG] CurrentTime(ms): %d, Timer expiration(ms): %d, Diff: %dms\n",
@@ -53,16 +51,12 @@ func TestTimeAdjustment(t *testing.T) {
 
 	// 立即调整时间,向前跳5秒 (超过任务应该执行的时间点)
 	offset := 5 * time.Second
-	fmt.Printf("\n[%s] Adjusting time forward by +5s\n", timelib.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("\n[%s] Adjusting time forward by +5s\n", time.Now().Format("2006-01-02 15:04:05"))
 
-	// 先调整 timelib 的时间
-	timelib.SetTimeOffset(offset)
-	fmt.Printf("[%s] timelib adjusted\n", timelib.Now().Format("2006-01-02 15:04:05"))
+	// 调整时间轮的offset (TimingWheel现在独立管理offset)
+	tw.SetTimeOffset(offset)
 
-	// 再调整时间轮
-	tw.AdjustTime(int64(offset / time.Millisecond))
-
-	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("[%s] Time adjusted\n", time.Now().Format("2006-01-02 15:04:05"))
 	newExpiration := js.getShard(timerId).tasks[timerId].GetExpiration()
 	fmt.Printf("[DEBUG] CurrentTime(ms): %d, Timer expiration(ms): %d, Diff: %dms\n",
 		atomic.LoadInt64(&tw.currentTime),
@@ -90,7 +84,7 @@ func TestTimeAdjustment(t *testing.T) {
 	scheduler.CancelTimer(timerId)
 
 	// 重置时间偏移
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestTimeAdjustmentWithMultipleTimers 测试多个定时器的时间调整
@@ -121,7 +115,7 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 		id, err := scheduler.AfterFunc(delay, fmt.Sprintf("task_%d", i), func(timer *Timer, args ...interface{}) error {
 			executionCount.Add(1)
 			taskName := args[0].(string)
-			fmt.Printf("[%s] %s executed\n", timelib.Now().Format("15:04:05"), taskName)
+			fmt.Printf("[%s] %s executed\n", time.Now().Format("15:04:05"), taskName)
 			return nil
 		}, fmt.Sprintf("task_%d", i))
 
@@ -131,19 +125,18 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 		timerIds = append(timerIds, id)
 	}
 
-	fmt.Printf("[%s] Created 3 tasks with delays: 3s, 5s, 7s\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Created 3 tasks with delays: 3s, 5s, 7s\n", time.Now().Format("15:04:05"))
 
 	// 等待1秒
 	time.Sleep(1 * time.Second)
 
 	// 时间向前跳跃10秒
 	offset := 10 * time.Second
-	fmt.Printf("\n[%s] Adjusting time forward by +10s\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("\n[%s] Adjusting time forward by +10s\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(int64(offset / time.Millisecond))
+	tw.SetTimeOffset(offset)
 
-	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Time adjusted\n", time.Now().Format("15:04:05"))
 
 	// 等待所有任务执行
 	time.Sleep(2 * time.Second)
@@ -160,7 +153,7 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 		scheduler.CancelTimer(id)
 	}
 
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestTimeAdjustmentWithTickerTimer 测试循环定时器的时间调整
@@ -186,7 +179,7 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	// 创建一个每2秒执行的循环任务
 	timerId, err := scheduler.TickerFunc(2*time.Second, "ticker_task", func(timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
-		fmt.Printf("[%s] Ticker executed, count: %d\n", timelib.Now().Format("15:04:05"), count)
+		fmt.Printf("[%s] Ticker executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
 	})
 
@@ -194,26 +187,25 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 		t.Fatalf("TickerFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Ticker task created (interval: 2s)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Ticker task created (interval: 2s)\n", time.Now().Format("15:04:05"))
 
 	// 等待任务执行几次
 	time.Sleep(3 * time.Second)
 
 	firstCount := executionCount.Load()
-	fmt.Printf("\n[%s] First phase: executed %d times\n", timelib.Now().Format("15:04:05"), firstCount)
+	fmt.Printf("\n[%s] First phase: executed %d times\n", time.Now().Format("15:04:05"), firstCount)
 
 	// 时间向前跳跃5秒
 	offset := 5 * time.Second
-	fmt.Printf("[%s] Adjusting time forward by +5s\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Adjusting time forward by +5s\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(int64(offset / time.Millisecond))
+	tw.SetTimeOffset(offset)
 
 	// 等待任务继续执行
 	time.Sleep(3 * time.Second)
 
 	finalCount := executionCount.Load()
-	fmt.Printf("\n[%s] After adjustment: total executed %d times\n", timelib.Now().Format("15:04:05"), finalCount)
+	fmt.Printf("\n[%s] After adjustment: total executed %d times\n", time.Now().Format("15:04:05"), finalCount)
 
 	if finalCount <= firstCount {
 		t.Errorf("Ticker should continue to execute after time adjustment")
@@ -222,7 +214,7 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	}
 
 	scheduler.CancelTimer(timerId)
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestTimeAdjustmentBackward 测试时间回退的场景
@@ -238,7 +230,7 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	// 创建一个3秒后执行的任务
 	timerId, err := scheduler.AfterFunc(3*time.Second, "test_task", func(timer *Timer, args ...interface{}) error {
 		executionCount.Add(1)
-		fmt.Printf("[%s] Task executed\n", timelib.Now().Format("15:04:05"))
+		fmt.Printf("[%s] Task executed\n", time.Now().Format("15:04:05"))
 		return nil
 	})
 
@@ -246,19 +238,18 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 		t.Fatalf("AfterFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Task created (delay: 3s)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Task created (delay: 3s)\n", time.Now().Format("15:04:05"))
 
 	// 等待1秒
 	time.Sleep(1 * time.Second)
 
 	// 时间回退5秒
 	offset := -5 * time.Second
-	fmt.Printf("\n[%s] Adjusting time backward by -5s\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("\n[%s] Adjusting time backward by -5s\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(int64(offset / time.Millisecond))
+	tw.SetTimeOffset(offset)
 
-	fmt.Printf("[%s] Time adjusted (went back 5s)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Time adjusted (went back 5s)\n", time.Now().Format("15:04:05"))
 
 	// 任务应该还要等待更长时间(原本3秒,回退5秒后还要等8秒)
 	time.Sleep(2 * time.Second)
@@ -270,7 +261,7 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	}
 
 	scheduler.CancelTimer(timerId)
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestCronTimerAdjustment 测试Cron定时器的时间调整
@@ -295,7 +286,7 @@ func TestCronTimerAdjustment(t *testing.T) {
 	// 创建一个每10秒的Cron任务
 	timerId, err := scheduler.CronFunc("@every 10s", "cron_task", func(timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
-		fmt.Printf("[%s] Cron task executed, count: %d\n", timelib.Now().Format("15:04:05"), count)
+		fmt.Printf("[%s] Cron task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
 	})
 
@@ -303,16 +294,15 @@ func TestCronTimerAdjustment(t *testing.T) {
 		t.Fatalf("CronFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Cron task created (@every 10s)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Cron task created (@every 10s)\n", time.Now().Format("15:04:05"))
 
 	// 立即调整时间,向前跳15秒(跨过一个触发点)
 	offset := 15 * time.Second
-	fmt.Printf("\n[%s] Adjusting time forward by +15s (crossing one trigger point)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("\n[%s] Adjusting time forward by +15s (crossing one trigger point)\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(int64(offset / time.Millisecond))
+	tw.SetTimeOffset(offset)
 
-	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Time adjusted\n", time.Now().Format("15:04:05"))
 
 	// 等待任务执行
 	time.Sleep(2 * time.Second)
@@ -325,7 +315,7 @@ func TestCronTimerAdjustment(t *testing.T) {
 	}
 
 	scheduler.CancelTimer(timerId)
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestCronTimerAdjustmentMultipleTriggers 测试跨过多个触发点的情况
@@ -350,7 +340,7 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 	// 创建一个每5秒的Cron任务
 	timerId, err := scheduler.CronFunc("@every 5s", "frequent_task", func(timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
-		fmt.Printf("[%s] Cron task executed, count: %d\n", timelib.Now().Format("15:04:05"), count)
+		fmt.Printf("[%s] Cron task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
 	})
 
@@ -358,17 +348,16 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 		t.Fatalf("CronFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Cron task created (@every 5s)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Cron task created (@every 5s)\n", time.Now().Format("15:04:05"))
 
 	// 调整时间,向前跳25秒(跨过5个触发点: 5s, 10s, 15s, 20s, 25s)
 	// 但只应该执行一次
 	offset := 25 * time.Second
-	fmt.Printf("\n[%s] Adjusting time forward by +25s (crossing 5 trigger points)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("\n[%s] Adjusting time forward by +25s (crossing 5 trigger points)\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(int64(offset / time.Millisecond))
+	tw.SetTimeOffset(offset)
 
-	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Time adjusted\n", time.Now().Format("15:04:05"))
 
 	// 等待任务执行
 	time.Sleep(2 * time.Second)
@@ -381,7 +370,7 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 	}
 
 	scheduler.CancelTimer(timerId)
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestCronTimerDailyCrossDay 测试跨天任务的时间调整
@@ -409,7 +398,7 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 	// 实际使用时应该用标准cron格式: "0 12 * * *"
 	timerId, err := scheduler.CronFunc("@every 7h", "daily_12pm_task", func(timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
-		fmt.Printf("[%s] Daily 12PM task executed, count: %d\n", timelib.Now().Format("15:04:05"), count)
+		fmt.Printf("[%s] Daily 12PM task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
 	})
 
@@ -417,17 +406,16 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 		t.Fatalf("CronFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Daily task created (@every 7h, next trigger at 12:00)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Daily task created (@every 7h, next trigger at 12:00)\n", time.Now().Format("15:04:05"))
 
 	// 模拟从早上5点调整到明天早上11点(跨过了今天12点这个触发点)
 	// 5点 -> 明天11点 = 24h + 6h = 30h
 	offset := 30 * time.Hour
-	fmt.Printf("\n[%s] Adjusting time forward by +30h (from 5AM to next day 11AM, crossing 12PM trigger point)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("\n[%s] Adjusting time forward by +30h (from 5AM to next day 11AM, crossing 12PM trigger point)\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset)
-	tw.AdjustTime(int64(offset / time.Millisecond))
+	tw.SetTimeOffset(offset)
 
-	fmt.Printf("[%s] Time adjusted\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Time adjusted\n", time.Now().Format("15:04:05"))
 
 	// 等待任务执行
 	time.Sleep(2 * time.Second)
@@ -440,7 +428,7 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 	}
 
 	scheduler.CancelTimer(timerId)
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
 
 // TestCronTimerBackwardCrossDay 测试时间往前调整跨过触发点
@@ -466,7 +454,7 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	// 创建一个每10秒的任务
 	timerId, err := scheduler.CronFunc("@every 10s", "backward_task", func(timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
-		fmt.Printf("[%s] Backward test task executed, count: %d\n", timelib.Now().Format("15:04:05"), count)
+		fmt.Printf("[%s] Backward test task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
 	})
 
@@ -474,13 +462,12 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 		t.Fatalf("CronFunc failed: %v", err)
 	}
 
-	fmt.Printf("[%s] Cron task created (@every 10s)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Cron task created (@every 10s)\n", time.Now().Format("15:04:05"))
 
 	// 先向前跳20秒
 	offset1 := 20 * time.Second
-	fmt.Printf("\n[%s] First: Adjusting time forward by +20s\n", timelib.Now().Format("15:04:05"))
-	timelib.SetTimeOffset(offset1)
-	tw.AdjustTime(int64(offset1 / time.Millisecond))
+	fmt.Printf("\n[%s] First: Adjusting time forward by +20s\n", time.Now().Format("15:04:05"))
+	tw.SetTimeOffset(offset1)
 
 	// 重置执行计数
 	time.Sleep(2 * time.Second)
@@ -488,12 +475,11 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 
 	// 再往回调整15秒(跨过10秒触发点)
 	offset2 := -15 * time.Second
-	fmt.Printf("\n[%s] Second: Adjusting time backward by -15s (crossing trigger point)\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("\n[%s] Second: Adjusting time backward by -15s (crossing trigger point)\n", time.Now().Format("15:04:05"))
 
-	timelib.SetTimeOffset(offset1 + offset2)
-	tw.AdjustTime(int64(offset2 / time.Millisecond))
+	tw.SetTimeOffset(offset1 + offset2)
 
-	fmt.Printf("[%s] Time adjusted backward\n", timelib.Now().Format("15:04:05"))
+	fmt.Printf("[%s] Time adjusted backward\n", time.Now().Format("15:04:05"))
 
 	// 等待任务执行
 	time.Sleep(2 * time.Second)
@@ -506,5 +492,5 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	}
 
 	scheduler.CancelTimer(timerId)
-	timelib.SetTimeOffset(0)
+	tw.SetTimeOffset(0)
 }
