@@ -8,25 +8,23 @@ import (
 	"unsafe"
 
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel/delayqueue"
 )
 
-// TimingWheel is an implementation of Hierarchical Timing Wheels.
+// TimingWheel 是分层时间轮的实现。
 type TimingWheel struct {
-	tick      int64 // in milliseconds
+	tick      int64 // 毫秒为单位的刻度
 	wheelSize int64
 
-	interval    int64 // in milliseconds
-	currentTime int64 // in milliseconds
+	interval    int64 // 毫秒为单位的轮盘周期
+	currentTime int64 // 毫秒为单位的当前时间
 	buckets     []*bucket
 	queue       *delayqueue.DelayQueue
 
 	timerIdSeed uint64
 
-	// The higher-level overflow wheel.
-	//
-	// NOTE: This field may be updated and read concurrently, through Add().
+	// 上层的溢出时间轮。
+	// 注意：此字段可被并发读写（通过 Add()），因此使用原子指针。
 	overflowWheel unsafe.Pointer // type: *TimingWheel
 
 	exitC     chan struct{}
@@ -35,13 +33,17 @@ type TimingWheel struct {
 
 	logger log.ILoggerX
 
-	// adjustMu protects time adjustment operations
-	adjusting     atomic.Bool // 是否正在调整时间
-	pendingTimers chan *Timer // 时间调整期间的待处理timer缓冲队列
-	adjustMu      sync.RWMutex
+	// timeOffsetNs 表示以纳秒为单位的时间偏移, 应用于所有时间计算
+	// 使用 atomic.Int64 以支持高并发场景下的无锁读写
+	timeOffsetNs atomic.Int64
+
+	// adjustMu 保护时间偏移调整操作
+	adjusting     atomic.Bool // 是否正在调整时间偏移
+	pendingTimers chan *Timer // 时间调整期间的待处理 timer 缓冲队列
+	adjustMu      sync.Mutex  // 保护整个调整过程，确保串行执行
 }
 
-// NewTimingWheel creates an instance of TimingWheel with the given tick and wheelSize.
+// NewTimingWheel 使用指定的刻度和轮大小创建一个 TimingWheel 实例。
 func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILoggerX) *TimingWheel {
 	if logger == nil {
 		l, err := log.NewDefaultLogger(nil)
@@ -67,7 +69,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILoggerX) *T
 		}
 	}
 
-	startMs := timeToMs(timelib.Now())
+	startMs := timeToMs(time.Now())
 
 	return newTimingWheel(
 		tickMs,
@@ -79,7 +81,7 @@ func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILoggerX) *T
 	)
 }
 
-// newTimingWheel is an internal helper function that really creates an instance of TimingWheel.
+// newTimingWheel 是内部辅助函数，用于真正创建 TimingWheel 实例。
 func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger log.ILoggerX, closed *atomic.Bool) *TimingWheel {
 	buckets := make([]*bucket, wheelSize)
 	for i := range buckets {
@@ -96,26 +98,34 @@ func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqu
 		logger:        logger,
 		closed:        closed,
 		pendingTimers: make(chan *Timer, 10000), // 缓冲队列，容量可配置
+		// timeOffsetNs 默认为0，无需显式初始化
 	}
 }
 
-// add inserts the timer t into the current timing wheel.
+// add 将定时器 t 插入到当前时间轮。
 func (tw *TimingWheel) add(t *Timer) bool {
 	// 如果timingwheel已关闭，不能添加任务
 	if tw.closed.Load() {
 		return false
 	}
 
-	// 如果正在调整时间,将timer放入缓冲队列
+	// 如果正在调整offset,将timer放入缓冲队列
 	if tw.adjusting.Load() {
 		select {
 		case tw.pendingTimers <- t:
 			return true // 已加入缓冲队列
 		default:
-			// 缓冲队列已满,降级为直接插入(极端情况)
+			// 缓冲队列已满,等待adjusting标志重置后重试
+			// 由于SetTimeOffset会持有adjustMu写锁,这里只需等待标志重置即可
 			if tw.logger != nil {
-				tw.logger.Warnf("[TimingWheel] Pending timer queue is full, fallback to direct insert")
+				tw.logger.Warnf("[TimingWheel] Pending timer queue is full, waiting for SetTimeOffset to complete")
 			}
+			// 等待调整完成
+			for tw.adjusting.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			// 调整完成后再次尝试
+			return tw.addInternal(t)
 		}
 	}
 
@@ -131,22 +141,20 @@ func (tw *TimingWheel) addInternal(t *Timer) bool {
 	currentTime := atomic.LoadInt64(&tw.currentTime)
 	expire := t.GetExpiration()
 	if expire < currentTime+tw.tick {
-		// Already expired
+		// 已经过期
 		return false
 	} else if expire < currentTime+tw.interval {
-		// Put it into its own bucket
+		// 放入当前轮的对应 bucket
 		virtualID := expire / tw.tick
 		b := tw.buckets[virtualID%tw.wheelSize]
 		b.Add(t)
 
 		// Set the bucket expiration time
 		if b.SetExpiration(virtualID * tw.tick) {
-			// The bucket needs to be enqueued since it was an expired bucket.
-			// We only need to enqueue the bucket when its expiration time has changed,
-			// i.e. the wheel has advanced and this bucket get reused with a new expiration.
-			// Any further calls to set the expiration within the same wheel cycle will
-			// pass in the same value and hence return false, thus the bucket with the
-			// same expiration will not be enqueued multiple times.
+			// 如果 bucket 的过期时间发生了变化，则需要将其入队。
+			// 仅当轮次前进且该 bucket 被重用为新的过期时间时才需要入队。
+			// 在同一轮周期内对相同值的重复设置将返回 false，
+			// 因此不会将同一过期时间的 bucket 多次入队。
 			tw.queue.Offer(b, b.Expiration())
 		}
 
@@ -229,8 +237,7 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 	}
 }
 
-// addOrRun inserts the timer t into the current timing wheel, or run the
-// timer's task if it has already expired.
+// addOrRun 将定时器 t 插入当前时间轮；如果已过期则立即执行任务。
 func (tw *TimingWheel) addOrRun(t *Timer) {
 	if tw.closed.Load() {
 		return
@@ -261,13 +268,19 @@ func (tw *TimingWheel) genTimerId() uint64 {
 	return atomic.AddUint64(&tw.timerIdSeed, 1)
 }
 
+// getNow 以无锁方式返回应用偏移后的当前时间
+func (tw *TimingWheel) getNow() time.Time {
+	offsetNs := tw.timeOffsetNs.Load()
+	return time.Now().Add(time.Duration(offsetNs))
+}
+
 func (tw *TimingWheel) advanceClock(expiration int64) {
 	currentTime := atomic.LoadInt64(&tw.currentTime)
 	if expiration >= currentTime+tw.tick {
 		currentTime = truncate(expiration, tw.tick)
 		atomic.StoreInt64(&tw.currentTime, currentTime)
 
-		// Try to advance the clock of the overflow wheel if present
+		// 尝试推进 overflow wheel 的时钟（如果存在）
 		overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
 		if overflowWheel != nil {
 			(*TimingWheel)(overflowWheel).advanceClock(currentTime)
@@ -275,11 +288,11 @@ func (tw *TimingWheel) advanceClock(expiration int64) {
 	}
 }
 
-// Start starts the current timing wheel.
+// Start 启动当前时间轮。
 func (tw *TimingWheel) Start() {
 	tw.waitGroup.Wrap(func() {
 		tw.queue.Poll(tw.exitC, func() int64 {
-			return timeToMs(timelib.Now())
+			return timeToMs(tw.getNow())
 		})
 	})
 
@@ -297,11 +310,10 @@ func (tw *TimingWheel) Start() {
 	})
 }
 
-// Stop stops the current timing wheel.
+// Stop 停止当前时间轮。
 //
-// If there is any timer's task being running in its own goroutine, Stop does
-// not wait for the task to complete before returning. If the caller needs to
-// know whether the task is completed, it must coordinate with the task explicitly.
+// 如果有定时任务在独立的 goroutine 中运行，Stop 不会等待这些任务完成才返回。
+// 如果调用方需要知道任务是否已完成，需要由调用方自行与任务进行协调。
 func (tw *TimingWheel) Stop() {
 	if tw.closed.Swap(true) {
 		return
@@ -314,40 +326,33 @@ func (tw *TimingWheel) IsClosed() bool {
 	return tw.closed.Load()
 }
 
-// AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
-// It returns a Timer that can be used to cancel the call using its Stop method.
+// AfterFunc 在指定的时长后调用任务函数 f（在独立的 goroutine 中执行）。
+// 返回值为可用于取消该定时调用的 `Timer`。
 func (tw *TimingWheel) AfterFunc(d time.Duration, t *Timer) {
-	t.SetExpiration(timeToMs(timelib.Now().Add(d)))
+	t.SetExpiration(timeToMs(tw.getNow().Add(d)))
 
 	tw.addOrRun(t)
 }
 
-// Scheduler determines the execution plan of a task.
+// Scheduler 定义任务的执行计划。
 type Scheduler interface {
-	// Next returns the next execution time after the given (previous) time.
-	// It will return a zero time if no next time is scheduled.
+	// Next 返回给定（上一次）时间之后的下一次执行时间。
+	// 如果没有下一次时间则返回零时间。
 	//
-	// All times must be UTC.
+	// 所有时间都应为 UTC。
 	Next(time.Time) time.Time
 }
 
-// ScheduleFunc calls f (in its own goroutine) according to the execution
-// plan scheduled by s. It returns a Timer that can be used to cancel the
-// call using its Stop method.
+// ScheduleFunc 根据调度器 s 提供的执行计划周期性调用函数 f（在独立 goroutine 中执行）。
+// 返回一个可通过 Stop 方法取消的 `Timer`。
 //
-// If the caller want to terminate the execution plan halfway, it must
-// stop the timer and ensure that the timer is stopped actually, since in
-// the current implementation, there is a gap between the expiring and the
-// restarting of the timer. The wait time for ensuring is short since the
-// gap is very small.
+// 如果调用方希望中途终止执行计划，必须显式停止定时器并确认定时器已停止，
+// 因为当前实现中在定时任务到期与重新调度之间存在短暂的间隙。
 //
-// Internally, ScheduleFunc will ask the first execution time (by calling
-// s.Next()) initially, and create a timer if the execution time is non-zero.
-// Afterwards, it will ask the next execution time each time f is about to
-// be executed, and f will be called at the next execution time if the time
-// is non-zero.
+// 内部实现：ScheduleFunc 会先调用 s.Next() 获取首次执行时间（如果非零则创建定时器），
+// 每次任务即将执行时再次调用 s.Next() 计算下一次执行时间，若下一次时间非零则继续调度。
 func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
-	expiration := t.Next(timelib.Now())
+	expiration := t.Next(tw.getNow())
 	if expiration.IsZero() {
 		return fmt.Errorf("next time is zero")
 	}
@@ -364,6 +369,17 @@ func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
 		}
 		expiration := t.Next(msToTime(t.GetExpiration()))
 		if !expiration.IsZero() {
+			// 安全检查：如果计算出的时间仍在过去（物理机时间跳变等异常情况），
+			// 基于当前时间重新计算，避免 overflow
+			now := tw.getNow()
+			if expiration.Before(now) || expiration.Equal(now) {
+				expiration = t.Next(now)
+				if expiration.IsZero() {
+					// 无法计算出有效的下次执行时间，取消定时器
+					t.taskScheduler.CancelTimer(t.GetTimerId())
+					return
+				}
+			}
 			t.SetExpiration(timeToMs(expiration))
 			tw.addOrRun(t)
 		}
@@ -374,63 +390,67 @@ func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
 	return nil
 }
 
-// AdjustTime adjusts all timers in the timing wheel after time offset change.
-// This is designed for development/testing environments only.
-// offsetMs: the time offset in milliseconds (can be positive or negative)
+// SetTimeOffset sets the time offset for the timing wheel.
+// This operation is synchronous and blocks all timer operations until complete.
+// offset: the time offset (can be positive or negative)
 //
-// WARNING: This operation is expensive and will block all timer operations.
-// DO NOT use in production environment.
-//
-// Time Adjustment Behavior:
-// 1. Backward (offset < 0, e.g., 12:00 -> 11:00):
-//   - All timers maintain relative delay unchanged
-//   - If 3s remaining, still 3s after adjustment
-//
-// 2. Forward (offset > 0, e.g., 12:00 -> 13:00):
-//   - Periodic timers (Ticker/Cron): if crossed next execution time
-//     -> execute once immediately, then recalculate next execution
-//   - One-shot timers (AfterFunc): if time reached
-//     -> execute once and recycle
-func (tw *TimingWheel) AdjustTime(offsetMs int64) {
+// This is the entry point that ensures TimingWheel always processes offset changes.
+// If the offset is not used, it will simply remain 0 and have no impact.
+func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
 	if tw.closed.Load() {
 		return
 	}
 
-	// 使用写锁保护整个调整过程
+	// 获取互斥锁,保护整个调整过程,确保串行执行
 	tw.adjustMu.Lock()
 	defer tw.adjustMu.Unlock()
 
-	if tw.logger != nil {
-		tw.logger.Infof("[TimingWheel] Start adjusting time, offset: %d ms", offsetMs)
-	}
-
 	// 设置调整标志,阻止新的timer直接插入
 	tw.adjusting.Store(true)
-	defer func() {
-		// 重置标志
-		tw.adjusting.Store(false)
-		// 重置后,处理期间累积的所有pending timer
-		tw.processPendingTimers()
-	}()
+	defer tw.adjusting.Store(false)
+
+	// 原子读取旧的offset并计算差值
+	oldOffsetNs := tw.timeOffsetNs.Load()
+	newOffsetNs := int64(offset)
+	offsetDeltaNs := newOffsetNs - oldOffsetNs
+
+	if tw.logger != nil {
+		tw.logger.Infof("[TimingWheel] Setting time offset from %v to %v (delta: %v)",
+			time.Duration(oldOffsetNs), offset, time.Duration(offsetDeltaNs))
+	}
+
+	if offsetDeltaNs == 0 {
+		// 没有实际变化,提前返回
+		return
+	}
+
+	// 原子更新offset
+	tw.timeOffsetNs.Store(newOffsetNs)
+	offsetDeltaMs := offsetDeltaNs / int64(time.Millisecond)
 
 	// 1. 收集所有活跃的 timer
 	allTimers := tw.collectAllTimers()
 	if tw.logger != nil {
-		tw.logger.Infof("[TimingWheel] Collected %d active timers", len(allTimers))
+		tw.logger.Infof("[TimingWheel] Collected %d active timers for offset adjustment", len(allTimers))
 	}
 
 	oldCurrentTime := atomic.LoadInt64(&tw.currentTime)
-	newCurrentTime := oldCurrentTime + offsetMs
+	newCurrentTime := oldCurrentTime + offsetDeltaMs
 
 	// 记录已执行的Timer,避免重复处理
 	executedTimers := make(map[uint64]bool)
 
-	// 2. 先调整currentTime，让loop函数使用新的时间
-	tw.clearAllBuckets()
+	// 2. 清空所有bucket并调整所有层级的currentTime
+	tw.clearAllBucketsRecursive()
 	atomic.StoreInt64(&tw.currentTime, truncate(newCurrentTime, tw.tick))
+	// 递归调整 overflow wheel 的 currentTime（bucket 已清空，避免残留）
+	overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
+	if overflowWheel != nil {
+		(*TimingWheel)(overflowWheel).adjustOffsetInternal(offsetDeltaMs)
+	}
 
-	// 3. 对于往后调时间(offset > 0),检查并执行跨过执行点的周期性任务
-	if offsetMs > 0 {
+	// 3. 对于正向偏移(offsetDelta > 0),检查并执行跨过执行点的任务
+	if offsetDeltaMs > 0 {
 		for _, t := range allTimers {
 			if !t.isActive() {
 				continue
@@ -442,18 +462,22 @@ func (tw *TimingWheel) AdjustTime(offsetMs int64) {
 				// 周期性任务: Ticker 或 Cron
 				if t.interval > 0 || t.isCron {
 					if tw.logger != nil {
-						tw.logger.Infof("[TimingWheel] Periodic timer %s crossed execution time, executing once", t.name)
+						tw.logger.Infof("[TimingWheel] Periodic timer %s crossed execution time due to offset, executing once", t.name)
 					}
-					// 先更新expiration为新的currentTime,让loop函数从新时间计算下一次执行
-					t.SetExpiration(newCurrentTime)
-					// 立即执行一次,runLoop=true会自动重新调度到下一次执行时间
-					tw.runTimer(t, true)
-					// 记录已执行,不需要再手动处理
+					// 调整过程中不允许触发 t.loop（它会走 addOrRun -> pendingTimers），
+					// 所以这里只执行一次，然后手动计算下一次并直接插入。
+					tw.runTimer(t, false)
+					base := msToTime(newCurrentTime)
+					next := t.Next(base)
+					if !next.IsZero() {
+						t.SetExpiration(timeToMs(next))
+						tw.addOrRunDirect(t)
+					}
 					executedTimers[t.GetTimerId()] = true
 				} else {
 					// AfterFunc(一次性任务),立即执行
 					if tw.logger != nil {
-						tw.logger.Infof("[TimingWheel] One-time timer %s crossed execution time, executing", t.name)
+						tw.logger.Infof("[TimingWheel] One-time timer %s crossed execution time due to offset, executing", t.name)
 					}
 					tw.runTimer(t, false) // runLoop=false,不重复执行
 					executedTimers[t.GetTimerId()] = true
@@ -462,7 +486,7 @@ func (tw *TimingWheel) AdjustTime(offsetMs int64) {
 		}
 	}
 
-	// 4. 处理未执行的Timer
+	// 4. 处理未执行的Timer（保持原有绝对 expiration 不变）
 	for _, t := range allTimers {
 		if !t.isActive() {
 			continue
@@ -473,32 +497,36 @@ func (tw *TimingWheel) AdjustTime(offsetMs int64) {
 			continue
 		}
 
-		// 调整过期时间,维持相对延迟
-		oldExpiration := t.GetExpiration()
-		newExpiration := oldExpiration + offsetMs
-		t.SetExpiration(newExpiration)
-
-		// 重新插入时间轮
-		tw.addOrRun(t)
+		// 重新插入时间轮：这里必须跳过 adjusting 检查，避免自我缓冲/死锁
+		tw.addOrRunDirect(t)
 	}
 
-	// 5. 递归调整 overflow wheel
-	overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
-	if overflowWheel != nil {
-		(*TimingWheel)(overflowWheel).adjustTimeInternal(offsetMs)
-	}
+	// 5. overflow wheel 的 currentTime 已在第2步递归调整
 
 	if tw.logger != nil {
-		tw.logger.Infof("[TimingWheel] Time adjustment completed, currentTime: %d -> %d", oldCurrentTime, newCurrentTime)
+		tw.logger.Infof("[TimingWheel] Time offset adjustment completed, currentTime: %d -> %d", oldCurrentTime, newCurrentTime)
 	}
-	// defer会在这里执行: 重置adjusting标志并处理累积的pending timers
+
+	// 处理期间累积的pending timers
+	tw.processPendingTimers()
 }
 
-// adjustCurrentTime只调整currentTime,不处理Timer
-func (tw *TimingWheel) adjustCurrentTime(offsetMs int64) {
-	tw.adjustMu.Lock()
-	defer tw.adjustMu.Unlock()
+// clearAllBucketsRecursive clears all timers from buckets in this wheel and its overflow wheels.
+func (tw *TimingWheel) clearAllBucketsRecursive() {
+	tw.clearAllBuckets()
+	overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
+	if overflowWheel != nil {
+		(*TimingWheel)(overflowWheel).clearAllBucketsRecursive()
+	}
+}
 
+// adjustOffsetInternal 用于overflow wheels (不需要再次收集timer)
+func (tw *TimingWheel) adjustOffsetInternal(offsetMs int64) {
+	if tw.closed.Load() {
+		return
+	}
+
+	// 调整 currentTime
 	oldCurrentTime := atomic.LoadInt64(&tw.currentTime)
 	newCurrentTime := oldCurrentTime + offsetMs
 	atomic.StoreInt64(&tw.currentTime, truncate(newCurrentTime, tw.tick))
@@ -506,7 +534,7 @@ func (tw *TimingWheel) adjustCurrentTime(offsetMs int64) {
 	// 递归调整 overflow wheel
 	overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
 	if overflowWheel != nil {
-		(*TimingWheel)(overflowWheel).adjustTimeInternal(offsetMs)
+		(*TimingWheel)(overflowWheel).adjustOffsetInternal(offsetMs)
 	}
 }
 
@@ -537,41 +565,6 @@ func (tw *TimingWheel) processPendingTimers() {
 			tw.logger.Infof("[TimingWheel] Processed %d pending timers", processed)
 		}
 		// 继续下一轮,确保处理期间新进入的timer
-	}
-}
-
-// reinsertAllTimers 重新插入所有Timer到时间轮
-func (tw *TimingWheel) reinsertAllTimers() {
-	tw.adjustMu.Lock()
-	defer tw.adjustMu.Unlock()
-
-	// 1. 收集所有活跃的 timer
-	allTimers := tw.collectAllTimers()
-
-	// 2. 清空所有 bucket
-	tw.clearAllBuckets()
-
-	// 3. 重新插入所有 timer
-	for _, t := range allTimers {
-		tw.addOrRun(t)
-	}
-}
-
-// adjustTimeInternal is used for overflow wheels (no need to collect timers again)
-func (tw *TimingWheel) adjustTimeInternal(offsetMs int64) {
-	if tw.closed.Load() {
-		return
-	}
-
-	// 调整 currentTime
-	oldCurrentTime := atomic.LoadInt64(&tw.currentTime)
-	newCurrentTime := oldCurrentTime + offsetMs
-	atomic.StoreInt64(&tw.currentTime, truncate(newCurrentTime, tw.tick))
-
-	// 递归调整 overflow wheel
-	overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
-	if overflowWheel != nil {
-		(*TimingWheel)(overflowWheel).adjustTimeInternal(offsetMs)
 	}
 }
 

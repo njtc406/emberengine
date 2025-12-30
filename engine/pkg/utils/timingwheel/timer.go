@@ -1,8 +1,8 @@
 // Package timingwheel
-// 模块名: 模块名
-// 功能描述: 描述
-// 作者:  yr  2025/8/21 0021 0:07
-// 最后更新:  yr  2025/8/21 0021 0:07
+// 模块名: timingwheel
+// 功能描述: 高性能分层时间轮实现，提供并发安全的定时任务调度
+// 作者:  yr
+// 最后更新:  2025
 package timingwheel
 
 import (
@@ -18,7 +18,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
 type ITimer interface {
@@ -30,8 +29,7 @@ type ITimer interface {
 type TimerOption func(t *Timer)
 type TimerCallback func(timer *Timer, args ...interface{}) error
 
-// Timer represents a single event. When the Timer expires, the given
-// task will be executed.
+// Timer 表示一个定时事件。当 Timer 到期时，会执行对应的任务。
 type Timer struct {
 	dto.DataRef
 	Scheduler
@@ -43,10 +41,8 @@ type Timer struct {
 	executing  atomic.Bool    // 标记是否正在执行
 	execWg     sync.WaitGroup // 等待执行完成
 
-	// The bucket that holds the list to which this timer's element belongs.
-	//
-	// NOTE: This field may be updated and read concurrently,
-	// through Timer.Stop() and Bucket.Flush().
+	// 保存该定时器所属的 bucket 的指针。
+	// 注意：该字段可能被并发更新和读取（通过 Timer.Stop() 和 Bucket.Flush()）。
 	b unsafe.Pointer // type: *bucket
 
 	// The timer's element.
@@ -200,7 +196,8 @@ func (t *Timer) Do() (err error) {
 
 func (t *Timer) Next(tm time.Time) time.Time {
 	if t.interval > 0 {
-		return timelib.Now().Add(t.interval)
+		// 基于传入的时间计算下一次执行时间
+		return tm.Add(t.interval)
 	}
 
 	if t.spec != "" {
