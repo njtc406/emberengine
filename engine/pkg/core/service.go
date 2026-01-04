@@ -327,19 +327,14 @@ func (s *Service) PushEvent(ctx context.Context, evt inf.IEvent) error {
 	return err
 }
 
-func (s *Service) pushConcurrentCallback(ctx context.Context, evt concurrent.IConcurrentCallback) error {
-	ev := event.NewEvent()
-	ev.Type = event.ServiceConcurrentCallback
-	ev.Data = evt
-	return s.mailbox.PostMessage(ctx, ev)
+func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurrentCallback) error {
+	env := event.NewCallbackEnvelope(evt)
+	return s.mailbox.PostMessage(ctx, env)
 }
 
 func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) error {
-	ev := event.NewEvent()
-	ev.Type = event.ServiceTimerCallback
-	ev.DispatcherKey = t.GetName() // 保证相同的回调在同一个worker处理
-	ev.Data = t
-	return s.mailbox.PostMessage(ctx, ev)
+	env := event.NewTimerEnvelope(t, t.GetName()) // 保证相同的回调在同一个worker处理
+	return s.mailbox.PostMessage(ctx, env)
 }
 
 func (s *Service) SetName(name string) {

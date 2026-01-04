@@ -8,6 +8,7 @@ package mailbox
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -23,6 +24,7 @@ type MiddlewareContext struct {
 	evt         inf.IEvent
 	serviceName string
 	startTime   time.Time
+	executed    atomic.Int32
 	data        map[string]interface{}
 	mu          sync.RWMutex
 }
@@ -104,6 +106,7 @@ func (c *MiddlewareContext) Reset(ctx context.Context, evt inf.IEvent, serviceNa
 	c.evt = evt
 	c.serviceName = serviceName
 	c.startTime = time.Now()
+	c.executed.Store(0)
 	c.mu.Lock()
 	for k := range c.data {
 		delete(c.data, k)
@@ -157,18 +160,21 @@ func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, evt inf.IEvent, 
 	middlewares := c.middlewares
 	c.mu.RUnlock()
 
-	for _, m := range middlewares {
+	for i, m := range middlewares {
 		result := m.OnReceive(mctx)
 		switch result.Action {
 		case inf.ActionReject:
+			mctx.executed.Store(int32(i + 1))
 			return result, mctx
 		case inf.ActionSkip:
+			// 仅执行到当前中间件为止（包含当前），跳过后续中间件。
+			mctx.executed.Store(int32(i + 1))
 			return inf.Continue(), mctx
 		case inf.ActionContinue:
 			continue
 		}
 	}
-
+	mctx.executed.Store(int32(len(middlewares)))
 	return inf.Continue(), mctx
 }
 
@@ -177,9 +183,14 @@ func (c *MiddlewareChain) ExecuteOnComplete(mctx inf.IMiddlewareContext, err err
 	c.mu.RLock()
 	middlewares := c.middlewares
 	c.mu.RUnlock()
-
-	// 逆序执行
-	for i := len(middlewares) - 1; i >= 0; i-- {
+	// 仅对执行过 OnReceive 的中间件执行 OnComplete（洋葱模型）。
+	end := len(middlewares)
+	if mc, ok := mctx.(*MiddlewareContext); ok {
+		if n := int(mc.executed.Load()); n >= 0 && n <= len(middlewares) {
+			end = n
+		}
+	}
+	for i := end - 1; i >= 0; i-- {
 		middlewares[i].OnComplete(mctx, err, panicVal)
 	}
 }

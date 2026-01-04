@@ -16,7 +16,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
@@ -80,14 +79,8 @@ func newBenchRPCPair() benchRPCPair {
 		if ev.GetType() != event.ServiceConcurrentCallback {
 			return
 		}
-		if e, ok := ev.(*event.Event); ok {
-			if cb, ok := e.Data.(concurrent.IConcurrentCallback); ok {
-				cb.DoCallback(ctx)
-			}
-			return
-		}
-		if cb, ok := ev.(concurrent.IConcurrentCallback); ok {
-			cb.DoCallback(ctx)
+		if env, ok := ev.(*event.CallbackEnvelope); ok {
+			env.Payload.DoCallback(ctx)
 		}
 	}
 

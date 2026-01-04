@@ -13,7 +13,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
@@ -79,8 +78,8 @@ func BenchmarkCallState_Complete_Async_Dispatch(b *testing.B) {
 		if ev.GetType() != event.ServiceConcurrentCallback {
 			return
 		}
-		if cb, ok := ev.(concurrent.IConcurrentCallback); ok {
-			cb.DoCallback(ctx)
+		if env, ok := ev.(*event.CallbackEnvelope); ok {
+			env.Payload.DoCallback(ctx)
 		}
 	}
 	disp := &fakeDispatcher{mailbox: mb}
@@ -156,8 +155,8 @@ func BenchmarkRpcMonitor_CallTimeout_Async(b *testing.B) {
 		if ev.GetType() != event.ServiceConcurrentCallback {
 			return
 		}
-		if cb, ok := ev.(concurrent.IConcurrentCallback); ok {
-			cb.DoCallback(ctx)
+		if env, ok := ev.(*event.CallbackEnvelope); ok {
+			env.Payload.DoCallback(ctx)
 		}
 	}
 	disp := &fakeDispatcher{mailbox: mb}
