@@ -57,6 +57,10 @@ NodeConf:
       PingInterval:
       PingMaxOutstanding:
       ReconnectBufSize:
+      # 订阅 pending 限制：用于提升高突发下异步订阅缓冲能力
+      # MsgLimit: 最大 pending 消息数；BytesLimit: 最大 pending 字节数
+      SubPendingMsgLimit:
+      SubPendingBytesLimit:
   # 去重器配置
   DeDuplicatorConf:
     DeDuplicatorType: "ttl"
@@ -129,13 +133,13 @@ ServiceConf:
       ServiceName: Test
       # 服务类型
       Type: test
-      # 服务器ID
-      ServerId: 1
+      # 服务分区ID(用于服务路由隔离)
+      Partition: 1
       # 服务版本
       Version: 1
-      # rpc方式
+      # rpc方式,优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
       RpcType: "nats"
-      # 系统级线程池大小
+      # 系统级线程池大小(根据业务自行调整，io密集型建议设置大一点)
       GoroutinePoolSize: 1000
       # 定时器配置
       TimerConf:

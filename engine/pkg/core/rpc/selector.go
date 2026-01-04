@@ -6,9 +6,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/router"
 )
 
-func WithServerId(serverId int32) inf.SelectParamBuilder {
+func WithPartition(partition int32) inf.SelectParamBuilder {
 	return func(param *inf.SelectParam) {
-		param.ServerId = &serverId
+		param.Partition = &partition
 	}
 }
 
@@ -36,11 +36,11 @@ func WithIsSlaver(isSlaver bool) inf.SelectParamBuilder {
 	}
 }
 
-// Select 选择相同serverId服务
+// Select 选择相同Partition服务
 func (h *Handler) Select(options ...inf.SelectParamBuilder) inf.IBus {
 	//log.SysLogger.Debugf("pid:%s", h.GetPid().String())
 	pid := h.GetPid()
-	options = append(options, WithServerId(pid.GetServerId()))
+	options = append(options, WithPartition(pid.GetPartition()))
 	return router.Select(pid, options...)
 }
 

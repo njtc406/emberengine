@@ -77,7 +77,7 @@
 在 RBAC 基础上增加属性约束：
 - 环境（dev/staging/prod）
 - 节点/机房/地域
-- serverId/区服
+- Partition/分区
 - 标签/租户
 - 时间窗口
 
@@ -95,7 +95,7 @@
    - 最接近管理平台“接口权限”
    - 例：`admin.node.restart`、`player.Create`、`match.Join`
 
-3) **数据域级（更难）**：例如 `player:123` 或 “只允许同 serverId”
+3) **数据域级（更难）**：例如 `player:123` 或 "只允许同 Partition"
    - 需要业务属性参与决策，更偏 ABAC
 
 对“顶级权限者/控制面 API”，建议：

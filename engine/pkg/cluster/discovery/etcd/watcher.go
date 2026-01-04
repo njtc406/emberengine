@@ -260,7 +260,7 @@ func (w *watcher) electMaster() (err error) {
 		return
 	}
 	pid := w.svc.GetPid()
-	masterKey := w.d.registry.MasterKey(pid.GetServiceGroup())
+	masterKey := w.d.registry.MasterKey(pid.GetPrimarySecondaryKey())
 	w.stopWatchMaster()
 	wasMaster := w.IsMaster()
 	prevEpoch := w.MasterEpoch()
@@ -278,7 +278,7 @@ func (w *watcher) electMaster() (err error) {
 			log.SysLogger.Errorf("register service to etcd failed: %v", err)
 		}
 	}()
-	succeeded, epoch, respErr := w.d.election.TryAcquireMaster(w.ctx, masterKey, pid.GetServiceGroup(), w.leaseRef)
+	succeeded, epoch, respErr := w.d.election.TryAcquireMaster(w.ctx, masterKey, pid.GetPrimarySecondaryKey(), w.leaseRef)
 	if respErr != nil {
 		log.SysLogger.Errorf("master election txn error: %v", respErr)
 		goto Slave

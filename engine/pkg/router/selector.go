@@ -28,8 +28,8 @@ func SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) inf.IBus {
 	return endpoints.GetEndpointManager().GetRepository().SelectByRule(sender, rule)
 }
 
-func SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) inf.IBus {
-	return endpoints.GetEndpointManager().GetRepository().SelectByServiceType(sender, serverId, serviceType, serviceName)
+func SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) inf.IBus {
+	return endpoints.GetEndpointManager().GetRepository().SelectByServiceType(sender, partition, serviceType, serviceName)
 }
 
 func SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) inf.IBus {

@@ -63,7 +63,7 @@ ServiceConf:
     - ClassName: Service2
       ServiceName: Service2
       Type: test
-      ServerId: 1
+      Partition: 1
       ServiceId: 1
       TimerConf:
         # 定时器队列长度
@@ -125,8 +125,8 @@ ServiceConf:
       ServiceId: 1
       # 服务类型
       Type: test
-      # 服务器ID
-      ServerId: 1
+      # 服务分区ID(用于服务路由隔离)
+      Partition: 1
       RpcType: "rpcx"
       # 定时器配置
       TimerConf:

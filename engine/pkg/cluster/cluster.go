@@ -120,7 +120,7 @@ func (c *Cluster) GetPid() *actor.PID {
 	return nil
 }
 
-func (c *Cluster) GetServerId() int32 {
+func (c *Cluster) GetPartition() int32 {
 	// 这里没有实质内容,为了凑接口
 	return 0
 }

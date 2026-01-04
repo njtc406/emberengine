@@ -31,8 +31,6 @@ import (
 
 // TODO 还需要给部分可自定义的组件增加一个设置的入口,不然需要覆写整个init太麻烦
 
-// TODO 之后将所有的serverId换个名字,叫做namespace,或者group,用来划分服务组
-
 var (
 	_ inf.IMessageInvoker = (*Service)(nil)
 	_ inf.IService        = (*Service)(nil)
@@ -141,8 +139,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		s.logger = log.SysLogger
 	}
 	s.ILoggerX = log.NewLoggerX(s.logger, log.Fields{
-		"sName": s.GetName(),
-		"sId":   serviceInitConf.ServerId,
+		"sName":     s.GetName(),
+		"partition": serviceInitConf.Partition,
 	})
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
 	s.stopGraceTimeout = serviceInitConf.StopGraceTimeout
@@ -180,7 +178,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 注册事件处理函数
 	s.initEventHandlers()
 
-	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.ServerId, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
+	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.Partition, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
 		s.logger.Panicf("service[%s] create pid error", s.GetName())
 		return
@@ -349,8 +347,8 @@ func (s *Service) SetPid(pid *actor.PID) {
 	s.pid = pid
 }
 
-func (s *Service) GetServerId() int32 {
-	return s.pid.GetServerId()
+func (s *Service) GetPartition() int32 {
+	return s.pid.GetPartition()
 }
 
 func (s *Service) GetPid() *actor.PID {

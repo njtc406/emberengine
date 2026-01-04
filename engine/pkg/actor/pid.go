@@ -12,23 +12,23 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
-func CreateInstanceId(serverId int32, serviceName, serviceId, nodeUid string) string {
-	// serverId.serviceName.serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
-	return fmt.Sprintf("%d.%s.%s.%s", serverId, serviceName, serviceId, nodeUid)
+func CreateInstanceId(partition int32, serviceName, serviceId, nodeUid string) string {
+	// partition.serviceName.serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
+	return fmt.Sprintf("%d.%s.%s.%s", partition, serviceName, serviceId, nodeUid)
 }
 
-func NewPID(address, nodeUid string, serverId int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {
+func NewPID(address, nodeUid string, partition int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {
 	return &PID{
 		Address:     address,
 		Name:        serviceName,
 		ServiceType: serviceType,
 		ServiceId:   serviceID,
 		State:       0,
-		ServerId:    serverId,
+		Partition:   partition,
 		Version:     version,
 		RpcType:     rpcType,
 		NodeUid:     nodeUid,
-		ServiceUid:  CreateInstanceId(serverId, serviceName, serviceID, nodeUid),
+		ServiceUid:  CreateInstanceId(partition, serviceName, serviceID, nodeUid),
 	}
 }
 
@@ -44,6 +44,6 @@ func (pid *PID) SetMaster(master bool) {
 	pid.IsMaster = master
 }
 
-func (pid *PID) GetServiceGroup() string {
-	return fmt.Sprintf("%s.%s.%d", pid.GetName(), pid.GetServiceId(), pid.GetServerId())
+func (pid *PID) GetPrimarySecondaryKey() string {
+	return fmt.Sprintf("%s.%s.%d", pid.GetName(), pid.GetServiceId(), pid.GetPartition())
 }

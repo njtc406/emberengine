@@ -7,6 +7,7 @@ package router
 
 import (
 	"errors"
+
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -28,7 +29,7 @@ func (r *Router) ApiGetUserRouter(rid string, method string) (string, error) {
 		key := buildKey(rid, method)
 		if err := r.Select(
 			rpc.WithName("DBService"),
-			rpc.WithServerId(r.GetService().GetServerId()),
+			rpc.WithPartition(r.GetService().GetPartition()),
 		).Call(
 			nil,
 			"ApiRedisGetString",
@@ -52,7 +53,7 @@ func (r *Router) ApiGetUserRouter(rid string, method string) (string, error) {
 
 func (r *Router) ApiSetUserRouter(rid string, method string, url string) error {
 	key := buildKey(rid, method)
-	if err := r.Select(rpc.WithName("DBService"), rpc.WithServerId(r.GetService().GetServerId())).
+	if err := r.Select(rpc.WithName("DBService"), rpc.WithPartition(r.GetService().GetPartition())).
 		Call(nil, "ApiRedisSetString", key, url); err != nil {
 		r.GetLogger().Errorf("set user router failed, err:%v", err)
 		return err
@@ -66,7 +67,7 @@ func (r *Router) ApiCleanRouter(rid string) error {
 	ctx := xcontext.New(nil)
 	if err := r.Select(
 		rpc.WithName("DBService"),
-		rpc.WithServerId(r.GetService().GetServerId()),
+		rpc.WithPartition(r.GetService().GetPartition()),
 	).Call(nil, "ApiRedisDel", "prefix.router"+rid, nil); err != nil {
 		r.GetLogger().WithContext(ctx).WithFields(map[string]interface{}{
 			"rid": rid,

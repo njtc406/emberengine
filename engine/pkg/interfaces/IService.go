@@ -62,7 +62,7 @@ type INamed interface {
 
 type IServer interface {
 	IActor
-	GetServerId() int32
+	GetPartition() int32
 }
 
 // IActor 表示一个可寻址的 Actor 实体

@@ -97,7 +97,7 @@ type ServiceInitConf struct {
 	ServiceName            string          `binding:""`         // 服务名称(调用时使用这个名字)
 	Type                   string          `binding:"required"` // 服务类型
 	Version                int64           `binding:""`         // 服务版本
-	ServerId               int32           `binding:"required"` // 服务ID
+	Partition              int32           `binding:"required"` // 服务分区ID(用于服务路由隔离)
 	TimerConf              *TimerConf      `binding:""`         // 定时器配置
 	StopGraceTimeout       time.Duration   `binding:""`         // 关闭时等待窗口(默认0,不等待; 仅用于等待回调/队列自然收敛)
 	RpcType                string          `binding:""`         // 远程调用方式(默认使用nats)
@@ -238,20 +238,22 @@ type EventBusConf struct {
 }
 
 type NatsConf struct {
-	EndPoints          []string      `binding:""` // nats地址
-	UserName           string        `binding:""` // nats用户名
-	Password           string        `binding:""` // nats密码
-	Token              string        `binding:""` // nats token
-	Secure             string        `binding:""` // nats secure
-	Cert               string        `binding:""` // 证书
-	CertKey            string        `binding:""` // 证书密钥
-	CAs                string        `binding:""` // ca证书
-	MaxReconnects      int           `binding:""` // 最大重连次数
-	ReconnectWait      time.Duration `binding:""` // 重连间隔
-	Timeout            time.Duration `binding:""` // 连接超时时间
-	PingInterval       time.Duration `binding:""` // ping间隔时间
-	PingMaxOutstanding int           `binding:""` // 最大未响应ping数
-	ReconnectBufSize   int           `binding:""` // 重连缓冲区大小
+	EndPoints            []string      `binding:""` // nats地址
+	UserName             string        `binding:""` // nats用户名
+	Password             string        `binding:""` // nats密码
+	Token                string        `binding:""` // nats token
+	Secure               string        `binding:""` // nats secure
+	Cert                 string        `binding:""` // 证书
+	CertKey              string        `binding:""` // 证书密钥
+	CAs                  string        `binding:""` // ca证书
+	MaxReconnects        int           `binding:""` // 最大重连次数
+	ReconnectWait        time.Duration `binding:""` // 重连间隔
+	Timeout              time.Duration `binding:""` // 连接超时时间
+	PingInterval         time.Duration `binding:""` // ping间隔时间
+	PingMaxOutstanding   int           `binding:""` // 最大未响应ping数
+	ReconnectBufSize     int           `binding:""` // 重连缓冲区大小
+	SubPendingMsgLimit   int           `binding:""` // 订阅 pending 最大消息数(用于提升高突发下的缓冲能力)
+	SubPendingBytesLimit int           `binding:""` // 订阅 pending 最大字节数(用于提升高突发下的缓冲能力)
 }
 
 type ServiceLogConf struct {

@@ -9,7 +9,7 @@ message PID {
   string ServiceType = 3;     // 服务类型
   string ServiceId = 4;       // 同类型服务内唯一标识
   int32 State = 5;            // 服务状态(0: 正常, 1: 退休)
-  int32 ServerId = 6;         // 服务ID
+  int32 Partition = 6;        // 服务分区ID(用于服务路由隔离)
   int64 Version = 7;          // 服务版本号
   string RpcType = 8;         // rpc类型(默认使用nats)
   string NodeUid = 9;         // 节点唯一标识(这个主要是用来区分本地服务用的)
@@ -56,7 +56,7 @@ message Event {
   string DispatcherKey                = 3;  // 分发键（用于分区/顺序保证）
   
   // === 路由信息 ===
-  int32 ServerId                      = 4;  // 目标服务器ID
+  int32 Partition                     = 4;  // 目标分区ID
   string ServiceUid                   = 5;  // 目标服务实例唯一id
   
   // === 数据 ===

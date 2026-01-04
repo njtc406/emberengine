@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/nats-io/nats.go"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -20,18 +21,57 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/diag"
 )
 
+func getGlobalNatsConf() *config.NatsConf {
+	if config.Conf == nil || config.Conf.NodeConf == nil || config.Conf.NodeConf.EventBusConf == nil {
+		return nil
+	}
+	return config.Conf.NodeConf.EventBusConf.NatsConf
+}
+
 type natsSender struct {
 	conns []*nats.Conn
 	next  uint32
 }
 
 func newNatsClient(addr string) inf.IRpcSender {
+	natsConf := getGlobalNatsConf()
+	maxReconnects := def.NatsDefaultMaxReconnects
+	if natsConf != nil && natsConf.MaxReconnects > 0 {
+		maxReconnects = natsConf.MaxReconnects
+	}
+
+	pingInterval := def.NatsDefaultPingInterval
+	if natsConf != nil && natsConf.PingInterval > 0 {
+		pingInterval = natsConf.PingInterval
+	}
+
+	pingMaxOutstanding := def.NatsDefaultPingMaxOutstanding
+	if natsConf != nil && natsConf.PingMaxOutstanding > 0 {
+		pingMaxOutstanding = natsConf.PingMaxOutstanding
+	}
+
+	reconnectBufSize := def.NatsDefaultReconnectBufSize
+	if natsConf != nil && natsConf.ReconnectBufSize > 0 {
+		reconnectBufSize = natsConf.ReconnectBufSize
+	}
+
+	timeout := def.NatsDefaultTimeout
+	if natsConf != nil && natsConf.Timeout > 0 {
+		timeout = natsConf.Timeout
+	}
+
+	reconnectWait := def.NatsDefaultReconnectWait
+	if natsConf != nil && natsConf.ReconnectWait > 0 {
+		reconnectWait = natsConf.ReconnectWait
+	}
+
 	opts := []nats.Option{
-		nats.MaxReconnects(def.NatsDefaultMaxReconnects),
-		nats.PingInterval(def.NatsDefaultPingInterval),
-		nats.MaxPingsOutstanding(def.NatsDefaultPingMaxOutstanding),
-		nats.ReconnectBufSize(def.NatsDefaultReconnectBufSize),
-		nats.Timeout(def.NatsDefaultTimeout),
+		nats.MaxReconnects(maxReconnects),
+		nats.ReconnectWait(reconnectWait),
+		nats.PingInterval(pingInterval),
+		nats.MaxPingsOutstanding(pingMaxOutstanding),
+		nats.ReconnectBufSize(reconnectBufSize),
+		nats.Timeout(timeout),
 		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
 			if sub != nil {
 				log.SysLogger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
@@ -50,6 +90,15 @@ func newNatsClient(addr string) inf.IRpcSender {
 		}),
 		//nats.NoEcho(),
 		//nats.Compression(false),
+	}
+
+	// 认证配置（可选）：复用 NodeConf.EventBusConf.NatsConf
+	if natsConf != nil {
+		if natsConf.Token != "" {
+			opts = append(opts, nats.Token(natsConf.Token))
+		} else if natsConf.UserName != "" {
+			opts = append(opts, nats.UserInfo(natsConf.UserName, natsConf.Password))
+		}
 	}
 
 	poolSize := 1

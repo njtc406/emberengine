@@ -45,6 +45,10 @@ type Bus struct {
 	nc     *nats.Conn // TODO 目前只支持nats,后续再看要不要扩展吧
 	enable atomic.Int32
 
+	// NATS 订阅 pending 配置（用于高突发缓冲，未配置则使用默认值）
+	subPendingMsgLimit   int
+	subPendingBytesLimit int
+
 	// 全体事件(所有订阅的服务都会收到)
 	globalPrefix      string                             // 全局事件前缀
 	globalLock        *shardedlock.ShardedRWLock         // 用分段锁提升并发能力
@@ -150,6 +154,10 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 		}
 		eb.nc = nc
 		eb.enable.Store(1)
+
+		// 订阅 pending 限制：配置优先，缺省使用默认值
+		eb.subPendingMsgLimit = conf.NatsConf.SubPendingMsgLimit
+		eb.subPendingBytesLimit = conf.NatsConf.SubPendingBytesLimit
 		eb.globalPrefix = conf.GlobalPrefix
 		if eb.globalPrefix == "" {
 			eb.globalPrefix = def.NatsDefaultGlobalPrefix
@@ -176,6 +184,21 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
 	eb.specificLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.specificSubscribers = make(map[int32]map[string]map[string]inf.IListener)
+}
+
+func (eb *Bus) applySubPendingLimits(subscription *nats.Subscription) {
+	if subscription == nil {
+		return
+	}
+	msgLimit := eb.subPendingMsgLimit
+	bytesLimit := eb.subPendingBytesLimit
+	if msgLimit <= 0 {
+		msgLimit = def.NatsDefaultSubPendingMsgLimit
+	}
+	if bytesLimit <= 0 {
+		bytesLimit = def.NatsDefaultSubPendingBytesLimit
+	}
+	_ = subscription.SetPendingLimits(msgLimit, bytesLimit)
 }
 
 func (eb *Bus) Stop() {
@@ -260,7 +283,7 @@ func (eb *Bus) genKey(format string, args ...interface{}) string {
 }
 
 // marshalEvent 将数据封装为 actor.Event，返回 ctx 和 event 分离的形式
-func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serviceUid string, data proto.Message) (*busEvent, error) {
+func (eb *Bus) marshalEvent(ctx context.Context, eventType, partition int32, serviceUid string, data proto.Message) (*busEvent, error) {
 	// 组装数据
 	rawData, err := anypb.New(data)
 	if err != nil {
@@ -280,7 +303,7 @@ func (eb *Bus) marshalEvent(ctx context.Context, eventType, serverId int32, serv
 		EventType:      eventType,
 		Priority:       int32(def.PriorityNormal), // 默认优先级，可由调用方覆盖
 		DispatcherKey:  dispatcherKey,
-		ServerId:       serverId,
+		Partition:      partition,
 		ServiceUid:     serviceUid,
 		Data:           rawData,
 		ContextHeaders: emberctx.ToHeaders(ctx),
@@ -422,8 +445,8 @@ func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data pro
 	return nil
 }
 
-func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
+func (eb *Bus) PublishServer(ctx context.Context, eventType, partition int32, data proto.Message) error {
+	be, err := eb.marshalEvent(ctx, eventType, partition, "", data)
 	if err != nil {
 		return err
 	}
@@ -434,7 +457,7 @@ func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, dat
 			return err
 		}
 
-		return eb.nc.Publish(eb.genKey(eb.serverPrefix, eventType, serverId), eventData)
+		return eb.nc.Publish(eb.genKey(eb.serverPrefix, eventType, partition), eventData)
 	} else {
 		// 没有使用nats,那么直接触发本地事件
 		eb.publishServer(be.ctx, be.event)
@@ -444,11 +467,11 @@ func (eb *Bus) PublishServer(ctx context.Context, eventType, serverId int32, dat
 
 // publishServer 发布服务器事件到本地订阅者
 func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
-	key := eb.genKey(eb.serverPrefix, e.EventType, e.ServerId)
+	key := eb.genKey(eb.serverPrefix, e.EventType, e.Partition)
 	eb.serverLock.RLock(key)
 	defer eb.serverLock.RUnlock(key)
 	if serverMap, ok := eb.serverSubscribers[e.EventType]; ok {
-		if subMap, ok := serverMap[e.ServerId]; ok {
+		if subMap, ok := serverMap[e.Partition]; ok {
 			for _, ch := range subMap {
 				ev := NewEvent()
 				ev.Type = ServiceGlobalEventTrigger
@@ -465,8 +488,8 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 	}
 }
 
-func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, serverId int32, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, serverId, "", data)
+func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, partition int32, data proto.Message) error {
+	be, err := eb.marshalEvent(ctx, eventType, partition, "", data)
 	if err != nil {
 		return err
 	}
@@ -497,6 +520,7 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 
 				eb.publishGlobal(be.ctx, be.event)
 			}); err == nil {
+				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe global event from nats failed, error: %v", err)
@@ -589,6 +613,7 @@ func (eb *Bus) SubscribeSpecific(eventType int32, serviceUid string, svc inf.ILi
 
 				eb.publishSpecific(be.ctx, be.event)
 			}); err == nil {
+				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
 				log.SysLogger.Errorf("subscribe specific event from nats failed, error: %v", err)
@@ -621,18 +646,18 @@ func (eb *Bus) UnSubscribeSpecific(eventType int32, serviceUid string, svc inf.I
 }
 
 func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
-	key := eb.genKey(eb.serverPrefix, eventType, svc.GetServerId())
+	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPartition())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needListen bool
 	if _, ok := eb.serverSubscribers[eventType]; !ok {
 		eb.serverSubscribers[eventType] = make(map[int32]map[string]inf.IListener)
 	}
-	if _, ok := eb.serverSubscribers[eventType][svc.GetServerId()]; !ok {
-		eb.serverSubscribers[eventType][svc.GetServerId()] = make(map[string]inf.IListener)
+	if _, ok := eb.serverSubscribers[eventType][svc.GetPartition()]; !ok {
+		eb.serverSubscribers[eventType][svc.GetPartition()] = make(map[string]inf.IListener)
 		needListen = true
 	}
-	eb.serverSubscribers[eventType][svc.GetServerId()][svc.GetPid().GetServiceUid()] = svc
+	eb.serverSubscribers[eventType][svc.GetPartition()][svc.GetPid().GetServiceUid()] = svc
 	if needListen {
 		// 之前没有监听过这个事件类型
 		if eb.isNatsEnabled() {
@@ -640,14 +665,15 @@ func (eb *Bus) SubscribeServer(eventType int32, svc inf.IListener) {
 				// 解析数据
 				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
-					log.SysLogger.Errorf("unmarshal server[%d] event error: %v", svc.GetServerId(), err)
+					log.SysLogger.Errorf("unmarshal partition[%d] event error: %v", svc.GetPartition(), err)
 					return
 				}
 				eb.publishServer(be.ctx, be.event)
 			}); err == nil {
+				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
-				log.SysLogger.Errorf("subscribe server[%d] event error: %v", svc.GetServerId(), err)
+				log.SysLogger.Errorf("subscribe partition[%d] event error: %v", svc.GetPartition(), err)
 			}
 		}
 	}
@@ -683,15 +709,15 @@ func (eb *Bus) UnSubscribeGlobal(eventType int32, svc inf.IListener) {
 }
 
 func (eb *Bus) UnSubscribeServer(eventType int32, svc inf.IListener) {
-	key := eb.genKey(eb.serverPrefix, eventType, svc.GetServerId())
+	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPartition())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needUnListen bool
 	if subMap, ok := eb.serverSubscribers[eventType]; ok {
-		if nameMap, ok := subMap[svc.GetServerId()]; ok {
+		if nameMap, ok := subMap[svc.GetPartition()]; ok {
 			delete(nameMap, svc.GetPid().GetServiceUid())
 			if len(nameMap) == 0 {
-				delete(subMap, svc.GetServerId())
+				delete(subMap, svc.GetPartition())
 				needUnListen = true
 			}
 		}
