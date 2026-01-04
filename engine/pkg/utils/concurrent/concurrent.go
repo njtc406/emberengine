@@ -18,19 +18,14 @@ import (
 type IConcurrent interface {
 	OpenConcurrent(poolSize, callbackChannelSize int)
 	AsyncDo(name string, ctx context.Context, f func(ctx context.Context) error, cb func(ctx context.Context, err error))
-	GetChannel() chan IConcurrentCallback
+	GetChannel() chan inf.IConcurrentCallback
 	Close()
-}
-
-type IConcurrentCallback interface {
-	inf.INamed
-	DoCallback(ctx context.Context)
 }
 
 // TaskScheduler 是并发任务调度器
 type TaskScheduler struct {
 	pool   *ants.Pool
-	c      chan IConcurrentCallback
+	c      chan inf.IConcurrentCallback
 	logger log.ILoggerX
 }
 
@@ -45,11 +40,11 @@ func (s *TaskScheduler) OpenConcurrent(poolSize, callbackChannelSize int) {
 		s.pool = asynclib.NewAntsPool(poolSize)
 	}
 	if s.c == nil {
-		s.c = make(chan IConcurrentCallback, callbackChannelSize)
+		s.c = make(chan inf.IConcurrentCallback, callbackChannelSize)
 	}
 }
 
-func (s *TaskScheduler) GetChannel() chan IConcurrentCallback {
+func (s *TaskScheduler) GetChannel() chan inf.IConcurrentCallback {
 	return s.c
 }
 

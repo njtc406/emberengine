@@ -17,12 +17,12 @@ import (
 //
 // 设计目标：
 // - 跨 goroutine 只流转 CallState（轻量、无锁，靠消息队列/chan 同步）；
-// - envelope 仅作为 mailbox 内部传输对象，不再作为“等待载体”。
+// - envelope 仅作为 mailbox 内部传输对象，不再作为"等待载体"。
 //
 // 生命周期：
 // - Call：调用方持有 state，等待 done 后读取结果并 Release。
-// - AsyncCall：state 由 monitor 持有；完成后投递到调用方 mailbox 执行回调，并在回调末尾 Release。
-// - 超时：同完成逻辑。
+// - AsyncCall：state 由 monitor 持有；完成后在 mailbox 中执行回调，末尾自动 Release。
+// - 超时：通过 dispatchCallbackEvent 投递到 mailbox 执行回调。
 //
 // 注意：done 使用缓冲 channel（size=1）+ drain reset，避免 close 带来的不可复用问题。
 //
@@ -123,9 +123,6 @@ func (s *CallState) ReqID() uint64          { return s.reqID }
 func (s *CallState) Method() string         { return s.method }
 func (s *CallState) Timeout() time.Duration { return s.timeout }
 
-// GetType 使 CallState 可作为 mailbox 事件直接投递。
-func (s *CallState) GetType() int32 { return event.ServiceConcurrentCallback }
-
 func (s *CallState) setTimerID(timerID uint64) { s.timerID = timerID }
 func (s *CallState) timerId() uint64           { return s.timerID }
 
@@ -139,16 +136,35 @@ func (s *CallState) Error() error          { return s.err }
 
 func (s *CallState) NeedCallback() bool { return len(s.callbacks) > 0 }
 
-// Complete 根据是否需要回调，选择投递回调事件或唤醒同步等待。
+// Complete 在 mailbox goroutine 中处理 RPC 响应。
 //
-// - AsyncCall：投递 event.ServiceConcurrentCallback 到 dispatcher，在回调末尾自动 Release。
+// 注意：此方法在 service 的 mailbox goroutine 中调用（由 HandleResponse 触发）。
+// - AsyncCall：直接执行用户回调，然后释放 CallState。
 // - Call：唤醒 Wait()，由调用方在读取结果后手动 Release。
 func (s *CallState) Complete() {
 	if s.NeedCallback() {
-		s.dispatchCallbackEvent()
+		// 已经在 mailbox goroutine 中，直接执行回调
+		s.DoCallback(s.XContext)
+		getCallStatePool().Put(s)
 		return
 	}
 	s.signalDone()
+}
+
+// dispatchCallbackEvent 用于超时/失败场景，需要投递到 mailbox 执行回调。
+//
+// 此方法在 monitor goroutine 或定时器 goroutine 中调用，需要投递事件到 service mailbox。
+func (s *CallState) dispatchCallbackEvent() {
+	if s.dispatcher == nil || s.dispatcher.IsClosed() {
+		getCallStatePool().Put(s)
+		return
+	}
+	// 使用 CallbackEnvelope 包装投递
+	env := event.NewCallbackEnvelope(s)
+	if err := s.dispatcher.PostMessage(s.XContext, env); err != nil {
+		env.Release()
+		getCallStatePool().Put(s)
+	}
 }
 
 func (s *CallState) signalDone() {
@@ -162,27 +178,15 @@ func (s *CallState) Wait() {
 	<-s.done
 }
 
-// DoCallback 在调用方 mailbox goroutine 中执行回调。
-// 该方法用于挂载到 event.ServiceConcurrentCallback。
+// DoCallback 执行用户注册的异步回调。
 func (s *CallState) DoCallback(ctx context.Context) {
 	for _, cb := range s.callbacks {
 		cb(ctx, s.resp, s.err, s.cbParams...)
 	}
 }
 
-func (s *CallState) dispatchCallbackEvent() {
-	if s.dispatcher == nil || s.dispatcher.IsClosed() {
-		getCallStatePool().Put(s)
-		return
-	}
-	// 直接投递 CallState，本身实现了 IEvent + IConcurrentCallback。
-	if err := s.dispatcher.PostMessage(s.XContext, s); err != nil {
-		getCallStatePool().Put(s)
-	}
-}
-
 // Release 仅用于同步 Call 路径：调用方在 Wait 结束后手动释放。
-// AsyncCall 路径由 DoCallback 自动释放。
+// AsyncCall 路径由 Complete 或 dispatchCallbackEvent 自动释放。
 func (s *CallState) Release() {
 	getCallStatePool().Put(s)
 }

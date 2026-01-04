@@ -13,8 +13,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
 // TODO 这个函数需要修改,如果pprof做成了模块,那么这里就不需要什么open这些字段了
@@ -135,8 +133,8 @@ func (s *Service) handleUserRpcMsg(ctx context.Context, ev inf.IEvent, open bool
 
 // handleTimerCallback 处理定时器回调事件
 func (s *Service) handleTimerCallback(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
-	evt := ev.(*event.Event)
-	t := evt.Data.(timingwheel.ITimer)
+	evt := ev.(*event.TimerEnvelope)
+	t := evt.Payload
 	if open {
 		analyzer = s.profiler.Push(fmt.Sprintf("[USER_TIME_CB] name:%s", t.GetName()))
 	}
@@ -148,14 +146,8 @@ func (s *Service) handleTimerCallback(ctx context.Context, ev inf.IEvent, open b
 
 // handleConcurrentCallback 处理并发回调事件
 func (s *Service) handleConcurrentCallback(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
-	var cb concurrent.IConcurrentCallback
-	if e, ok := ev.(*event.Event); ok {
-		cb = e.Data.(concurrent.IConcurrentCallback)
-	} else if c, ok := ev.(concurrent.IConcurrentCallback); ok {
-		cb = c
-	} else {
-		return
-	}
+	evt := ev.(*event.CallbackEnvelope)
+	cb := evt.Payload
 	if open {
 		analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", cb.GetName()))
 	}

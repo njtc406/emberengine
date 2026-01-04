@@ -87,17 +87,36 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 
 ### Mailbox 中间件
 
-- Mailbox 支持中间件（`IMailboxMiddleware`），可以在消息进入 worker 之前/之后执行自定义逻辑（如限流、统计、埋点等）。
-- 当前实现中：
-  - 在 `defaultMailbox.PostMessage` 中，在消息入队前调用一次 `MessageReceived`；
-  - 在 `Worker.safeExec` 中，在消息处理完成后再次调用一次 `MessageProcessed`。
+- Mailbox 支持中间件（`IMailboxMiddleware`），用于在**消息入队前**与**消息处理完成后**执行自定义逻辑（限流、熔断、统计、埋点、追踪等）。
+- 执行位置与顺序：
+  - **入队前（OnReceive）**：在 `Mailbox.PostMessage` 中调用 `middlewareChain.ExecuteOnReceive`，按注册顺序依次执行。
+  - **处理后（OnComplete）**：在 `Worker.safeExec` 的 defer 中调用 `middlewareChain.ExecuteOnComplete`，按逆序执行（洋葱模型）。
+- `OnReceive` 的返回值决定是否入队：
+  - `Continue()`：继续执行后续中间件，最终入队。
+  - `Reject(err)`：拒绝消息入队，`PostMessage` 直接返回该错误。
+  - `Skip()`：跳过后续中间件，直接入队（用于快速路径）。
+- 回调一致性：
+  - 只有当消息最终成功入队并被 worker 执行后，才会触发 `OnComplete`。
+  - `OnComplete` 仅对实际执行过 `OnReceive` 的中间件回调。
+
+#### 内置中间件
+
+- `DispatchKeyStatsMiddleware`：debug 辅助，统计 dispatcherKey 热点与 TopN（仅 debug 模式可配置启用）。
+- `RateLimitMiddleware`：基于令牌桶的入队限流，支持配置跳过紧急消息。
+- `CircuitBreakerMiddleware`：基于失败次数的熔断（Closed/Open/HalfOpen），在 `OnComplete` 根据执行结果推进状态。
+
+#### 启用方式：配置 + 自定义合并
+
+- 从配置创建：使用 `CreateMiddlewaresFromConfig(conf, logger, isDebug)` 生成中间件列表。
+- 自定义注入：将你实现的 `IMailboxMiddleware` 放入 `customMiddlewares`。
+- 推荐：用 `MergeMiddlewares(configMiddlewares, customMiddlewares)` 合并（配置在前，自定义在后），然后传给 `NewMailbox`。
 
 ### 挂起与恢复（Suspend/Resume）
 
 - `defaultMailbox` 提供简单的挂起机制：
   - `Suspend()`：标记 mailbox 已挂起；
   - `Resume()`：恢复 mailbox 接收；
-  - 挂起后，优先级 **低于紧急级别（Urgent）** 的消息会被拒绝，返回 `ErrMailboxNotRunning`；
+  - 挂起后，不满足 `ISuspendPolicy` 放行条件的消息会被拒绝，返回 `ErrMailboxSuspended`；
 - 适用场景：
   - 服务进入“只处理紧急/控制消息”的降级模式；
   - 热更新 / 维护窗口中，先挂起普通业务流量，只保留管理流量。

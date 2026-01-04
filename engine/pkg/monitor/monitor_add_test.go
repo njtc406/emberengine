@@ -8,8 +8,8 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"golang.org/x/net/context"
 )
@@ -60,8 +60,8 @@ func (d *inlineDispatcher) PostMessage(ctx context.Context, evt inf.IEvent) erro
 		d.cb(ctx, evt)
 	} else {
 		// 默认模拟 ServiceConcurrentCallback 的处理：执行回调
-		if cb, ok := evt.(concurrent.IConcurrentCallback); ok {
-			cb.DoCallback(ctx)
+		if env, ok := evt.(*event.CallbackEnvelope); ok {
+			env.Payload.DoCallback(ctx)
 		}
 	}
 	// 模拟 Service.InvokeMessage 的 defer Release
@@ -96,9 +96,9 @@ func TestRpcMonitorAdd_WhenSchedulerFails_CallDoesNotHang(t *testing.T) {
 func TestRpcMonitorAdd_WhenSchedulerFails_AsyncCallbackFires(t *testing.T) {
 	var called atomic.Int32
 	disp := &inlineDispatcher{cb: func(ctx context.Context, evt inf.IEvent) {
-		// evt 是 *CallState，模拟 ServiceConcurrentCallback 触发回调
-		if cb, ok := evt.(concurrent.IConcurrentCallback); ok {
-			cb.DoCallback(ctx)
+		// evt 是 *CallbackEnvelope，模拟 ServiceConcurrentCallback 触发回调
+		if env, ok := evt.(*event.CallbackEnvelope); ok {
+			env.Payload.DoCallback(ctx)
 			called.Add(1)
 		}
 	}}
