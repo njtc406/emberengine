@@ -79,7 +79,7 @@ const (
 )
 
 const (
-	NatsDefaultMaxReconnects      = 5 // 不限制重连次数
+	NatsDefaultMaxReconnects      = 5 // 默认最大重连次数(0 表示未配置时会回落到该值)
 	NatsDefaultReconnectWait      = 2 * time.Second
 	NatsDefaultPingInterval       = 30 * time.Second
 	NatsDefaultPingMaxOutstanding = 2
@@ -94,7 +94,7 @@ const (
 
 const (
 	NatsDefaultGlobalPrefix = "event.global.%d"    // global.eventType
-	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.serverId
+	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.partition
 	NatsDefaultMasterPrefix = "event.master.%s"    // master.serviceUid
 	NatsDefaultSlavePrefix  = "event.slave.%s"     // slave.serviceUid
 	DefaultSpecificPrefix   = "event.specific.%d"  // specific.eventType

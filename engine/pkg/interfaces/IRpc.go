@@ -33,7 +33,7 @@ type IRpcProcessor interface {
 }
 
 type IRpcSelector interface {
-	// 选择相同serverId的服务,如果需要选择其他serverId的服务,使用下面的SelectByOpt
+	// 选择相同Partition的服务,如果需要选择其他Partition的服务,使用下面的SelectByOpt
 	Select(options ...SelectParamBuilder) IBus
 
 	SelectByOpt(options ...SelectParamBuilder) IBus
@@ -54,7 +54,7 @@ type IRpcSelector interface {
 type SelectParamBuilder func(param *SelectParam)
 
 type SelectParam struct {
-	ServerId    *int32
+	Partition   *int32
 	ServiceId   *string
 	ServiceName *string
 	ServiceType *string

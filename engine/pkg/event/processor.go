@@ -115,7 +115,7 @@ func (p *Processor) PublishGlobal(ctx context.Context, eventType int32, data pro
 
 // 发布服务器事件
 func (p *Processor) PublishServer(ctx context.Context, eventType int32, data proto.Message) error {
-	return GetEventBus().PublishServer(ctx, eventType, p.GetServerId(), data)
+	return GetEventBus().PublishServer(ctx, eventType, p.GetPartition(), data)
 }
 
 // 发布特定服务事件

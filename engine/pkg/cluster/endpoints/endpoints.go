@@ -194,11 +194,11 @@ func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
 	return cli
 }
 
-func (em *EndpointManager) CreatePid(serverId int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID {
+func (em *EndpointManager) CreatePid(partition int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID {
 	rt, ok := em.remotes[rpcType]
 	if !ok {
-		return actor.NewPID("", em.nodeUid, serverId, serviceId, serviceType, serviceName, version, "")
+		return actor.NewPID("", em.nodeUid, partition, serviceId, serviceType, serviceName, version, "")
 	} else {
-		return actor.NewPID(rt.GetAddress(), em.nodeUid, serverId, serviceId, serviceType, serviceName, version, rpcType)
+		return actor.NewPID(rt.GetAddress(), em.nodeUid, partition, serviceId, serviceType, serviceName, version, rpcType)
 	}
 }

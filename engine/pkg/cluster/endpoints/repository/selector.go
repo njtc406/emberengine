@@ -136,7 +136,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 			continue
 		}
 		cPid := c.GetPid()
-		if !actor.IsRetired(cPid) && (param.ServerId == nil || cPid.GetServerId() == *param.ServerId) &&
+		if !actor.IsRetired(cPid) && (param.Partition == nil || cPid.GetPartition() == *param.Partition) &&
 			(param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.GetIsMaster() == !param.IsSlaver {
 			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
 		}
@@ -145,7 +145,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 	return returnList
 }
 
-func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) inf.IBus {
+func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) inf.IBus {
 	if serviceType == "" && serviceName == "" {
 		return msgbus.MultiBus{}
 	}
@@ -195,7 +195,7 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serv
 			continue
 		}
 		cPid := c.GetPid()
-		if c != nil && !actor.IsRetired(cPid) && (serverId == 0 || cPid.GetServerId() == serverId) && cPid.GetIsMaster() {
+		if c != nil && !actor.IsRetired(cPid) && (partition == 0 || cPid.GetPartition() == partition) && cPid.GetIsMaster() {
 			list = append(list, msgbus.NewMessageBus(s, c, nil))
 		}
 	}

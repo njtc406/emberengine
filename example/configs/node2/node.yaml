@@ -67,7 +67,7 @@ ServiceConf:
     - ClassName: Service3
       ServiceName: Service3
       Type: test
-      ServerId: 1
+      Partition: 1
       ServiceId: 1
       TimerConf:
         # 定时器队列长度

@@ -17,9 +17,9 @@ import (
 )
 
 type testService struct {
-	name     string
-	serverId int32
-	pid      *actor.PID
+	name      string
+	partition int32
+	pid       *actor.PID
 }
 
 func (s *testService) SetName(name string) {
@@ -30,8 +30,8 @@ func (s *testService) GetName() string {
 	return s.name
 }
 
-func (s *testService) GetServerId() int32 {
-	return s.serverId
+func (s *testService) GetPartition() int32 {
+	return s.partition
 }
 
 func (s *testService) SetPid(pid *actor.PID) {
@@ -76,10 +76,10 @@ func TestEventBus(t *testing.T) {
 
 	service1.SetName("service1")
 	service2.SetName("service2")
-	service1.serverId = 2
-	service2.serverId = 1
-	service1.SetPid(actor.NewPID("", "test-node", service1.serverId, "svc1", "test", service1.GetName(), 1, "local"))
-	service2.SetPid(actor.NewPID("", "test-node", service2.serverId, "svc2", "test", service2.GetName(), 1, "local"))
+	service1.partition = 2
+	service2.partition = 1
+	service1.SetPid(actor.NewPID("", "test-node", service1.partition, "svc1", "test", service1.GetName(), 1, "local"))
+	service2.SetPid(actor.NewPID("", "test-node", service2.partition, "svc2", "test", service2.GetName(), 1, "local"))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -135,24 +135,24 @@ func TestSpecificEvent(t *testing.T) {
 
 	// 创建测试服务
 	targetService := &testService{
-		name:     "target-service",
-		serverId: 1,
+		name:      "target-service",
+		partition: 1,
 		pid: &actor.PID{
 			ServiceUid: "target-service-uid-001",
 		},
 	}
 
 	subscriber1 := &testService{
-		name:     "subscriber1",
-		serverId: 2,
+		name:      "subscriber1",
+		partition: 2,
 		pid: &actor.PID{
 			ServiceUid: "subscriber1-uid-001",
 		},
 	}
 
 	subscriber2 := &testService{
-		name:     "subscriber2",
-		serverId: 3,
+		name:      "subscriber2",
+		partition: 3,
 		pid: &actor.PID{
 			ServiceUid: "subscriber2-uid-001",
 		},

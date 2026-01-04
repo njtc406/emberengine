@@ -39,7 +39,7 @@ func (s *Service1) OnInit() error {
 	//	ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
 	//	defer cancel()
 	//	// 获取消息总线
-	//	bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithServerId(1))
+	//	bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithPartition(1))
 	//	defer bus.Release()
 	//
 	//	// 发送消息
@@ -219,10 +219,10 @@ func (s *Service1) OnInit() error {
 	//	defer cancel()
 	//	// 1. 让node2开启多线程,然后调用10次cast
 	//	//for i := 0; i < 10; i++ {
-	//	//	s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1)).Send(ctxWithTimeout, "RPCTest2", nil)
+	//	//	s.Select(rpc.WithName(ServiceNameTest3), rpc.WithPartition(1)).Send(ctxWithTimeout, "RPCTest2", nil)
 	//	//}
 	//	resp := &msg.Msg_Test_Resp{}
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Call(ctxWithTimeout, "RPCSum",
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithPartition(1), rpc.WithType("test")).Call(ctxWithTimeout, "RPCSum",
 	//		&msg.Msg_Test_Req{A: 1, B: 2}, resp); err != nil {
 	//		log.SysLogger.Errorf("call Service3.RPCSum failed, err:%v", err)
 	//	} else {
@@ -231,7 +231,7 @@ func (s *Service1) OnInit() error {
 	//
 	//	s.GetLogger().Debugf("==========================================17")
 	//	// 2. 让node2开启单线程,然后调用1次cast
-	//	//s.Select(rpc.WithName(ServiceNameTest3), rpc.WithServerId(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
+	//	//s.Select(rpc.WithName(ServiceNameTest3), rpc.WithPartition(1), rpc.WithType("test")).Send(ctxWithTimeout, "RPCTest2", nil)
 	//	s.GetLogger().Debugf("==========================================18")
 	//	return nil
 	//})

@@ -25,6 +25,13 @@ type natsServer struct {
 	slowConsumerSuppressed      atomic.Uint64
 }
 
+func getGlobalNatsConf() *config.NatsConf {
+	if config.Conf == nil || config.Conf.NodeConf == nil || config.Conf.NodeConf.EventBusConf == nil {
+		return nil
+	}
+	return config.Conf.NodeConf.EventBusConf.NatsConf
+}
+
 func NewNatsServer() inf.IRemoteServer {
 	return &natsServer{}
 }
@@ -38,13 +45,53 @@ func (s *natsServer) Init(sf inf.IRpcSenderFactory) {
 func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
 	log.SysLogger.Infof("nats server listening at: %s", conf.Addr)
 
+	natsConf := getGlobalNatsConf()
+
 	var opts []nats.Option
-	opts = append(opts, nats.MaxReconnects(def.NatsDefaultMaxReconnects))
-	opts = append(opts, nats.ReconnectWait(def.NatsDefaultReconnectWait))
-	opts = append(opts, nats.PingInterval(def.NatsDefaultPingInterval))
-	opts = append(opts, nats.MaxPingsOutstanding(def.NatsDefaultPingMaxOutstanding))
-	opts = append(opts, nats.ReconnectBufSize(def.NatsDefaultReconnectBufSize))
-	opts = append(opts, nats.Timeout(def.NatsDefaultTimeout))
+	maxReconnects := def.NatsDefaultMaxReconnects
+	if natsConf != nil && natsConf.MaxReconnects > 0 {
+		maxReconnects = natsConf.MaxReconnects
+	}
+	opts = append(opts, nats.MaxReconnects(maxReconnects))
+
+	reconnectWait := def.NatsDefaultReconnectWait
+	if natsConf != nil && natsConf.ReconnectWait > 0 {
+		reconnectWait = natsConf.ReconnectWait
+	}
+	opts = append(opts, nats.ReconnectWait(reconnectWait))
+
+	pingInterval := def.NatsDefaultPingInterval
+	if natsConf != nil && natsConf.PingInterval > 0 {
+		pingInterval = natsConf.PingInterval
+	}
+	opts = append(opts, nats.PingInterval(pingInterval))
+
+	pingMaxOutstanding := def.NatsDefaultPingMaxOutstanding
+	if natsConf != nil && natsConf.PingMaxOutstanding > 0 {
+		pingMaxOutstanding = natsConf.PingMaxOutstanding
+	}
+	opts = append(opts, nats.MaxPingsOutstanding(pingMaxOutstanding))
+
+	reconnectBufSize := def.NatsDefaultReconnectBufSize
+	if natsConf != nil && natsConf.ReconnectBufSize > 0 {
+		reconnectBufSize = natsConf.ReconnectBufSize
+	}
+	opts = append(opts, nats.ReconnectBufSize(reconnectBufSize))
+
+	timeout := def.NatsDefaultTimeout
+	if natsConf != nil && natsConf.Timeout > 0 {
+		timeout = natsConf.Timeout
+	}
+	opts = append(opts, nats.Timeout(timeout))
+
+	// 认证配置（可选）：复用 NodeConf.EventBusConf.NatsConf
+	if natsConf != nil {
+		if natsConf.Token != "" {
+			opts = append(opts, nats.Token(natsConf.Token))
+		} else if natsConf.UserName != "" {
+			opts = append(opts, nats.UserInfo(natsConf.UserName, natsConf.Password))
+		}
+	}
 	opts = append(opts, nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
 		if err != nil {
 			// NOTE: slow consumer 在压测时可能非常频繁，如果每次都 Errorf 会导致 IO/锁/控制台写入
@@ -114,7 +161,17 @@ func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
 		return err
 	}
 	// 提升异步订阅在高突发场景下的缓冲能力，减少 slow consumer 丢消息风险。
-	_ = subscription.SetPendingLimits(def.NatsDefaultSubPendingMsgLimit, def.NatsDefaultSubPendingBytesLimit)
+	msgLimit := def.NatsDefaultSubPendingMsgLimit
+	bytesLimit := def.NatsDefaultSubPendingBytesLimit
+	if natsConf != nil {
+		if natsConf.SubPendingMsgLimit > 0 {
+			msgLimit = natsConf.SubPendingMsgLimit
+		}
+		if natsConf.SubPendingBytesLimit > 0 {
+			bytesLimit = natsConf.SubPendingBytesLimit
+		}
+	}
+	_ = subscription.SetPendingLimits(msgLimit, bytesLimit)
 	s.subscription = subscription
 	return nil
 }
