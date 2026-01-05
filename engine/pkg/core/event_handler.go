@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
@@ -29,7 +28,6 @@ func (s *Service) initEventHandlers() {
 	s.RegisterUserHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
 	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
 	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
-	s.RegisterUserHandler(event.ServiceGlobalEventTrigger, s.handleGlobalEvent)
 	s.RegisterUserHandler(event.RpcMsg, s.handleUserRpcMsg)
 }
 
@@ -152,24 +150,4 @@ func (s *Service) handleConcurrentCallback(ctx context.Context, ev inf.IEvent, o
 		analyzer = s.profiler.Push(fmt.Sprintf("[USER_ASYNC_CB] name:%s", cb.GetName()))
 	}
 	cb.DoCallback(ctx)
-}
-
-// handleGlobalEvent 处理用户全局事件
-// ev.Data 中存储的是 *actor.Event（EventBus 传递过来的原始事件数据载体）
-func (s *Service) handleGlobalEvent(ctx context.Context, ev inf.IEvent, open bool, analyzer *profiler.Analyzer) {
-	evt := ev.(*event.Event)
-	actorEvt := evt.Data.(*actor.Event)
-
-	// 创建一个本地 Event 传递给 processor
-	// Type 使用 actor.Event 的原始事件类型
-	// Data 使用 actor.Event.Data（Any 类型，包含实际业务数据）
-	localEvt := event.NewEvent()
-	localEvt.Type = actorEvt.EventType
-	localEvt.Data = actorEvt.Data // *anypb.Any
-	defer localEvt.Release()
-
-	if open {
-		analyzer = s.profiler.Push(fmt.Sprintf("[USER_GLB_EVENT] type:%d", localEvt.Type))
-	}
-	s.globalEventProcessor.EventHandler(ctx, localEvt)
 }
