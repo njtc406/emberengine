@@ -39,6 +39,8 @@ type Mailbox struct {
 	suspended atomic.Bool
 	// 挂起策略（可自定义放行规则）
 	suspendPolicy inf.ISuspendPolicy
+	// 停机时队列处理策略
+	drainPolicy DrainPolicy
 	// 工作线程池
 	workerPool *WorkerPool
 	logger     log.ILoggerX
@@ -54,6 +56,13 @@ func WithSuspendPolicy(policy inf.ISuspendPolicy) MailboxOption {
 	}
 }
 
+// WithDrainPolicy 设置停机时的队列处理策略。
+func WithDrainPolicy(policy DrainPolicy) MailboxOption {
+	return func(m *Mailbox) {
+		m.drainPolicy = policy
+	}
+}
+
 // NewMailbox 根据 MailboxConf 创建一个默认 mailbox 实例。
 //
 //   - conf: 控制队列模式、worker 数量、扩缩容策略等；
@@ -66,11 +75,14 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 	m := &Mailbox{
 		workerPool:    NewWorkerPool(conf, logger, invoker, middlewares...),
 		suspendPolicy: NewDefaultSuspendPolicy(), // 默认挂起策略
+		drainPolicy:   DrainExecute,
 		logger:        logger,
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
+	// 将策略下发给 workerPool（worker 在 Start 时读取）
+	m.workerPool.SetDrainPolicy(m.drainPolicy)
 	return m
 }
 
@@ -117,6 +129,15 @@ func (m *Mailbox) Start() {
 	m.workerPool.Start()
 }
 
+func (m *Mailbox) BeginStop() {
+	m.workerPool.BeginStop()
+}
+
+func (m *Mailbox) Wait() {
+	m.workerPool.Wait()
+}
+
 func (m *Mailbox) Stop() {
-	m.workerPool.Stop()
+	m.BeginStop()
+	m.Wait()
 }

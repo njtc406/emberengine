@@ -61,6 +61,7 @@ type Service struct {
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
 
 	stopGraceTimeout time.Duration // 关闭时等待窗口
+	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
 }
 
 func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
@@ -69,6 +70,11 @@ func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 	}
 	if serviceInitConf.StopGraceTimeout < 0 {
 		serviceInitConf.StopGraceTimeout = 0
+	}
+	if serviceInitConf.StopPolicy != nil {
+		if serviceInitConf.StopPolicy.GraceTimeout < 0 {
+			serviceInitConf.StopPolicy.GraceTimeout = 0
+		}
 	}
 	if serviceInitConf.RpcType == "" {
 		// 优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
@@ -143,7 +149,17 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		"partition": serviceInitConf.Partition,
 	})
 	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
-	s.stopGraceTimeout = serviceInitConf.StopGraceTimeout
+	// StopPolicy 优先，其次兼容旧的 StopGraceTimeout
+	stopGraceTimeout := serviceInitConf.StopGraceTimeout
+	drainPolicy := mailbox.DrainExecute
+	if serviceInitConf.StopPolicy != nil {
+		stopGraceTimeout = serviceInitConf.StopPolicy.GraceTimeout
+		drainPolicy = mailbox.ParseDrainPolicy(serviceInitConf.StopPolicy.DrainPolicy)
+	}
+	if stopGraceTimeout < 0 {
+		stopGraceTimeout = 0
+	}
+	s.stopGraceTimeout = stopGraceTimeout
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize,
@@ -153,8 +169,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.ILoggerX, config.IsDebug())
 	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
 
-	// 创建邮箱
-	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares)
+	// 创建邮箱（将停机 drain 策略下发给 mailbox/workerPool）
+	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares, mailbox.WithDrainPolicy(drainPolicy))
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)
@@ -258,37 +274,74 @@ func (s *Service) startListenCallback() {
 	}
 }
 
+// Stop 同步停止服务：请求停止并等待完成。
+// 注意：不要在 mailbox worker 内调用此方法，会死锁！
 func (s *Service) Stop() {
-	if s.IsClosed() {
-		// 防止多次关闭
+	s.RequestStop()
+	s.WaitStopped()
+}
+
+// RequestStop 请求停止（非阻塞）：向 mailbox 投递 FinalizeEvent。
+// 可在 mailbox worker 内安全调用。
+func (s *Service) RequestStop() {
+	// 防止重复投递
+	if !s.stopRequested.CompareAndSwap(false, true) {
 		return
 	}
-	//s.Debugf("service[%s] begin stop", s.GetName())
+
+	// 标记进入关闭中状态
 	atomic.StoreInt32(&s.status, def.SvcStatusClosing)
 
-	// 挂起邮箱(防止有新的请求消息进来)
-	s.mailbox.Suspend()
+	// 挂起邮箱（只允许 Finalize 等必要消息进入）
+	if s.mailbox != nil {
+		s.mailbox.Suspend()
+	}
 
+	// 投递 FinalizeEvent 到 mailbox，由 worker 在 actor 语义内执行清理
+	ev := event.NewEvent()
+	ev.Type = event.ServiceFinalize
+	ev.Priority = def.PriorityUrgent // 确保能通过挂起策略
+	if err := s.mailbox.PostMessage(xcontext.New(nil), ev); err != nil {
+		// 如果投递失败（mailbox 已关闭），直接在当前协程清理
+		ev.Release()
+		s.doFinalize()
+	}
+}
+
+// WaitStopped 等待服务完全停止（阻塞）。
+// 注意：不要在 mailbox worker 内调用此方法，会死锁！
+func (s *Service) WaitStopped() {
+	if s.mailbox != nil {
+		s.mailbox.Wait()
+	}
+}
+
+// doFinalize 在 mailbox worker 内执行的清理逻辑（串行、无并发风险）。
+func (s *Service) doFinalize() {
 	// 关闭定时器
-	s.ITimerScheduler.Stop()
+	if s.ITimerScheduler != nil {
+		s.ITimerScheduler.Stop()
+	}
 
 	// 关闭并发
-	s.IConcurrent.Close()
+	if s.IConcurrent != nil {
+		s.IConcurrent.Close()
+	}
 
-	// 释放资源(这里面可能还会有call类型的调用,所以先执行)
+	// 释放资源
 	s.release()
 
 	// 等待窗口：允许短延迟回调/回复在关闭前最后进入并处理。
-	// 超过窗口不再等待，直接停止 mailbox。
 	if s.stopGraceTimeout > 0 {
 		time.Sleep(s.stopGraceTimeout)
 	}
 
-	// 关闭邮箱(完全关闭所有的工作线程,不再接收任何消息)
-	s.mailbox.Stop()
+	// 发起 mailbox 停止（不等待，当前就是在 worker 内）
+	if s.mailbox != nil {
+		s.mailbox.BeginStop()
+	}
 
 	if s.enableLogging && s.logger != nil {
-		// 如果开启了独立日志,则关闭日志
 		log.Release(s.logger)
 	}
 

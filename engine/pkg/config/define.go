@@ -92,18 +92,32 @@ type RPCServer struct {
 }
 
 type ServiceInitConf struct {
-	ClassName              string          `binding:"required"` // 服务类名
-	ServiceId              string          `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
-	ServiceName            string          `binding:""`         // 服务名称(调用时使用这个名字)
-	Type                   string          `binding:"required"` // 服务类型
-	Version                int64           `binding:""`         // 服务版本
-	Partition              int32           `binding:"required"` // 服务分区ID(用于服务路由隔离)
-	TimerConf              *TimerConf      `binding:""`         // 定时器配置
-	StopGraceTimeout       time.Duration   `binding:""`         // 关闭时等待窗口(默认0,不等待; 仅用于等待回调/队列自然收敛)
-	RpcType                string          `binding:""`         // 远程调用方式(默认使用nats)
-	Mailbox                *MailboxConf    `binding:""`         // 邮箱配置
-	LogConf                *ServiceLogConf `binding:""`         // 日志配置
-	IsPrimarySecondaryMode bool            `binding:""`         // 是否是主从模式(默认不开启)
+	ClassName   string     `binding:"required"` // 服务类名
+	ServiceId   string     `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
+	ServiceName string     `binding:""`         // 服务名称(调用时使用这个名字)
+	Type        string     `binding:"required"` // 服务类型
+	Version     int64      `binding:""`         // 服务版本
+	Partition   int32      `binding:"required"` // 服务分区ID(用于服务路由隔离)
+	TimerConf   *TimerConf `binding:""`         // 定时器配置
+	// StopGraceTimeout 已废弃：请使用 StopPolicy.GraceTimeout。
+	// 保留该字段是为了兼容旧配置。
+	StopGraceTimeout time.Duration `binding:""` // 关闭时等待窗口(默认0,不等待; 仅用于等待回调/队列自然收敛)
+	// StopPolicy 停机策略配置：优雅窗口与停机时队列处理方式。
+	StopPolicy             *StopPolicyConf `binding:""`
+	RpcType                string          `binding:""` // 远程调用方式(默认使用nats)
+	Mailbox                *MailboxConf    `binding:""` // 邮箱配置
+	LogConf                *ServiceLogConf `binding:""` // 日志配置
+	IsPrimarySecondaryMode bool            `binding:""` // 是否是主从模式(默认不开启)
+}
+
+// StopPolicyConf 服务停机策略
+// GraceTimeout: 优雅窗口（期间 mailbox 挂起，仅放行必要消息）
+// DrainPolicy: 停机时对队列剩余消息的处理方式
+//   - "execute" : 继续执行剩余消息（默认，保持现有语义）
+//   - "discard" : 丢弃剩余消息（仅回收/OnComplete，不执行业务）
+type StopPolicyConf struct {
+	GraceTimeout time.Duration `binding:""`
+	DrainPolicy  string        `binding:""`
 }
 
 type ServiceConfig struct {

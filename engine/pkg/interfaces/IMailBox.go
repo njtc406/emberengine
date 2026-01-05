@@ -178,6 +178,11 @@ type IMailboxChannel interface {
 type IMailbox interface {
 	IMailboxChannel
 	Start()
+	// BeginStop 发起停止（非阻塞）：停止接收新消息并唤醒 worker 退出。
+	BeginStop()
+	// Wait 等待 mailbox 完全停止（阻塞）。
+	Wait()
+	// Stop 便捷方法：BeginStop + Wait。
 	Stop()
 	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
 	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
@@ -185,6 +190,11 @@ type IMailbox interface {
 
 type IMailboxWorker interface {
 	Start()
+	// BeginStop 发起停止（非阻塞）：停止接收新消息并让 run 循环退出。
+	BeginStop()
+	// Wait 等待 worker 完全退出。
+	Wait()
+	// Stop 便捷方法：BeginStop + Wait。
 	Stop()
 	SubmitEvent(ctx context.Context, evt IEvent, mctx IMiddlewareContext) error
 	GetWorkerId() int

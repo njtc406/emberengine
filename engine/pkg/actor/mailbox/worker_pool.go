@@ -55,10 +55,17 @@ type WorkerPool struct {
 	logger          log.ILoggerX
 	workerCount     int // 当前 worker 数量（用于扩缩容）
 
+	// 停机时队列处理策略（由 Mailbox 下发）
+	drainPolicy DrainPolicy
+
 	// Debug-only dispatch distribution stats.
 	statsEnabled  bool
 	statsInterval time.Duration
 	dispatchCnt   map[int]*atomic.Uint64
+}
+
+func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
+	p.drainPolicy = policy
 }
 
 func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
@@ -116,25 +123,62 @@ func (p *WorkerPool) Start() {
 	p.logger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.SchedulePolicy.InitialWorkerNum)
 }
 
-func (p *WorkerPool) Stop() {
-	// 先关闭自动扩容
+// BeginStop 发起停止（非阻塞）：停止后台协程并通知 workers 退出，但不等待。
+func (p *WorkerPool) BeginStop() {
+	// 先关闭自动扩容/统计等后台协程
 	p.cancel()
+	// 等待后台协程退出，避免与 shrink/dispatch 等竞争（不涉及 worker 自等问题）
 	p.wg.Wait()
+
+	p.mu.RLock()
+	if p.workers == nil {
+		p.mu.RUnlock()
+		return
+	}
+	workers := make([]inf.IMailboxWorker, 0, len(p.workers))
+	for _, w := range p.workers {
+		workers = append(workers, w)
+	}
+	p.mu.RUnlock()
+
+	for _, w := range workers {
+		w.BeginStop()
+	}
+}
+
+// Wait 等待 worker 全部退出，并完成中间件链停止与资源清理。
+func (p *WorkerPool) Wait() {
+	p.mu.Lock()
+	if p.workers == nil {
+		p.mu.Unlock()
+		return
+	}
+	workers := make([]inf.IMailboxWorker, 0, len(p.workers))
+	for _, w := range p.workers {
+		workers = append(workers, w)
+	}
+	p.mu.Unlock()
+
+	for _, w := range workers {
+		w.Wait()
+	}
+
+	// 停止中间件链（需要在 workers 完全退出后，避免 DrainDiscard 时仍调用 OnComplete）
+	p.middlewareChain.Stop()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
 	if p.workers == nil {
 		return
 	}
-
-	for _, worker := range p.workers {
-		worker.Stop()
-	}
-	// 停止中间件链
-	p.middlewareChain.Stop()
 	p.ring.Clear()
 	p.workers = nil
+}
+
+// Stop 兼容接口：BeginStop + Wait。
+func (p *WorkerPool) Stop() {
+	p.BeginStop()
+	p.Wait()
 }
 
 // DispatchEvent 将事件分派给具体 worker。
