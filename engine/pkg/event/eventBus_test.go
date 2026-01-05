@@ -42,12 +42,12 @@ func (s *testService) GetPid() *actor.PID {
 }
 
 func (s *testService) PushEvent(ctx context.Context, e inf.IEvent) error {
-	ev, ok := e.(*Event)
+	ev, ok := e.(*ActorEventEnvelope)
 	if !ok {
-		return fmt.Errorf("event type is not Event")
+		return fmt.Errorf("event type is not ActorEventEnvelope")
 	}
-	globalEvent := ev.Data.(*actor.Event)
-	fmt.Println("service ", s.name, " eventBus receive ", ev.GetType(), " event type:", globalEvent.EventType)
+	globalEvent := ev.Payload
+	fmt.Println("service ", s.name, " eventBus receive ", ev.GetType(), " payload event type:", globalEvent.EventType)
 	return nil
 }
 

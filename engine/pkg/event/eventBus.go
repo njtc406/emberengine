@@ -420,12 +420,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 	defer eb.globalLock.RUnlock(key)
 	if subMap, ok := eb.globalSubscribers[e.EventType]; ok {
 		for _, ch := range subMap {
-			ev := NewEvent()
-			ev.Type = ServiceGlobalEventTrigger
-			ev.Data = e // 直接存储 *actor.Event
-			ev.DispatcherKey = e.DispatcherKey
-			ev.Priority = def.Priority(e.Priority)
-
+			ev := NewActorEventEnvelope(e)
 			if err := ch.PushEvent(ctx, ev); err != nil {
 				log.SysLogger.WithContext(ctx).Errorf("push global event error: %v", err)
 				ev.Release()
@@ -473,12 +468,7 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 	if serverMap, ok := eb.serverSubscribers[e.EventType]; ok {
 		if subMap, ok := serverMap[e.Partition]; ok {
 			for _, ch := range subMap {
-				ev := NewEvent()
-				ev.Type = ServiceGlobalEventTrigger
-				ev.Data = e // 直接存储 *actor.Event
-				ev.DispatcherKey = e.DispatcherKey
-				ev.Priority = def.Priority(e.Priority)
-
+				ev := NewActorEventEnvelope(e)
 				if err := ch.PushEvent(ctx, ev); err != nil {
 					log.SysLogger.Errorf("push server event error: %v", err)
 					ev.Release()
@@ -568,12 +558,7 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 	if eventMap, ok := eb.specificSubscribers[e.EventType]; ok {
 		if subMap, ok := eventMap[e.ServiceUid]; ok {
 			for _, ch := range subMap {
-				ev := NewEvent()
-				ev.Type = ServiceGlobalEventTrigger
-				ev.Data = e // 直接存储 *actor.Event
-				ev.DispatcherKey = e.DispatcherKey
-				ev.Priority = def.Priority(e.Priority)
-
+				ev := NewActorEventEnvelope(e)
 				if err := ch.PushEvent(ctx, ev); err != nil {
 					log.SysLogger.Errorf("push specific event error: %v", err)
 					ev.Release()
