@@ -31,6 +31,7 @@ const (
 	ServiceNew           = -1004 // 启动服务
 	ServiceClose         = -1005 // 关闭服务
 	ServiceHeartbeat     = -1006 // 心跳事件
+	ServiceFinalize      = -1007 // 服务最终清理事件（在 mailbox 内执行）
 
 	SysEventKcp       = -1100 // kcp 连接事件
 	SysEventTcp       = -1101 // tcp 连接事件

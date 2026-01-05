@@ -25,6 +25,7 @@ func (s *Service) initEventHandlers() {
 	s.RegisterUserHandler(event.ServiceSuspended, s.handleServiceSuspended)
 	s.RegisterUserHandler(event.ServiceResumed, s.handleServiceResumed)
 	s.RegisterUserHandler(event.SysEventServiceClose, s.handleServiceClose)
+	s.RegisterUserHandler(event.ServiceFinalize, s.handleServiceFinalize)
 	s.RegisterUserHandler(event.ServiceHeartbeat, s.handleServiceHeartbeat)
 	s.RegisterUserHandler(event.ServiceTimerCallback, s.handleTimerCallback)
 	s.RegisterUserHandler(event.ServiceConcurrentCallback, s.handleConcurrentCallback)
@@ -92,8 +93,13 @@ func (s *Service) handleServiceResumed(ctx context.Context, ev inf.IEvent, _ boo
 }
 
 func (s *Service) handleServiceClose(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-	// 服务关闭
-	go s.Stop()
+	// 服务关闭：请求停止，由 handleServiceFinalize 在 mailbox 内完成清理
+	s.RequestStop()
+}
+
+// handleServiceFinalize 在 mailbox worker 内执行清理（串行、无并发风险）
+func (s *Service) handleServiceFinalize(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
+	s.doFinalize()
 }
 
 func (s *Service) handleServiceHeartbeat(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {

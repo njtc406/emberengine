@@ -43,6 +43,7 @@ type Worker struct {
 	queueManager IQueueManager            // 队列管理器（可以是双队列或多优先级队列）
 	idler        *idle.AdaptiveController // 自适应空闲控制器
 	count        atomic.Int64
+	drainPolicy  DrainPolicy
 }
 
 // newWorker 创建统一Worker
@@ -50,6 +51,12 @@ func newWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMa
 	w := &Worker{
 		workerId: workerId,
 		pool:     pool,
+		drainPolicy: func() DrainPolicy {
+			if pool != nil {
+				return pool.drainPolicy
+			}
+			return DrainExecute
+		}(),
 	}
 
 	// 根据配置创建队列管理器
@@ -164,9 +171,19 @@ func (w *Worker) run() {
 
 	// 退出时处理所有剩余消息
 	defer func() {
-		w.queueManager.DrainAll(func(e inf.IEvent) {
-			w.safeExec(e)
-		})
+		if w.queueManager == nil {
+			return
+		}
+		switch w.drainPolicy {
+		case DrainDiscard:
+			w.queueManager.DrainAll(func(e inf.IEvent) {
+				w.discardExec(e)
+			})
+		default:
+			w.queueManager.DrainAll(func(e inf.IEvent) {
+				w.safeExec(e)
+			})
+		}
 	}()
 
 	// 主处理循环
@@ -182,8 +199,8 @@ func (w *Worker) run() {
 	}
 }
 
-// Stop 停止Worker
-func (w *Worker) Stop() {
+// BeginStop 发起停止（非阻塞）。
+func (w *Worker) BeginStop() {
 	// First, stop accepting new submissions.
 	if !w.closing.CompareAndSwap(false, true) {
 		return // already stopping/stopped
@@ -204,10 +221,41 @@ func (w *Worker) Stop() {
 		w.idler.Wake()
 	}
 
-	// 等待Worker完全退出
+	// NOTE: 不在这里 Wait，避免在 worker 自身 goroutine 内调用导致自等死锁。
+}
+
+// Wait 等待 worker 完全退出。
+func (w *Worker) Wait() {
 	w.wg.Wait()
-	// 打印计数
-	w.pool.logger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
+	if w.pool != nil && w.pool.logger != nil {
+		w.pool.logger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
+	}
+}
+
+// Stop 兼容接口：BeginStop + Wait。
+func (w *Worker) Stop() {
+	w.BeginStop()
+	w.Wait()
+}
+
+// discardExec 在 DrainDiscard 策略下处理残留消息：不执行业务，仅触发 OnComplete 并回收引用。
+func (w *Worker) discardExec(e inf.IEvent) {
+	ctx, evt, mctx := UnwrapCtxEventFull(e)
+
+	defer func() {
+		// 调用中间件链的 OnComplete（逆序执行）
+		if mctx != nil {
+			w.pool.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxNotRunning, nil)
+		}
+		// 不执行业务，直接释放内部 event（原本由 InvokeMessage 负责 Release）
+		if evt != nil {
+			evt.Release()
+		}
+		// 释放 CtxEvent 包装器
+		e.Release()
+	}()
+
+	_ = ctx // 预留：后续可记录日志/trace
 }
 
 // safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析：
