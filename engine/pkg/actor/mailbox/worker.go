@@ -300,7 +300,9 @@ func (w *Worker) safeExec(e inf.IEvent) {
 	}
 
 	// 调用消息处理器
-	w.pool.invoker.InvokeMessage(ctx, evt)
+	if err := w.pool.invoker.InvokeMessage(ctx, evt); err != nil {
+		execErr = err
+	}
 
 	if analyzer != nil {
 		analyzer.Pop()

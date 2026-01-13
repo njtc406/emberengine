@@ -56,7 +56,7 @@ type Service struct {
 
 	eventHandlers map[int32]EventHandler
 
-	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用)
+	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用) TODO 这个实际上已经在mailbox中做了,这里暂时废弃
 
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
 
@@ -482,13 +482,15 @@ func (s *Service) GetServiceCfg() interface{} {
 	return s.cfg
 }
 
-func (s *Service) safeExec(f func()) {
+func (s *Service) safeExec(f func()) (err error) {
 	defer func() {
 		if err := recover(); err != nil {
 			s.Errorf("safe exec error: %v\ntrace:%s", err, debug.Stack())
+			err = fmt.Errorf("safe exec error: %v", err)
 		}
 	}()
 	f()
+	return err
 }
 
 func (s *Service) setStatus(status int32) {

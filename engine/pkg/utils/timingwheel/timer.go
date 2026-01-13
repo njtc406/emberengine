@@ -191,6 +191,7 @@ func (t *Timer) Do() (err error) {
 		}
 		return nil
 	})
+	// 记录执行时间
 	return
 }
 

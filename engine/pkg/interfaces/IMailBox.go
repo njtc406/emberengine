@@ -165,7 +165,7 @@ type ISuspendPolicy interface {
 // IMessageInvoker 处理消息
 type IMessageInvoker interface {
 	GetServiceName() string
-	InvokeMessage(ctx context.Context, evt IEvent)
+	InvokeMessage(ctx context.Context, evt IEvent) error
 	EscalateFailure(ctx context.Context, reason interface{}, evt IEvent)
 }
 

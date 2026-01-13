@@ -9,6 +9,7 @@ import inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 
 type MsgHookFun func(ev inf.IEvent) bool
 
+// 废弃
 func (s *Service) AddMsgHook(fns ...MsgHookFun) {
 	for _, fn := range fns {
 		s.msgHooks = append(s.msgHooks, fn)

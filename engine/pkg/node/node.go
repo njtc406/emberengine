@@ -122,7 +122,7 @@ func Start(opts ...StartOption) {
 	// 初始化rpc请求去重缓存器
 	dedup.Init(config.Conf.NodeConf.DeDuplicatorConf)
 	// 初始化等待队列,并启动监听
-	monitor.GetRpcMonitor().Init().Start()
+	monitor.GetRpcMonitor().Start()
 
 	// 初始化集群设置
 	cluster.GetCluster().Init()

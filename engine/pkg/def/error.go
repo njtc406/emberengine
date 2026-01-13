@@ -50,6 +50,8 @@ var (
 	ErrTimerReuse                  = errors.New("timer reuse")                               // 定时器复用
 	ErrMailboxSuspended            = errors.New("mailbox suspended")                         // 邮箱已挂起
 	ErrMailboxMiddlewareRejected   = errors.New("mailbox middleware rejected")               // 中间件拒绝消息
+	ErrEventIsUnRef                = errors.New("event is unref")                            // 事件已经被释放
+	ErrRpcMsgMetaOrDataIsNil       = errors.New("rpc msg meta or data is nil")               // rpc 消息元数据或数据为空
 )
 
 //type RpcErr string

@@ -3,9 +3,10 @@ package monitor
 import (
 	"time"
 
+	"testing"
+
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"testing"
 
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
@@ -24,7 +25,6 @@ func TestRpcMonitor_Add(t *testing.T) {
 	defer timingwheel.Stop()
 
 	rm := GetRpcMonitor()
-	rm.Init()
 	rm.Start()
 	defer rm.Stop()
 	reqId := rm.GenSeq()
@@ -46,7 +46,6 @@ func TestRpcMonitor_Remove(t *testing.T) {
 	defer timingwheel.Stop()
 
 	rm := GetRpcMonitor()
-	rm.Init()
 	rm.Start()
 	defer rm.Stop()
 	const reqId = 1

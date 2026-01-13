@@ -35,7 +35,6 @@ func benchInitRPC() {
 		timingwheel.Start(time.Millisecond, 64, log.SysLogger)
 
 		rm := monitor.GetRpcMonitor()
-		rm.Init()
 		rm.Start()
 	})
 }

@@ -28,8 +28,11 @@ type IRpcInvoker interface {
 // IRpcProcessor 低层 RPC 消息处理接口（框架内部使用）
 // 处理原始的 RPC 请求和响应消息
 type IRpcProcessor interface {
-	HandleRequest(ctx context.Context, msg IEnvelope)  // 处理请求
-	HandleResponse(ctx context.Context, msg IEnvelope) // 处理回复
+	// HandleRequest 处理请求消息
+	HandleRequest(ctx context.Context, msg IEnvelope) error
+
+	// HandleResponse 处理回复消息
+	HandleResponse(ctx context.Context, msg IEnvelope) error
 }
 
 type IRpcSelector interface {

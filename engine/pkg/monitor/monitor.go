@@ -11,33 +11,66 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
 
 var rpcMonitor *RpcMonitor
+var monitorOnce sync.Once
+
+type waitBucket struct {
+	mu sync.RWMutex
+	m  map[uint64]*CallState
+}
 
 type RpcMonitor struct {
-	closed  atomic.Bool
-	ctx     context.Context
-	cancel  context.CancelFunc
-	locker  sync.RWMutex
-	epoch   uint64 // 启动纳秒时间戳左移44位，作为ID高位前缀（周期约1ms，不可能重启冲突）
-	seq     uint64 // 自增序列号（低44位，支持约339天@60万QPS）
-	waitMap map[uint64]*CallState
-	sd      timingwheel.ITimerScheduler
-	wg      sync.WaitGroup
+	closed     atomic.Bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	epoch      uint64 // 启动纳秒时间戳左移44位，作为ID高位前缀（周期约1ms，不可能重启冲突）
+	seq        uint64 // 自增序列号（低44位，支持约339天@60万QPS）
+	buckets    []waitBucket
+	bucketMask uint64
+	sd         timingwheel.ITimerScheduler
+	wg         sync.WaitGroup
+}
+
+func (rm *RpcMonitor) bucketIndex(seqId uint64) int {
+	return int(seqId & rm.bucketMask)
+}
+
+func (rm *RpcMonitor) bucket(seqId uint64) *waitBucket {
+	return &rm.buckets[rm.bucketIndex(seqId)]
+}
+
+const defaultWaitBucketCount = 256
+
+func (rm *RpcMonitor) initBuckets(bucketCount int, initCap int) {
+	if bucketCount <= 0 {
+		bucketCount = defaultWaitBucketCount
+	}
+	bucketCount = util.RoundUpToPowerOfTwoInt(bucketCount)
+	rm.buckets = make([]waitBucket, bucketCount)
+	for i := range rm.buckets {
+		if initCap > 0 {
+			rm.buckets[i].m = make(map[uint64]*CallState, initCap)
+		} else {
+			rm.buckets[i].m = make(map[uint64]*CallState)
+		}
+	}
+	rm.bucketMask = uint64(bucketCount - 1)
 }
 
 func GetRpcMonitor() *RpcMonitor {
-	if rpcMonitor == nil {
+	monitorOnce.Do(func() {
 		rpcMonitor = &RpcMonitor{}
-	}
+		rpcMonitor.Init()
+	})
 	return rpcMonitor
 }
 
@@ -50,9 +83,31 @@ func (rm *RpcMonitor) Init() *RpcMonitor {
 	// 低44位: 序列号，2^44 / 60万QPS ≈ 339天
 	rm.epoch = uint64(time.Now().UnixNano()&0xFFFFF) << 44
 	rm.seq = 0
-	rm.waitMap = make(map[uint64]*CallState)
-	rm.sd = timingwheel.NewJobScheduler("rpc monitor", config.Conf.NodeConf.RpcMonitorConf.MonitorTimerSize, config.Conf.NodeConf.RpcMonitorConf.MonitorBucketSize,
-		timingwheel.GetTimingWheel(), log.NewLoggerX(log.SysLogger, log.Fields{"component": "rpc monitor"}), config.IsDebug())
+	// Buckets are sharded to reduce lock contention.
+	// BucketCount must be power-of-two; otherwise we round up.
+	conf := config.Conf.NodeConf.RpcMonitorConf
+	bucketCount := defaultWaitBucketCount
+	if conf != nil && conf.WaitBucketCount > 0 {
+		bucketCount = conf.WaitBucketCount
+	}
+	initCap := 0
+	if conf != nil {
+		initCap = conf.WaitBucketInitCap
+		if initCap <= 0 {
+			// Auto derive a reasonable per-bucket capacity to avoid frequent map growth.
+			if conf.MonitorTimerSize > 0 {
+				bc := util.RoundUpToPowerOfTwoInt(bucketCount)
+				initCap = conf.MonitorTimerSize / bc
+				if initCap < 16 {
+					initCap = 16
+				}
+			}
+		}
+	}
+	rm.initBuckets(bucketCount, initCap)
+	rm.sd = timingwheel.NewJobScheduler("rpc_monitor", config.Conf.NodeConf.RpcMonitorConf.MonitorTimerSize,
+		config.Conf.NodeConf.RpcMonitorConf.MonitorBucketSize,
+		nil, log.NewLoggerX(log.SysLogger, log.Fields{"component": "rpc monitor"}), config.IsDebug())
 	return rm
 }
 
@@ -78,21 +133,26 @@ func (rm *RpcMonitor) Stop() {
 	}
 	// 2) Drain any remaining waiting states so callers don't hang and pooled states don't leak.
 	var pending []*CallState
-	rm.locker.Lock()
-	if len(rm.waitMap) > 0 {
-		pending = make([]*CallState, 0, len(rm.waitMap))
-		for seq, st := range rm.waitMap {
-			if st != nil {
-				pending = append(pending, st)
-				// Best-effort cancel: scheduler might already be stopped.
-				if rm.sd != nil {
-					rm.sd.CancelTimer(st.timerId())
-				}
+	for i := range rm.buckets {
+		b := &rm.buckets[i]
+		b.mu.Lock()
+		if len(b.m) > 0 {
+			if pending == nil {
+				pending = make([]*CallState, 0, len(b.m))
 			}
-			delete(rm.waitMap, seq)
+			for seq, st := range b.m {
+				if st != nil {
+					pending = append(pending, st)
+					// Best-effort cancel: scheduler might already be stopped.
+					if rm.sd != nil {
+						rm.sd.CancelTimer(st.timerId())
+					}
+				}
+				delete(b.m, seq)
+			}
 		}
+		b.mu.Unlock()
 	}
-	rm.locker.Unlock()
 
 	for _, st := range pending {
 		// Make the failure explicit; unblocks Call() waiters and triggers AsyncCall callbacks.
@@ -144,20 +204,18 @@ func (rm *RpcMonitor) GenSeq() uint64 {
 }
 
 func (rm *RpcMonitor) Add(state *CallState) {
-	rm.locker.Lock()
-	defer rm.locker.Unlock()
-
 	reqId := state.ReqID()
 	timerId, err := rm.sd.AfterFunc(state.Timeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
 		seq := args[0].(uint64)
-		rm.locker.Lock()
-		st, ok := rm.waitMap[seq]
+		b := rm.bucket(seq)
+		b.mu.Lock()
+		st, ok := b.m[seq]
 		if !ok || st == nil || st.timerId() != tm.GetTimerId() {
-			rm.locker.Unlock()
+			b.mu.Unlock()
 			return nil
 		}
-		delete(rm.waitMap, seq)
-		rm.locker.Unlock()
+		delete(b.m, seq)
+		b.mu.Unlock()
 
 		if log.SysLogger != nil {
 			log.SysLogger.WithContext(st.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s",
@@ -180,17 +238,21 @@ func (rm *RpcMonitor) Add(state *CallState) {
 		return
 	}
 	state.setTimerID(timerId)
-	rm.waitMap[reqId] = state
+	b := rm.bucket(reqId)
+	b.mu.Lock()
+	b.m[reqId] = state
+	b.mu.Unlock()
 }
 
-func (rm *RpcMonitor) remove(seqId uint64) *CallState {
-	state, ok := rm.waitMap[seqId]
+func (rm *RpcMonitor) removeLocked(b *waitBucket, seqId uint64) *CallState {
+	state, ok := b.m[seqId]
 	if !ok {
 		return nil
 	}
-
-	rm.sd.CancelTimer(state.timerId())
-	delete(rm.waitMap, seqId)
+	if rm.sd != nil {
+		rm.sd.CancelTimer(state.timerId())
+	}
+	delete(b.m, seqId)
 	return state
 }
 
@@ -198,17 +260,22 @@ func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
 	if seqId == 0 {
 		return nil
 	}
-	rm.locker.Lock()
-	f := rm.remove(seqId)
-	rm.locker.Unlock()
+	b := rm.bucket(seqId)
+	b.mu.Lock()
+	f := rm.removeLocked(b, seqId)
+	b.mu.Unlock()
 	return f
 }
 
 func (rm *RpcMonitor) Get(seqId uint64) *CallState {
-	rm.locker.RLock()
-	defer rm.locker.RUnlock()
-
-	return rm.waitMap[seqId]
+	if seqId == 0 {
+		return nil
+	}
+	b := rm.bucket(seqId)
+	b.mu.RLock()
+	st := b.m[seqId]
+	b.mu.RUnlock()
+	return st
 }
 
 func (rm *RpcMonitor) callTimeout(state *CallState) {
@@ -233,13 +300,11 @@ func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {
 
 func (rm *RpcMonitor) NewMultiCancel(seqIds ...uint64) dto.CancelRpc {
 	return func() {
-		rm.locker.Lock()
-		defer rm.locker.Unlock()
 		for _, seqId := range seqIds {
 			if seqId == 0 {
 				continue
 			}
-			state := rm.remove(seqId)
+			state := rm.Remove(seqId)
 			if state != nil {
 				state.callbacks = nil
 				state.cbParams = nil

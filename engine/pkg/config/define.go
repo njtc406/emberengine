@@ -50,6 +50,14 @@ type RpcMonitorConf struct {
 	MonitorTimerSize  int `binding:""` // 定时器数量(用于监控rpc调用的timer)(默认10000)
 	MonitorBucketSize int `binding:""` // 定时器桶数量(默认20)
 
+	// WaitBucketCount: 等待表分桶数量（用于降低锁竞争）。
+	// 建议为 2 的幂；若不是 2 的幂，运行时会向上取整到 2 的幂。
+	// 默认 256。
+	WaitBucketCount int `binding:""`
+	// WaitBucketInitCap: 每个桶内部 map 的初始容量。
+	// 配置 <=0 表示自动推导（基于 MonitorTimerSize / WaitBucketCount，且最小为 16）。
+	WaitBucketInitCap int `binding:""`
+
 	// RPC 超时配置
 	DefaultRpcTimeout    time.Duration `binding:""` // RPC 调用默认超时时间(默认1秒)
 	CheckTimeoutInterval time.Duration `binding:""` // RPC 超时检查间隔(默认1秒)
