@@ -81,7 +81,7 @@ type jobScheduler struct {
 // NewJobScheduler 创建一个新的任务调度器
 // chanSize: 回调通道大小
 // bucketSize: 桶数量，用于分片存储任务以提高并发性能
-func NewJobScheduler(jobName string, chanSize, bucketSize int, t *TimingWheel, logger log.ILoggerX, isDebug bool) ITimerScheduler {
+func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, logger log.ILoggerX, isDebug bool) ITimerScheduler {
 	if logger == nil {
 		l, err := log.NewDefaultLogger(nil)
 		if err != nil {
@@ -95,10 +95,10 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, t *TimingWheel, l
 	if bucketSize <= 0 {
 		bucketSize = 10
 	}
-	if t == nil {
-		t = globTW
+	if tw == nil {
+		tw = globTW
 	}
-	if t == nil {
+	if tw == nil {
 		logger.Panic("timing wheel is nil")
 	}
 	shards := make([]*timerBucket, bucketSize)
@@ -110,7 +110,7 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, t *TimingWheel, l
 	return &jobScheduler{
 		shards: shards,
 		c:      make(chan ITimer, chanSize),
-		tw:     t,
+		tw:     tw,
 		timerPool: pool.NewSyncPoolWrapper(
 			func() *Timer {
 				return &Timer{}

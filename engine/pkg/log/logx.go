@@ -18,5 +18,5 @@ func NewLoggerX(logger *Logger, fields Fields) ILoggerX {
 	if fields == nil {
 		fields = Fields{}
 	}
-	return logger.WithFields(map[string]interface{}(fields))
+	return logger.WithFields(fields)
 }

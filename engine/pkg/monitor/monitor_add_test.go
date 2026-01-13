@@ -69,8 +69,14 @@ func (d *inlineDispatcher) PostMessage(ctx context.Context, evt inf.IEvent) erro
 	return nil
 }
 
+func newTestRpcMonitor(sd timingwheel.ITimerScheduler) *RpcMonitor {
+	rm := &RpcMonitor{sd: sd}
+	rm.initBuckets(defaultWaitBucketCount, 16)
+	return rm
+}
+
 func TestRpcMonitorAdd_WhenSchedulerFails_CallDoesNotHang(t *testing.T) {
-	rm := &RpcMonitor{sd: &errScheduler{}, waitMap: make(map[uint64]*CallState)}
+	rm := newTestRpcMonitor(&errScheduler{})
 	st := NewCallState(context.Background(), 1, "m", time.Second, nil, nil, nil)
 
 	done := make(chan struct{})
@@ -103,7 +109,7 @@ func TestRpcMonitorAdd_WhenSchedulerFails_AsyncCallbackFires(t *testing.T) {
 		}
 	}}
 
-	rm := &RpcMonitor{sd: &errScheduler{}, waitMap: make(map[uint64]*CallState)}
+	rm := newTestRpcMonitor(&errScheduler{})
 	st := NewCallState(context.Background(), 2, "m", time.Second, disp, []dto.CompletionFunc{
 		func(ctx context.Context, _ interface{}, _ error, _ ...interface{}) {},
 	}, nil)

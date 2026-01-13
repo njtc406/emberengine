@@ -6,10 +6,11 @@
 package mpmc
 
 import (
-	"math/bits"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
 
 const maxBackoff uint32 = 8 // 最大退避时间(最大退避3次)
@@ -46,7 +47,7 @@ func NewQueue[T any](capacity int64) *Queue[T] {
 		panic("capacity must be > 0")
 	}
 	if capacity&(capacity-1) != 0 {
-		capacity = roundUpToPowerOfTwo(capacity)
+		capacity = util.RoundUpToPowerOfTwoInt64(capacity)
 	}
 	buffer := make([]slot[T], capacity)
 	// 初始化每个槽的 sequence 为槽的下标
@@ -60,15 +61,6 @@ func NewQueue[T any](capacity int64) *Queue[T] {
 		head:   0,
 		tail:   0,
 	}
-}
-
-// roundUpToPowerOfTwo 向上取整到 2 的幂次方
-func roundUpToPowerOfTwo(v int64) int64 {
-	if v <= 0 {
-		return 1024
-	}
-	// 将 v-1 转换为 uint64 后计算前导零
-	return int64(1) << (64 - bits.LeadingZeros64(uint64(v-1)))
 }
 
 // Push 入队操作 并发安全

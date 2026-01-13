@@ -32,7 +32,6 @@ func benchInitMonitor() {
 		timingwheel.Start(time.Millisecond, 64, log.SysLogger)
 
 		rm := GetRpcMonitor()
-		rm.Init()
 		rm.Start()
 	})
 }

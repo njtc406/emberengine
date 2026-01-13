@@ -140,6 +140,8 @@ func setDefaultValues() {
 		RpcMonitorConf: &RpcMonitorConf{
 			MonitorTimerSize:  def.DefaultMonitorTimerSize,
 			MonitorBucketSize: def.DefaultMonitorBucketSize,
+			WaitBucketCount:   256,
+			WaitBucketInitCap: 0,
 		},
 		TimingWheelConf: &TimingWheelConf{
 			Interval:  time.Millisecond * 10,

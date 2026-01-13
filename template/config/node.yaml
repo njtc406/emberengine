@@ -20,6 +20,10 @@ NodeConf:
     MonitorTimerSize: 10000
     # 定时器桶数量(决定锁的粒度)
     MonitorBucketSize: 20
+    # 等待表分桶数量(用于降低锁竞争，建议为2的幂；非2的幂会自动向上取整)
+    WaitBucketCount: 256
+    # 每个桶内 map 初始容量；配置<=0表示自动推导(基于 MonitorTimerSize / WaitBucketCount，且最小为16)
+    WaitBucketInitCap: 0
     # RPC 调用默认超时时间(不配置则默认1秒)
     # 这是业务层 RPC 调用的超时时间，应设置得较严格以快速失败
     DefaultRpcTimeout: 1s
