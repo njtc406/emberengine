@@ -255,7 +255,8 @@ func (w *Worker) discardExec(e inf.IEvent) {
 		e.Release()
 	}()
 
-	_ = ctx // 预留：后续可记录日志/trace
+	// 记录日志
+	w.pool.logger.WithContext(ctx).Errorf("Worker %d discard event %v", w.workerId, evt)
 }
 
 // safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析：
