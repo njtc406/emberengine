@@ -110,23 +110,16 @@ func (w *Worker) GetWorkerId() int {
 // SubmitEvent 提交事件到队列
 func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent, mctx inf.IMiddlewareContext) error {
 	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
-	for {
-		if w.closing.Load() || w.closed.Load() {
-			return def.ErrMailboxWorkerClosed
-		}
-		w.submitters.Add(1)
-		// If Stop flipped closing concurrently, back out and refuse.
-		if w.closing.Load() || w.closed.Load() {
-			w.submitters.Add(-1)
-			return def.ErrMailboxWorkerClosed
-		}
-		break
-	}
-	defer w.submitters.Add(-1)
-
-	if w.closed.Load() {
+	if w.closing.Load() || w.closed.Load() {
 		return def.ErrMailboxWorkerClosed
 	}
+	w.submitters.Add(1)
+	// If Stop flipped closing concurrently, back out and refuse.
+	if w.closing.Load() || w.closed.Load() {
+		w.submitters.Add(-1)
+		return def.ErrMailboxWorkerClosed
+	}
+	defer w.submitters.Add(-1)
 
 	if w.queueManager == nil {
 		return def.ErrMailboxWorkerChannelNotInit
