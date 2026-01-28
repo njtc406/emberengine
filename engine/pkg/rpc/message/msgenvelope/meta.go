@@ -164,6 +164,9 @@ type Meta struct {
 	receiverPid *actor.PID         // 接收者
 	sender      inf.IRpcDispatcher // 发送者客户端(用于回复)
 	reqID       uint64             // 请求ID(主要用于monitor区分不同的call)
+	deadline    int64              // 超时时间(单位: 纳秒)
+	callbacks   dto.CompletionFuncs
+	cbParams    []interface{}
 }
 
 func (e *Meta) Reset() {
@@ -171,6 +174,9 @@ func (e *Meta) Reset() {
 	e.receiverPid = nil
 	e.sender = nil
 	e.reqID = 0
+	e.deadline = 0
+	e.callbacks = nil
+	e.cbParams = nil
 }
 
 func (e *Meta) SetSenderPid(senderPid *actor.PID) {
@@ -196,6 +202,18 @@ func (e *Meta) SetReqId(reqId uint64) {
 	defer e.locker.Unlock()
 	e.reqID = reqId
 }
+func (e *Meta) SetDeadline(deadline int64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.deadline = deadline
+}
+
+func (e *Meta) SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.callbacks = callbacks
+	e.cbParams = cbParams
+}
 
 func (e *Meta) GetSenderPid() *actor.PID {
 	e.locker.RLock()
@@ -219,4 +237,16 @@ func (e *Meta) GetReqId() uint64 {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.reqID
+}
+
+func (e *Meta) GetDeadline() int64 {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.deadline
+}
+
+func (e *Meta) GetCallback() (callback dto.CompletionFuncs, cbParams []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	return e.callbacks, e.cbParams
 }

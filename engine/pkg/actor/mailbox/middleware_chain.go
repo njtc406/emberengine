@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -21,7 +23,7 @@ import (
 // MiddlewareContext 是 IMiddlewareContext 的默认实现
 type MiddlewareContext struct {
 	ctx         context.Context
-	evt         inf.IEvent
+	job         inf.IMailboxJob
 	serviceName string
 	startTime   time.Time
 	executed    atomic.Int32
@@ -30,10 +32,10 @@ type MiddlewareContext struct {
 }
 
 // NewMiddlewareContext 创建中间件上下文
-func NewMiddlewareContext(ctx context.Context, evt inf.IEvent, serviceName string) *MiddlewareContext {
+func NewMiddlewareContext(ctx context.Context, job inf.IMailboxJob, serviceName string) *MiddlewareContext {
 	return &MiddlewareContext{
 		ctx:         ctx,
-		evt:         evt,
+		job:         job,
 		serviceName: serviceName,
 		startTime:   time.Now(),
 		data:        make(map[string]interface{}, 8), // 增加初始容量以减少扩容
@@ -44,8 +46,8 @@ func (c *MiddlewareContext) Context() context.Context {
 	return c.ctx
 }
 
-func (c *MiddlewareContext) Event() inf.IEvent {
-	return c.evt
+func (c *MiddlewareContext) Job() inf.IMailboxJob {
+	return c.job
 }
 
 func (c *MiddlewareContext) ServiceName() string {
@@ -101,9 +103,9 @@ func (c *MiddlewareContext) Elapsed() time.Duration {
 }
 
 // Reset 重置上下文以便复用（对象池场景）
-func (c *MiddlewareContext) Reset(ctx context.Context, evt inf.IEvent, serviceName string) {
+func (c *MiddlewareContext) Reset(ctx context.Context, job inf.IMailboxJob, serviceName string) {
 	c.ctx = ctx
-	c.evt = evt
+	c.job = job
 	c.serviceName = serviceName
 	c.startTime = time.Now()
 	c.executed.Store(0)
@@ -153,8 +155,8 @@ func (c *MiddlewareChain) Remove(name string) bool {
 }
 
 // ExecuteOnReceive 执行所有中间件的 OnReceive
-func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, evt inf.IEvent, serviceName string) (inf.MiddlewareResult, inf.IMiddlewareContext) {
-	mctx := NewMiddlewareContext(ctx, evt, serviceName)
+func (c *MiddlewareChain) ExecuteOnReceive(job inf.IMailboxJob, serviceName string) (dto.MiddlewareResult, inf.IMiddlewareContext) {
+	mctx := NewMiddlewareContext(job.GetContext(), job, serviceName)
 
 	c.mu.RLock()
 	middlewares := c.middlewares
@@ -163,19 +165,19 @@ func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, evt inf.IEvent, 
 	for i, m := range middlewares {
 		result := m.OnReceive(mctx)
 		switch result.Action {
-		case inf.ActionReject:
+		case def.ActionReject:
 			mctx.executed.Store(int32(i + 1))
 			return result, mctx
-		case inf.ActionSkip:
+		case def.ActionSkip:
 			// 仅执行到当前中间件为止（包含当前），跳过后续中间件。
 			mctx.executed.Store(int32(i + 1))
-			return inf.Continue(), mctx
-		case inf.ActionContinue:
+			return dto.Continue(), mctx
+		case def.ActionContinue:
 			continue
 		}
 	}
 	mctx.executed.Store(int32(len(middlewares)))
-	return inf.Continue(), mctx
+	return dto.Continue(), mctx
 }
 
 // ExecuteOnComplete 执行所有中间件的 OnComplete（逆序）

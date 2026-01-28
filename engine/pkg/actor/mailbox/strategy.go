@@ -79,7 +79,7 @@ func newMaxLoadStrategy(_ []AutoScalerStrategy, params map[string]interface{}) A
 
 func (d *MaxLoadStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	for _, w := range workers {
-		if w.GetMsgLen() > d.MaxLoadThreshold {
+		if w.GetJobLen() > d.MaxLoadThreshold {
 			return true
 		}
 	}
@@ -93,7 +93,7 @@ func (d *MaxLoadStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int)
 
 	idleCount := 0
 	for _, w := range workers {
-		if w.GetMsgLen() == 0 {
+		if w.GetJobLen() == 0 {
 			idleCount++
 		}
 	}

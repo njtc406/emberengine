@@ -5,8 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
 // Guard provides a minimal, backend-agnostic leadership guard.
@@ -80,22 +81,10 @@ func (g *Guard) Ctx() context.Context {
 // OnEvent consumes a framework event and updates leadership state.
 //
 // It returns true if leadership state changed.
-func (g *Guard) OnEvent(ctx context.Context, ev inf.IEvent) bool {
-	if ev == nil {
-		return false
-	}
-
-	typeVal := ev.GetType()
-	switch typeVal {
+func (g *Guard) OnEvent(ctx context.Context, eventType def.EventType, stateData *actor.MasterStateData) bool {
+	switch eventType {
 	case event.ServiceBecomeMaster:
-		// 从 Event.Data 中获取 epoch 信息
-		var newEpoch int64
-		if data, ok := ev.(*event.Event); ok {
-			if stateData, ok := data.Data.(*event.MasterStateData); ok {
-				newEpoch = stateData.NewEpoch
-			}
-		}
-		return g.becomeLeader(newEpoch)
+		return g.becomeLeader(stateData.GetNewEpoch())
 
 	case event.ServiceLoseMaster, event.ServiceBecomeSlaver, event.ServiceDisconnected:
 		return g.loseLeader()

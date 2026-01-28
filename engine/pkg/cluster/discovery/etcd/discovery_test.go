@@ -9,10 +9,18 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	mvccpb "go.etcd.io/etcd/api/v3/mvccpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/protobuf/proto"
 )
+
+type captureEventChannel struct {
+	ch chan inf.IEvent
+}
+
+func (c *captureEventChannel) PushEvent(evt inf.IEvent) error {
+	c.ch <- evt
+	return nil
+}
 
 // mock provider implements IClientProvider
 type mockProvider struct {
@@ -32,35 +40,6 @@ func (m *mockProvider) GetPrefix(ctx context.Context, key string) (*clientv3.Get
 	return m.getResp, nil
 }
 
-// mock processor captures pushed events
-type mockProcessor struct{ got []inf.IEvent }
-
-func (p *mockProcessor) Init(_ inf.IListener)                                                   {}
-func (p *mockProcessor) EventHandler(ctx context.Context, ev inf.IEvent)                        {}
-func (p *mockProcessor) RegEventReceiverFunc(int32, inf.IEventHandler, inf.EventCallBack)       {}
-func (p *mockProcessor) UnRegEventReceiverFun(int32, inf.IEventHandler)                         {}
-func (p *mockProcessor) RegGlobalEventReceiverFunc(int32, inf.IEventHandler, inf.EventCallBack) {}
-func (p *mockProcessor) UnRegGlobalEventReceiverFun(int32, inf.IEventHandler)                   {}
-func (p *mockProcessor) PublishGlobal(context.Context, int32, proto.Message) error              { return nil }
-func (p *mockProcessor) RegServerEventReceiverFunc(int32, inf.IEventHandler, inf.EventCallBack) {}
-func (p *mockProcessor) UnRegServerEventReceiverFun(int32, inf.IEventHandler)                   {}
-func (p *mockProcessor) PublishServer(context.Context, int32, proto.Message) error              { return nil }
-func (p *mockProcessor) RegSpecificEventReceiverFunc(int32, string, inf.IEventHandler, inf.EventCallBack) {
-}
-func (p *mockProcessor) UnRegSpecificEventReceiverFun(int32, string, inf.IEventHandler) {}
-func (p *mockProcessor) PublishSpecific(context.Context, int32, string, proto.Message) error {
-	return nil
-}
-func (p *mockProcessor) CastEvent(ctx context.Context, ev inf.IEvent)             {}
-func (p *mockProcessor) AddBindEvent(int32, inf.IEventHandler, inf.EventCallBack) {}
-func (p *mockProcessor) AddListen(int32, inf.IEventHandler)                       {}
-func (p *mockProcessor) RemoveBindEvent(int32, inf.IEventHandler)                 {}
-func (p *mockProcessor) RemoveListen(int32, inf.IEventHandler)                    {}
-func (p *mockProcessor) PushEvent(ctx context.Context, ev inf.IEvent) error {
-	p.got = append(p.got, ev)
-	return nil
-}
-
 func TestWatchLoopPushesEvents(t *testing.T) {
 	if log.SysLogger == nil {
 		log.Init(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "debug"}, true)
@@ -74,24 +53,45 @@ func TestWatchLoopPushesEvents(t *testing.T) {
 	watchCh <- clientv3.WatchResponse{Events: []*clientv3.Event{{Type: clientv3.EventTypePut, Kv: kv}}}
 
 	mp := &mockProvider{connected: true, watchCh: watchCh, getResp: &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{kv}}}
-	proc := &mockProcessor{}
 
-	e := &EtcdDiscovery{ctx: ctx, provider: mp, proc: proc, conf: &config.DiscoveryConf{Path: "/ember/service"}}
+	capture := &captureEventChannel{ch: make(chan inf.IEvent, 8)}
+
+	// 不调用 Init：Init 会创建真实 etcd client。
+	// 这里直接注入 provider/evtCh/context/conf，验证 watchLoop/syncInitialState 是否按约定推送事件。
+	e := &EtcdDiscovery{}
+	e.ctx = ctx
+	e.cancel = cancel
+	e.conf = &config.DiscoveryConf{Path: "/ember/service"}
+	e.provider = mp
+	e.evtCh = capture
 
 	// run watch loop briefly
 	go e.watchLoop()
 	go e.syncInitialState()
-	// allow goroutines to process
-	time.Sleep(100 * time.Millisecond)
-	cancel()
-	// check that events were pushed
-	if len(proc.got) == 0 {
-		t.Fatalf("expected events pushed, got 0")
+
+	// 预期：syncInitialState 推 1 个 SysEventETCDPut，watchLoop 再推 1 个 SysEventETCDPut
+	var got []inf.IEvent
+	deadline := time.After(1 * time.Second)
+	for len(got) < 2 {
+		select {
+		case ev := <-capture.ch:
+			got = append(got, ev)
+		case <-deadline:
+			t.Fatalf("timeout waiting events, got=%d", len(got))
+		}
 	}
-	// types should be either put or del
-	for _, ev := range proc.got {
-		if ev.GetType() != event.SysEventETCDPut && ev.GetType() != event.SysEventETCDDel {
-			t.Fatalf("unexpected event type: %d", ev.GetType())
+	cancel()
+
+	for i, ev := range got {
+		if ev.GetEventType() != event.SysEventETCDPut {
+			t.Fatalf("event[%d] type mismatch: got=%v", i, ev.GetEventType())
+		}
+		data, ok := ev.GetData().(*mvccpb.KeyValue)
+		if !ok || data == nil {
+			t.Fatalf("event[%d] data type mismatch: %T", i, ev.GetData())
+		}
+		if string(data.Key) != "k" || string(data.Value) != "v" {
+			t.Fatalf("event[%d] kv mismatch: key=%s value=%s", i, string(data.Key), string(data.Value))
 		}
 	}
 }

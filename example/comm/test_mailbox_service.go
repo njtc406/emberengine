@@ -12,13 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
+	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -92,67 +93,53 @@ func (s *MailboxTestService) OnInit() error {
 
 // registerEventHandlers 注册事件处理器
 func (s *MailboxTestService) registerEventHandlers() {
-	// 注册系统消息处理器
-	s.RegisterUserHandler(EventTypeSystem, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleSystemMessage(data)
-			}
-		}
-	})
+	reg := s.GetEventHandlerRegistry()
+	if reg == nil {
+		log.SysLogger.Errorf("[%s] event handler registry is nil", s.GetName())
+		return
+	}
 
-	// 注册紧急消息处理器
-	s.RegisterUserHandler(EventTypeUrgent, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleUrgentMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeSystem), "mailbox_test_system", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleSystemMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册高优先级消息处理器
-	s.RegisterUserHandler(EventTypeHigh, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleHighPriorityMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeUrgent), "mailbox_test_urgent", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleUrgentMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册普通消息处理器
-	s.RegisterUserHandler(EventTypeNormal, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleNormalMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeHigh), "mailbox_test_high", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleHighPriorityMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册低优先级消息处理器
-	s.RegisterUserHandler(EventTypeLow, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleLowPriorityMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeNormal), "mailbox_test_normal", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleNormalMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册批量消息处理器
-	s.RegisterUserHandler(EventTypeBatch, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleBatchMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeLow), "mailbox_test_low", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleLowPriorityMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册后台消息处理器
-	s.RegisterUserHandler(EventTypeBackground, func(ctx context.Context, ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleBackgroundMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeBatch), "mailbox_test_batch", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleBatchMessage(v.Value)
 		}
+		return nil
+	})
+	_ = reg.RegisterEvent(def.EventType(EventTypeBackground), "mailbox_test_background", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleBackgroundMessage(v.Value)
+		}
+		return nil
 	})
 }
 
@@ -201,37 +188,43 @@ func (s *MailboxTestService) useCustomConfig() {
 // scheduleTests 调度测试任务
 func (s *MailboxTestService) scheduleTests() {
 	// 测试1: 基础优先级测试 - 1秒后执行
-	s.AfterFunc(time.Second*1, "基础优先级测试", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*1, "基础优先级测试", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testBasicPriority()
 		return nil
 	})
 
 	// 测试2: 混合优先级并发测试 - 3秒后执行
-	s.AfterFunc(time.Second*3, "混合优先级并发测试", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*3, "混合优先级并发测试", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testMixedPriorityConcurrent()
 		return nil
 	})
 
 	// 测试3: 优先级顺序验证测试 - 6秒后执行
-	s.AfterFunc(time.Second*6, "优先级顺序验证测试", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*6, "优先级顺序验证测试", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testPriorityOrder()
 		return nil
 	})
 
 	// 测试4: 性能压测 - 9秒后执行
-	s.AfterFunc(time.Second*9, "性能压测", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*9, "性能压测", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testPerformance()
 		return nil
 	})
 
 	// 测试5: 调度策略验证 - 15秒后执行
-	s.AfterFunc(time.Second*15, "调度策略验证", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*15, "调度策略验证", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testSchedulingStrategy()
 		return nil
 	})
 
 	// 统计报告 - 20秒后输出
-	s.AfterFunc(time.Second*20, "统计报告", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*20, "统计报告", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.printStatistics()
 		return nil
 	})
@@ -489,14 +482,35 @@ func (s *MailboxTestService) postMessageWithPriority(ctx context.Context, priori
 
 // ==================== 各优先级消息处理方法 ====================
 
+func (s *MailboxTestService) postPriorityEvent(ctx context.Context, eventType def.EventType, priority def.Priority, message string) {
+	anyMsg, err := codec.EncodeToAny(wrapperspb.String(message))
+	if err != nil {
+		log.SysLogger.Errorf("[%s] encode event payload failed: %v", s.GetName(), err)
+		return
+	}
+
+	evt := &actor.Event{
+		Type:          int32(eventType),
+		Priority:      int32(priority),
+		DispatcherKey: message,
+		Payload:       anyMsg,
+	}
+
+	j := mbjob.NewEventBusJob()
+	j.SetContext(ctx)
+	j.SetPriority(priority)
+	j.SetDispatcherKey(message)
+	j.SetPayload(evt)
+
+	if err := s.PostJob(j); err != nil {
+		j.Release()
+		log.SysLogger.Errorf("[%s] post event job failed: %v", s.GetName(), err)
+	}
+}
+
 // PostSystemPriorityMessage 系统优先级消息
 func (s *MailboxTestService) PostSystemPriorityMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeSystem
-	evt.Data = message
-	evt.Priority = def.PrioritySys
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeSystem), def.PrioritySys, message)
 }
 
 func (s *MailboxTestService) HandleSystemMessage(message string) {
@@ -513,12 +527,7 @@ func (s *MailboxTestService) HandleSystemMessage(message string) {
 
 // PostUrgentMessage 紧急消息
 func (s *MailboxTestService) PostUrgentMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeUrgent
-	evt.Data = message
-	evt.Priority = def.PriorityUrgent
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeUrgent), def.PriorityUrgent, message)
 }
 
 func (s *MailboxTestService) HandleUrgentMessage(message string) {
@@ -534,12 +543,7 @@ func (s *MailboxTestService) HandleUrgentMessage(message string) {
 
 // PostHighPriorityMessage 高优先级消息
 func (s *MailboxTestService) PostHighPriorityMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeHigh
-	evt.Data = message
-	evt.Priority = def.PriorityHigh
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeHigh), def.PriorityHigh, message)
 }
 
 func (s *MailboxTestService) HandleHighPriorityMessage(message string) {
@@ -555,12 +559,7 @@ func (s *MailboxTestService) HandleHighPriorityMessage(message string) {
 
 // PostNormalMessage 普通消息
 func (s *MailboxTestService) PostNormalMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeNormal
-	evt.Data = message
-	evt.Priority = def.PriorityNormal
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeNormal), def.PriorityNormal, message)
 }
 
 func (s *MailboxTestService) HandleNormalMessage(message string) {
@@ -576,12 +575,7 @@ func (s *MailboxTestService) HandleNormalMessage(message string) {
 
 // PostLowPriorityMessage 低优先级消息
 func (s *MailboxTestService) PostLowPriorityMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeLow
-	evt.Data = message
-	evt.Priority = def.PriorityLow
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeLow), def.PriorityLow, message)
 }
 
 func (s *MailboxTestService) HandleLowPriorityMessage(message string) {
@@ -597,12 +591,7 @@ func (s *MailboxTestService) HandleLowPriorityMessage(message string) {
 
 // PostBatchMessage 批量消息
 func (s *MailboxTestService) PostBatchMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeBatch
-	evt.Data = message
-	evt.Priority = def.PriorityBatch
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeBatch), def.PriorityBatch, message)
 }
 
 func (s *MailboxTestService) HandleBatchMessage(message string) {
@@ -618,12 +607,7 @@ func (s *MailboxTestService) HandleBatchMessage(message string) {
 
 // PostBackgroundMessage 后台消息
 func (s *MailboxTestService) PostBackgroundMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeBackground
-	evt.Data = message
-	evt.Priority = def.PriorityBackground
-
-	s.GetMailbox().PostMessage(ctx, evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeBackground), def.PriorityBackground, message)
 }
 
 func (s *MailboxTestService) HandleBackgroundMessage(message string) {

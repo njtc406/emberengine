@@ -20,11 +20,11 @@ import (
 // 职责：管理多个优先级队列，按照调度策略返回下一个待处理消息
 // 调度策略：由 PriorityScheduler 决定（绝对优先/加权/公平）
 type PriorityQueueManager struct {
-	queues           map[def.Priority]queue[inf.IEvent] // 各优先级队列
-	scheduler        *PriorityScheduler                 // 优先级调度器
-	batchSizes       map[def.Priority]int               // 各优先级批量大小
-	sortedPriorities []def.Priority                     // 预排序的优先级列表（数值小的优先级高）
-	totalBatchLimit  int                                // 单次处理的总批次限制
+	queues           map[def.Priority]queue[inf.IMailboxJob] // 各优先级队列
+	scheduler        *PriorityScheduler                      // 优先级调度器
+	batchSizes       map[def.Priority]int                    // 各优先级批量大小
+	sortedPriorities []def.Priority                          // 预排序的优先级列表（数值小的优先级高）
+	totalBatchLimit  int                                     // 单次处理的总批次限制
 
 	// 内存复用池
 	availablePrioritiesPool sync.Pool
@@ -38,7 +38,7 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 	}
 
 	m := &PriorityQueueManager{
-		queues:           make(map[def.Priority]queue[inf.IEvent]),
+		queues:           make(map[def.Priority]queue[inf.IMailboxJob]),
 		batchSizes:       make(map[def.Priority]int),
 		sortedPriorities: make([]def.Priority, 0, len(conf.PriorityBatches)),
 	}
@@ -57,7 +57,7 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 	// 初始化各优先级队列
 	totalBatchSize := 0
 	for priority, pc := range conf.PriorityBatches {
-		m.queues[priority] = mpsc.New[inf.IEvent]()
+		m.queues[priority] = mpsc.New[inf.IMailboxJob]()
 		m.batchSizes[priority] = pc.BatchSize
 		m.sortedPriorities = append(m.sortedPriorities, priority)
 		totalBatchSize += pc.BatchSize
@@ -86,7 +86,7 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 }
 
 // Submit 提交事件到对应优先级队列
-func (m *PriorityQueueManager) Submit(e inf.IEvent) error {
+func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 	priority := e.GetPriority()
 	que, exists := m.queues[priority]
 	if !exists {
@@ -97,9 +97,9 @@ func (m *PriorityQueueManager) Submit(e inf.IEvent) error {
 	return nil
 }
 
-// NextEvent 获取下一个待处理事件
+// NextJob 获取下一个待处理事件
 // 调度策略：根据调度器策略选择优先级，然后从对应队列弹出消息
-func (m *PriorityQueueManager) NextEvent() (inf.IEvent, bool) {
+func (m *PriorityQueueManager) NextJob() (inf.IMailboxJob, bool) {
 	// 从对象池获取可复用切片
 	availableSlice := m.availablePrioritiesPool.Get().([]def.Priority)
 	available := availableSlice[:0]
@@ -133,8 +133,8 @@ func (m *PriorityQueueManager) NextEvent() (inf.IEvent, bool) {
 	return nil, false
 }
 
-// GetMsgLen 获取所有队列的总消息数量
-func (m *PriorityQueueManager) GetMsgLen() int {
+// GetJobLen 获取所有队列的总消息数量
+func (m *PriorityQueueManager) GetJobLen() int {
 	total := 0
 	for _, que := range m.queues {
 		total += que.Len()
@@ -143,7 +143,7 @@ func (m *PriorityQueueManager) GetMsgLen() int {
 }
 
 // DrainAll 清空所有队列
-func (m *PriorityQueueManager) DrainAll(handler func(inf.IEvent)) {
+func (m *PriorityQueueManager) DrainAll(handler func(inf.IMailboxJob)) {
 	// 按优先级从高到低处理剩余消息
 	for _, priority := range m.sortedPriorities {
 		que := m.queues[priority]

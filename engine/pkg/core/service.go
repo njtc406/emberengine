@@ -13,8 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -48,17 +50,17 @@ type Service struct {
 	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 	isPrimarySecondaryMode bool         // 是否是主从模式
 
-	mailbox              *mailbox.Mailbox // 邮箱
-	eventProcessor       *event.Processor // 事件管理器
-	globalEventProcessor *event.Processor // 全局事件管理器
+	mailbox *mailbox.Mailbox // 邮箱
+
+	eventProcessor *event.Processor // 事件管理器
 
 	profiler *profiler.Profiler // 性能监控
-
-	eventHandlers map[int32]EventHandler
 
 	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用) TODO 这个实际上已经在mailbox中做了,这里暂时废弃
 
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
+
+	jobRegistry *jobHandlerRegistry // Job 处理器注册表
 
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
@@ -99,6 +101,10 @@ func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 		if serviceInitConf.TimerConf.TimerBucketSize <= 0 {
 			serviceInitConf.TimerConf.TimerBucketSize = def.DefaultTimerBucketSize
 		}
+	}
+	// 事件通道大小
+	if serviceInitConf.EventChanSize <= 0 {
+		serviceInitConf.EventChanSize = def.DefaultEventChanSize
 	}
 
 	return serviceInitConf
@@ -180,19 +186,16 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.moduleName = s.name
 
 	// 创建事件处理器
-	s.eventProcessor = event.NewProcessor()
+	s.eventProcessor = event.NewTrigger()
 	s.eventProcessor.Init(s)
 	// 注册事件管理器
-	s.eventHandler = event.NewHandler()
+	s.eventHandler = event.NewTriggerHandler()
 	s.eventHandler.Init(s.eventProcessor)
-
-	s.globalEventProcessor = event.NewProcessor()
-	s.globalEventProcessor.Init(s)
 
 	s.IConcurrent = concurrent.NewTaskScheduler(s.ILoggerX)
 
-	// 注册事件处理函数
-	s.initEventHandlers()
+	// 注册 Job 处理函数
+	s.initJobHandlers()
 
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.Partition, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
@@ -277,13 +280,6 @@ func (s *Service) startListenCallback() {
 // Stop 同步停止服务：请求停止并等待完成。
 // 注意：不要在 mailbox worker 内调用此方法，会死锁！
 func (s *Service) Stop() {
-	s.RequestStop()
-	s.WaitStopped()
-}
-
-// RequestStop 请求停止（非阻塞）：向 mailbox 投递 FinalizeEvent。
-// 可在 mailbox worker 内安全调用。
-func (s *Service) RequestStop() {
 	// 防止重复投递
 	if !s.stopRequested.CompareAndSwap(false, true) {
 		return
@@ -306,64 +302,6 @@ func (s *Service) RequestStop() {
 		s.mailbox.Suspend()
 	}
 
-	// 投递 FinalizeEvent 到 mailbox，由 worker 在 actor 语义内执行清理
-	ev := event.NewEvent()
-	ev.Type = event.ServiceFinalize
-	ev.Priority = def.PriorityUrgent // 确保能通过挂起策略
-	if err := s.mailbox.PostMessage(xcontext.New(nil), ev); err != nil {
-		// 如果投递失败（mailbox 已关闭），先确保 mailbox 停止，再清理
-		ev.Release()
-		s.Warnf("FinalizeEvent post failed: %v, triggering direct finalize", err)
-		if s.mailbox != nil {
-			s.mailbox.BeginStop()
-		}
-		s.doFinalizeDirectly()
-	}
-}
-
-// WaitStopped 等待服务完全停止（阻塞）。
-// 注意：不要在 mailbox worker 内调用此方法，会死锁！
-func (s *Service) WaitStopped() {
-	if s.mailbox != nil {
-		s.mailbox.Wait()
-	}
-}
-
-// doFinalize 在 mailbox worker 内执行的清理逻辑（串行、无并发风险）。
-func (s *Service) doFinalize() {
-	s.doFinalizeCore()
-
-	// 等待窗口：允许短延迟回调/回复在关闭前最后进入并处理。
-	if s.stopGraceTimeout > 0 {
-		time.Sleep(s.stopGraceTimeout)
-	}
-
-	// 发起 mailbox 停止（不等待，当前就是在 worker 内）
-	if s.mailbox != nil {
-		s.mailbox.BeginStop()
-	}
-
-	if s.enableLogging && s.logger != nil {
-		log.Release(s.logger)
-	}
-
-	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
-}
-
-// doFinalizeDirectly 在 PostMessage 失败时由调用者协程直接执行清理。
-// 此时 mailbox 已经 BeginStop，不会有 worker 并发处理消息。
-func (s *Service) doFinalizeDirectly() {
-	s.doFinalizeCore()
-
-	if s.enableLogging && s.logger != nil {
-		log.Release(s.logger)
-	}
-
-	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
-}
-
-// doFinalizeCore 执行核心清理逻辑，供 doFinalize 和 doFinalizeDirectly 复用。
-func (s *Service) doFinalizeCore() {
 	// 关闭定时器
 	if s.ITimerScheduler != nil {
 		s.ITimerScheduler.Stop()
@@ -376,6 +314,12 @@ func (s *Service) doFinalizeCore() {
 
 	// 释放资源
 	s.release()
+
+	if s.enableLogging && s.logger != nil {
+		log.Release(s.logger)
+	}
+
+	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
 
 func (s *Service) release() {
@@ -392,30 +336,38 @@ func (s *Service) release() {
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
 	endpoints.GetEndpointManager().RemoveService(s)
-
 }
 
-func (s *Service) PushEvent(ctx context.Context, evt inf.IEvent) error {
-	//if !s.isRunning() {
-	//	return def.ErrServiceIsUnavailable
-	//}
-	// 所有权转移：调用方在 PushEvent 后不得再使用 evt。
-	// mailbox/service 会在处理完毕后 Release；若入队失败，这里负责释放避免泄露。
-	err := s.mailbox.PostMessage(ctx, evt)
-	if err != nil {
-		evt.Release()
-	}
-	return err
+func (s *Service) PostJob(job inf.IMailboxJob) error {
+	return s.mailbox.PostJob(job)
 }
 
 func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurrentCallback) error {
-	env := event.NewCallbackEnvelope(evt)
-	return s.mailbox.PostMessage(ctx, env)
+	j := job.NewConcurrentCallbackJob()
+	j.SetContext(ctx)
+	j.SetPriority(def.PriorityNormal)
+	j.SetDispatcherKey(uuid.NewString())
+	j.SetPayload(evt)
+	if err := s.mailbox.PostJob(j); err != nil {
+		log.SysLogger.Errorf("post job error: %v", err)
+		j.Release()
+		return err
+	}
+	return nil
 }
 
 func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) error {
-	env := event.NewTimerEnvelope(t, t.GetName()) // 保证相同的回调在同一个worker处理
-	return s.mailbox.PostMessage(ctx, env)
+	j := job.NewTimerJob()
+	j.SetContext(ctx)
+	j.SetPriority(def.PriorityNormal)
+	j.SetDispatcherKey(uuid.NewString())
+	j.SetPayload(t)
+	if err := s.mailbox.PostJob(j); err != nil {
+		log.SysLogger.Errorf("post job error: %v", err)
+		j.Release()
+		return err
+	}
+	return nil
 }
 
 func (s *Service) SetName(name string) {
@@ -482,14 +434,14 @@ func (s *Service) GetServiceCfg() interface{} {
 	return s.cfg
 }
 
-func (s *Service) safeExec(f func()) (err error) {
+func (s *Service) safeExec(f func() error) (err error) {
 	defer func() {
 		if err := recover(); err != nil {
 			s.Errorf("safe exec error: %v\ntrace:%s", err, debug.Stack())
 			err = fmt.Errorf("safe exec error: %v", err)
 		}
 	}()
-	f()
+	err = f()
 	return err
 }
 
@@ -514,8 +466,8 @@ func (s *Service) GetRpcHandler() inf.IRpcHandler {
 	return s.IRpcHandler
 }
 
-func (s *Service) EscalateFailure(ctx context.Context, reason interface{}, evt inf.IEvent) {
-	s.WithContext(ctx).Errorf("event[%d] EscalateFailure: %v", evt.GetType(), reason)
+func (s *Service) EscalateFailure(ctx context.Context, reason interface{}, j inf.IMailboxJob) {
+	s.WithContext(ctx).Errorf("job[%d] EscalateFailure: %v", j.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {

@@ -46,7 +46,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 	concurrentNum := 100000
 	wg.Add(concurrentNum)
 	var startTime time.Time
-	_, _ = s.AfterFunc(time.Second, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
+	_, _ = s.AfterFunc(time.Second, "test", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 		// 使用协程不断调用
 		startTime = timelib.Now()
 		for i := 0; i < concurrentNum; i++ {
@@ -154,8 +154,7 @@ func (s *ConcurrencyTest) OnInit() error {
 
 	var startTime time.Time
 
-	_, _ = s.AfterFunc(time.Second*1, "test", func(timer *timingwheel.Timer, args ...interface{}) error {
-
+	_, _ = s.AfterFunc(time.Second*1, "test", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 		var keys = make([]string, concurrency)
 		for i := 0; i < concurrency; i++ {
 			keys[i] = fmt.Sprintf("bench-%d", i)
@@ -210,11 +209,11 @@ func (s *ConcurrencyTest) OnInit() error {
 						}
 
 						// 根据配置决定是否每请求生成新 traceID
-						var ctx xcontext.XContext
+						var ctxx xcontext.XContext
 						if perReqTrace {
-							ctx = factory.NewContext() // 每请求新 traceID
+							ctxx = factory.NewContext() // 每请求新 traceID
 						} else {
-							ctx = factory.NewContextWithoutTrace() // 无 traceID，最高吞吐
+							ctxx = factory.NewContextWithoutTrace() // 无 traceID，最高吞吐
 						}
 
 						var start time.Time
@@ -223,7 +222,7 @@ func (s *ConcurrencyTest) OnInit() error {
 						}
 						switch testType {
 						case "send":
-							err := s.Select(rpc.WithName(ServiceName2)).Send(ctx, "abc", nil)
+							err := s.Select(rpc.WithName(ServiceName2)).Send(ctxx, "abc", nil)
 							if err != nil {
 								errCount.Add(1)
 								log.SysLogger.Errorf("call error: %v", err)

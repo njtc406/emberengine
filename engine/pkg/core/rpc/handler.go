@@ -18,15 +18,10 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 )
 
-var (
-	apiPreFix  = []string{"Api", "API"}
-	rpcPreFix  = []string{"Rpc", "RPC"}
-	emptyError = reflect.TypeOf((*error)(nil))
-)
+var emptyError = reflect.TypeOf((*error)(nil))
 
 // MethodMgr 管理所有注册的方法
 type MethodMgr struct {
@@ -56,7 +51,7 @@ func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if hasPrefix(name, rpcPreFix) {
+	if hasRpcPrefix(name) {
 		m.rpcCnt++
 	}
 	m.methodMap[name] = fn
@@ -75,7 +70,7 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 	oldRpcCnt := m.rpcCnt
 	for _, name := range names {
 		delete(m.methodMap, name)
-		if hasPrefix(name, rpcPreFix) {
+		if hasRpcPrefix(name) {
 			m.rpcCnt--
 		}
 		if m.rpcCnt < 0 {
@@ -140,7 +135,7 @@ func (h *Handler) isExportedOrBuiltinType(t reflect.Type) bool {
 
 func (h *Handler) suitableMethods(method reflect.Method) error {
 	// 只注册以 Api 或 Rpc 开头的方法
-	if !hasPrefix(method.Name, apiPreFix) && !hasPrefix(method.Name, rpcPreFix) {
+	if !hasApiPrefix(method.Name) && !hasRpcPrefix(method.Name) {
 		return nil
 	}
 
@@ -309,7 +304,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 	}
 }
 
-func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) {
+func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) error {
 	meta := envelope.GetMeta()
 	data := envelope.GetData()
 	defer func() {
@@ -328,15 +323,16 @@ func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) {
 	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {
 		data.SetError(def.ErrMethodNotFound)
-		return
+		return nil
 	}
 	resp, err := call(ctx, data.GetRequest())
 	if err != nil {
 		h.WithContext(ctx).Errorf("method call failed:%v", err)
 		data.SetError(err)
-		return
+		return nil
 	}
 	data.SetResponse(resp)
+	return nil
 }
 
 func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
@@ -376,12 +372,13 @@ func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
 	respMeta.SetDispatcher(dispatcher)
 	respEnv.SetMeta(respMeta)
 
-	if err := dispatcher.Deliver(ctx, respEnv); err != nil {
+	if err := dispatcher.DeliverResponse(ctx, respEnv); err != nil {
 		h.WithContext(ctx).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
+		respEnv.Release()
 	}
 }
 
-func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) {
+func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) error {
 	defer func() {
 		if r := recover(); r != nil {
 			h.WithContext(ctx).Errorf("service[%s] handle message panic: %v\n trace:%s",
@@ -392,16 +389,17 @@ func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) {
 	meta := envelope.GetMeta()
 	data := envelope.GetData()
 	if meta == nil || data == nil {
-		return
+		return nil
 	}
 
-	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
-	if state == nil {
-		return
+	cb, params := meta.GetCallback()
+	if cb == nil {
+		return nil
 	}
 
-	state.SetResult(data.GetResponse(), data.GetError())
-	state.Complete()
+	cb.DoCallback(ctx, data.GetResponse(), data.GetError(), params...)
+
+	return nil
 }
 
 func (h *Handler) GetMethods() []string {

@@ -93,12 +93,6 @@ func (e *Data) SetNeedResponse(need bool) {
 	e.needResp = need
 }
 
-//func (e *Data) SetRequestBuff(reqBuff *anypb.Any) {
-//	e.locker.Lock()
-//	defer e.locker.Unlock()
-//	e.requestBuff = reqBuff
-//}
-
 func (e *Data) GetMethod() string {
 	e.locker.RLock()
 	defer e.locker.RUnlock()

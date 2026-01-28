@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
@@ -150,7 +151,7 @@ func (m *CircuitBreakerMiddleware) OnStop() {
 	}
 }
 
-func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.MiddlewareResult {
+func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.MiddlewareResult {
 	atomic.AddUint64(&m.totalRequests, 1)
 
 	state := CircuitState(m.state.Load())
@@ -158,7 +159,7 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Mi
 	switch state {
 	case StateClosed:
 		// 关闭状态，直接放行
-		return inf.Continue()
+		return dto.Continue()
 
 	case StateOpen:
 		// 检查是否应该转换到半开状态（使用原子操作读取时间）
@@ -172,7 +173,7 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Mi
 				if m.logger != nil {
 					m.logger.Infof("CircuitBreaker state: open -> half-open")
 				}
-				return inf.Continue()
+				return dto.Continue()
 			}
 			// CAS 失败，说明其他线程已经转换了，重新检查状态
 			state = CircuitState(m.state.Load())
@@ -182,12 +183,12 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Mi
 			} else {
 				// 仍在打开状态或冷却时间未到，拒绝请求
 				atomic.AddUint64(&m.rejectedByBreak, 1)
-				return inf.Reject(ErrCircuitBreakerOpen)
+				return dto.Reject(ErrCircuitBreakerOpen)
 			}
 		} else {
 			// 冷却时间未到，拒绝请求
 			atomic.AddUint64(&m.rejectedByBreak, 1)
-			return inf.Reject(ErrCircuitBreakerOpen)
+			return dto.Reject(ErrCircuitBreakerOpen)
 		}
 		fallthrough
 
@@ -198,18 +199,18 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Mi
 			if current >= int32(m.halfOpenMaxAllowed) {
 				// 超过探测请求数限制
 				atomic.AddUint64(&m.rejectedByBreak, 1)
-				return inf.Reject(ErrCircuitBreakerOpen)
+				return dto.Reject(ErrCircuitBreakerOpen)
 			}
 			// 尝试 CAS 增加计数
 			if m.halfOpenReqs.CompareAndSwap(current, current+1) {
 				// 成功获取探测机会
-				return inf.Continue()
+				return dto.Continue()
 			}
 			// CAS 失败，重试
 		}
 	}
 
-	return inf.Continue()
+	return dto.Continue()
 }
 
 func (m *CircuitBreakerMiddleware) OnComplete(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {

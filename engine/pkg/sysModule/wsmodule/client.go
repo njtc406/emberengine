@@ -40,7 +40,7 @@ package wsmodule
 //	c.wg.Add(1)
 //	go c.listen()
 //	// 连接事件
-//	c.mgr.NotifyEvent(&event.Event{
+//	c.mgr.TriggerEvent(&event.Event{
 //		Type: event.SysEventWebSocket,
 //		Data: &WSPack{
 //			Type:      WPTConnected,
@@ -60,7 +60,7 @@ package wsmodule
 //		msg, err := c.conn.ReadMsg()
 //		if err != nil {
 //			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
-//			c.mgr.NotifyEvent(&event.Event{
+//			c.mgr.TriggerEvent(&event.Event{
 //				Type: event.SysEventWebSocket,
 //				Data: &WSPack{
 //					Type:      WPTDisConnected,
@@ -75,7 +75,7 @@ package wsmodule
 //		info, err := c.mgr.Unmarshal(msg)
 //		if err != nil {
 //			log.SysLogger.Errorf("Client receive msg error: %s", err)
-//			c.mgr.NotifyEvent(&event.Event{
+//			c.mgr.TriggerEvent(&event.Event{
 //				Type: event.SysEventWebSocket,
 //				Data: &WSPack{
 //					Type:      WPTUnknownPack,
@@ -123,7 +123,7 @@ package wsmodule
 //			err := c.conn.WriteMsg(buffer.Bytes())
 //			if err != nil {
 //				// TODO 这里看要不要处理一下这个错误,是直接踢掉玩家还是怎么,按理说是需要保证玩家收到每条消息的,如果没收到某个消息,可能造成状态不一致
-//				c.mgr.NotifyEvent(&event.Event{
+//				c.mgr.TriggerEvent(&event.Event{
 //					Type: event.SysEventWebSocket,
 //					Data: &WSPack{
 //						Type:      WPTWriteErr,
@@ -161,7 +161,7 @@ package wsmodule
 //
 //func (c *Client) OnClose() {
 //	// 这个事件放在这是为了保证只调用一次
-//	c.mgr.NotifyEvent(&event.Event{
+//	c.mgr.TriggerEvent(&event.Event{
 //		Type: event.SysEventWebSocket,
 //		Data: &WSPack{
 //			Type:      WPTDisConnected,
@@ -185,7 +185,7 @@ package wsmodule
 //	c.roleId = roleId
 //	// 绑定玩家数据才算运行中
 //	c.status.Store(running)
-//	c.mgr.NotifyEvent(&event.Event{
+//	c.mgr.TriggerEvent(&event.Event{
 //		Type: event.SysEventWebSocket,
 //		Data: &WSPack{
 //			Type:      WPTReady,

@@ -28,6 +28,22 @@ func New(ctx context.Context) XContext {
 	}
 }
 
+func NewWithCloneCtx(ctx context.Context) XContext {
+	if ctx == nil {
+		newCtx := emberctx.NewCtx(nil)
+		return XContext{
+			Context: newCtx,
+		}
+	}
+
+	headers := emberctx.GetHeader(ctx)
+	newCtx := emberctx.NewCtx(context.Background())
+	emberctx.AddHeaders(newCtx, headers)
+	return XContext{
+		Context: newCtx,
+	}
+}
+
 func NewWithTimeout(ctx context.Context, timeout time.Duration) (*XContext, context.CancelFunc) {
 	if ctx == nil {
 		ctx = emberctx.NewCtx(nil)

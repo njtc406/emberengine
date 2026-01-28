@@ -5,12 +5,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 // CallState 承载一次 RPC 调用（Call/AsyncCall）的等待/回调状态。
@@ -30,18 +32,21 @@ import (
 // (CallState 不包含锁，只包含轻量字段)
 type CallState struct {
 	dto.DataRef
-	name string
-	xcontext.XContext
+	name       string
+	ctx        context.Context
 	reqID      uint64
 	timerID    uint64
 	timeout    time.Duration // nanoseconds
 	method     string
 	dispatcher inf.IRpcDispatcher
-	callbacks  []dto.CompletionFunc
+	callbacks  dto.CompletionFuncs
 	cbParams   []interface{}
 	done       chan struct{}
 	resp       interface{}
 	err        error
+	// 并发回调参数
+	Priority      def.Priority
+	DispatcherKey string
 }
 
 var callStatePool pool.IPool[*CallState]
@@ -74,7 +79,7 @@ func newCallState() *CallState {
 
 func (s *CallState) Reset() {
 	s.name = ""
-	s.XContext.Reset()
+	s.ctx = nil
 	s.reqID = 0
 	s.timerID = 0
 	s.timeout = 0
@@ -105,7 +110,7 @@ func (s *CallState) GetName() string {
 
 func NewCallState(ctx context.Context, reqID uint64, method string, timeout time.Duration, dispatcher inf.IRpcDispatcher, callbacks []dto.CompletionFunc, cbParams []interface{}) *CallState {
 	s := newCallState()
-	s.XContext = xcontext.New(ctx)
+	s.ctx = ctx
 	s.reqID = reqID
 	s.method = method
 	s.timeout = timeout
@@ -143,28 +148,29 @@ func (s *CallState) NeedCallback() bool { return len(s.callbacks) > 0 }
 // - Call：唤醒 Wait()，由调用方在读取结果后手动 Release。
 func (s *CallState) Complete() {
 	if s.NeedCallback() {
-		// 已经在 mailbox goroutine 中，直接执行回调
-		s.DoCallback(s.XContext)
+		// 需要回调执行
+		envelopeResp := msgenvelope.NewMsgEnvelope()
+		meta := msgenvelope.NewMeta()
+		meta.SetCallbacks(s.callbacks, s.cbParams)
+		envelopeResp.SetMeta(meta)
+		data := msgenvelope.NewData()
+		data.SetReply()
+		data.SetResponse(s.Response())
+		data.SetError(s.Error())
+		envelopeResp.SetData(data)
+
+		rpcJob := job.NewRpcJob()
+		rpcJob.SetContext(s.ctx)
+		rpcJob.SetPayload(envelopeResp)
+		if err := s.dispatcher.PostJob(rpcJob); err != nil {
+			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+			rpcJob.Release()
+		}
+
 		getCallStatePool().Put(s)
 		return
 	}
 	s.signalDone()
-}
-
-// dispatchCallbackEvent 用于超时/失败场景，需要投递到 mailbox 执行回调。
-//
-// 此方法在 monitor goroutine 或定时器 goroutine 中调用，需要投递事件到 service mailbox。
-func (s *CallState) dispatchCallbackEvent() {
-	if s.dispatcher == nil || s.dispatcher.IsClosed() {
-		getCallStatePool().Put(s)
-		return
-	}
-	// 使用 CallbackEnvelope 包装投递
-	env := event.NewCallbackEnvelope(s)
-	if err := s.dispatcher.PostMessage(s.XContext, env); err != nil {
-		env.Release()
-		getCallStatePool().Put(s)
-	}
 }
 
 func (s *CallState) signalDone() {
@@ -183,6 +189,10 @@ func (s *CallState) DoCallback(ctx context.Context) {
 	for _, cb := range s.callbacks {
 		cb(ctx, s.resp, s.err, s.cbParams...)
 	}
+}
+
+func (s *CallState) GetCallbacks() ([]dto.CompletionFunc, []interface{}) {
+	return s.callbacks, s.cbParams
 }
 
 // Release 仅用于同步 Call 路径：调用方在 Wait 结束后手动释放。

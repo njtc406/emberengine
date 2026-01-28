@@ -1,5 +1,5 @@
 // Package interfaces
-// @Title  信封接口
+// @Title  rpc数据信封接口
 // @Description  desc
 // @Author  yr  2024/11/14
 // @Update  yr  2024/11/14
@@ -9,25 +9,34 @@ import (
 	"context"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type IEnvelope interface {
 	IDataDef
-	IEvent
 
 	// Set
 
 	SetMeta(meta IEnvelopeMeta)
 	SetData(data IEnvelopeData)
+	SetPriority(priority def.Priority)
+	SetDispatchKey(key string)
 
 	// Get
 
 	GetMeta() IEnvelopeMeta
 	GetData() IEnvelopeData
+	GetPriority() def.Priority
+	GetDispatchKey() string
 
 	// Option
+
 	ToProtoMsg(ctx context.Context) (*actor.Message, error)
+
+	// Release 释放信封资源
+	Release()
 }
 
 type IEnvelopeMeta interface {
@@ -38,6 +47,8 @@ type IEnvelopeMeta interface {
 	SetReceiverPid(receiver *actor.PID)
 	SetDispatcher(client IRpcDispatcher)
 	SetReqId(reqId uint64)
+	SetDeadline(deadline int64)
+	SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{})
 
 	// Get
 
@@ -45,6 +56,8 @@ type IEnvelopeMeta interface {
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher
 	GetReqId() uint64
+	GetDeadline() int64
+	GetCallback() (dto.CompletionFuncs, []interface{})
 }
 
 type IEnvelopeData interface {
@@ -58,7 +71,6 @@ type IEnvelopeData interface {
 	SetError(err error)
 	SetErrStr(err string)
 	SetNeedResponse(need bool)
-	//SetRequestBuff(reqBuff *anypb.Any)
 
 	// Get
 

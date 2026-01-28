@@ -1,6 +1,7 @@
 package timingwheel
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -16,11 +17,12 @@ func TestTimeAdjustment(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	// 启动callback channel的消费者
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -30,7 +32,7 @@ func TestTimeAdjustment(t *testing.T) {
 	var lastExecutionTime atomic.Int64
 
 	// 创建一个2秒后执行的任务 (缩短时间以便测试)
-	timerId, err := scheduler.AfterFunc(2*time.Second, "test_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.AfterFunc(2*time.Second, "test_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		executionCount.Add(1)
 		lastExecutionTime.Store(time.Now().Unix())
 		fmt.Printf("[%s] Task executed, count: %d\n", time.Now().Format("2006-01-02 15:04:05"), executionCount.Load())
@@ -95,11 +97,12 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	// 启动callback channel的消费者
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -112,7 +115,7 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 	timerIds := make([]uint64, 0, len(delays))
 
 	for i, delay := range delays {
-		id, err := scheduler.AfterFunc(delay, fmt.Sprintf("task_%d", i), func(timer *Timer, args ...interface{}) error {
+		id, err := scheduler.AfterFunc(delay, fmt.Sprintf("task_%d", i), func(ctx context.Context, timer *Timer, args ...interface{}) error {
 			executionCount.Add(1)
 			taskName := args[0].(string)
 			fmt.Printf("[%s] %s executed\n", time.Now().Format("15:04:05"), taskName)
@@ -164,11 +167,12 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	// 启动callback channel的消费者
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -177,7 +181,7 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	var executionCount atomic.Int32
 
 	// 创建一个每2秒执行的循环任务
-	timerId, err := scheduler.TickerFunc(2*time.Second, "ticker_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.TickerFunc(2*time.Second, "ticker_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
 		fmt.Printf("[%s] Ticker executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
@@ -228,7 +232,7 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	var executionCount atomic.Int32
 
 	// 创建一个3秒后执行的任务
-	timerId, err := scheduler.AfterFunc(3*time.Second, "test_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.AfterFunc(3*time.Second, "test_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		executionCount.Add(1)
 		fmt.Printf("[%s] Task executed\n", time.Now().Format("15:04:05"))
 		return nil
@@ -272,10 +276,11 @@ func TestCronTimerAdjustment(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -284,7 +289,7 @@ func TestCronTimerAdjustment(t *testing.T) {
 	var executionCount atomic.Int32
 
 	// 创建一个每10秒的Cron任务
-	timerId, err := scheduler.CronFunc("@every 10s", "cron_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.CronFunc("@every 10s", "cron_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
 		fmt.Printf("[%s] Cron task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
@@ -326,10 +331,11 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -338,7 +344,7 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 	var executionCount atomic.Int32
 
 	// 创建一个每5秒的Cron任务
-	timerId, err := scheduler.CronFunc("@every 5s", "frequent_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.CronFunc("@every 5s", "frequent_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
 		fmt.Printf("[%s] Cron task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
@@ -382,10 +388,11 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -396,7 +403,7 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 	// 模拟当前时间是早上5点
 	// 我们使用 @every 7h 来模拟每天12点的任务(因为从5点开始,7小时后是12点)
 	// 实际使用时应该用标准cron格式: "0 12 * * *"
-	timerId, err := scheduler.CronFunc("@every 7h", "daily_12pm_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.CronFunc("@every 7h", "daily_12pm_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
 		fmt.Printf("[%s] Daily 12PM task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil
@@ -440,10 +447,11 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 
 	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil, true)
 	defer scheduler.Stop()
+	ctx := context.Background()
 
 	go func() {
 		for timer := range scheduler.GetTimerCbChannel() {
-			if err := timer.Do(); err != nil {
+			if err := timer.Do(ctx); err != nil {
 				fmt.Printf("Timer execution error: %v\n", err)
 			}
 		}
@@ -452,7 +460,7 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	var executionCount atomic.Int32
 
 	// 创建一个每10秒的任务
-	timerId, err := scheduler.CronFunc("@every 10s", "backward_task", func(timer *Timer, args ...interface{}) error {
+	timerId, err := scheduler.CronFunc("@every 10s", "backward_task", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 		count := executionCount.Add(1)
 		fmt.Printf("[%s] Backward test task executed, count: %d\n", time.Now().Format("15:04:05"), count)
 		return nil

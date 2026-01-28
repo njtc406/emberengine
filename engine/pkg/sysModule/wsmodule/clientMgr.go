@@ -68,7 +68,7 @@ package wsmodule
 //	m.clients = make(map[int64]*Client)
 //	m.roleIdMap = make(map[string]*Client)
 //
-//	m.GetEventProcessor().RegEventReceiverFunc(event.SysEventWebSocket, m.GetEventHandler(), m.wsEventHandler)
+//	m.GetEventProcessor().RegEventReceiver(event.SysEventWebSocket, m.GetEventHandler(), m.wsEventHandler)
 //	return nil
 //}
 //

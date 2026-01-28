@@ -64,7 +64,7 @@ func CreateMiddlewaresFromConfig(conf *config.MailboxConf, logger log.ILoggerX, 
 		// 跳过紧急消息的限流
 		if rconf.SkipUrgent {
 			opts = append(opts, WithRateLimitSkipFunc(func(mctx inf.IMiddlewareContext) bool {
-				return mctx.Event().GetPriority() <= def.PriorityUrgent
+				return mctx.Job().GetPriority() <= def.PriorityUrgent
 			}))
 		}
 

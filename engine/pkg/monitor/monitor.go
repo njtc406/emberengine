@@ -28,13 +28,49 @@ type waitBucket struct {
 	m  map[uint64]*CallState
 }
 
+func (w *waitBucket) Get(seq uint64) *CallState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state, ok := w.m[seq]
+	if ok {
+		return state
+	}
+	return nil
+}
+
+func (w *waitBucket) Add(seq uint64, state *CallState) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.m[seq] = state
+}
+
+func (w *waitBucket) Del(seq uint64) *CallState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state, ok := w.m[seq]
+	delete(w.m, seq)
+	if ok {
+		return state
+	}
+	return nil
+}
+
+func (w *waitBucket) Clear() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, state := range w.m {
+		state.Release()
+	}
+	clear(w.m)
+}
+
 type RpcMonitor struct {
 	closed     atomic.Bool
 	ctx        context.Context
 	cancel     context.CancelFunc
 	epoch      uint64 // 启动纳秒时间戳左移44位，作为ID高位前缀（周期约1ms，不可能重启冲突）
 	seq        uint64 // 自增序列号（低44位，支持约339天@60万QPS）
-	buckets    []waitBucket
+	buckets    []*waitBucket
 	bucketMask uint64
 	sd         timingwheel.ITimerScheduler
 	wg         sync.WaitGroup
@@ -45,7 +81,7 @@ func (rm *RpcMonitor) bucketIndex(seqId uint64) int {
 }
 
 func (rm *RpcMonitor) bucket(seqId uint64) *waitBucket {
-	return &rm.buckets[rm.bucketIndex(seqId)]
+	return rm.buckets[rm.bucketIndex(seqId)]
 }
 
 const defaultWaitBucketCount = 256
@@ -55,12 +91,12 @@ func (rm *RpcMonitor) initBuckets(bucketCount int, initCap int) {
 		bucketCount = defaultWaitBucketCount
 	}
 	bucketCount = util.RoundUpToPowerOfTwoInt(bucketCount)
-	rm.buckets = make([]waitBucket, bucketCount)
+	rm.buckets = make([]*waitBucket, bucketCount)
 	for i := range rm.buckets {
 		if initCap > 0 {
-			rm.buckets[i].m = make(map[uint64]*CallState, initCap)
+			rm.buckets[i] = &waitBucket{m: make(map[uint64]*CallState, initCap)}
 		} else {
-			rm.buckets[i].m = make(map[uint64]*CallState)
+			rm.buckets[i] = &waitBucket{m: make(map[uint64]*CallState)}
 		}
 	}
 	rm.bucketMask = uint64(bucketCount - 1)
@@ -126,51 +162,31 @@ func (rm *RpcMonitor) Stop() {
 	if !rm.closed.CompareAndSwap(false, true) {
 		return
 	}
-	// 1) Stop the listen loop / scheduler first to prevent new timeout callbacks racing.
+	// 节点关闭时，所有 service 已停止，无需处理 pending 调用，直接释放资源
 	rm.cancel()
 	if rm.sd != nil {
 		rm.sd.Stop()
+		rm.sd = nil
 	}
-	// 2) Drain any remaining waiting states so callers don't hang and pooled states don't leak.
-	var pending []*CallState
-	for i := range rm.buckets {
-		b := &rm.buckets[i]
-		b.mu.Lock()
-		if len(b.m) > 0 {
-			if pending == nil {
-				pending = make([]*CallState, 0, len(b.m))
-			}
-			for seq, st := range b.m {
-				if st != nil {
-					pending = append(pending, st)
-					// Best-effort cancel: scheduler might already be stopped.
-					if rm.sd != nil {
-						rm.sd.CancelTimer(st.timerId())
-					}
-				}
-				delete(b.m, seq)
-			}
-		}
-		b.mu.Unlock()
+	// 清空 buckets，释放 CallState
+	for _, bucket := range rm.buckets {
+		bucket.Clear()
 	}
-
-	for _, st := range pending {
-		// Make the failure explicit; unblocks Call() waiters and triggers AsyncCall callbacks.
-		st.SetResult(nil, def.ErrRPCHadClosed)
-		st.Complete()
-	}
-
-	// 3) Wait for listen goroutine to exit.
-	rm.wg.Wait()
 }
 
 func (rm *RpcMonitor) listen() {
 	defer rm.wg.Done()
 	wg := sync.WaitGroup{}
+	defer func() {
+		log.SysLogger.Infof("rpc monitor listen stop")
+	}()
 	defer wg.Wait() // 等待所有回调执行完成
 	for {
 		select {
-		case t := <-rm.sd.GetTimerCbChannel():
+		case t, ok := <-rm.sd.GetTimerCbChannel():
+			if !ok {
+				return
+			}
 			if t == nil {
 				continue
 			}
@@ -178,16 +194,21 @@ func (rm *RpcMonitor) listen() {
 			wg.Add(1)
 			if err := asynclib.Go(func() {
 				defer wg.Done()
-				if err := t.Do(); err != nil {
+				if err := t.Do(rm.ctx); err != nil {
 					log.SysLogger.Errorf("rpc monitor: %s callback failed,error:%s", name, err)
 				}
 			}); err != nil {
+				wg.Done() // asynclib.Go 失败时也要 Done，避免 wg 泄漏
 				log.SysLogger.Errorf("rpc monitor execute timeout callback failed,error:%s", err)
 			}
 		case <-rm.ctx.Done():
 			return
 		}
 	}
+}
+
+func (rm *RpcMonitor) isClosed() bool {
+	return rm.closed.Load()
 }
 
 const seqMask = uint64(0xFFFFFFFFFFF) // 低44位掩码
@@ -204,87 +225,76 @@ func (rm *RpcMonitor) GenSeq() uint64 {
 }
 
 func (rm *RpcMonitor) Add(state *CallState) {
+	if rm.isClosed() {
+		state.SetResult(nil, def.ErrRPCHadClosed)
+		state.Complete()
+		return
+	}
 	reqId := state.ReqID()
-	timerId, err := rm.sd.AfterFunc(state.Timeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
+	timeout := state.Timeout()
+	method := state.Method()
+	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(_ context.Context, tm *timingwheel.Timer, args ...interface{}) error {
+		defer func() {
+			if log.SysLogger != nil {
+				log.SysLogger.WithContext(state.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
+					timeout.Milliseconds(), method)
+			}
+		}()
 		seq := args[0].(uint64)
-		b := rm.bucket(seq)
-		b.mu.Lock()
-		st, ok := b.m[seq]
-		if !ok || st == nil || st.timerId() != tm.GetTimerId() {
-			b.mu.Unlock()
+		st := rm.remove(seq) // 这里只需要移除monitor,不需要取消timer,timer已经触发了
+		if st == nil {
+			// 已经删除
 			return nil
 		}
-		delete(b.m, seq)
-		b.mu.Unlock()
 
-		if log.SysLogger != nil {
-			log.SysLogger.WithContext(st.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s",
-				int64(st.Timeout().Seconds()), st.Method())
-		}
-		rm.callTimeout(st)
+		st.SetResult(nil, def.ErrRPCCallTimeout)
+		st.Complete()
 		return nil
 	}, reqId)
 	if err != nil {
 		if log.SysLogger != nil {
-			log.SysLogger.WithContext(state.GetContext()).Errorf("add monitor failed,error:%s", err)
+			log.SysLogger.WithContext(state.ctx).Errorf("add monitor failed,error:%s", err)
 		}
 		// 无法加入 monitor：避免 Call 永久阻塞 / AsyncCall 永远不回调。
 		state.SetResult(nil, err)
-		if state.NeedCallback() {
-			state.dispatchCallbackEvent()
-			return
-		}
-		state.signalDone()
+		state.Complete()
 		return
 	}
 	state.setTimerID(timerId)
 	b := rm.bucket(reqId)
-	b.mu.Lock()
-	b.m[reqId] = state
-	b.mu.Unlock()
+	b.Add(reqId, state)
 }
 
-func (rm *RpcMonitor) removeLocked(b *waitBucket, seqId uint64) *CallState {
-	state, ok := b.m[seqId]
-	if !ok {
+func (rm *RpcMonitor) remove(seqId uint64) *CallState {
+	if rm.isClosed() {
 		return nil
 	}
-	if rm.sd != nil {
-		rm.sd.CancelTimer(state.timerId())
+	if seqId == 0 {
+		return nil
 	}
-	delete(b.m, seqId)
-	return state
+	b := rm.bucket(seqId)
+	return b.Del(seqId)
 }
 
 func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
-	if seqId == 0 {
-		return nil
+	state := rm.remove(seqId)
+	if state != nil {
+		if rm.sd != nil && !rm.isClosed() {
+			rm.sd.CancelTimer(state.timerId())
+		}
 	}
-	b := rm.bucket(seqId)
-	b.mu.Lock()
-	f := rm.removeLocked(b, seqId)
-	b.mu.Unlock()
-	return f
+	return state
 }
 
 func (rm *RpcMonitor) Get(seqId uint64) *CallState {
+	if rm.isClosed() {
+		return nil
+	}
 	if seqId == 0 {
 		return nil
 	}
 	b := rm.bucket(seqId)
-	b.mu.RLock()
-	st := b.m[seqId]
-	b.mu.RUnlock()
-	return st
-}
-
-func (rm *RpcMonitor) callTimeout(state *CallState) {
-	state.SetResult(nil, def.ErrRPCCallTimeout)
-	if state.NeedCallback() {
-		state.dispatchCallbackEvent()
-		return
-	}
-	state.signalDone()
+	return b.Get(seqId)
 }
 
 func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/leadership"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
@@ -76,9 +77,15 @@ func (s *MasterSlaverTest) OnInit() error {
 	// 把任何 master-only 的 goroutine 都绑定到 guard.Ctx() 即可做到失主即停。
 	s.guard = leadership.NewGuard(context.Background())
 
-	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceBecomeMaster, s.GetEventHandler(), s.becomeMaster) // 升级为主服务
-	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceBecomeSlaver, s.GetEventHandler(), s.becomeSlaver) // 降级为从服务
-	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceLoseMaster, s.GetEventHandler(), s.loseMaster)     // 主服务降级
+	if err := event.RegisterHandler(s.GetEventHandlerRegistry(), event.ServiceBecomeMaster, "becomeMaster", s.becomeMaster); err != nil {
+		return err
+	}
+	if err := event.RegisterHandler(s.GetEventHandlerRegistry(), event.ServiceBecomeSlaver, "becomeSlaver", s.becomeSlaver); err != nil {
+		return err
+	}
+	if err := event.RegisterHandler(s.GetEventHandlerRegistry(), event.ServiceLoseMaster, "LoseMaster", s.loseMaster); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -101,16 +108,14 @@ func (s *MasterSlaverTest) OnRelease() {
 	// 保存数据
 }
 
-func (s *MasterSlaverTest) becomeMaster(ctx context.Context, e inf.IEvent) {
-	evt := e.(*event.Event)
+func (s *MasterSlaverTest) becomeMaster(ctx context.Context, stateData *actor.MasterStateData) error {
 	if s.guard != nil {
-		s.guard.OnEvent(ctx, e)
+		s.guard.OnEvent(ctx, event.ServiceBecomeMaster, stateData)
 	}
-	stateData := evt.Data.(*event.MasterStateData)
 	if stateData.OldStateIsMaster {
 		// 没有变化,自己依然是主服务（可能是重复通知）
 		s.Debugf("still master, epoch=%v", stateData.NewEpoch)
-		return
+		return nil
 	}
 
 	// 框架层会把 fencing token (epoch) 放进事件 data，业务可以用于围栏。
@@ -143,7 +148,8 @@ func (s *MasterSlaverTest) becomeMaster(ctx context.Context, e inf.IEvent) {
 	// 真实业务里这可能是：撮合/调度/对外写接口/扫描任务等。
 	t1, err := s.TickerFunc(time.Second, "master tick", s.tick)
 	if err != nil {
-		s.Panicf("create master tick timer failed, err:%v", err)
+		s.Errorf("create master tick timer failed, err:%v", err)
+		return err
 	}
 	s.masterTimerId = t1
 
@@ -151,7 +157,8 @@ func (s *MasterSlaverTest) becomeMaster(ctx context.Context, e inf.IEvent) {
 	// 真实业务里可能是：定期把状态落库/写文件，并清理已确认的操作日志。
 	t2, err := s.TickerFunc(time.Second*10, "save all data", s.saveAllData)
 	if err != nil {
-		s.Panicf("create save all data timer failed, err:%v", err)
+		s.Errorf("create save all data timer failed, err:%v", err)
+		return err
 	}
 	s.slaverTimerId = t2
 
@@ -159,11 +166,13 @@ func (s *MasterSlaverTest) becomeMaster(ctx context.Context, e inf.IEvent) {
 	xctx.AddHeader(def.DefaultPriorityKey, def.PrioritySys)
 
 	// 向所有从服务同步一次完整数据
-	if err := s.selectSelfSlavers().Send(xctx, "RpcSyncAllData", s.packageData()); err != nil {
+	if err = s.selectSelfSlavers().Send(xctx, "RpcSyncAllData", s.packageData()); err != nil {
 		s.WithContext(xctx).Errorf("sync all data to slaver failed, err:%v", err)
+		return err
 	}
 
 	s.Debugf("master start...")
+	return nil
 }
 
 func (s *MasterSlaverTest) selectSelfSlavers() inf.IBus {
@@ -180,12 +189,10 @@ func (s *MasterSlaverTest) selectSelfMaster() inf.IBus {
 		rpc.WithPartition(s.GetPartition()))
 }
 
-func (s *MasterSlaverTest) becomeSlaver(ctx context.Context, e inf.IEvent) {
-	evt := e.(*event.Event)
+func (s *MasterSlaverTest) becomeSlaver(ctx context.Context, stateData *actor.MasterStateData) error {
 	if s.guard != nil {
-		s.guard.OnEvent(ctx, e)
+		s.guard.OnEvent(ctx, event.ServiceBecomeSlaver, stateData)
 	}
-	stateData := evt.Data.(*event.MasterStateData)
 	s.Debugf("Become slaver, prevEpoch=%v newEpoch=%v", stateData.PrevEpoch, stateData.NewEpoch)
 
 	// 降级为从服务
@@ -227,18 +234,16 @@ func (s *MasterSlaverTest) becomeSlaver(ctx context.Context, e inf.IEvent) {
 		s.option(log.Opt, log.Param)
 	}
 	s.queueCache = s.queueCache[:0]
-
+	return nil
 }
 
-func (s *MasterSlaverTest) loseMaster(ctx context.Context, e inf.IEvent) {
-	evt := e.(*event.Event)
+func (s *MasterSlaverTest) loseMaster(ctx context.Context, stateData *actor.MasterStateData) error {
 	if s.guard != nil {
-		s.guard.OnEvent(ctx, e)
+		s.guard.OnEvent(ctx, event.ServiceLoseMaster, stateData)
 	}
-	stateData := evt.Data.(*event.MasterStateData)
 	if !stateData.OldStateIsMaster {
 		// 本来就不是 master，就不需要做降级动作
-		return
+		return nil
 	}
 	s.Debugf("lose master, prevEpoch=%v newEpoch=%v", stateData.PrevEpoch, stateData.NewEpoch)
 	// 主服务降级
@@ -255,6 +260,7 @@ func (s *MasterSlaverTest) loseMaster(ctx context.Context, e inf.IEvent) {
 
 	// 存储全量数据,根据version判断是否需要写入
 	s.Debugf("lose master...")
+	return nil
 }
 
 func (s *MasterSlaverTest) packageData() proto.Message {
@@ -317,7 +323,7 @@ func (s *MasterSlaverTest) RpcSyncLog(req *msg.TestLog) error {
 	return nil
 }
 
-func (s *MasterSlaverTest) tick(timer *timingwheel.Timer, args ...interface{}) error {
+func (s *MasterSlaverTest) tick(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 	// 防御式检查：即使 timer 因为调度/竞态晚到，也不要在非 master 上产生副作用。
 	if s.guard != nil && !s.guard.IsLeader() {
 		return nil
@@ -343,16 +349,16 @@ func (s *MasterSlaverTest) tick(timer *timingwheel.Timer, args ...interface{}) e
 	s.option(opt, param)
 
 	// 同步所有从服务
-	ctx := xcontext.New(nil)
-	if err := s.selectSelfSlavers().Send(ctx, "RpcSyncLog", log.ToProto()); err != nil {
-		s.WithContext(ctx).Errorf("sync all data to slaver failed, err:%v", err)
+	ctxx := xcontext.New(ctx)
+	if err := s.selectSelfSlavers().Send(ctxx, "RpcSyncLog", log.ToProto()); err != nil {
+		s.WithContext(ctxx).Errorf("sync all data to slaver failed, err:%v", err)
 	}
 
 	// TODO 如果有任何需要操作其他的东西,都只有主服务可以进行后续,从服务只做数据更新
 	return nil
 }
 
-func (s *MasterSlaverTest) saveAllData(timer *timingwheel.Timer, args ...interface{}) error {
+func (s *MasterSlaverTest) saveAllData(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 	if s.guard != nil && !s.guard.IsLeader() {
 		return nil
 	}

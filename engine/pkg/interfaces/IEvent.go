@@ -12,66 +12,98 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// EventCallBack 事件接受器
-type EventCallBack func(ctx context.Context, event IEvent)
-type EventOption func(eventType int32, processor IEventProcessor) int
-
 type IEvent interface {
-	IDataDef
-	GetType() int32
-	GetPriority() def.Priority
-	GetDispatcherKey() string
-	Release()
+	GetEventType() def.EventType
+	GetData() any
+	GetContext() context.Context
 }
+
+// EventHandler 泛型事件回调，data为具体类型
+type EventHandler[T any] func(ctx context.Context, data T) error
+
+// EventHandlerAny 内部使用的非泛型回调（用于存储）
+type EventHandlerAny func(ctx context.Context, data any) error
 
 type IEventChannel interface {
-	PushEvent(ctx context.Context, ev IEvent) error // 使用接口时,请注意数据引用问题!!
+	// PushEvent 推送事件到事件通道，异步处理
+	PushEvent(evt IEvent) error
 }
 
-type IListener interface {
-	IEventChannel
-	IServer
-}
-
+// IEventProcessor 同步事件触发器接口（服务级别，类似Processor）
+// 用于服务内部的同步事件分发，所有handler会在同一个goroutine中依次执行
 type IEventProcessor interface {
-	IEventChannel
+	// Trigger 触发事件，同步依次调用所有对应类型的handler
+	Trigger(ctx context.Context, eventType def.EventType, data any)
 
-	Init(eventChannel IListener)
-	EventHandler(ctx context.Context, ev IEvent)
-	// 普通事件
-	RegEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
-	UnRegEventReceiverFun(eventType int32, receiver IEventHandler)
-	// 全局事件
-	RegGlobalEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
-	UnRegGlobalEventReceiverFun(eventType int32, receiver IEventHandler)
-	// 发布全局事件
-	PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error
+	// HasHandler 检查是否有某个事件类型的处理器
+	HasHandler(eventType def.EventType) bool
 
-	// 服务器事件
-	RegServerEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
-	UnRegServerEventReceiverFun(eventType int32, receiver IEventHandler)
-	// 发布服务器事件
-	PublishServer(ctx context.Context, eventType int32, data proto.Message) error
+	// Clear 清除所有注册的处理器
+	Clear()
 
-	// 特定服务事件
-	RegSpecificEventReceiverFunc(eventType int32, serviceUid string, receiver IEventHandler, callback EventCallBack)
-	UnRegSpecificEventReceiverFun(eventType int32, serviceUid string, receiver IEventHandler)
-	// 发布特定服务事件
-	PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error
+	// BindHandler 绑定本地事件处理器
+	BindHandler(eventType def.EventType, name string, handler IEventHandler, callback EventHandlerAny)
+	// BindGlobalHandler 绑定集群事件处理器
+	BindGlobalHandler(eventType def.EventType, name string, handler IEventHandler, callback EventHandlerAny)
+	// BindServerHandler 绑定服务器事件处理器
+	BindServerHandler(eventType def.EventType, name string, handler IEventHandler, callback EventHandlerAny)
+	// BindSpecificHandler 绑定特定服务事件处理器
+	BindSpecificHandler(eventType def.EventType, serviceUid string, name string, handler IEventHandler, callback EventHandlerAny)
+	// UnbindHandler 取消绑定本地事件处理器
+	UnbindHandler(eventType def.EventType, name string, handler IEventHandler)
+	// UnbindGlobalHandler 取消绑定全局事件处理器
+	UnbindGlobalHandler(eventType def.EventType, name string, handler IEventHandler)
+	// UnbindServerHandler 取消绑定服务器事件处理器
+	UnbindServerHandler(eventType def.EventType, name string, handler IEventHandler)
+	// UnbindSpecificHandler 取消绑定特定服务事件处理器
+	UnbindSpecificHandler(eventType def.EventType, serviceUid string, name string, handler IEventHandler)
 
-	CastEvent(ctx context.Context, event IEvent) //广播事件
-	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)
-	AddListen(eventType int32, receiver IEventHandler)
-	RemoveBindEvent(eventType int32, receiver IEventHandler)
-	RemoveListen(eventType int32, receiver IEventHandler)
+	// ========== 集群事件发布 ==========
+
+	// PublishGlobal 发布全局事件
+	PublishGlobal(ctx context.Context, eventType def.EventType, data proto.Message) error
+	// PublishServer 发布服务器事件
+	PublishServer(ctx context.Context, eventType def.EventType, data proto.Message) error
+	// PublishSpecific 发布特定服务事件
+	PublishSpecific(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error
 }
 
+// IEventHandler 事件处理器接口（module级别，类似Handler）
+// 每个module持有一个，用于管理自己注册的事件
+// 注册事件请使用泛型函数：Register[T]、RegisterGlobal[T]、RegisterServer[T]、RegisterSpecific[T]
 type IEventHandler interface {
-	Init(p IEventProcessor)
-	GetEventProcessor() IEventProcessor
-	NotifyEvent(ctx context.Context, ev IEvent)
+	// GetProcessor 获取关联的Trigger
+	GetProcessor() IEventProcessor
+
+	// UnregisterAll 取消注册该handler下所有事件
+	UnregisterAll()
+
+	// Trigger 触发事件（快捷方法，调用关联Trigger的Trigger）
+	Trigger(ctx context.Context, eventType def.EventType, data any)
+
+	// GetRegisteredEvents 获取已注册的事件列表（用于调试）
+	GetRegisteredEvents() map[def.EventType][]string
+
+	// Destroy 销毁，取消所有注册
 	Destroy()
-	//注册了事件
-	AddRegInfo(eventType int32, eventProcessor IEventProcessor)
-	RemoveRegInfo(eventType int32, eventProcessor IEventProcessor)
+}
+
+type IEventHandlerRegistrar interface {
+	// RegisterEvent 注册本地事件处理器
+	RegisterEvent(eventType def.EventType, name string, callback EventHandlerAny) error
+	// RegisterGlobalEvent 注册集群事件处理器
+	RegisterGlobalEvent(eventType def.EventType, name string, callback EventHandlerAny) error
+	// RegisterServerEvent 注册服务器事件处理器
+	RegisterServerEvent(eventType def.EventType, name string, callback EventHandlerAny) error
+	// RegisterSpecificEvent 注册特定服务事件处理器
+	RegisterSpecificEvent(eventType def.EventType, serviceUid string, name string, callback EventHandlerAny) error
+
+	// UnregisterEvent 注销本地事件处理器
+	UnregisterEvent(eventType def.EventType, name string)
+	// UnregisterGlobalEvent 注销集群事件处理器
+	UnregisterGlobalEvent(eventType def.EventType, name string)
+	// UnregisterServerEvent 注销服务器事件处理器
+	UnregisterServerEvent(eventType def.EventType, name string)
+	// UnregisterSpecificEvent 注销特定服务事件处理器
+	UnregisterSpecificEvent(eventType def.EventType, serviceUid string, name string)
 }

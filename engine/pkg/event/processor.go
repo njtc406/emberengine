@@ -1,193 +1,491 @@
 // Package event
-// @Title  事件管理器
-// @Description  这里管理着所有已经注册的事件,一般是一个service一个processor,事件触发时分发到不同的handler，并执行回调
-// @Author  yr  2024/7/19 下午3:33
-// @Update  yr  2024/7/19 下午3:33
+// @Title  同步事件触发器（服务内 + 集群事件）
+// @Description  服务内同步触发；集群事件通过EventBus订阅，投递job后在服务内触发对应handler
+// @Author  yr  2026/1/31
+// @Update  yr  2026/1/31
 package event
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"google.golang.org/protobuf/proto"
 )
 
 var _ inf.IEventProcessor = (*Processor)(nil)
 
+type callbackEntry struct {
+	name string
+	cb   inf.EventHandlerAny
+}
+
+type specificKey struct {
+	eventType  def.EventType
+	serviceUid string
+}
+
+// Processor 服务级别同步触发器（一个 service 一个）
+// - 本地事件：Processor(ctx, eventType, data)
+// - 集群事件：注册时会Subscribe到EventBus；当服务收到EventBusJob时，应调用 EventHandler(ctx, ev)
 type Processor struct {
-	inf.IListener
+	mu       sync.RWMutex
+	listener inf.IListener
 
-	locker              sync.RWMutex
-	mapListenerEvent    map[int32]map[inf.IEventProcessor]int             //监听者信息
-	mapBindHandlerEvent map[int32]map[inf.IEventHandler]inf.EventCallBack //收到事件处理
+	// 结构：map[事件类型]map[所属handler]map[回调名]entry
+	// 这样既能支持同一 module(handler) 多个 name 的注册，也能按 handler+name 精准解绑。
+	local    map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+	global   map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+	server   map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+	specific map[specificKey]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+
+	// 订阅引用计数，避免重复订阅与提前取消
+	globalSubCnt   map[def.EventType]int
+	serverSubCnt   map[def.EventType]int
+	specificSubCnt map[specificKey]int
 }
 
-func NewProcessor() *Processor {
-	p := &Processor{
-		mapListenerEvent:    make(map[int32]map[inf.IEventProcessor]int),
-		mapBindHandlerEvent: make(map[int32]map[inf.IEventHandler]inf.EventCallBack),
-	}
-	return p
+func NewTrigger() *Processor {
+	return &Processor{}
 }
 
-func (p *Processor) Init(listener inf.IListener) {
-	p.IListener = listener
+func (t *Processor) Init(listener inf.IListener) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.local = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.global = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.server = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.specific = make(map[specificKey]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+
+	t.globalSubCnt = make(map[def.EventType]int)
+	t.serverSubCnt = make(map[def.EventType]int)
+	t.specificSubCnt = make(map[specificKey]int)
+
+	t.listener = listener
 }
 
-func (p *Processor) safeExec(f func(ctx context.Context, e inf.IEvent), ctx context.Context, e inf.IEvent) {
-	defer func() {
-		if err := recover(); err != nil {
-			//log.Error("event handler panic:", err)
-			log.SysLogger.Errorf("event handler panic: %v", err)
+func (t *Processor) HasHandler(eventType def.EventType) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, byName := range t.local[eventType] {
+		if len(byName) > 0 {
+			return true
 		}
-	}()
-	f(ctx, e)
+	}
+	for _, byName := range t.global[eventType] {
+		if len(byName) > 0 {
+			return true
+		}
+	}
+	for _, byName := range t.server[eventType] {
+		if len(byName) > 0 {
+			return true
+		}
+	}
+	for k, byHandler := range t.specific {
+		if k.eventType != eventType {
+			continue
+		}
+		for _, byName := range byHandler {
+			if len(byName) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-// EventHandler 事件处理
-func (p *Processor) EventHandler(ctx context.Context, ev inf.IEvent) {
-	eventType := ev.GetType()
-	mapCallBack, ok := p.mapBindHandlerEvent[eventType]
-	if !ok {
+func (t *Processor) Clear() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// 尽量取消订阅
+	if t.listener != nil {
+		for et, cnt := range t.globalSubCnt {
+			if cnt > 0 {
+				GetEventBus().UnSubscribeGlobal(et, t.listener)
+			}
+		}
+		for et, cnt := range t.serverSubCnt {
+			if cnt > 0 {
+				GetEventBus().UnSubscribeServer(et, t.listener)
+			}
+		}
+		for k, cnt := range t.specificSubCnt {
+			if cnt > 0 {
+				GetEventBus().UnSubscribeSpecific(k.eventType, k.serviceUid, t.listener)
+			}
+		}
+	}
+
+	t.local = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.global = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.server = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.specific = make(map[specificKey]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+
+	t.globalSubCnt = make(map[def.EventType]int)
+	t.serverSubCnt = make(map[def.EventType]int)
+	t.specificSubCnt = make(map[specificKey]int)
+}
+
+func (t *Processor) BindHandler(eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	byHandler := t.local[eventType]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.local[eventType] = byHandler
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	byName[name] = callback
+}
+
+func (t *Processor) UnbindHandler(eventType def.EventType, name string, handler inf.IEventHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if byHandler := t.local[eventType]; byHandler != nil {
+		if byName := byHandler[handler]; byName != nil {
+			delete(byName, name)
+			if len(byName) == 0 {
+				delete(byHandler, handler)
+			}
+		}
+		if len(byHandler) == 0 {
+			delete(t.local, eventType)
+		}
+	}
+}
+
+// ========== 泛型绑定函数（包级别，用于类型安全注册） ==========
+
+// BindHandler 泛型版本，将TriggerCallback[T]包装为TriggerCallbackAny并绑定
+func BindHandler[T any](t inf.IEventProcessor, eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandler[T]) {
+	wrapped := func(ctx context.Context, data any) error {
+		return callback(ctx, data.(T))
+	}
+	t.BindHandler(eventType, name, handler, wrapped)
+}
+
+// BindGlobalHandler 泛型版本，将TriggerCallback[T]包装为TriggerCallbackAny并绑定全局事件
+func BindGlobalHandler[T any](t inf.IEventProcessor, eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandler[T]) {
+	wrapped := func(ctx context.Context, data any) error {
+		return callback(ctx, data.(T))
+	}
+	t.BindGlobalHandler(eventType, name, handler, wrapped)
+}
+
+// BindServerHandler 泛型版本，将TriggerCallback[T]包装为TriggerCallbackAny并绑定服务器事件
+func BindServerHandler[T any](t inf.IEventProcessor, eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandler[T]) {
+	wrapped := func(ctx context.Context, data any) error {
+		return callback(ctx, data.(T))
+	}
+	t.BindServerHandler(eventType, name, handler, wrapped)
+}
+
+// BindSpecificHandler 泛型版本，将TriggerCallback[T]包装为TriggerCallbackAny并绑定特定服务事件
+func BindSpecificHandler[T any](t inf.IEventProcessor, eventType def.EventType, serviceUid string, name string, handler inf.IEventHandler, callback inf.EventHandler[T]) {
+	wrapped := func(ctx context.Context, data any) error {
+		return callback(ctx, data.(T))
+	}
+	t.BindSpecificHandler(eventType, serviceUid, name, handler, wrapped)
+}
+
+// UnbindHandler 包装函数，取消绑定本地事件处理器
+func UnbindHandler(t inf.IEventProcessor, eventType def.EventType, name string, handler inf.IEventHandler) {
+	t.UnbindHandler(eventType, name, handler)
+}
+
+// UnbindGlobalHandler 包装函数，取消绑定全局事件处理器
+func UnbindGlobalHandler(t inf.IEventProcessor, eventType def.EventType, name string, handler inf.IEventHandler) {
+	t.UnbindGlobalHandler(eventType, name, handler)
+}
+
+// UnbindServerHandler 包装函数，取消绑定服务器事件处理器
+func UnbindServerHandler(t inf.IEventProcessor, eventType def.EventType, name string, handler inf.IEventHandler) {
+	t.UnbindServerHandler(eventType, name, handler)
+}
+
+// UnbindSpecificHandler 包装函数，取消绑定特定服务事件处理器
+func UnbindSpecificHandler(t inf.IEventProcessor, eventType def.EventType, serviceUid string, name string, handler inf.IEventHandler) {
+	t.UnbindSpecificHandler(eventType, serviceUid, name, handler)
+}
+
+func (t *Processor) BindGlobalHandler(eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	byHandler := t.global[eventType]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.global[eventType] = byHandler
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	_, existed := byName[name]
+	byName[name] = callback
+
+	if t.listener != nil && !existed {
+		if t.globalSubCnt[eventType] == 0 {
+			GetEventBus().SubscribeGlobal(eventType, t.listener)
+		}
+		t.globalSubCnt[eventType]++
+	}
+}
+
+func (t *Processor) UnbindGlobalHandler(eventType def.EventType, name string, handler inf.IEventHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	byHandler := t.global[eventType]
+	if byHandler == nil {
 		return
 	}
-	for _, callback := range mapCallBack {
-		p.safeExec(callback, ctx, ev)
+	byName := byHandler[handler]
+	if byName == nil {
+		return
+	}
+	if _, exists := byName[name]; !exists {
+		return
+	}
+	delete(byName, name)
+	if len(byName) == 0 {
+		delete(byHandler, handler)
+	}
+	if len(byHandler) == 0 {
+		delete(t.global, eventType)
+	}
+	if t.listener != nil {
+		t.globalSubCnt[eventType]--
+		if t.globalSubCnt[eventType] <= 0 {
+			delete(t.globalSubCnt, eventType)
+			GetEventBus().UnSubscribeGlobal(eventType, t.listener)
+		}
 	}
 }
 
-// RegEventReceiverFunc 注册事件处理函数
-func (p *Processor) RegEventReceiverFunc(eventType int32, receiver inf.IEventHandler, callback inf.EventCallBack) {
-	//记录receiver自己注册过的事件
-	receiver.AddRegInfo(eventType, p)
-	//记录当前所属IEventProcessor注册的回调
-	receiver.GetEventProcessor().AddBindEvent(eventType, receiver, callback)
-	//将注册加入到监听中
-	p.AddListen(eventType, receiver)
+func (t *Processor) BindServerHandler(eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	byHandler := t.server[eventType]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.server[eventType] = byHandler
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	_, existed := byName[name]
+	byName[name] = callback
+
+	if t.listener != nil && !existed {
+		if t.serverSubCnt[eventType] == 0 {
+			GetEventBus().SubscribeServer(eventType, t.listener)
+		}
+		t.serverSubCnt[eventType]++
+	}
 }
 
-// UnRegEventReceiverFun 取消注册
-func (p *Processor) UnRegEventReceiverFun(eventType int32, receiver inf.IEventHandler) {
-	p.RemoveListen(eventType, receiver)
-	receiver.GetEventProcessor().RemoveBindEvent(eventType, receiver)
-	receiver.RemoveRegInfo(eventType, p)
+func (t *Processor) UnbindServerHandler(eventType def.EventType, name string, handler inf.IEventHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	byHandler := t.server[eventType]
+	if byHandler == nil {
+		return
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		return
+	}
+	if _, exists := byName[name]; !exists {
+		return
+	}
+	delete(byName, name)
+	if len(byName) == 0 {
+		delete(byHandler, handler)
+	}
+	if len(byHandler) == 0 {
+		delete(t.server, eventType)
+	}
+	if t.listener != nil {
+		t.serverSubCnt[eventType]--
+		if t.serverSubCnt[eventType] <= 0 {
+			delete(t.serverSubCnt, eventType)
+			GetEventBus().UnSubscribeServer(eventType, t.listener)
+		}
+	}
 }
 
-// 全局事件
-func (p *Processor) RegGlobalEventReceiverFunc(eventType int32, receiver inf.IEventHandler, callback inf.EventCallBack) {
-	p.RegEventReceiverFunc(eventType, receiver, callback)
-	GetEventBus().SubscribeGlobal(eventType, p)
+func (t *Processor) BindSpecificHandler(eventType def.EventType, serviceUid string, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	k := specificKey{eventType: eventType, serviceUid: serviceUid}
+	byHandler := t.specific[k]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.specific[k] = byHandler
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	_, existed := byName[name]
+	byName[name] = callback
+
+	if t.listener != nil && !existed {
+		if t.specificSubCnt[k] == 0 {
+			GetEventBus().SubscribeSpecific(eventType, serviceUid, t.listener)
+		}
+		t.specificSubCnt[k]++
+	}
 }
 
-func (p *Processor) UnRegGlobalEventReceiverFun(eventType int32, receiver inf.IEventHandler) {
-	p.UnRegEventReceiverFun(eventType, receiver)
-	GetEventBus().UnSubscribeGlobal(eventType, p)
+func (t *Processor) UnbindSpecificHandler(eventType def.EventType, serviceUid string, name string, handler inf.IEventHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	k := specificKey{eventType: eventType, serviceUid: serviceUid}
+	byHandler := t.specific[k]
+	if byHandler == nil {
+		return
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		return
+	}
+	if _, exists := byName[name]; !exists {
+		return
+	}
+	delete(byName, name)
+	if len(byName) == 0 {
+		delete(byHandler, handler)
+	}
+	if len(byHandler) == 0 {
+		delete(t.specific, k)
+	}
+	if t.listener != nil {
+		t.specificSubCnt[k]--
+		if t.specificSubCnt[k] <= 0 {
+			delete(t.specificSubCnt, k)
+			GetEventBus().UnSubscribeSpecific(eventType, serviceUid, t.listener)
+		}
+	}
 }
 
-// 服务器事件
-func (p *Processor) RegServerEventReceiverFunc(eventType int32, receiver inf.IEventHandler, callback inf.EventCallBack) {
-	p.RegEventReceiverFunc(eventType, receiver, callback)
-	GetEventBus().SubscribeServer(eventType, p)
+// Trigger 本地同步触发
+func (t *Processor) Trigger(ctx context.Context, eventType def.EventType, data any) {
+	entries := t.snapshotLocal(eventType)
+	for _, e := range entries {
+		if err := t.safeExec(e, ctx, eventType, data); err != nil {
+			log.SysLogger.WithContext(ctx).WithField("eventType", eventType).Errorf("trigger handler failed: %v", err)
+		}
+	}
 }
 
-func (p *Processor) UnRegServerEventReceiverFun(eventType int32, receiver inf.IEventHandler) {
-	p.UnRegEventReceiverFun(eventType, receiver)
-	GetEventBus().UnSubscribeServer(eventType, p)
+// EventHandler 由服务的 MailboxJobTypeEvent handler 调用
+// 这里会把 *actor.Event 作为 data 传给已注册的集群事件回调（wrapper里可自动反序列化到具体类型）
+func (t *Processor) EventHandler(ctx context.Context, ev *actor.Event) {
+	if ev == nil {
+		return
+	}
+	et := def.EventType(ev.GetType())
+
+	entries := t.snapshotCluster(et, ev.GetServiceUid())
+	if len(entries) == 0 {
+		return
+	}
+	payload := ev.GetPayload()
+	data, err := codec.DecodeFromAny(payload)
+	if err != nil {
+		log.SysLogger.WithContext(ctx).WithField("eventType", et).Errorf("unmarshal event payload failed: %v", err)
+		return
+	}
+	for _, e := range entries {
+		if err := t.safeExec(e, ctx, et, data); err != nil {
+			log.SysLogger.WithContext(ctx).WithField("eventType", et).Errorf("trigger handler failed: %v", err)
+		}
+	}
 }
 
-// 特定服务事件
-func (p *Processor) RegSpecificEventReceiverFunc(eventType int32, serviceUid string, receiver inf.IEventHandler, callback inf.EventCallBack) {
-	p.RegEventReceiverFunc(eventType, receiver, callback)
-	GetEventBus().SubscribeSpecific(eventType, serviceUid, p)
-}
-
-func (p *Processor) UnRegSpecificEventReceiverFun(eventType int32, serviceUid string, receiver inf.IEventHandler) {
-	p.UnRegEventReceiverFun(eventType, receiver)
-	GetEventBus().UnSubscribeSpecific(eventType, serviceUid, p)
-}
-
-// 发布全局事件
-func (p *Processor) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
+func (t *Processor) PublishGlobal(ctx context.Context, eventType def.EventType, data proto.Message) error {
 	return GetEventBus().PublishGlobal(ctx, eventType, data)
 }
 
-// 发布服务器事件
-func (p *Processor) PublishServer(ctx context.Context, eventType int32, data proto.Message) error {
-	return GetEventBus().PublishServer(ctx, eventType, p.GetPartition(), data)
+func (t *Processor) PublishServer(ctx context.Context, eventType def.EventType, data proto.Message) error {
+	t.mu.RLock()
+	listener := t.listener
+	t.mu.RUnlock()
+	if listener == nil {
+		return GetEventBus().PublishServer(ctx, eventType, 0, data)
+	}
+	return GetEventBus().PublishServer(ctx, eventType, listener.GetPartition(), data)
 }
 
-// 发布特定服务事件
-func (p *Processor) PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
+func (t *Processor) PublishSpecific(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error {
 	return GetEventBus().PublishSpecific(ctx, eventType, serviceUid, data)
 }
 
-// castEvent 广播事件
-func (p *Processor) CastEvent(ctx context.Context, event inf.IEvent) {
-	if p.mapListenerEvent == nil {
-		//log.Error("mapListenerEvent not init!")
-		return
+func (t *Processor) snapshotLocal(eventType def.EventType) []callbackEntry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	byHandler := t.local[eventType]
+	if len(byHandler) == 0 {
+		return nil
 	}
-
-	eventProcessor, ok := p.mapListenerEvent[event.GetType()]
-	if ok == false || p == nil {
-		return
+	out := make([]callbackEntry, 0)
+	for _, byName := range byHandler {
+		for name, cb := range byName {
+			out = append(out, callbackEntry{name: name, cb: cb})
+		}
 	}
+	return out
+}
 
-	for proc := range eventProcessor {
-		if ev, ok := event.(*Event); ok {
-			clone := ev.Clone()
-			if err := proc.PushEvent(ctx, clone); err != nil {
-				clone.Release()
+func (t *Processor) snapshotCluster(eventType def.EventType, targetServiceUid string) []callbackEntry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var out []callbackEntry
+	for _, byName := range t.global[eventType] {
+		for name, cb := range byName {
+			out = append(out, callbackEntry{name: name, cb: cb})
+		}
+	}
+	for _, byName := range t.server[eventType] {
+		for name, cb := range byName {
+			out = append(out, callbackEntry{name: name, cb: cb})
+		}
+	}
+	if targetServiceUid != "" {
+		k := specificKey{eventType: eventType, serviceUid: targetServiceUid}
+		for _, byName := range t.specific[k] {
+			for name, cb := range byName {
+				out = append(out, callbackEntry{name: name, cb: cb})
 			}
-			continue
-		}
-		_ = proc.PushEvent(ctx, event)
-	}
-}
-
-// addListen 添加监听
-func (p *Processor) AddListen(eventType int32, receiver inf.IEventHandler) {
-	p.locker.Lock()
-	defer p.locker.Unlock()
-
-	if _, ok := p.mapListenerEvent[eventType]; ok == false {
-		p.mapListenerEvent[eventType] = map[inf.IEventProcessor]int{}
-	}
-
-	p.mapListenerEvent[eventType][receiver.GetEventProcessor()] += 1
-}
-
-// addBindEvent 添加绑定事件
-func (p *Processor) AddBindEvent(eventType int32, receiver inf.IEventHandler, callback inf.EventCallBack) {
-	p.locker.Lock()
-	defer p.locker.Unlock()
-
-	if _, ok := p.mapBindHandlerEvent[eventType]; ok == false {
-		p.mapBindHandlerEvent[eventType] = map[inf.IEventHandler]inf.EventCallBack{}
-	}
-
-	p.mapBindHandlerEvent[eventType][receiver] = callback
-}
-
-// removeBindEvent 移除绑定事件
-func (p *Processor) RemoveBindEvent(eventType int32, receiver inf.IEventHandler) {
-	p.locker.Lock()
-	defer p.locker.Unlock()
-	if _, ok := p.mapBindHandlerEvent[eventType]; ok == true {
-		delete(p.mapBindHandlerEvent[eventType], receiver)
-	}
-}
-
-// removeListen 移除监听
-func (p *Processor) RemoveListen(eventType int32, receiver inf.IEventHandler) {
-	p.locker.Lock()
-	defer p.locker.Unlock()
-	if _, ok := p.mapListenerEvent[eventType]; ok == true {
-		p.mapListenerEvent[eventType][receiver.GetEventProcessor()] -= 1
-		if p.mapListenerEvent[eventType][receiver.GetEventProcessor()] <= 0 {
-			delete(p.mapListenerEvent[eventType], receiver.GetEventProcessor())
 		}
 	}
+	return out
+}
+
+func (t *Processor) safeExec(entry callbackEntry, ctx context.Context, eventType def.EventType, data any) error {
+	defer func() {
+		if err := recover(); err != nil {
+			log.SysLogger.Errorf("trigger handler panic: eventType=%d, name=%s, err=%v\nstack=%s", eventType, entry.name, err, string(debug.Stack()))
+		}
+	}()
+	return entry.cb(ctx, data)
 }

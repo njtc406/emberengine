@@ -8,12 +8,10 @@ package cluster
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -36,7 +34,7 @@ type Cluster struct {
 
 	// 事件
 	eventProcessor *event.Processor
-	eventChannel   chan ctxEvent
+	eventChannel   chan inf.IEvent
 }
 
 // ctxEvent 包装 ctx 和 event
@@ -47,15 +45,15 @@ type ctxEvent struct {
 
 func (c *Cluster) Init() {
 	c.closed = make(chan struct{})
-	c.eventChannel = make(chan ctxEvent, 1024)
-	c.eventProcessor = event.NewProcessor()
-	c.eventProcessor.Init(c)
+	c.eventChannel = make(chan inf.IEvent, 1024)
+	c.eventProcessor = event.NewTrigger()
+	c.eventProcessor.Init(nil)
 
 	c.endpoints = endpoints.GetEndpointManager().Init(c.eventProcessor)
 
 	c.discovery = discovery.CreateDiscovery(config.Conf.ClusterConf.DiscoveryType)
 	if c.discovery != nil {
-		if err := c.discovery.Init(c.eventProcessor, config.Conf.ClusterConf); err != nil {
+		if err := c.discovery.Init(config.Conf.ClusterConf, c.eventProcessor, c); err != nil {
 			log.SysLogger.Fatalf("init discovery error: %v, conf: %+v", err, config.Conf.ClusterConf)
 		}
 	}
@@ -80,13 +78,16 @@ func (c *Cluster) Close() {
 	}
 }
 
-func (c *Cluster) PushEvent(ctx context.Context, ev inf.IEvent) error {
+func (c *Cluster) PushEvent(data inf.IEvent) error {
+	if data == nil {
+		return nil
+	}
 	select {
-	case c.eventChannel <- ctxEvent{ctx: ctx, ev: ev}: // 发送成功则里面释放
-
-	default:
-		ev.Release() // 发送不成功直接释放
-		return def.ErrEventChannelIsFull
+	case <-data.GetContext().Done():
+		return data.GetContext().Err()
+	case c.eventChannel <- data: // 发送成功则里面释放(需要阻塞等待,不能丢弃事件)
+		//default:
+		//	return def.ErrEventChannelIsFull
 	}
 
 	return nil
@@ -95,34 +96,17 @@ func (c *Cluster) PushEvent(ctx context.Context, ev inf.IEvent) error {
 func (c *Cluster) run() {
 	for {
 		select {
-		case ce := <-c.eventChannel:
-			if ce.ev != nil {
-				c.executeEvent(ce.ctx, ce.ev)
+		case evt, ok := <-c.eventChannel:
+			if !ok {
+				log.SysLogger.Error("cluster event channel closed")
+				return
 			}
+			c.eventProcessor.Trigger(evt.GetContext(), evt.GetEventType(), evt.GetData())
 		case <-c.closed:
 			log.SysLogger.Info("cluster closed")
 			return
 		}
 	}
-}
-
-func (c *Cluster) executeEvent(ctx context.Context, ev inf.IEvent) {
-	defer ev.Release()
-	c.eventProcessor.EventHandler(ctx, ev)
-}
-
-func (c *Cluster) SetPid(pid *actor.PID) {
-	// 这里没有实质内容,为了凑接口
-}
-
-func (c *Cluster) GetPid() *actor.PID {
-	// 这里没有实质内容,为了凑接口
-	return nil
-}
-
-func (c *Cluster) GetPartition() int32 {
-	// 这里没有实质内容,为了凑接口
-	return 0
 }
 
 func (c *Cluster) IsClusterMode() bool {

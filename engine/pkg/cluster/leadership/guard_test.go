@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 )
 
@@ -20,10 +21,7 @@ func TestGuard_BecomeAndLoseLeader(t *testing.T) {
 		t.Fatalf("expected initial ctx to be cancelled")
 	}
 
-	evt := event.NewEvent()
-	evt.Type = event.ServiceBecomeMaster
-	evt.Data = &event.MasterStateData{NewEpoch: 123}
-	if changed := g.OnEvent(context.Background(), evt); !changed {
+	if changed := g.OnEvent(context.Background(), event.ServiceBecomeMaster, &actor.MasterStateData{NewEpoch: 123}); !changed {
 		t.Fatalf("expected state change on become master")
 	}
 	if !g.IsLeader() || g.Epoch() != 123 {
@@ -38,9 +36,7 @@ func TestGuard_BecomeAndLoseLeader(t *testing.T) {
 		// ok
 	}
 
-	evt2 := event.NewEvent()
-	evt2.Type = event.ServiceLoseMaster
-	if changed := g.OnEvent(context.Background(), evt2); !changed {
+	if changed := g.OnEvent(context.Background(), event.ServiceLoseMaster, nil); !changed {
 		t.Fatalf("expected state change on lose master")
 	}
 	if g.IsLeader() {
@@ -57,16 +53,10 @@ func TestGuard_BecomeAndLoseLeader(t *testing.T) {
 
 func TestGuard_NewEpochReplacesContext(t *testing.T) {
 	g := NewGuard(context.Background())
-	evt := event.NewEvent()
-	evt.Type = event.ServiceBecomeMaster
-	evt.Data = &event.MasterStateData{NewEpoch: 1}
-	_ = g.OnEvent(context.Background(), evt)
+	_ = g.OnEvent(context.Background(), event.ServiceBecomeMaster, &actor.MasterStateData{NewEpoch: 1})
 	ctx1 := g.Ctx()
 
-	evt2 := event.NewEvent()
-	evt2.Type = event.ServiceBecomeMaster
-	evt2.Data = &event.MasterStateData{NewEpoch: 2}
-	if changed := g.OnEvent(context.Background(), evt2); !changed {
+	if changed := g.OnEvent(context.Background(), event.ServiceBecomeMaster, &actor.MasterStateData{NewEpoch: 2}); !changed {
 		t.Fatalf("expected state change on epoch update")
 	}
 	ctx2 := g.Ctx()

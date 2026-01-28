@@ -10,43 +10,97 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 )
 
-// ============================================================================
-// Mailbox 中间件系统
-// ============================================================================
-
-// MiddlewareAction 中间件动作，决定消息的后续处理方式
-type MiddlewareAction int
-
-const (
-	// ActionContinue 继续执行后续中间件和消息处理
-	ActionContinue MiddlewareAction = iota
-	// ActionReject 拒绝消息入队，返回错误给调用方
-	ActionReject
-	// ActionSkip 跳过后续中间件，直接入队（用于快速路径）
-	ActionSkip
-)
-
-// MiddlewareResult 中间件处理结果
-type MiddlewareResult struct {
-	Action MiddlewareAction // 动作
-	Err    error            // 拒绝时的错误信息
+// IMailbox interface is used to enqueue messages to the mailbox
+type IMailbox interface {
+	IMailboxChannel
+	Start()
+	// BeginStop 发起停止（非阻塞）：停止接收新消息并唤醒 worker 退出。
+	BeginStop()
+	// Wait 等待 mailbox 完全停止（阻塞）。
+	Wait()
+	// Stop 便捷方法：BeginStop + Wait。
+	// TODO 这里的改造可能是多余的，stop不应该由service自身发起,应该由外部的管理器来发起,比如node的daemon服务,服务本身收到停止消息时，如果是
+	// TODO 基础服务，那么立即向daemon服务send一条kill自己的消息，这样可以精确控制只关闭某个服务，当然也可以直接向daemon发送一条定向关闭某服务消息
+	Stop()
+	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
+	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
 }
 
-// Continue 创建继续执行的结果
-func Continue() MiddlewareResult {
-	return MiddlewareResult{Action: ActionContinue}
+type IMailboxWorker interface {
+	Start()
+	// BeginStop 发起停止（非阻塞）：停止接收新消息并让 run 循环退出。
+	BeginStop()
+	// Wait 等待 worker 完全退出。
+	Wait()
+	// Stop 便捷方法：BeginStop + Wait。
+	Stop()
+
+	GetWorkerId() int
+	// GetJobLen 获取当前队列中的任务数量
+	GetJobLen() int
+
+	// SubmitJob 提交任务
+	SubmitJob(job IMailboxJob) error
 }
 
-// Reject 创建拒绝消息的结果
-func Reject(err error) MiddlewareResult {
-	return MiddlewareResult{Action: ActionReject, Err: err}
+type IMailboxJob interface {
+	// SetContext 设置上下文
+	SetContext(ctx context.Context)
+	// SetDeadline 设置截止时间
+	SetDeadline(t int64)
+	// SetPriority 设置优先级
+	SetPriority(priority def.Priority)
+	// SetDispatcherKey 设置分发key,用于将job分发给不同的worker
+	SetDispatcherKey(key string)
+	// SetType 设置类型，用于分发到不同 handler
+	SetType(jobType def.MailboxJobType)
+	// SetMiddlewareContext 设置中间件上下文
+	SetMiddlewareContext(mctx IMiddlewareContext)
+
+	// GetType 类型，用于分发到不同 handler
+	GetType() def.MailboxJobType
+	// GetPriority 获取优先级
+	GetPriority() def.Priority
+	// GetDispatcherKey 获取分发key,用于将job分发给不同的worker
+	GetDispatcherKey() string
+	// GetContext 获取上下文
+	GetContext() context.Context
+	// GetDeadline 获取截止时间
+	GetDeadline() int64
+	// GetMiddlewareContext 获取中间件上下文
+	GetMiddlewareContext() IMiddlewareContext
+
+	// Release 释放job
+	Release()
 }
 
-// Skip 创建跳过后续中间件的结果
-func Skip() MiddlewareResult {
-	return MiddlewareResult{Action: ActionSkip}
+// IMailboxChannel 消息接口
+type IMailboxChannel interface {
+	PostJob(job IMailboxJob) error
+}
+
+// IMessageInvoker 处理消息
+type IMessageInvoker interface {
+	GetServiceName() string
+	ExecuteJob(ctx context.Context, job IMailboxJob) error
+	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
+}
+
+type IListener interface {
+	IMailboxChannel
+	IServer
+}
+
+// ================TODO 下面这些还未验证===================
+
+type IMailboxStatistics interface {
+	GetPriorityQueueLen(priority def.Priority) int
+	GetTotalQueueLen() int
+	GetPriorityStatistics() map[def.Priority]int
+	GetSchedulerStatistics() map[string]interface{}
 }
 
 // IMiddlewareContext 中间件上下文接口
@@ -57,8 +111,8 @@ type IMiddlewareContext interface {
 	// Context 获取原始 context.Context
 	Context() context.Context
 
-	// Event 获取当前处理的事件
-	Event() IEvent
+	// Job 获取当前处理的作业
+	Job() IMailboxJob
 
 	// ServiceName 获取所属服务名
 	ServiceName() string
@@ -114,7 +168,7 @@ type IMailboxMiddleware interface {
 	//   - Skip(): 跳过后续中间件，直接入队
 	//
 	// 注意：此方法应该快速返回，避免阻塞投递线程
-	OnReceive(mctx IMiddlewareContext) MiddlewareResult
+	OnReceive(mctx IMiddlewareContext) dto.MiddlewareResult
 
 	// OnComplete 消息处理完成后调用
 	//
@@ -137,7 +191,7 @@ type IMiddlewareChain interface {
 
 	// ExecuteOnReceive 执行所有中间件的 OnReceive
 	// 返回最终结果和创建的上下文（用于后续 OnComplete）
-	ExecuteOnReceive(ctx context.Context, evt IEvent, serviceName string) (MiddlewareResult, IMiddlewareContext)
+	ExecuteOnReceive(ctx context.Context, job IMailboxJob, serviceName string) (dto.MiddlewareResult, IMiddlewareContext)
 
 	// ExecuteOnComplete 执行所有中间件的 OnComplete（逆序）
 	ExecuteOnComplete(mctx IMiddlewareContext, err error, panicVal interface{})
@@ -159,60 +213,5 @@ type IMiddlewareChain interface {
 type ISuspendPolicy interface {
 	// ShouldAllow 判断挂起状态下是否允许该事件通过。
 	// 返回 true 表示放行，false 表示拒绝。
-	ShouldAllow(ctx context.Context, evt IEvent) bool
+	ShouldAllow(job IMailboxJob) bool
 }
-
-// IMessageInvoker 处理消息
-type IMessageInvoker interface {
-	GetServiceName() string
-	InvokeMessage(ctx context.Context, evt IEvent) error
-	EscalateFailure(ctx context.Context, reason interface{}, evt IEvent)
-}
-
-// IMailboxChannel 消息接口
-type IMailboxChannel interface {
-	PostMessage(ctx context.Context, evt IEvent) error
-}
-
-// IMailbox interface is used to enqueue messages to the mailbox
-type IMailbox interface {
-	IMailboxChannel
-	Start()
-	// BeginStop 发起停止（非阻塞）：停止接收新消息并唤醒 worker 退出。
-	BeginStop()
-	// Wait 等待 mailbox 完全停止（阻塞）。
-	Wait()
-	// Stop 便捷方法：BeginStop + Wait。
-	Stop()
-	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
-	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
-}
-
-type IMailboxWorker interface {
-	Start()
-	// BeginStop 发起停止（非阻塞）：停止接收新消息并让 run 循环退出。
-	BeginStop()
-	// Wait 等待 worker 完全退出。
-	Wait()
-	// Stop 便捷方法：BeginStop + Wait。
-	Stop()
-	SubmitEvent(ctx context.Context, evt IEvent, mctx IMiddlewareContext) error
-	GetWorkerId() int
-	// GetMsgLen 获取当前队列中的消息数量
-	GetMsgLen() int
-}
-
-type IMailboxStatistics interface {
-	GetPriorityQueueLen(priority def.Priority) int
-	GetTotalQueueLen() int
-	GetPriorityStatistics() map[def.Priority]int
-	GetSchedulerStatistics() map[string]interface{}
-}
-
-//type IDispatcher interface {
-//	Schedule(fn func()) error
-//	Throughput() int // 每次处理的消息数量,达到该值后,释放cpu资源等待下次处理
-//}
-
-// MailboxProducer is a function which creates a new mailbox
-//type MailboxProducer func(conf *config.Mailbox, invoker IMessageInvoker, middlewares ...IMailboxMiddleware) IMailbox

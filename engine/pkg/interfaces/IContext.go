@@ -7,8 +7,6 @@ package interfaces
 
 import (
 	"context"
-
-	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
 type IContext interface {
@@ -27,7 +25,4 @@ type IContext interface {
 	ToHeaders() map[string]string
 
 	GetTranceId() string
-	GetDispatcherKey() string
-	GetPriority() def.Priority
-	GetType() int32
 }

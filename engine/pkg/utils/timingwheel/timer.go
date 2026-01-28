@@ -7,6 +7,7 @@ package timingwheel
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"reflect"
 	"runtime"
@@ -21,13 +22,13 @@ import (
 )
 
 type ITimer interface {
-	Do() error
+	Do(ctx context.Context) error
 	GetName() string
 	GetTimerId() uint64
 }
 
 type TimerOption func(t *Timer)
-type TimerCallback func(timer *Timer, args ...interface{}) error
+type TimerCallback func(ctx context.Context, timer *Timer, args ...interface{}) error
 
 // Timer 表示一个定时事件。当 Timer 到期时，会执行对应的任务。
 type Timer struct {
@@ -152,7 +153,7 @@ func (t *Timer) isActive() bool {
 	return !t.cancel.Load()
 }
 
-func (t *Timer) Do() (err error) {
+func (t *Timer) Do(ctx context.Context) (err error) {
 	// 检查是否正在执行
 	if !t.executing.CompareAndSwap(false, true) {
 		// 已经在执行中，不应该发生
@@ -166,7 +167,7 @@ func (t *Timer) Do() (err error) {
 		t.executing.Store(false)
 		t.execWg.Done()
 		// 不是循环任务, 执行完成后停止（循环任务会在timingwheel的addorrun弹出时就重新添加）
-		if t.loop == nil && !errors.Is(err, def.ErrTimerReuse) { // timer被复用时不能停止
+		if t.loop == nil && !errors.Is(err, def.ErrTimerReuse) && t.taskScheduler != nil { // timer被复用时不能停止
 			t.taskScheduler.CancelTimer(t.timerId)
 		}
 	}()
@@ -185,7 +186,7 @@ func (t *Timer) Do() (err error) {
 
 	// 开始执行回调任务
 	err = safe.Do(func() error {
-		err := t.task(t, t.taskArgs...)
+		err := t.task(ctx, t, t.taskArgs...)
 		if err != nil {
 			return err
 		}

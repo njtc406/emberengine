@@ -116,6 +116,7 @@ type ServiceInitConf struct {
 	Mailbox                *MailboxConf    `binding:""` // 邮箱配置
 	LogConf                *ServiceLogConf `binding:""` // 日志配置
 	IsPrimarySecondaryMode bool            `binding:""` // 是否是主从模式(默认不开启)
+	EventChanSize          int             `binding:""` // 事件通道大小(默认100)
 }
 
 // StopPolicyConf 服务停机策略
