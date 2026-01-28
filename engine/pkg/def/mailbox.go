@@ -15,10 +15,11 @@ const (
 type MailboxJobType int32
 
 const (
-	MailboxJobTypeRpc                MailboxJobType = iota + 1 // rpc消息
-	MailboxJobTypeEvent                                        // 订阅事件(来自event_bus的消息)
-	MailboxJobTypeInternalEvent                                // 内部事件
-	MailboxJobTypeTimer                                        // 定时器
-	MailboxJobTypeConcurrentCallback                           // 并发回调
-	MailboxJobSysCtl                                           // 系统控制类
+	MailboxJobTypeNone               MailboxJobType = iota
+	MailboxJobTypeRpc                               // rpc消息
+	MailboxJobTypeEvent                             // 订阅事件(来自event_bus的消息)
+	MailboxJobTypeInternalEvent                     // 内部事件
+	MailboxJobTypeTimer                             // 定时器
+	MailboxJobTypeConcurrentCallback                // 并发回调
+	MailboxJobSysCtl                                // 系统控制类
 )

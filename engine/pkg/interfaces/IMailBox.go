@@ -44,16 +44,20 @@ type IMailboxWorker interface {
 
 type IMailboxJob interface {
 	// 调度相关
-	GetType() def.MailboxJobType // 类型，用于分发到不同 handler
-	GetPriority() def.Priority   // 优先级
-	GetDispatcherKey() string    // 分发key,用于
 
-	// 生命周期
+	// GetType 类型，用于分发到不同 handler
+	GetType() def.MailboxJobType
+	// GetPriority 获取优先级
+	GetPriority() def.Priority
+	// GetDispatcherKey 获取分发key,用于将job分发给不同的worker
+	GetDispatcherKey() string
+	// Release 释放job
 	Release()
 }
 
 // IMailboxChannel 消息接口
 type IMailboxChannel interface {
+	// TODO 这里是不是可以把ctx,timeout都放入job中?
 	PostJob(ctx context.Context, job IMailboxJob) error
 	// TODO 是否需要增加带超时的接口，还是就使用一个接口,用其他方式来携带超时信息
 }

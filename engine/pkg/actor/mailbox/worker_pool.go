@@ -186,7 +186,7 @@ func (p *WorkerPool) Stop() {
 //   - 多 worker 模式：通过 ring.Get(evt.GetDispatcherKey()) 选择 worker，保证相同 dispatcherKey 的事件落到同一 worker；
 //   - 单 worker 模式：固定使用 workerID=0，行为接近 Actor 模型的串行执行。
 //   - mctx: 中间件上下文，用于在消息处理完成后调用 OnComplete 回调。
-func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent, mctx inf.IMiddlewareContext) error {
+func (p *WorkerPool) DispatchJob(ctx context.Context, job inf.IMailboxJob, mctx inf.IMiddlewareContext) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
 	var worker inf.IMailboxWorker
 	var exists bool
@@ -195,7 +195,7 @@ func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent, mctx inf
 	p.mu.RLock() // 加个锁,防止在调整worker数量时,hash环还没有更新
 	if len(p.workers) > 1 {
 		var ok bool
-		workerID, ok = p.ring.Get(evt.GetDispatcherKey())
+		workerID, ok = p.ring.Get(job.GetDispatcherKey())
 		if !ok {
 			p.logger.WithContext(ctx).Errorf("No worker available in hash ring")
 			p.mu.RUnlock()
@@ -222,7 +222,7 @@ func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent, mctx inf
 	}
 
 	p.mu.RUnlock()
-	return worker.SubmitJob(ctx, evt, mctx)
+	return worker.SubmitJob(ctx, job, mctx)
 }
 
 func (p *WorkerPool) resizeWorkers(newSize int) {

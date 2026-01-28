@@ -108,7 +108,7 @@ func (w *Worker) GetWorkerId() int {
 }
 
 // SubmitEvent 提交事件到队列
-func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent, mctx inf.IMiddlewareContext) error {
+func (w *Worker) SubmitJob(ctx context.Context, job inf.IMailboxJob, mctx inf.IMiddlewareContext) error {
 	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
 	if w.closing.Load() || w.closed.Load() {
 		return def.ErrMailboxWorkerClosed
@@ -126,7 +126,7 @@ func (w *Worker) SubmitEvent(ctx context.Context, e inf.IEvent, mctx inf.IMiddle
 	}
 
 	// 使用 CtxEvent 包装 ctx、event 和中间件上下文
-	ctxEvt := NewCtxEventWithMiddleware(ctx, e, mctx)
+	ctxEvt := NewCtxEventWithMiddleware(ctx, job, mctx)
 
 	// 提交到队列管理器
 	err := w.queueManager.Submit(ctxEvt)

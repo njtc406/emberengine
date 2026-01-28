@@ -49,7 +49,7 @@ type Mailbox struct {
 // MailboxOption 用于配置 Mailbox 的选项函数
 type MailboxOption func(*Mailbox)
 
-// WithSuspendPolicy 设置自定义的挂起策略
+// WithSuspendPolicy 设置自定义的挂起策略( TODO 这个可能需要修改为注册式的，方便扩展)
 func WithSuspendPolicy(policy inf.ISuspendPolicy) MailboxOption {
 	return func(m *Mailbox) {
 		m.suspendPolicy = policy
@@ -92,16 +92,16 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 //  1. 如果 mailbox 已挂起，通过 ISuspendPolicy 判断是否放行，不放行则返回 ErrMailboxSuspended；
 //  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
 //  3. 将事件和中间件上下文交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
-func (m *Mailbox) PostMessage(ctx context.Context, e inf.IEvent) error {
+func (m *Mailbox) PostJob(ctx context.Context, job inf.IMailboxJob) error {
 	// 挂起检查（内建机制，在所有中间件之前执行）
 	if m.isSuspended() {
-		if !m.suspendPolicy.ShouldAllow(ctx, e) {
+		if !m.suspendPolicy.ShouldAllow(ctx, job) {
 			return def.ErrMailboxSuspended
 		}
 	}
 
 	// 执行中间件链的 OnReceive
-	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(ctx, e, m.workerPool.invoker.GetServiceName())
+	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(ctx, job, m.workerPool.invoker.GetServiceName())
 	if result.Action == def.ActionReject {
 		if result.Err != nil {
 			return result.Err
@@ -110,7 +110,7 @@ func (m *Mailbox) PostMessage(ctx context.Context, e inf.IEvent) error {
 	}
 
 	// 分发事件（携带中间件上下文，用于 OnComplete 回调）
-	return m.workerPool.DispatchEvent(ctx, e, mctx)
+	return m.workerPool.DispatchJob(ctx, job, mctx)
 }
 
 func (m *Mailbox) isSuspended() bool {

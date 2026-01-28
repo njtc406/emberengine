@@ -22,11 +22,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 )
 
-var (
-	apiPreFix  = []string{"Api", "API"}
-	rpcPreFix  = []string{"Rpc", "RPC"}
-	emptyError = reflect.TypeOf((*error)(nil))
-)
+var emptyError = reflect.TypeOf((*error)(nil))
 
 // MethodMgr 管理所有注册的方法
 type MethodMgr struct {
@@ -56,7 +52,7 @@ func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if hasPrefix(name, rpcPreFix) {
+	if hasRpcPrefix(name) {
 		m.rpcCnt++
 	}
 	m.methodMap[name] = fn
@@ -75,7 +71,7 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 	oldRpcCnt := m.rpcCnt
 	for _, name := range names {
 		delete(m.methodMap, name)
-		if hasPrefix(name, rpcPreFix) {
+		if hasRpcPrefix(name) {
 			m.rpcCnt--
 		}
 		if m.rpcCnt < 0 {
@@ -140,7 +136,7 @@ func (h *Handler) isExportedOrBuiltinType(t reflect.Type) bool {
 
 func (h *Handler) suitableMethods(method reflect.Method) error {
 	// 只注册以 Api 或 Rpc 开头的方法
-	if !hasPrefix(method.Name, apiPreFix) && !hasPrefix(method.Name, rpcPreFix) {
+	if !hasApiPrefix(method.Name) && !hasRpcPrefix(method.Name) {
 		return nil
 	}
 

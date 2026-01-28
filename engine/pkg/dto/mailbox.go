@@ -24,7 +24,3 @@ func Reject(err error) MiddlewareResult {
 func Skip() MiddlewareResult {
 	return MiddlewareResult{Action: def.ActionSkip}
 }
-
-type MailboxJob[T any] struct {
-	payload T
-}
