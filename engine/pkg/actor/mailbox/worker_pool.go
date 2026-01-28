@@ -222,7 +222,7 @@ func (p *WorkerPool) DispatchEvent(ctx context.Context, evt inf.IEvent, mctx inf
 	}
 
 	p.mu.RUnlock()
-	return worker.SubmitEvent(ctx, evt, mctx)
+	return worker.SubmitJob(ctx, evt, mctx)
 }
 
 func (p *WorkerPool) resizeWorkers(newSize int) {

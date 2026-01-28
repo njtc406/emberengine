@@ -89,3 +89,41 @@ func (e *CallbackEnvelope) GetName() string {
 	}
 	return ""
 }
+
+type RpcCallbackEnvelope struct {
+	InternalEnvelope[inf.IRpcCallback]
+}
+
+var rpcCallbackEnvelopePool pool.IPool[*RpcCallbackEnvelope]
+var rpcCallbackEnvelopePoolOnce sync.Once
+
+func getRpcCallbackEnvelopePool() pool.IPool[*RpcCallbackEnvelope] {
+	rpcCallbackEnvelopePoolOnce.Do(func() {
+		rpcCallbackEnvelopePool = pool.NewSyncPoolWrapper(
+			func() *RpcCallbackEnvelope { return &RpcCallbackEnvelope{} },
+			func() pool.IStatsRecorder {
+				if config.IsDebug() {
+					return pool.NewStatsRecorder("rpcCallbackEnvelopePool")
+				}
+				return pool.NewNoStatsRecorder()
+			}(),
+			pool.WithRef(func(e *RpcCallbackEnvelope) { e.Ref() }),
+			pool.WithUnRef(func(e *RpcCallbackEnvelope) bool { return e.UnRef() }),
+			pool.WithReset(func(e *RpcCallbackEnvelope) { e.Reset() }),
+		)
+	})
+	return rpcCallbackEnvelopePool
+}
+
+func NewRpcCallbackEnvelope(callback inf.IRpcCallback, priority def.Priority, dispatcherKey string) *RpcCallbackEnvelope {
+	e := getRpcCallbackEnvelopePool().Get()
+	e.Type = RpcMsg
+	e.Priority = priority
+	e.DispatcherKey = dispatcherKey
+	e.Payload = callback
+	return e
+}
+
+func (e *RpcCallbackEnvelope) Release() {
+	getRpcCallbackEnvelopePool().Put(e)
+}

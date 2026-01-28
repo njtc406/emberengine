@@ -309,7 +309,7 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 	}
 }
 
-func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) {
+func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) error {
 	meta := envelope.GetMeta()
 	data := envelope.GetData()
 	defer func() {
@@ -328,15 +328,16 @@ func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) {
 	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {
 		data.SetError(def.ErrMethodNotFound)
-		return
+		return nil
 	}
 	resp, err := call(ctx, data.GetRequest())
 	if err != nil {
 		h.WithContext(ctx).Errorf("method call failed:%v", err)
 		data.SetError(err)
-		return
+		return nil
 	}
 	data.SetResponse(resp)
+	return nil
 }
 
 func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
@@ -381,7 +382,7 @@ func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
 	}
 }
 
-func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) {
+func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) error {
 	defer func() {
 		if r := recover(); r != nil {
 			h.WithContext(ctx).Errorf("service[%s] handle message panic: %v\n trace:%s",
@@ -392,16 +393,17 @@ func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) {
 	meta := envelope.GetMeta()
 	data := envelope.GetData()
 	if meta == nil || data == nil {
-		return
+		return nil
 	}
 
 	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
 	if state == nil {
-		return
+		return nil
 	}
 
 	state.SetResult(data.GetResponse(), data.GetError())
 	state.Complete()
+	return nil
 }
 
 func (h *Handler) GetMethods() []string {

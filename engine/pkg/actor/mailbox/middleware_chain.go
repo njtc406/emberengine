@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -153,7 +155,7 @@ func (c *MiddlewareChain) Remove(name string) bool {
 }
 
 // ExecuteOnReceive 执行所有中间件的 OnReceive
-func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, evt inf.IEvent, serviceName string) (inf.MiddlewareResult, inf.IMiddlewareContext) {
+func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, evt inf.IEvent, serviceName string) (dto.MiddlewareResult, inf.IMiddlewareContext) {
 	mctx := NewMiddlewareContext(ctx, evt, serviceName)
 
 	c.mu.RLock()
@@ -163,19 +165,19 @@ func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, evt inf.IEvent, 
 	for i, m := range middlewares {
 		result := m.OnReceive(mctx)
 		switch result.Action {
-		case inf.ActionReject:
+		case def.ActionReject:
 			mctx.executed.Store(int32(i + 1))
 			return result, mctx
-		case inf.ActionSkip:
+		case def.ActionSkip:
 			// 仅执行到当前中间件为止（包含当前），跳过后续中间件。
 			mctx.executed.Store(int32(i + 1))
-			return inf.Continue(), mctx
-		case inf.ActionContinue:
+			return dto.Continue(), mctx
+		case def.ActionContinue:
 			continue
 		}
 	}
 	mctx.executed.Store(int32(len(middlewares)))
-	return inf.Continue(), mctx
+	return dto.Continue(), mctx
 }
 
 // ExecuteOnComplete 执行所有中间件的 OnComplete（逆序）

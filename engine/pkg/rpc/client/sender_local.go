@@ -41,7 +41,7 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 	data := envelope.GetData()
 	if data != nil && data.IsReply() {
 		// 本地回复：reply 复用的是“当前正在处理的请求 envelope”，
-		// envelope 的最终释放由对端 mailbox 的 InvokeMessage 统一负责。
+		// envelope 的最终释放由对端 mailbox 的 InvokeJob 统一负责。
 		// 这里提前 Release 会导致对象过早回到池里，被并发复用后出现 meta/data=nil 等异常。
 		state := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId())
 		if state == nil {
@@ -55,8 +55,8 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 
 	// 本地请求：投递到对端 mailbox。
 	// envelope 的最终 Release 由对端 mailbox 统一处理。
-	if err := dispatcher.PostMessage(ctx, envelope); err != nil {
-		// PostMessage 失败说明未能把 envelope 交给对端 mailbox，当前方需要负责回收。
+	if err := dispatcher.PostJob(ctx, envelope); err != nil {
+		// PostJob 失败说明未能把 envelope 交给对端 mailbox，当前方需要负责回收。
 		envelope.Release()
 		return err
 	}

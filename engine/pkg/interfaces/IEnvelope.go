@@ -1,5 +1,5 @@
 // Package interfaces
-// @Title  信封接口
+// @Title  rpc数据信封接口
 // @Description  desc
 // @Author  yr  2024/11/14
 // @Update  yr  2024/11/14
@@ -14,7 +14,7 @@ import (
 
 type IEnvelope interface {
 	IDataDef
-	IEvent
+	IMailboxJob
 
 	// Set
 
@@ -27,6 +27,7 @@ type IEnvelope interface {
 	GetData() IEnvelopeData
 
 	// Option
+
 	ToProtoMsg(ctx context.Context) (*actor.Message, error)
 }
 

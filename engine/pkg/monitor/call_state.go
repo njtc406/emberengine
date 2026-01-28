@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
@@ -37,11 +39,14 @@ type CallState struct {
 	timeout    time.Duration // nanoseconds
 	method     string
 	dispatcher inf.IRpcDispatcher
-	callbacks  []dto.CompletionFunc
+	callbacks  dto.CompletionFuncs
 	cbParams   []interface{}
 	done       chan struct{}
 	resp       interface{}
 	err        error
+	// 并发回调参数
+	Priority      def.Priority
+	DispatcherKey string
 }
 
 var callStatePool pool.IPool[*CallState]
@@ -143,8 +148,16 @@ func (s *CallState) NeedCallback() bool { return len(s.callbacks) > 0 }
 // - Call：唤醒 Wait()，由调用方在读取结果后手动 Release。
 func (s *CallState) Complete() {
 	if s.NeedCallback() {
-		// 已经在 mailbox goroutine 中，直接执行回调
-		s.DoCallback(s.XContext)
+		// 需要回调执行
+		// TODO 重写
+		envelopeResp := msgenvelope.NewMsgEnvelope()
+		meta := msgenvelope.NewMeta()
+		envelopeResp.SetMeta(meta)
+		data := msgenvelope.NewData()
+		data.SetResponse(s.Response())
+		data.SetError(s.Error())
+		envelopeResp.SetData(data)
+		s.dispatcher.PostJob(s.XContext, envelopeResp)
 		getCallStatePool().Put(s)
 		return
 	}
@@ -161,7 +174,7 @@ func (s *CallState) dispatchCallbackEvent() {
 	}
 	// 使用 CallbackEnvelope 包装投递
 	env := event.NewCallbackEnvelope(s)
-	if err := s.dispatcher.PostMessage(s.XContext, env); err != nil {
+	if err := s.dispatcher.PostJob(s.XContext, env); err != nil {
 		env.Release()
 		getCallStatePool().Put(s)
 	}

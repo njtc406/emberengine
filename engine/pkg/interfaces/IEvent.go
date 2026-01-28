@@ -8,7 +8,6 @@ package interfaces
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -18,10 +17,8 @@ type EventOption func(eventType int32, processor IEventProcessor) int
 
 type IEvent interface {
 	IDataDef
-	GetType() int32
-	GetPriority() def.Priority
-	GetDispatcherKey() string
-	Release()
+	IMailboxJob
+	GetData() any
 }
 
 type IEventChannel interface {
@@ -29,7 +26,7 @@ type IEventChannel interface {
 }
 
 type IListener interface {
-	IEventChannel
+	IMailboxChannel
 	IServer
 }
 

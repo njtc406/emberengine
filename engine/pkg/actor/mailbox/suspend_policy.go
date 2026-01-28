@@ -37,14 +37,14 @@ func NewDefaultSuspendPolicy() *DefaultSuspendPolicy {
 // 返回：
 //   - true: 允许通过
 //   - false: 拒绝入队
-func (p *DefaultSuspendPolicy) ShouldAllow(ctx context.Context, evt inf.IEvent) bool {
+func (p *DefaultSuspendPolicy) ShouldAllow(ctx context.Context, job inf.IMailboxJob) bool {
 	// 规则1: 紧急及以上优先级始终放行
-	if evt.GetPriority() <= def.PriorityUrgent {
+	if job.GetPriority() <= def.PriorityUrgent {
 		return true
 	}
 
 	// 规则2: RPC Reply 放行
-	if env, ok := evt.(inf.IEnvelope); ok {
+	if env, ok := job.(inf.IEnvelope); ok {
 		data := env.GetData()
 		if data != nil && data.IsReply() {
 			return true
@@ -52,7 +52,7 @@ func (p *DefaultSuspendPolicy) ShouldAllow(ctx context.Context, evt inf.IEvent) 
 	}
 
 	// 规则3: 并发回调事件放行
-	if evt.GetType() == event.ServiceConcurrentCallback {
+	if job.GetType() == event.ServiceConcurrentCallback {
 		return true
 	}
 

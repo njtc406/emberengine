@@ -10,43 +10,68 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 )
 
-// ============================================================================
-// Mailbox 中间件系统
-// ============================================================================
-
-// MiddlewareAction 中间件动作，决定消息的后续处理方式
-type MiddlewareAction int
-
-const (
-	// ActionContinue 继续执行后续中间件和消息处理
-	ActionContinue MiddlewareAction = iota
-	// ActionReject 拒绝消息入队，返回错误给调用方
-	ActionReject
-	// ActionSkip 跳过后续中间件，直接入队（用于快速路径）
-	ActionSkip
-)
-
-// MiddlewareResult 中间件处理结果
-type MiddlewareResult struct {
-	Action MiddlewareAction // 动作
-	Err    error            // 拒绝时的错误信息
+// IMailbox interface is used to enqueue messages to the mailbox
+type IMailbox interface {
+	IMailboxChannel
+	Start()
+	// BeginStop 发起停止（非阻塞）：停止接收新消息并唤醒 worker 退出。
+	BeginStop()
+	// Wait 等待 mailbox 完全停止（阻塞）。
+	Wait()
+	// Stop 便捷方法：BeginStop + Wait。
+	Stop()         // TODO 这里的改造可能是多余的，stop不应该由service自身发起,应该由外部的管理器来发起,比如node的daemon服务
+	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
+	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
 }
 
-// Continue 创建继续执行的结果
-func Continue() MiddlewareResult {
-	return MiddlewareResult{Action: ActionContinue}
+type IMailboxWorker interface {
+	Start()
+	// BeginStop 发起停止（非阻塞）：停止接收新消息并让 run 循环退出。
+	BeginStop()
+	// Wait 等待 worker 完全退出。
+	Wait()
+	// Stop 便捷方法：BeginStop + Wait。
+	Stop()
+	// SubmitJob 提交任务
+	SubmitJob(ctx context.Context, job IMailboxJob, mctx IMiddlewareContext) error
+	GetWorkerId() int
+	// GetMsgLen 获取当前队列中的消息数量
+	GetMsgLen() int
 }
 
-// Reject 创建拒绝消息的结果
-func Reject(err error) MiddlewareResult {
-	return MiddlewareResult{Action: ActionReject, Err: err}
+type IMailboxJob interface {
+	// 调度相关
+	GetType() def.MailboxJobType // 类型，用于分发到不同 handler
+	GetPriority() def.Priority   // 优先级
+	GetDispatcherKey() string    // 分发key,用于
+
+	// 生命周期
+	Release()
 }
 
-// Skip 创建跳过后续中间件的结果
-func Skip() MiddlewareResult {
-	return MiddlewareResult{Action: ActionSkip}
+// IMailboxChannel 消息接口
+type IMailboxChannel interface {
+	PostJob(ctx context.Context, job IMailboxJob) error
+	// TODO 是否需要增加带超时的接口，还是就使用一个接口,用其他方式来携带超时信息
+}
+
+// IMessageInvoker 处理消息
+type IMessageInvoker interface {
+	GetServiceName() string
+	InvokeJob(ctx context.Context, job IMailboxJob) error
+	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
+}
+
+// ================TODO 下面这些还未验证===================
+
+type IMailboxStatistics interface {
+	GetPriorityQueueLen(priority def.Priority) int
+	GetTotalQueueLen() int
+	GetPriorityStatistics() map[def.Priority]int
+	GetSchedulerStatistics() map[string]interface{}
 }
 
 // IMiddlewareContext 中间件上下文接口
@@ -57,8 +82,8 @@ type IMiddlewareContext interface {
 	// Context 获取原始 context.Context
 	Context() context.Context
 
-	// Event 获取当前处理的事件
-	Event() IEvent
+	// Job 获取当前处理的作业
+	Job() IMailboxJob
 
 	// ServiceName 获取所属服务名
 	ServiceName() string
@@ -114,7 +139,7 @@ type IMailboxMiddleware interface {
 	//   - Skip(): 跳过后续中间件，直接入队
 	//
 	// 注意：此方法应该快速返回，避免阻塞投递线程
-	OnReceive(mctx IMiddlewareContext) MiddlewareResult
+	OnReceive(mctx IMiddlewareContext) dto.MiddlewareResult
 
 	// OnComplete 消息处理完成后调用
 	//
@@ -137,7 +162,7 @@ type IMiddlewareChain interface {
 
 	// ExecuteOnReceive 执行所有中间件的 OnReceive
 	// 返回最终结果和创建的上下文（用于后续 OnComplete）
-	ExecuteOnReceive(ctx context.Context, evt IEvent, serviceName string) (MiddlewareResult, IMiddlewareContext)
+	ExecuteOnReceive(ctx context.Context, job IMailboxJob, serviceName string) (dto.MiddlewareResult, IMiddlewareContext)
 
 	// ExecuteOnComplete 执行所有中间件的 OnComplete（逆序）
 	ExecuteOnComplete(mctx IMiddlewareContext, err error, panicVal interface{})
@@ -159,60 +184,5 @@ type IMiddlewareChain interface {
 type ISuspendPolicy interface {
 	// ShouldAllow 判断挂起状态下是否允许该事件通过。
 	// 返回 true 表示放行，false 表示拒绝。
-	ShouldAllow(ctx context.Context, evt IEvent) bool
+	ShouldAllow(ctx context.Context, job IMailboxJob) bool
 }
-
-// IMessageInvoker 处理消息
-type IMessageInvoker interface {
-	GetServiceName() string
-	InvokeMessage(ctx context.Context, evt IEvent) error
-	EscalateFailure(ctx context.Context, reason interface{}, evt IEvent)
-}
-
-// IMailboxChannel 消息接口
-type IMailboxChannel interface {
-	PostMessage(ctx context.Context, evt IEvent) error
-}
-
-// IMailbox interface is used to enqueue messages to the mailbox
-type IMailbox interface {
-	IMailboxChannel
-	Start()
-	// BeginStop 发起停止（非阻塞）：停止接收新消息并唤醒 worker 退出。
-	BeginStop()
-	// Wait 等待 mailbox 完全停止（阻塞）。
-	Wait()
-	// Stop 便捷方法：BeginStop + Wait。
-	Stop()
-	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
-	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
-}
-
-type IMailboxWorker interface {
-	Start()
-	// BeginStop 发起停止（非阻塞）：停止接收新消息并让 run 循环退出。
-	BeginStop()
-	// Wait 等待 worker 完全退出。
-	Wait()
-	// Stop 便捷方法：BeginStop + Wait。
-	Stop()
-	SubmitEvent(ctx context.Context, evt IEvent, mctx IMiddlewareContext) error
-	GetWorkerId() int
-	// GetMsgLen 获取当前队列中的消息数量
-	GetMsgLen() int
-}
-
-type IMailboxStatistics interface {
-	GetPriorityQueueLen(priority def.Priority) int
-	GetTotalQueueLen() int
-	GetPriorityStatistics() map[def.Priority]int
-	GetSchedulerStatistics() map[string]interface{}
-}
-
-//type IDispatcher interface {
-//	Schedule(fn func()) error
-//	Throughput() int // 每次处理的消息数量,达到该值后,释放cpu资源等待下次处理
-//}
-
-// MailboxProducer is a function which creates a new mailbox
-//type MailboxProducer func(conf *config.Mailbox, invoker IMessageInvoker, middlewares ...IMailboxMiddleware) IMailbox

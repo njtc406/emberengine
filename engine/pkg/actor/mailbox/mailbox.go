@@ -102,7 +102,7 @@ func (m *Mailbox) PostMessage(ctx context.Context, e inf.IEvent) error {
 
 	// 执行中间件链的 OnReceive
 	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(ctx, e, m.workerPool.invoker.GetServiceName())
-	if result.Action == inf.ActionReject {
+	if result.Action == def.ActionReject {
 		if result.Err != nil {
 			return result.Err
 		}

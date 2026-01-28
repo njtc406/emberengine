@@ -199,7 +199,7 @@ func (w *Worker) BeginStop() {
 		return // already stopping/stopped
 	}
 
-	// Wait for in-flight SubmitEvent calls to finish.
+	// Wait for in-flight SubmitJob calls to finish.
 	for w.submitters.Load() != 0 {
 		runtime.Gosched()
 	}
@@ -240,7 +240,7 @@ func (w *Worker) discardExec(e inf.IEvent) {
 		if mctx != nil {
 			w.pool.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxNotRunning, nil)
 		}
-		// 不执行业务，直接释放内部 event（原本由 InvokeMessage 负责 Release）
+		// 不执行业务，直接释放内部 event（原本由 InvokeJob 负责 Release）
 		if evt != nil {
 			evt.Release()
 		}
@@ -284,7 +284,7 @@ func (w *Worker) safeExec(e inf.IEvent) {
 			w.pool.middlewareChain.ExecuteOnComplete(mctx, execErr, panicVal)
 		}
 
-		// 释放 CtxEvent 包装器（内部 event 由 InvokeMessage 负责释放）
+		// 释放 CtxEvent 包装器（内部 event 由 InvokeJob 负责释放）
 		e.Release()
 	}()
 
@@ -294,7 +294,7 @@ func (w *Worker) safeExec(e inf.IEvent) {
 	}
 
 	// 调用消息处理器
-	if err := w.pool.invoker.InvokeMessage(ctx, evt); err != nil {
+	if err := w.pool.invoker.InvokeJob(ctx, evt); err != nil {
 		execErr = err
 	}
 

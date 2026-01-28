@@ -51,7 +51,7 @@ func (c *CtxEvent) UnRef() bool {
 
 func (c *CtxEvent) Release() {
 	// CtxEvent 只是包装器，不负责释放内部 event
-	// 内部 event 由使用方（如 InvokeMessage 之后的业务逻辑）负责释放
+	// 内部 event 由使用方（如 InvokeJob 之后的业务逻辑）负责释放
 	c.Event = nil
 	c.Ctx = nil
 	c.Mctx = nil

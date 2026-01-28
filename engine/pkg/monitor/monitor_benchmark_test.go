@@ -169,7 +169,7 @@ func BenchmarkRpcMonitor_CallTimeout_Async(b *testing.B) {
 	}
 }
 
-// fakeDispatcher implements IRpcDispatcher enough for CallState.dispatchCallbackEvent (PostMessage/IsClosed).
+// fakeDispatcher implements IRpcDispatcher enough for CallState.dispatchCallbackEvent (PostJob/IsClosed).
 // Other methods are unused in these benchmarks.
 
 type fakeDispatcher struct {
@@ -177,7 +177,7 @@ type fakeDispatcher struct {
 }
 
 func (d *fakeDispatcher) PostMessage(ctx context.Context, evt inf.IEvent) error {
-	return d.mailbox.PostMessage(ctx, evt)
+	return d.mailbox.PostJob(ctx, evt)
 }
 
 func (d *fakeDispatcher) Deliver(ctx context.Context, _ inf.IEnvelope) error { return nil }

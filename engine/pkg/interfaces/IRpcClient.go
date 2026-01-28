@@ -16,7 +16,7 @@ type IRpcDispatcher interface {
 
 	// Deliver 投递一条 envelope。
 	// 语义：调用方在调用后不得再使用该 envelope（所有权转移）。
-	// 本地路径：通常会 PostMessage 到对端 mailbox，由对端处理后 Release。
+	// 本地路径：通常会 PostJob 到对端 mailbox，由对端处理后 Release。
 	// 远端路径：发送完成后由 sender 负责 Release。
 	Deliver(ctx context.Context, envelope IEnvelope) error
 

@@ -18,6 +18,14 @@ func EmptyCancelRpc() {} // 空的取消函数
 
 type CompletionFunc func(ctx context.Context, data interface{}, err error, params ...interface{}) // 异步回调函数
 
+type CompletionFuncs []CompletionFunc
+
+func (f CompletionFuncs) DoCallback(ctx context.Context, data interface{}, err error, params ...interface{}) {
+	for _, callback := range f {
+		callback(ctx, data, err, params...)
+	}
+}
+
 type AsyncCallParams struct {
 	Params []interface{}
 }

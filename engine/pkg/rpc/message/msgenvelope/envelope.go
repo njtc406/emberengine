@@ -117,7 +117,7 @@ func (e *MsgEnvelope) GetType() int32 {
 }
 
 func (e *MsgEnvelope) GetPriority() def.Priority {
-	// RPC 消息默认使用普通优先级
+	// TODO 需要修改为能设置优先级
 	return def.PriorityNormal
 }
 

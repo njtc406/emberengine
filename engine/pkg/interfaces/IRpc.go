@@ -63,3 +63,7 @@ type SelectParam struct {
 	ServiceType *string
 	IsSlaver    bool
 }
+
+type IRpcCallback interface {
+	DoCallback(ctx context.Context, data interface{}, err error, params ...interface{})
+}

@@ -421,7 +421,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 	if subMap, ok := eb.globalSubscribers[e.EventType]; ok {
 		for _, ch := range subMap {
 			ev := NewActorEventEnvelope(e)
-			if err := ch.PushEvent(ctx, ev); err != nil {
+			if err := ch.PostJob(ctx, ev); err != nil {
 				log.SysLogger.WithContext(ctx).Errorf("push global event error: %v", err)
 				ev.Release()
 			}

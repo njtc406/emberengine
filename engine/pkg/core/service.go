@@ -350,7 +350,7 @@ func (s *Service) doFinalize() {
 	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
 
-// doFinalizeDirectly 在 PostMessage 失败时由调用者协程直接执行清理。
+// doFinalizeDirectly 在 PostJob 失败时由调用者协程直接执行清理。
 // 此时 mailbox 已经 BeginStop，不会有 worker 并发处理消息。
 func (s *Service) doFinalizeDirectly() {
 	s.doFinalizeCore()
