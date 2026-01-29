@@ -14,18 +14,17 @@ import (
 // 实现：支持双队列（DualQueueManager）和多优先级队列（PriorityQueueManager）
 type IQueueManager interface {
 	// Submit 提交事件到队列
-	Submit(e inf.IEvent) error
+	Submit(e inf.IMailboxJob) error
 
-	// NextEvent 获取下一个待处理事件（按优先级或策略）
-	// 返回：事件对象，是否成功获取
-	NextEvent() (inf.IEvent, bool)
+	// NextJob 获取下一个待处理事件（按优先级或策略）
+	NextJob() (inf.IMailboxJob, bool)
 
-	// GetMsgLen 获取所有队列的总消息数量
-	GetMsgLen() int
+	// GetJobLen 获取所有队列的总消息数量
+	GetJobLen() int
 
 	// DrainAll 清空所有队列，对每个事件执行处理函数
 	// 用于 Worker 关闭时处理剩余消息
-	DrainAll(handler func(inf.IEvent))
+	DrainAll(handler func(inf.IMailboxJob))
 
 	// IsEmpty 判断所有队列是否为空
 	IsEmpty() bool

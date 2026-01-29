@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
@@ -62,7 +63,7 @@ const (
 
 // EventClassification 事件分类配置
 type EventClassification struct {
-	EventType    int32             `json:"event_type"`    // 事件类型
+	EventType    inf.EventType     `json:"event_type"`    // 事件类型
 	Category     EventCategory     `json:"category"`      // 事件分类
 	Priority     def.Priority      `json:"priority"`      // 事件优先级
 	Scope        EventScope        `json:"scope"`         // 事件范围
@@ -75,7 +76,7 @@ type EventClassification struct {
 
 // EventRegistry 事件注册表
 type EventRegistry struct {
-	classifications map[int32]*EventClassification
+	classifications map[inf.EventType]*EventClassification
 	categoryStats   map[EventCategory]*CategoryStats
 }
 
@@ -89,7 +90,7 @@ type CategoryStats struct {
 }
 
 // 预定义的事件分类规则
-var defaultClassifications = map[int32]*EventClassification{
+var defaultClassifications = map[inf.EventType]*EventClassification{
 	// 系统关键事件
 	SysEventServiceClose: {
 		EventType:    SysEventServiceClose,
@@ -192,7 +193,7 @@ var defaultClassifications = map[int32]*EventClassification{
 // NewEventRegistry 创建事件注册表
 func NewEventRegistry() *EventRegistry {
 	registry := &EventRegistry{
-		classifications: make(map[int32]*EventClassification),
+		classifications: make(map[inf.EventType]*EventClassification),
 		categoryStats:   make(map[EventCategory]*CategoryStats),
 	}
 
@@ -210,7 +211,7 @@ func NewEventRegistry() *EventRegistry {
 }
 
 // GetClassification 获取事件分类信息
-func (r *EventRegistry) GetClassification(eventType int32) *EventClassification {
+func (r *EventRegistry) GetClassification(eventType inf.EventType) *EventClassification {
 	if classification, exists := r.classifications[eventType]; exists {
 		return classification
 	}
@@ -262,26 +263,26 @@ func (r *EventRegistry) GetCategoryStats(category EventCategory) *CategoryStats 
 }
 
 // ShouldThrottle 检查是否应该限流
-func (r *EventRegistry) ShouldThrottle(eventType int32, currentFrequency int) bool {
+func (r *EventRegistry) ShouldThrottle(eventType inf.EventType, currentFrequency int) bool {
 	classification := r.GetClassification(eventType)
 	return currentFrequency > classification.MaxFrequency
 }
 
 // GetBatchSize 获取批处理大小
-func (r *EventRegistry) GetBatchSize(eventType int32) int {
+func (r *EventRegistry) GetBatchSize(eventType inf.EventType) int {
 	classification := r.GetClassification(eventType)
 	return classification.BatchSize
 }
 
 // IsExpired 检查事件是否过期
-func (r *EventRegistry) IsExpired(eventType int32, timestamp int64) bool {
+func (r *EventRegistry) IsExpired(eventType inf.EventType, timestamp int64) bool {
 	classification := r.GetClassification(eventType)
 	return time.Now().Unix()-timestamp > int64(classification.TTL)
 }
 
 // GetEventsByCategory 按分类获取事件类型列表
-func (r *EventRegistry) GetEventsByCategory(category EventCategory) []int32 {
-	var events []int32
+func (r *EventRegistry) GetEventsByCategory(category EventCategory) []inf.EventType {
+	var events []inf.EventType
 	for eventType, classification := range r.classifications {
 		if classification.Category == category {
 			events = append(events, eventType)
@@ -291,8 +292,8 @@ func (r *EventRegistry) GetEventsByCategory(category EventCategory) []int32 {
 }
 
 // GetEventsByScope 按范围获取事件类型列表
-func (r *EventRegistry) GetEventsByScope(scope EventScope) []int32 {
-	var events []int32
+func (r *EventRegistry) GetEventsByScope(scope EventScope) []inf.EventType {
+	var events []inf.EventType
 	for eventType, classification := range r.classifications {
 		if classification.Scope == scope {
 			events = append(events, eventType)
@@ -302,8 +303,8 @@ func (r *EventRegistry) GetEventsByScope(scope EventScope) []int32 {
 }
 
 // GetEventsByTags 按标签获取事件类型列表
-func (r *EventRegistry) GetEventsByTags(tags []string) []int32 {
-	var events []int32
+func (r *EventRegistry) GetEventsByTags(tags []string) []inf.EventType {
+	var events []inf.EventType
 	for eventType, classification := range r.classifications {
 		if r.hasAllTags(classification.Tags, tags) {
 			events = append(events, eventType)

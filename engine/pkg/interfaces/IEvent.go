@@ -11,6 +11,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type EventType int32
+
 // EventCallBack 事件接受器
 type EventCallBack func(ctx context.Context, event IEvent)
 type EventOption func(eventType int32, processor IEventProcessor) int
@@ -19,6 +21,7 @@ type IEvent interface {
 	IDataDef
 	IMailboxJob
 	GetData() any
+	GetEventType() EventType
 }
 
 type IEventChannel interface {
@@ -30,37 +33,43 @@ type IListener interface {
 	IServer
 }
 
+type IEventListener interface {
+	IEventChannel
+	IMailboxChannel
+	IServer
+}
+
 type IEventProcessor interface {
 	IEventChannel
 
-	Init(eventChannel IListener)
+	Init(eventChannel IEventListener)
 	EventHandler(ctx context.Context, ev IEvent)
 	// 普通事件
-	RegEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
-	UnRegEventReceiverFun(eventType int32, receiver IEventHandler)
+	RegEventReceiverFunc(eventType EventType, receiver IEventHandler, callback EventCallBack)
+	UnRegEventReceiverFun(eventType EventType, receiver IEventHandler)
 	// 全局事件
-	RegGlobalEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
-	UnRegGlobalEventReceiverFun(eventType int32, receiver IEventHandler)
+	RegGlobalEventReceiverFunc(eventType EventType, receiver IEventHandler, callback EventCallBack)
+	UnRegGlobalEventReceiverFun(eventType EventType, receiver IEventHandler)
 	// 发布全局事件
-	PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error
+	PublishGlobal(ctx context.Context, eventType EventType, data proto.Message) error
 
 	// 服务器事件
-	RegServerEventReceiverFunc(eventType int32, receiver IEventHandler, callback EventCallBack)
-	UnRegServerEventReceiverFun(eventType int32, receiver IEventHandler)
+	RegServerEventReceiverFunc(eventType EventType, receiver IEventHandler, callback EventCallBack)
+	UnRegServerEventReceiverFun(eventType EventType, receiver IEventHandler)
 	// 发布服务器事件
-	PublishServer(ctx context.Context, eventType int32, data proto.Message) error
+	PublishServer(ctx context.Context, eventType EventType, data proto.Message) error
 
 	// 特定服务事件
-	RegSpecificEventReceiverFunc(eventType int32, serviceUid string, receiver IEventHandler, callback EventCallBack)
-	UnRegSpecificEventReceiverFun(eventType int32, serviceUid string, receiver IEventHandler)
+	RegSpecificEventReceiverFunc(eventType EventType, serviceUid string, receiver IEventHandler, callback EventCallBack)
+	UnRegSpecificEventReceiverFun(eventType EventType, serviceUid string, receiver IEventHandler)
 	// 发布特定服务事件
-	PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error
+	PublishSpecific(ctx context.Context, eventType EventType, serviceUid string, data proto.Message) error
 
 	CastEvent(ctx context.Context, event IEvent) //广播事件
-	AddBindEvent(eventType int32, receiver IEventHandler, callback EventCallBack)
-	AddListen(eventType int32, receiver IEventHandler)
-	RemoveBindEvent(eventType int32, receiver IEventHandler)
-	RemoveListen(eventType int32, receiver IEventHandler)
+	AddBindEvent(eventType EventType, receiver IEventHandler, callback EventCallBack)
+	AddListen(eventType EventType, receiver IEventHandler)
+	RemoveBindEvent(eventType EventType, receiver IEventHandler)
+	RemoveListen(eventType EventType, receiver IEventHandler)
 }
 
 type IEventHandler interface {
@@ -69,6 +78,6 @@ type IEventHandler interface {
 	NotifyEvent(ctx context.Context, ev IEvent)
 	Destroy()
 	//注册了事件
-	AddRegInfo(eventType int32, eventProcessor IEventProcessor)
-	RemoveRegInfo(eventType int32, eventProcessor IEventProcessor)
+	AddRegInfo(eventType EventType, eventProcessor IEventProcessor)
+	RemoveRegInfo(eventType EventType, eventProcessor IEventProcessor)
 }

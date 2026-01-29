@@ -155,8 +155,8 @@ func (c *MiddlewareChain) Remove(name string) bool {
 }
 
 // ExecuteOnReceive 执行所有中间件的 OnReceive
-func (c *MiddlewareChain) ExecuteOnReceive(ctx context.Context, job inf.IMailboxJob, serviceName string) (dto.MiddlewareResult, inf.IMiddlewareContext) {
-	mctx := NewMiddlewareContext(ctx, job, serviceName)
+func (c *MiddlewareChain) ExecuteOnReceive(job inf.IMailboxJob, serviceName string) (dto.MiddlewareResult, inf.IMiddlewareContext) {
+	mctx := NewMiddlewareContext(job.GetContext(), job, serviceName)
 
 	c.mu.RLock()
 	middlewares := c.middlewares

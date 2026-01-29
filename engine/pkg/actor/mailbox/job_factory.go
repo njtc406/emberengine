@@ -6,9 +6,7 @@
 package mailbox
 
 import (
-	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -16,69 +14,71 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
-type jobCreator func() inf.IMailboxJob
-
-var (
-	jobFactoryOnce sync.Once
-	jobFactoryVal  atomic.Value // map[def.MailboxJobType]jobCreator
-)
-
-func initJobFactory() {
-	defaults := map[def.MailboxJobType]jobCreator{
-		def.MailboxJobTypeRpc:                func() inf.IMailboxJob { return NewMsgJob() },
-		def.MailboxJobTypeEvent:              func() inf.IMailboxJob { return NewEventBusJob() },
-		def.MailboxJobTypeInternalEvent:      func() inf.IMailboxJob { return NewInternalEventJob() },
-		def.MailboxJobTypeTimer:              func() inf.IMailboxJob { return NewTimerJob() },
-		def.MailboxJobTypeConcurrentCallback: func() inf.IMailboxJob { return NewConcurrentCallbackJob() },
-		def.MailboxJobSysCtl:                 func() inf.IMailboxJob { return NewSysCtlJob() },
-	}
-	jobFactoryVal.Store(defaults)
+type jobEntry struct {
+	creator func() inf.IMailboxJob
+	getter  func(inf.IMailboxJob) any
 }
 
-func getJobFactory() map[def.MailboxJobType]jobCreator {
-	jobFactoryOnce.Do(initJobFactory)
-	return jobFactoryVal.Load().(map[def.MailboxJobType]jobCreator)
-}
-
-// RegisterJobFactory 注册一个新的 job 创建器。
-// 说明：实现为 copy-on-write，因此 CreateJob() 热路径无锁。
-// replace=false 且已存在时返回 error。
-func RegisterJobFactory(jobType def.MailboxJobType, creator jobCreator, replace bool) error {
-	if creator == nil {
-		return fmt.Errorf("jobFactory: nil creator for type %v", jobType)
-	}
-	jobFactoryOnce.Do(initJobFactory)
-
-	old := jobFactoryVal.Load().(map[def.MailboxJobType]jobCreator)
-	if _, exists := old[jobType]; exists && !replace {
-		return fmt.Errorf("jobFactory: creator already registered for type %v", jobType)
-	}
-
-	newMap := make(map[def.MailboxJobType]jobCreator, len(old)+1)
-	for k, v := range old {
-		newMap[k] = v
-	}
-	newMap[jobType] = creator
-	jobFactoryVal.Store(newMap)
-	return nil
-}
-
-// MustRegisterJobFactory 类似 RegisterJobFactory，但失败直接 panic，适合在 init() 中使用。
-func MustRegisterJobFactory(jobType def.MailboxJobType, creator jobCreator, replace bool) {
-	if err := RegisterJobFactory(jobType, creator, replace); err != nil {
-		panic(err)
-	}
+// jobFactory 静态注册表，请勿在运行时修改
+var jobFactory = map[def.MailboxJobType]jobEntry{
+	def.MailboxJobTypeRpc: {
+		creator: func() inf.IMailboxJob { return NewMsgJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*MsgJob).GetPayload() },
+	},
+	def.MailboxJobTypeEvent: {
+		creator: func() inf.IMailboxJob { return NewEventBusJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*EventBusJob).GetPayload() },
+	},
+	def.MailboxJobTypeInternalEvent: {
+		creator: func() inf.IMailboxJob { return NewInternalEventJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*InternalEventJob).GetPayload() },
+	},
+	def.MailboxJobTypeTimer: {
+		creator: func() inf.IMailboxJob { return NewTimerJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*TimerJob).GetPayload() },
+	},
+	def.MailboxJobTypeConcurrentCallback: {
+		creator: func() inf.IMailboxJob { return NewConcurrentCallbackJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*ConcurrentCallbackJob).GetPayload() },
+	},
+	def.MailboxJobSysCtl: {
+		creator: func() inf.IMailboxJob { return NewSysCtlJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*SysCtlJob).GetPayload() },
+	},
 }
 
 // CreateJob 按类型创建一个 job。
 // 未注册则返回 (nil, false)。
 func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
-	creator, ok := getJobFactory()[jobType]
+	entry, ok := jobFactory[jobType]
 	if !ok {
 		return nil, false
 	}
-	return creator(), true
+	return entry.creator(), true
 }
+
+// GetJobPayload 根据 job 的类型获取其负载。
+// 返回值需要调用方根据 jobType 断言为具体类型。
+// 未注册的类型返回 nil。
+func GetJobPayload(job inf.IMailboxJob) any {
+	entry, ok := jobFactory[job.GetType()]
+	if !ok {
+		return nil
+	}
+	return entry.getter(job)
+}
+
+// GetJobPayloadAs 泛型版本，直接返回指定类型。
+func GetJobPayloadAs[T any](job inf.IMailboxJob) T {
+	payload := GetJobPayload(job)
+	if payload == nil {
+		var zero T
+		return zero
+	}
+	return payload.(T)
+}
+
+// ===============================================================
 
 var msgJobPool pool.IPool[*MsgJob]
 var msgJobPoolOnce sync.Once

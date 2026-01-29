@@ -6,6 +6,9 @@
 package mailbox
 
 import (
+	"context"
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
@@ -23,6 +26,10 @@ type Job[T any] struct {
 	DispatcherKey string
 	// 负载数据
 	payload T
+
+	ctx      context.Context
+	deadline time.Time
+	mctx     inf.IMiddlewareContext
 }
 
 func (j *Job[T]) Reset() {
@@ -31,6 +38,31 @@ func (j *Job[T]) Reset() {
 	j.DispatcherKey = ""
 	var zero T
 	j.payload = zero
+}
+
+func (j *Job[T]) SetContext(ctx context.Context) {
+	j.ctx = ctx
+}
+
+func (j *Job[T]) SetDeadline(t time.Time) {
+	j.deadline = t
+}
+
+func (j *Job[T]) SetPriority(priority def.Priority) {
+	j.Priority = priority
+}
+
+func (j *Job[T]) SetDispatcherKey(key string) {
+	j.DispatcherKey = key
+}
+
+func (j *Job[T]) SetType(jobType def.MailboxJobType) {
+	j.Type = jobType
+}
+
+// SetMiddlewareContext 设置中间件上下文
+func (j *Job[T]) SetMiddlewareContext(mctx inf.IMiddlewareContext) {
+	j.mctx = mctx
 }
 
 func (j *Job[T]) GetPayload() T {
@@ -47,6 +79,18 @@ func (j *Job[T]) GetPriority() def.Priority {
 
 func (j *Job[T]) GetDispatcherKey() string {
 	return j.DispatcherKey
+}
+
+func (j *Job[T]) GetContext() context.Context {
+	return j.ctx
+}
+
+func (j *Job[T]) GetDeadline() time.Time {
+	return j.deadline
+}
+
+func (j *Job[T]) GetMiddlewareContext() inf.IMiddlewareContext {
+	return j.mctx
 }
 
 // MsgJob rpc消息任务

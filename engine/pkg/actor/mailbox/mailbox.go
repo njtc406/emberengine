@@ -6,7 +6,6 @@
 package mailbox
 
 import (
-	"context"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -15,7 +14,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
-// Mailbox 是 IMailbox 的默认实现，用于承载一个 service 的消息入口。
+// Mailbox 邮箱
 //
 // 运行时行为：
 //  1. 外部通过 PostMessage 投递 IEvent；
@@ -86,22 +85,27 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 	return m
 }
 
-// PostMessage 将事件投递到 mailbox。
+// PostJob 将任务投递到 mailbox。
 //
 // 行为：
 //  1. 如果 mailbox 已挂起，通过 ISuspendPolicy 判断是否放行，不放行则返回 ErrMailboxSuspended；
 //  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
 //  3. 将事件和中间件上下文交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
-func (m *Mailbox) PostJob(ctx context.Context, job inf.IMailboxJob) error {
-	// 挂起检查（内建机制，在所有中间件之前执行）
+func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
+	defer func() {
+		if err != nil {
+			job.Release()
+		}
+	}()
+	// 挂起检查
 	if m.isSuspended() {
-		if !m.suspendPolicy.ShouldAllow(ctx, job) {
+		if !m.suspendPolicy.ShouldAllow(job) {
 			return def.ErrMailboxSuspended
 		}
 	}
 
 	// 执行中间件链的 OnReceive
-	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(ctx, job, m.workerPool.invoker.GetServiceName())
+	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(job, m.workerPool.invoker.GetServiceName())
 	if result.Action == def.ActionReject {
 		if result.Err != nil {
 			return result.Err
@@ -109,8 +113,10 @@ func (m *Mailbox) PostJob(ctx context.Context, job inf.IMailboxJob) error {
 		return def.ErrMailboxMiddlewareRejected
 	}
 
+	job.SetMiddlewareContext(mctx)
+
 	// 分发事件（携带中间件上下文，用于 OnComplete 回调）
-	return m.workerPool.DispatchJob(ctx, job, mctx)
+	return m.workerPool.DispatchJob(job)
 }
 
 func (m *Mailbox) isSuspended() bool {

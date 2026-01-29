@@ -6,8 +6,6 @@
 package mailbox
 
 import (
-	"context"
-
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -37,15 +35,16 @@ func NewDefaultSuspendPolicy() *DefaultSuspendPolicy {
 // 返回：
 //   - true: 允许通过
 //   - false: 拒绝入队
-func (p *DefaultSuspendPolicy) ShouldAllow(ctx context.Context, job inf.IMailboxJob) bool {
+func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 	// 规则1: 紧急及以上优先级始终放行
 	if job.GetPriority() <= def.PriorityUrgent {
 		return true
 	}
 
 	// 规则2: RPC Reply 放行
-	if env, ok := job.(inf.IEnvelope); ok {
-		data := env.GetData()
+	if job.GetType() == def.MailboxJobTypeRpc {
+		envelope := GetJobPayloadAs[inf.IEnvelope](job)
+		data := envelope.GetData()
 		if data != nil && data.IsReply() {
 			return true
 		}
@@ -72,9 +71,9 @@ func NewCompositeSuspendPolicy(policies ...inf.ISuspendPolicy) *CompositeSuspend
 }
 
 // ShouldAllow 检查所有策略，任一放行则返回 true。
-func (p *CompositeSuspendPolicy) ShouldAllow(ctx context.Context, evt inf.IEvent) bool {
+func (p *CompositeSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 	for _, policy := range p.policies {
-		if policy.ShouldAllow(ctx, evt) {
+		if policy.ShouldAllow(job) {
 			return true
 		}
 	}

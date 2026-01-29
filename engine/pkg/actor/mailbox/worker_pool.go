@@ -59,9 +59,9 @@ type WorkerPool struct {
 	drainPolicy DrainPolicy
 
 	// Debug-only dispatch distribution stats.
-	statsEnabled  bool
+	statsEnabled  bool // 是否开启统计（仅在 Debug 模式下）
 	statsInterval time.Duration
-	dispatchCnt   map[int]*atomic.Uint64
+	dispatchCnt   map[int]*atomic.Uint64 // 每个 worker 的事件计数
 }
 
 func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
@@ -181,17 +181,17 @@ func (p *WorkerPool) Stop() {
 	p.Wait()
 }
 
-// DispatchEvent 将事件分派给具体 worker。
+// DispatchJob 将任务分派给具体 worker。
 //
 //   - 多 worker 模式：通过 ring.Get(evt.GetDispatcherKey()) 选择 worker，保证相同 dispatcherKey 的事件落到同一 worker；
 //   - 单 worker 模式：固定使用 workerID=0，行为接近 Actor 模型的串行执行。
 //   - mctx: 中间件上下文，用于在消息处理完成后调用 OnComplete 回调。
-func (p *WorkerPool) DispatchJob(ctx context.Context, job inf.IMailboxJob, mctx inf.IMiddlewareContext) error {
+func (p *WorkerPool) DispatchJob(job inf.IMailboxJob) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
 	var worker inf.IMailboxWorker
 	var exists bool
 	var workerID int
-
+	ctx := job.GetContext()
 	p.mu.RLock() // 加个锁,防止在调整worker数量时,hash环还没有更新
 	if len(p.workers) > 1 {
 		var ok bool
@@ -204,12 +204,11 @@ func (p *WorkerPool) DispatchJob(ctx context.Context, job inf.IMailboxJob, mctx 
 		worker, exists = p.workers[workerID]
 	} else {
 		// 单线程时直接使用 workerID=0
-		workerID = 0
 		worker, exists = p.workers[workerID]
 	}
 
 	if !exists {
-		p.logger.WithContext(ctx).Errorf("service[%s] Worker %d not found", p.invoker.GetServiceName(), workerID)
+		p.logger.WithContext(ctx).Errorf("Worker %d not found", workerID)
 		p.mu.RUnlock()
 		return def.ErrMailboxWorkerNotFound
 	}
@@ -220,9 +219,9 @@ func (p *WorkerPool) DispatchJob(ctx context.Context, job inf.IMailboxJob, mctx 
 			cnt.Add(1)
 		}
 	}
-
 	p.mu.RUnlock()
-	return worker.SubmitJob(ctx, job, mctx)
+
+	return worker.SubmitJob(job)
 }
 
 func (p *WorkerPool) resizeWorkers(newSize int) {

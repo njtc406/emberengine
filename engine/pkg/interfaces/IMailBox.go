@@ -22,7 +22,9 @@ type IMailbox interface {
 	// Wait 等待 mailbox 完全停止（阻塞）。
 	Wait()
 	// Stop 便捷方法：BeginStop + Wait。
-	Stop()         // TODO 这里的改造可能是多余的，stop不应该由service自身发起,应该由外部的管理器来发起,比如node的daemon服务
+	// TODO 这里的改造可能是多余的，stop不应该由service自身发起,应该由外部的管理器来发起,比如node的daemon服务,服务本身收到停止消息时，如果是
+	// TODO 基础服务，那么立即向daemon服务send一条kill自己的消息，这样可以精确控制只关闭某个服务，当然也可以直接向daemon发送一条定向关闭某服务消息
+	Stop()
 	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
 	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
 }
@@ -35,15 +37,28 @@ type IMailboxWorker interface {
 	Wait()
 	// Stop 便捷方法：BeginStop + Wait。
 	Stop()
-	// SubmitJob 提交任务
-	SubmitJob(ctx context.Context, job IMailboxJob, mctx IMiddlewareContext) error
+
 	GetWorkerId() int
-	// GetMsgLen 获取当前队列中的消息数量
-	GetMsgLen() int
+	// GetJobLen 获取当前队列中的任务数量
+	GetJobLen() int
+
+	// SubmitJob 提交任务
+	SubmitJob(job IMailboxJob) error
 }
 
 type IMailboxJob interface {
-	// 调度相关
+	// SetContext 设置上下文
+	SetContext(ctx context.Context)
+	// SetDeadline 设置截止时间
+	SetDeadline(t time.Time)
+	// SetPriority 设置优先级
+	SetPriority(priority def.Priority)
+	// SetDispatcherKey 设置分发key,用于将job分发给不同的worker
+	SetDispatcherKey(key string)
+	// SetType 设置类型，用于分发到不同 handler
+	SetType(jobType def.MailboxJobType)
+	// SetMiddlewareContext 设置中间件上下文
+	SetMiddlewareContext(mctx IMiddlewareContext)
 
 	// GetType 类型，用于分发到不同 handler
 	GetType() def.MailboxJobType
@@ -51,6 +66,13 @@ type IMailboxJob interface {
 	GetPriority() def.Priority
 	// GetDispatcherKey 获取分发key,用于将job分发给不同的worker
 	GetDispatcherKey() string
+	// GetContext 获取上下文
+	GetContext() context.Context
+	// GetDeadline 获取截止时间
+	GetDeadline() time.Time
+	// GetMiddlewareContext 获取中间件上下文
+	GetMiddlewareContext() IMiddlewareContext
+
 	// Release 释放job
 	Release()
 }
@@ -58,7 +80,7 @@ type IMailboxJob interface {
 // IMailboxChannel 消息接口
 type IMailboxChannel interface {
 	// TODO 这里是不是可以把ctx,timeout都放入job中?
-	PostJob(ctx context.Context, job IMailboxJob) error
+	PostJob(job IMailboxJob) error
 	// TODO 是否需要增加带超时的接口，还是就使用一个接口,用其他方式来携带超时信息
 }
 
@@ -188,5 +210,5 @@ type IMiddlewareChain interface {
 type ISuspendPolicy interface {
 	// ShouldAllow 判断挂起状态下是否允许该事件通过。
 	// 返回 true 表示放行，false 表示拒绝。
-	ShouldAllow(ctx context.Context, job IMailboxJob) bool
+	ShouldAllow(job IMailboxJob) bool
 }

@@ -15,20 +15,20 @@ import (
 // 职责：将消息分为系统消息（高优先级）和用户消息（普通优先级）两个队列
 // 调度策略：始终优先处理系统消息
 type DualQueueManager struct {
-	systemMailbox queue[inf.IEvent] // 系统队列：PrioritySys/Urgent/High
-	userMailbox   queue[inf.IEvent] // 用户队列：PriorityNormal/Low/Batch
+	systemMailbox queue[inf.IMailboxJob] // 系统队列：PrioritySys/Urgent/High
+	userMailbox   queue[inf.IMailboxJob] // 用户队列：PriorityNormal/Low/Batch
 }
 
 // NewDualQueueManager 创建双队列管理器
 func NewDualQueueManager() *DualQueueManager {
 	return &DualQueueManager{
-		systemMailbox: mpsc.New[inf.IEvent](),
-		userMailbox:   mpsc.New[inf.IEvent](),
+		systemMailbox: mpsc.New[inf.IMailboxJob](),
+		userMailbox:   mpsc.New[inf.IMailboxJob](),
 	}
 }
 
 // Submit 提交事件到对应队列
-func (m *DualQueueManager) Submit(e inf.IEvent) error {
+func (m *DualQueueManager) Submit(e inf.IMailboxJob) error {
 	// 按优先级分配队列：< Normal 的进系统队列，>= Normal 的进用户队列
 	if e.GetPriority() < def.PriorityNormal {
 		m.systemMailbox.Push(e)
@@ -38,9 +38,9 @@ func (m *DualQueueManager) Submit(e inf.IEvent) error {
 	return nil
 }
 
-// NextEvent 获取下一个待处理事件
+// NextJob 获取下一个待处理事件
 // 调度策略：优先返回系统队列的消息，系统队列为空时返回用户队列消息
-func (m *DualQueueManager) NextEvent() (inf.IEvent, bool) {
+func (m *DualQueueManager) NextJob() (inf.IMailboxJob, bool) {
 	// 优先处理系统消息
 	if e, ok := m.systemMailbox.Pop(); ok {
 		return e, true
@@ -54,8 +54,8 @@ func (m *DualQueueManager) NextEvent() (inf.IEvent, bool) {
 	return nil, false
 }
 
-// GetMsgLen 获取所有队列的总消息数量
-func (m *DualQueueManager) GetMsgLen() int {
+// GetJobLen 获取所有队列的总消息数量
+func (m *DualQueueManager) GetJobLen() int {
 	total := 0
 	if m.systemMailbox != nil {
 		total += m.systemMailbox.Len()
@@ -67,7 +67,7 @@ func (m *DualQueueManager) GetMsgLen() int {
 }
 
 // DrainAll 清空所有队列
-func (m *DualQueueManager) DrainAll(handler func(inf.IEvent)) {
+func (m *DualQueueManager) DrainAll(handler func(inf.IMailboxJob)) {
 	// 先清空系统队列
 	for !m.systemMailbox.Empty() {
 		if e, ok := m.systemMailbox.Pop(); ok {

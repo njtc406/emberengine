@@ -50,19 +50,19 @@ type Bus struct {
 	subPendingBytesLimit int
 
 	// 全体事件(所有订阅的服务都会收到)
-	globalPrefix      string                             // 全局事件前缀
-	globalLock        *shardedlock.ShardedRWLock         // 用分段锁提升并发能力
-	globalSubscribers map[int32]map[string]inf.IListener // map[事件类型]map[服务唯一id]事件通道
+	globalPrefix      string                                     // 全局事件前缀
+	globalLock        *shardedlock.ShardedRWLock                 // 用分段锁提升并发能力
+	globalSubscribers map[inf.EventType]map[string]inf.IListener // map[事件类型]map[服务唯一id]事件通道
 
 	// 服务器事件(只有相同服务器的订阅会收到)
 	serverPrefix      string // 服务器事件前缀
 	serverLock        *shardedlock.ShardedRWLock
-	serverSubscribers map[int32]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
+	serverSubscribers map[inf.EventType]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
 	// 特定事件(只有订阅者会收到)
 	specificPrefix      string // 特定事件前缀
 	specificLock        *shardedlock.ShardedRWLock
-	specificSubscribers map[int32]map[string]map[string]inf.IListener // map[事件类型]map[目标服务唯一id]map[订阅者服务唯一id]事件通道
+	specificSubscribers map[inf.EventType]map[string]map[string]inf.IListener // map[事件类型]map[目标服务唯一id]map[订阅者服务唯一id]事件通道
 
 	subMap sync.Map // 记录所有订阅 map[string]*nats.Subscription
 
@@ -179,11 +179,11 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	}
 
 	eb.globalLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.globalSubscribers = make(map[int32]map[string]inf.IListener)
+	eb.globalSubscribers = make(map[inf.EventType]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.serverSubscribers = make(map[int32]map[int32]map[string]inf.IListener)
+	eb.serverSubscribers = make(map[inf.EventType]map[int32]map[string]inf.IListener)
 	eb.specificLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.specificSubscribers = make(map[int32]map[string]map[string]inf.IListener)
+	eb.specificSubscribers = make(map[inf.EventType]map[string]map[string]inf.IListener)
 }
 
 func (eb *Bus) applySubPendingLimits(subscription *nats.Subscription) {
@@ -336,7 +336,7 @@ func (eb *Bus) unmarshalEvent(eventData []byte) (*busEvent, error) {
 
 // TODO 全局事件这里可以考虑订阅指定服务的事件，比如当处于某个场景服时，可以只订阅该场景服的事件，就可以实现广播功能，可以通过广播减少rpc寻址调用
 // PublishGlobal 发布全局事件(带限流和批处理)
-func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Message) error {
+func (eb *Bus) PublishGlobal(ctx context.Context, eventType inf.EventType, data proto.Message) error {
 	// 1. 检查限流
 	if !eb.throttleManager.Allow(eventType) {
 		atomic.AddInt64(&eb.metrics.TotalThrottled, 1)
@@ -367,7 +367,7 @@ func (eb *Bus) PublishGlobal(ctx context.Context, eventType int32, data proto.Me
 }
 
 // addToBatch 添加到批处理缓冲区
-func (eb *Bus) addToBatch(eventType int32, be *busEvent) error {
+func (eb *Bus) addToBatch(eventType inf.EventType, be *busEvent) error {
 	eb.bufferMutex.Lock()
 	defer eb.bufferMutex.Unlock()
 
@@ -430,7 +430,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 }
 
 // PublishGlobalLocal 发布本地全局事件
-func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data proto.Message) error {
+func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType inf.EventType, data proto.Message) error {
 	be, err := eb.marshalEvent(ctx, eventType, 0, "", data)
 	if err != nil {
 		return err
@@ -440,7 +440,7 @@ func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType int32, data pro
 	return nil
 }
 
-func (eb *Bus) PublishServer(ctx context.Context, eventType, partition int32, data proto.Message) error {
+func (eb *Bus) PublishServer(ctx context.Context, eventType inf.EventType, partition int32, data proto.Message) error {
 	be, err := eb.marshalEvent(ctx, eventType, partition, "", data)
 	if err != nil {
 		return err
@@ -487,7 +487,7 @@ func (eb *Bus) PublishServerLocal(ctx context.Context, eventType, partition int3
 	return nil
 }
 
-func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
+func (eb *Bus) SubscribeGlobal(eventType inf.EventType, svc inf.IListener) {
 	key := eb.genKey(eb.globalPrefix, eventType)
 	eb.globalLock.Lock(key)
 	defer eb.globalLock.Unlock(key)
@@ -520,7 +520,7 @@ func (eb *Bus) SubscribeGlobal(eventType int32, svc inf.IListener) {
 }
 
 // PublishSpecific 发布指定服务的事件(只有订阅了该服务事件的服务会收到)
-func (eb *Bus) PublishSpecific(ctx context.Context, eventType int32, serviceUid string, data proto.Message) error {
+func (eb *Bus) PublishSpecific(ctx context.Context, eventType inf.EventType, serviceUid string, data proto.Message) error {
 	be, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
 	if err != nil {
 		return err
