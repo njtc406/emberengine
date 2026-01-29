@@ -1,4 +1,4 @@
-package mailbox
+package job
 
 import (
 	"testing"
@@ -39,14 +39,16 @@ func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
 
 	creator1 := func() inf.IMailboxJob { return NewMsgJob() }
 	creator2 := func() inf.IMailboxJob { return NewTimerJob() }
+	getter1 := func(j inf.IMailboxJob) any { return j.(*MsgJob).GetPayload() }
+	getter2 := func(j inf.IMailboxJob) any { return j.(*TimerJob).GetPayload() }
 
-	if err := RegisterJobFactory(customType, creator1, false); err != nil {
+	if err := RegisterJobFactory(customType, creator1, getter1); err != nil {
 		t.Fatalf("register creator1 failed: %v", err)
 	}
-	if err := RegisterJobFactory(customType, creator1, false); err == nil {
+	if err := RegisterJobFactory(customType, creator1, getter1); err == nil {
 		t.Fatalf("expected duplicate register error")
 	}
-	if err := RegisterJobFactory(customType, creator2, true); err != nil {
+	if err := RegisterJobFactory(customType, creator2, getter2); err != nil {
 		t.Fatalf("replace register failed: %v", err)
 	}
 

@@ -6,8 +6,8 @@
 package mailbox
 
 import (
+	job2 "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -43,7 +43,7 @@ func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 
 	// 规则2: RPC Reply 放行
 	if job.GetType() == def.MailboxJobTypeRpc {
-		envelope := GetJobPayloadAs[inf.IEnvelope](job)
+		envelope := job2.GetJobPayloadAs[inf.IEnvelope](job)
 		data := envelope.GetData()
 		if data != nil && data.IsReply() {
 			return true
@@ -51,7 +51,7 @@ func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 	}
 
 	// 规则3: 并发回调事件放行
-	if job.GetType() == event.ServiceConcurrentCallback {
+	if job.GetType() == def.MailboxJobTypeConcurrentCallback {
 		return true
 	}
 

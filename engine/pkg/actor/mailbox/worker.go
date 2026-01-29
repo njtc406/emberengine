@@ -274,6 +274,7 @@ func (w *Worker) safeExec(job inf.IMailboxJob) {
 
 		// 调用中间件链的 OnComplete（逆序执行）
 		if mctx != nil {
+			// 可以在这里执行数据回滚操作
 			w.pool.middlewareChain.ExecuteOnComplete(mctx, execErr, panicVal)
 		}
 

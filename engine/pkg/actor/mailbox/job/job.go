@@ -3,7 +3,7 @@
 // 功能描述: 描述
 // 作者:  yr  2026/1/29 00:18
 // 最后更新:  yr  2026/1/29 00:18
-package mailbox
+package job
 
 import (
 	"context"

@@ -50,15 +50,15 @@ type Service struct {
 
 	mailbox              *mailbox.Mailbox // 邮箱
 	eventProcessor       *event.Processor // 事件管理器
-	globalEventProcessor *event.Processor // 全局事件管理器
+	globalEventProcessor *event.Processor // 全局事件管理器(由eventBus触发的事件)
 
 	profiler *profiler.Profiler // 性能监控
-
-	eventHandlers map[int32]EventHandler
 
 	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用) TODO 这个实际上已经在mailbox中做了,这里暂时废弃
 
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
+
+	jobRegistry *JobHandlerRegistry // Job 处理器注册表
 
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
@@ -191,8 +191,8 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	s.IConcurrent = concurrent.NewTaskScheduler(s.ILoggerX)
 
-	// 注册事件处理函数
-	s.initEventHandlers()
+	// 注册 Job 处理函数
+	s.initJobHandlers()
 
 	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.Partition, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
@@ -482,14 +482,14 @@ func (s *Service) GetServiceCfg() interface{} {
 	return s.cfg
 }
 
-func (s *Service) safeExec(f func()) (err error) {
+func (s *Service) safeExec(f func() error) (err error) {
 	defer func() {
 		if err := recover(); err != nil {
 			s.Errorf("safe exec error: %v\ntrace:%s", err, debug.Stack())
 			err = fmt.Errorf("safe exec error: %v", err)
 		}
 	}()
-	f()
+	err = f()
 	return err
 }
 
@@ -514,8 +514,8 @@ func (s *Service) GetRpcHandler() inf.IRpcHandler {
 	return s.IRpcHandler
 }
 
-func (s *Service) EscalateFailure(ctx context.Context, reason interface{}, evt inf.IEvent) {
-	s.WithContext(ctx).Errorf("event[%d] EscalateFailure: %v", evt.GetType(), reason)
+func (s *Service) EscalateFailure(ctx context.Context, reason interface{}, j inf.IMailboxJob) {
+	s.WithContext(ctx).Errorf("job[%d] EscalateFailure: %v", j.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {
@@ -531,4 +531,8 @@ func (s *Service) GetLoggerX() log.ILoggerX {
 
 func (s *Service) IsPrimarySecondaryMode() bool {
 	return s.isPrimarySecondaryMode
+}
+
+func (s *Service) SetJobHandler(handler func(job inf.IMailboxJob) (err error)) {
+	s.jobHandler = handler
 }

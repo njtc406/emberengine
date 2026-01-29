@@ -52,6 +52,9 @@ var (
 	ErrMailboxMiddlewareRejected   = errors.New("mailbox middleware rejected")               // 中间件拒绝消息
 	ErrEventIsUnRef                = errors.New("event is unref")                            // 事件已经被释放
 	ErrRpcMsgMetaOrDataIsNil       = errors.New("rpc msg meta or data is nil")               // rpc 消息元数据或数据为空
+	ErrJobHandlerNotFound          = errors.New("job handler not found")                     // 任务处理函数未找到
+	ErrJobTimeout                  = errors.New("job timeout")                               // 任务超时
+	ErrEventHandlerNotFound        = errors.New("event handler not found")                   // 事件处理函数未找到
 )
 
 //type RpcErr string

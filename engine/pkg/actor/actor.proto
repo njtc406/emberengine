@@ -49,19 +49,20 @@ message RpcCallResponse{
 
 message Event {
   // === 事件标识 ===
-  int32 EventType                     = 1;  // 事件类型
+  int32 Type                     = 1;  // 事件类型
   
   // === 调度属性（显式字段） ===
   int32 Priority                      = 2;  // 优先级
   string DispatcherKey                = 3;  // 分发键（用于分区/顺序保证）
+  int64 Deadline                      = 4;  // 事件处理截止时间(单位: 纳秒)
   
   // === 路由信息 ===
-  int32 Partition                     = 4;  // 目标分区ID
-  string ServiceUid                   = 5;  // 目标服务实例唯一id
+  int32 Partition                     = 5;  // 目标分区ID
+  string ServiceUid                   = 6;  // 目标服务实例唯一id
   
   // === 数据 ===
-  google.protobuf.Any Data            = 6;  // 实际事件数据
+  google.protobuf.Any Payload            = 7;  // 实际事件数据
   
   // === 上下文元数据（仅用于 tracing/metadata） ===
-  map<string, string> ContextHeaders  = 7;  // 上下文头（traceId 等）
+  map<string, string> ContextHeaders  = 8;  // 上下文头（traceId 等）
 }

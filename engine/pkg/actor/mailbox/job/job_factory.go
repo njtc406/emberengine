@@ -3,9 +3,10 @@
 // 功能描述: 描述
 // 作者:  yr  2026/1/29 00:52
 // 最后更新:  yr  2026/1/29 00:52
-package mailbox
+package job
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -14,9 +15,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
+type Creator func() inf.IMailboxJob
+type Getter func(inf.IMailboxJob) any
+
 type jobEntry struct {
-	creator func() inf.IMailboxJob
-	getter  func(inf.IMailboxJob) any
+	creator Creator
+	getter  Getter
 }
 
 // jobFactory 静态注册表，请勿在运行时修改
@@ -45,6 +49,14 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 		creator: func() inf.IMailboxJob { return NewSysCtlJob() },
 		getter:  func(j inf.IMailboxJob) any { return j.(*SysCtlJob).GetPayload() },
 	},
+}
+
+func RegisterJobFactory(jobType def.MailboxJobType, creator Creator, getter Getter) error {
+	if _, ok := jobFactory[jobType]; ok {
+		return fmt.Errorf("job type %d is already registered", jobType)
+	}
+	jobFactory[jobType] = jobEntry{creator, getter}
+	return nil
 }
 
 // CreateJob 按类型创建一个 job。

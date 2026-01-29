@@ -7,6 +7,7 @@ package timingwheel
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"reflect"
 	"runtime"
@@ -21,13 +22,13 @@ import (
 )
 
 type ITimer interface {
-	Do() error
+	Do(ctx context.Context) error
 	GetName() string
 	GetTimerId() uint64
 }
 
 type TimerOption func(t *Timer)
-type TimerCallback func(timer *Timer, args ...interface{}) error
+type TimerCallback func(ctx context.Context, timer *Timer, args ...interface{}) error
 
 // Timer 表示一个定时事件。当 Timer 到期时，会执行对应的任务。
 type Timer struct {
@@ -152,7 +153,7 @@ func (t *Timer) isActive() bool {
 	return !t.cancel.Load()
 }
 
-func (t *Timer) Do() (err error) {
+func (t *Timer) Do(ctx context.Context) (err error) {
 	// 检查是否正在执行
 	if !t.executing.CompareAndSwap(false, true) {
 		// 已经在执行中，不应该发生
@@ -185,7 +186,7 @@ func (t *Timer) Do() (err error) {
 
 	// 开始执行回调任务
 	err = safe.Do(func() error {
-		err := t.task(t, t.taskArgs...)
+		err := t.task(ctx, t, t.taskArgs...)
 		if err != nil {
 			return err
 		}
