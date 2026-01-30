@@ -9,6 +9,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -17,7 +18,7 @@ var _ inf.IEventHandler = (*Handler)(nil)
 type Handler struct {
 	sync.RWMutex
 	processor   inf.IEventProcessor
-	mapRegEvent map[int32]map[inf.IEventProcessor]interface{}
+	mapRegEvent map[def.EventType]map[inf.IEventProcessor]interface{}
 }
 
 func NewHandler() inf.IEventHandler {
@@ -26,7 +27,7 @@ func NewHandler() inf.IEventHandler {
 
 func (h *Handler) Init(p inf.IEventProcessor) {
 	h.processor = p
-	h.mapRegEvent = make(map[int32]map[inf.IEventProcessor]interface{})
+	h.mapRegEvent = make(map[def.EventType]map[inf.IEventProcessor]interface{})
 }
 
 func (h *Handler) GetEventProcessor() inf.IEventProcessor {
@@ -51,11 +52,11 @@ func (h *Handler) Destroy() {
 	}
 }
 
-func (h *Handler) AddRegInfo(eventType int32, eventProcessor inf.IEventProcessor) {
+func (h *Handler) AddRegInfo(eventType def.EventType, eventProcessor inf.IEventProcessor) {
 	h.Lock()
 	defer h.Unlock()
 	if h.mapRegEvent == nil {
-		h.mapRegEvent = map[int32]map[inf.IEventProcessor]interface{}{}
+		h.mapRegEvent = map[def.EventType]map[inf.IEventProcessor]interface{}{}
 	}
 
 	if _, ok := h.mapRegEvent[eventType]; ok == false {
@@ -64,7 +65,7 @@ func (h *Handler) AddRegInfo(eventType int32, eventProcessor inf.IEventProcessor
 	h.mapRegEvent[eventType][eventProcessor] = nil
 }
 
-func (h *Handler) RemoveRegInfo(eventType int32, eventProcessor inf.IEventProcessor) {
+func (h *Handler) RemoveRegInfo(eventType def.EventType, eventProcessor inf.IEventProcessor) {
 	if _, ok := h.mapRegEvent[eventType]; ok == true {
 		delete(h.mapRegEvent[eventType], eventProcessor)
 	}

@@ -234,12 +234,10 @@ func (w *Worker) discardExec(job inf.IMailboxJob) {
 		if mctx != nil {
 			w.pool.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxNotRunning, nil)
 		}
-		// 不执行业务，直接释放内部 event（原本由 InvokeJob 负责 Release）
+		// 不执行业务，直接释放 job
 		if job != nil {
 			job.Release()
 		}
-		// 释放 CtxEvent 包装器
-		job.Release()
 	}()
 
 	// 记录日志
@@ -290,7 +288,7 @@ func (w *Worker) safeExec(job inf.IMailboxJob) {
 	}
 
 	// 调用消息处理器
-	if err := w.pool.invoker.InvokeJob(ctx, job); err != nil {
+	if err := w.pool.invoker.ExecuteJob(ctx, job); err != nil {
 		execErr = err
 	}
 

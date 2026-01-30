@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
@@ -85,11 +86,11 @@ func (m *DispatchKeyStatsMiddleware) OnStop() {
 }
 
 // OnReceive 消息入队前调用，记录 dispatcherKey 统计
-func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.MiddlewareResult {
-	if m == nil || mctx == nil || mctx.Event() == nil {
-		return inf.Continue()
+func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.MiddlewareResult {
+	if m == nil || mctx == nil || mctx.Job() == nil {
+		return dto.Continue()
 	}
-	key := mctx.Event().GetDispatcherKey()
+	key := mctx.Job().GetDispatcherKey()
 	if key == "" {
 		key = "<empty>"
 	}
@@ -101,14 +102,14 @@ func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.
 	if _, exists := m.counts[key]; exists {
 		m.counts[key]++
 		m.total++
-		return inf.Continue()
+		return dto.Continue()
 	}
 
 	// 如果未达到上限，添加新 key
 	if len(m.counts) < m.maxKeys {
 		m.counts[key] = 1
 		m.total++
-		return inf.Continue()
+		return dto.Continue()
 	}
 
 	// 达到上限，淘汰计数最小的 key（LRU 策略）
@@ -123,7 +124,7 @@ func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.
 	delete(m.counts, minKey)
 	m.counts[key] = 1
 	m.total++
-	return inf.Continue()
+	return dto.Continue()
 }
 
 // OnComplete 消息处理完成后调用

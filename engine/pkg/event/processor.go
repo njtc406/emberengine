@@ -9,6 +9,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"google.golang.org/protobuf/proto"
@@ -20,14 +21,14 @@ type Processor struct {
 	inf.IEventListener
 
 	locker              sync.RWMutex
-	mapListenerEvent    map[inf.EventType]map[inf.IEventProcessor]int             //监听者信息
-	mapBindHandlerEvent map[inf.EventType]map[inf.IEventHandler]inf.EventCallBack //收到事件处理
+	mapListenerEvent    map[def.EventType]map[inf.IEventProcessor]int             //监听者信息
+	mapBindHandlerEvent map[def.EventType]map[inf.IEventHandler]inf.EventCallBack //收到事件处理
 }
 
 func NewProcessor() *Processor {
 	p := &Processor{
-		mapListenerEvent:    make(map[inf.EventType]map[inf.IEventProcessor]int),
-		mapBindHandlerEvent: make(map[inf.EventType]map[inf.IEventHandler]inf.EventCallBack),
+		mapListenerEvent:    make(map[def.EventType]map[inf.IEventProcessor]int),
+		mapBindHandlerEvent: make(map[def.EventType]map[inf.IEventHandler]inf.EventCallBack),
 	}
 	return p
 }
@@ -59,7 +60,7 @@ func (p *Processor) EventHandler(ctx context.Context, ev inf.IEvent) {
 }
 
 // RegEventReceiverFunc 注册事件处理函数
-func (p *Processor) RegEventReceiverFunc(eventType inf.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
+func (p *Processor) RegEventReceiverFunc(eventType def.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
 	//记录receiver自己注册过的事件
 	receiver.AddRegInfo(eventType, p)
 	//记录当前所属IEventProcessor注册的回调
@@ -69,57 +70,57 @@ func (p *Processor) RegEventReceiverFunc(eventType inf.EventType, receiver inf.I
 }
 
 // UnRegEventReceiverFun 取消注册
-func (p *Processor) UnRegEventReceiverFun(eventType inf.EventType, receiver inf.IEventHandler) {
+func (p *Processor) UnRegEventReceiverFun(eventType def.EventType, receiver inf.IEventHandler) {
 	p.RemoveListen(eventType, receiver)
 	receiver.GetEventProcessor().RemoveBindEvent(eventType, receiver)
 	receiver.RemoveRegInfo(eventType, p)
 }
 
 // 全局事件
-func (p *Processor) RegGlobalEventReceiverFunc(eventType inf.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
+func (p *Processor) RegGlobalEventReceiverFunc(eventType def.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
 	p.RegEventReceiverFunc(eventType, receiver, callback)
 	GetEventBus().SubscribeGlobal(eventType, p)
 }
 
-func (p *Processor) UnRegGlobalEventReceiverFun(eventType inf.EventType, receiver inf.IEventHandler) {
+func (p *Processor) UnRegGlobalEventReceiverFun(eventType def.EventType, receiver inf.IEventHandler) {
 	p.UnRegEventReceiverFun(eventType, receiver)
 	GetEventBus().UnSubscribeGlobal(eventType, p)
 }
 
 // 服务器事件
-func (p *Processor) RegServerEventReceiverFunc(eventType inf.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
+func (p *Processor) RegServerEventReceiverFunc(eventType def.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
 	p.RegEventReceiverFunc(eventType, receiver, callback)
 	GetEventBus().SubscribeServer(eventType, p)
 }
 
-func (p *Processor) UnRegServerEventReceiverFun(eventType inf.EventType, receiver inf.IEventHandler) {
+func (p *Processor) UnRegServerEventReceiverFun(eventType def.EventType, receiver inf.IEventHandler) {
 	p.UnRegEventReceiverFun(eventType, receiver)
 	GetEventBus().UnSubscribeServer(eventType, p)
 }
 
 // 特定服务事件
-func (p *Processor) RegSpecificEventReceiverFunc(eventType inf.EventType, serviceUid string, receiver inf.IEventHandler, callback inf.EventCallBack) {
+func (p *Processor) RegSpecificEventReceiverFunc(eventType def.EventType, serviceUid string, receiver inf.IEventHandler, callback inf.EventCallBack) {
 	p.RegEventReceiverFunc(eventType, receiver, callback)
 	GetEventBus().SubscribeSpecific(eventType, serviceUid, p)
 }
 
-func (p *Processor) UnRegSpecificEventReceiverFun(eventType inf.EventType, serviceUid string, receiver inf.IEventHandler) {
+func (p *Processor) UnRegSpecificEventReceiverFun(eventType def.EventType, serviceUid string, receiver inf.IEventHandler) {
 	p.UnRegEventReceiverFun(eventType, receiver)
 	GetEventBus().UnSubscribeSpecific(eventType, serviceUid, p)
 }
 
 // 发布全局事件
-func (p *Processor) PublishGlobal(ctx context.Context, eventType inf.EventType, data proto.Message) error {
+func (p *Processor) PublishGlobal(ctx context.Context, eventType def.EventType, data proto.Message) error {
 	return GetEventBus().PublishGlobal(ctx, eventType, data)
 }
 
 // 发布服务器事件
-func (p *Processor) PublishServer(ctx context.Context, eventType inf.EventType, data proto.Message) error {
+func (p *Processor) PublishServer(ctx context.Context, eventType def.EventType, data proto.Message) error {
 	return GetEventBus().PublishServer(ctx, eventType, p.GetPartition(), data)
 }
 
 // 发布特定服务事件
-func (p *Processor) PublishSpecific(ctx context.Context, eventType inf.EventType, serviceUid string, data proto.Message) error {
+func (p *Processor) PublishSpecific(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error {
 	return GetEventBus().PublishSpecific(ctx, eventType, serviceUid, data)
 }
 
@@ -148,7 +149,7 @@ func (p *Processor) CastEvent(ctx context.Context, event inf.IEvent) {
 }
 
 // addListen 添加监听
-func (p *Processor) AddListen(eventType inf.EventType, receiver inf.IEventHandler) {
+func (p *Processor) AddListen(eventType def.EventType, receiver inf.IEventHandler) {
 	p.locker.Lock()
 	defer p.locker.Unlock()
 
@@ -160,7 +161,7 @@ func (p *Processor) AddListen(eventType inf.EventType, receiver inf.IEventHandle
 }
 
 // addBindEvent 添加绑定事件
-func (p *Processor) AddBindEvent(eventType inf.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
+func (p *Processor) AddBindEvent(eventType def.EventType, receiver inf.IEventHandler, callback inf.EventCallBack) {
 	p.locker.Lock()
 	defer p.locker.Unlock()
 
@@ -172,7 +173,7 @@ func (p *Processor) AddBindEvent(eventType inf.EventType, receiver inf.IEventHan
 }
 
 // removeBindEvent 移除绑定事件
-func (p *Processor) RemoveBindEvent(eventType inf.EventType, receiver inf.IEventHandler) {
+func (p *Processor) RemoveBindEvent(eventType def.EventType, receiver inf.IEventHandler) {
 	p.locker.Lock()
 	defer p.locker.Unlock()
 	if _, ok := p.mapBindHandlerEvent[eventType]; ok == true {
@@ -181,7 +182,7 @@ func (p *Processor) RemoveBindEvent(eventType inf.EventType, receiver inf.IEvent
 }
 
 // removeListen 移除监听
-func (p *Processor) RemoveListen(eventType inf.EventType, receiver inf.IEventHandler) {
+func (p *Processor) RemoveListen(eventType def.EventType, receiver inf.IEventHandler) {
 	p.locker.Lock()
 	defer p.locker.Unlock()
 	if _, ok := p.mapListenerEvent[eventType]; ok == true {

@@ -157,7 +157,8 @@ func (s *CallState) Complete() {
 		data.SetResponse(s.Response())
 		data.SetError(s.Error())
 		envelopeResp.SetData(data)
-		s.dispatcher.PostJob(s.XContext, envelopeResp)
+		envelopeResp.SetContext(s.XContext)
+		s.dispatcher.PostJob(envelopeResp)
 		getCallStatePool().Put(s)
 		return
 	}
@@ -174,7 +175,8 @@ func (s *CallState) dispatchCallbackEvent() {
 	}
 	// 使用 CallbackEnvelope 包装投递
 	env := event.NewCallbackEnvelope(s)
-	if err := s.dispatcher.PostJob(s.XContext, env); err != nil {
+	env.SetContext(s.XContext)
+	if err := s.dispatcher.PostJob(env); err != nil {
 		env.Release()
 		getCallStatePool().Put(s)
 	}

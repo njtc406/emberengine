@@ -14,7 +14,6 @@ import (
 
 type IEnvelope interface {
 	IDataDef
-	IMailboxJob
 
 	// Set
 

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
@@ -92,10 +93,10 @@ func (m *RateLimitMiddleware) OnStop() {
 	}
 }
 
-func (m *RateLimitMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.MiddlewareResult {
+func (m *RateLimitMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.MiddlewareResult {
 	// 检查是否跳过限流
 	if m.skipFunc != nil && m.skipFunc(mctx) {
-		return inf.Continue()
+		return dto.Continue()
 	}
 
 	m.mu.Lock()
@@ -115,12 +116,12 @@ func (m *RateLimitMiddleware) OnReceive(mctx inf.IMiddlewareContext) inf.Middlew
 	if m.tokens >= 1 {
 		m.tokens--
 		m.accepted.Add(1)
-		return inf.Continue()
+		return dto.Continue()
 	}
 
 	// 被限流
 	m.rejected.Add(1)
-	return inf.Reject(ErrRateLimitExceeded)
+	return dto.Reject(ErrRateLimitExceeded)
 }
 
 func (m *RateLimitMiddleware) OnComplete(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {

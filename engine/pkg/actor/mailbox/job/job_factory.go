@@ -26,8 +26,8 @@ type jobEntry struct {
 // jobFactory 静态注册表，请勿在运行时修改
 var jobFactory = map[def.MailboxJobType]jobEntry{
 	def.MailboxJobTypeRpc: {
-		creator: func() inf.IMailboxJob { return NewMsgJob() },
-		getter:  func(j inf.IMailboxJob) any { return j.(*MsgJob).GetPayload() },
+		creator: func() inf.IMailboxJob { return NewRpcJob() },
+		getter:  func(j inf.IMailboxJob) any { return j.(*RpcJob).GetPayload() },
 	},
 	def.MailboxJobTypeEvent: {
 		creator: func() inf.IMailboxJob { return NewEventBusJob() },
@@ -45,7 +45,7 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 		creator: func() inf.IMailboxJob { return NewConcurrentCallbackJob() },
 		getter:  func(j inf.IMailboxJob) any { return j.(*ConcurrentCallbackJob).GetPayload() },
 	},
-	def.MailboxJobSysCtl: {
+	def.MailboxJobTypeSysCtl: {
 		creator: func() inf.IMailboxJob { return NewSysCtlJob() },
 		getter:  func(j inf.IMailboxJob) any { return j.(*SysCtlJob).GetPayload() },
 	},
@@ -92,14 +92,14 @@ func GetJobPayloadAs[T any](job inf.IMailboxJob) T {
 
 // ===============================================================
 
-var msgJobPool pool.IPool[*MsgJob]
+var msgJobPool pool.IPool[*RpcJob]
 var msgJobPoolOnce sync.Once
 
-func getMsgJobPool() pool.IPool[*MsgJob] {
+func getMsgJobPool() pool.IPool[*RpcJob] {
 	msgJobPoolOnce.Do(func() {
-		msgJobPool = pool.NewSyncPoolWrapper[*MsgJob](
-			func() *MsgJob {
-				return &MsgJob{}
+		msgJobPool = pool.NewSyncPoolWrapper[*RpcJob](
+			func() *RpcJob {
+				return &RpcJob{}
 			},
 			func() pool.IStatsRecorder {
 				if config.IsDebug() {
@@ -108,13 +108,13 @@ func getMsgJobPool() pool.IPool[*MsgJob] {
 					return pool.NewNoStatsRecorder()
 				}
 			}(),
-			pool.WithReset[*MsgJob](func(j *MsgJob) {
+			pool.WithReset[*RpcJob](func(j *RpcJob) {
 				j.Reset()
 			}),
-			pool.WithRef[*MsgJob](func(j *MsgJob) {
+			pool.WithRef[*RpcJob](func(j *RpcJob) {
 				j.Ref()
 			}),
-			pool.WithUnRef[*MsgJob](func(j *MsgJob) bool {
+			pool.WithUnRef[*RpcJob](func(j *RpcJob) bool {
 				return j.UnRef()
 			}),
 		)

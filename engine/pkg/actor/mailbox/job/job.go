@@ -48,6 +48,10 @@ func (j *Job[T]) SetDeadline(t time.Time) {
 	j.deadline = t
 }
 
+func (j *Job[T]) SetPayload(payload T) {
+	j.payload = payload
+}
+
 func (j *Job[T]) SetPriority(priority def.Priority) {
 	j.Priority = priority
 }
@@ -93,16 +97,18 @@ func (j *Job[T]) GetMiddlewareContext() inf.IMiddlewareContext {
 	return j.mctx
 }
 
-// MsgJob rpc消息任务
-type MsgJob struct {
+// RpcJob rpc消息任务
+type RpcJob struct {
 	Job[inf.IEnvelope]
 }
 
-func NewMsgJob() *MsgJob {
-	return getMsgJobPool().Get()
+func NewRpcJob() *RpcJob {
+	j := getMsgJobPool().Get()
+	j.SetType(def.MailboxJobTypeRpc)
+	return j
 }
 
-func (j *MsgJob) Release() {
+func (j *RpcJob) Release() {
 	getMsgJobPool().Put(j)
 }
 
@@ -111,7 +117,9 @@ type EventBusJob struct {
 }
 
 func NewEventBusJob() *EventBusJob {
-	return getEventBusJobPool().Get()
+	j := getEventBusJobPool().Get()
+	j.SetType(def.MailboxJobTypeEvent)
+	return j
 }
 
 func (j *EventBusJob) Release() {
@@ -119,11 +127,13 @@ func (j *EventBusJob) Release() {
 }
 
 type TimerJob struct {
-	Job[*timingwheel.ITimer]
+	Job[timingwheel.ITimer]
 }
 
 func NewTimerJob() *TimerJob {
-	return getTimerJobPool().Get()
+	j := getTimerJobPool().Get()
+	j.SetType(def.MailboxJobTypeTimer)
+	return j
 }
 
 func (j *TimerJob) Release() {
@@ -135,7 +145,9 @@ type ConcurrentCallbackJob struct {
 }
 
 func NewConcurrentCallbackJob() *ConcurrentCallbackJob {
-	return getConcurrentCallbackJobPool().Get()
+	j := getConcurrentCallbackJobPool().Get()
+	j.SetType(def.MailboxJobTypeConcurrentCallback)
+	return j
 }
 
 func (j *ConcurrentCallbackJob) Release() {
@@ -147,7 +159,9 @@ type SysCtlJob struct {
 }
 
 func NewSysCtlJob() *SysCtlJob {
-	return getSysCtlJobPool().Get()
+	j := getSysCtlJobPool().Get()
+	j.SetType(def.MailboxJobTypeSysCtl)
+	return j
 }
 
 func (j *SysCtlJob) Release() {
@@ -159,7 +173,9 @@ type InternalEventJob struct {
 }
 
 func NewInternalEventJob() *InternalEventJob {
-	return getInternalEventJobPool().Get()
+	j := getInternalEventJobPool().Get()
+	j.SetType(def.MailboxJobTypeInternalEvent)
+	return j
 }
 
 func (j *InternalEventJob) Release() {

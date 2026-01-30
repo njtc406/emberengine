@@ -18,7 +18,7 @@ type IService interface {
 	ILifecycle
 	IIdentifiable
 	IServiceHandler
-	IEventChannel
+	IMailboxChannel
 	IProfiler
 	ILogger
 	IRpcHandler

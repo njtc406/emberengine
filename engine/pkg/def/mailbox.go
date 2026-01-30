@@ -21,5 +21,5 @@ const (
 	MailboxJobTypeInternalEvent                     // 内部事件
 	MailboxJobTypeTimer                             // 定时器
 	MailboxJobTypeConcurrentCallback                // 并发回调
-	MailboxJobSysCtl                                // 系统控制类
+	MailboxJobTypeSysCtl                            // 系统控制类
 )

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
 // ThrottleStrategy 限流策略
@@ -24,16 +24,16 @@ const (
 
 // RateLimiter 速率限制器接口
 type RateLimiter interface {
-	Allow(eventType inf.EventType) bool
-	AllowN(eventType inf.EventType, n int) bool
-	Reserve(eventType inf.EventType) Reservation
-	Wait(eventType inf.EventType) error
-	GetStats(eventType inf.EventType) *LimiterStats
+	Allow(eventType def.EventType) bool
+	AllowN(eventType def.EventType, n int) bool
+	Reserve(eventType def.EventType) Reservation
+	Wait(eventType def.EventType) error
+	GetStats(eventType def.EventType) *LimiterStats
 }
 
 // Reservation 预约结构
 type Reservation struct {
-	eventType inf.EventType
+	eventType def.EventType
 	delay     time.Duration
 	granted   bool
 }
@@ -72,12 +72,12 @@ func NewTokenBucketLimiter(capacity, rate int64) *TokenBucketLimiter {
 }
 
 // Allow 检查是否允许单个事件
-func (tbl *TokenBucketLimiter) Allow(eventType inf.EventType) bool {
+func (tbl *TokenBucketLimiter) Allow(eventType def.EventType) bool {
 	return tbl.AllowN(eventType, 1)
 }
 
 // AllowN 检查是否允许N个事件
-func (tbl *TokenBucketLimiter) AllowN(eventType inf.EventType, n int) bool {
+func (tbl *TokenBucketLimiter) AllowN(eventType def.EventType, n int) bool {
 	tbl.mu.Lock()
 	defer tbl.mu.Unlock()
 
@@ -98,7 +98,7 @@ func (tbl *TokenBucketLimiter) AllowN(eventType inf.EventType, n int) bool {
 }
 
 // Reserve 预约令牌
-func (tbl *TokenBucketLimiter) Reserve(eventType inf.EventType) Reservation {
+func (tbl *TokenBucketLimiter) Reserve(eventType def.EventType) Reservation {
 	tbl.mu.Lock()
 	defer tbl.mu.Unlock()
 
@@ -126,7 +126,7 @@ func (tbl *TokenBucketLimiter) Reserve(eventType inf.EventType) Reservation {
 }
 
 // Wait 等待令牌可用
-func (tbl *TokenBucketLimiter) Wait(eventType inf.EventType) error {
+func (tbl *TokenBucketLimiter) Wait(eventType def.EventType) error {
 	reservation := tbl.Reserve(eventType)
 	if reservation.granted {
 		return nil
@@ -137,7 +137,7 @@ func (tbl *TokenBucketLimiter) Wait(eventType inf.EventType) error {
 }
 
 // GetStats 获取统计信息
-func (tbl *TokenBucketLimiter) GetStats(eventType inf.EventType) *LimiterStats {
+func (tbl *TokenBucketLimiter) GetStats(eventType def.EventType) *LimiterStats {
 	tbl.mu.RLock()
 	defer tbl.mu.RUnlock()
 
@@ -200,12 +200,12 @@ func NewSlidingWindowLimiter(windowSize time.Duration, limit int64) *SlidingWind
 }
 
 // Allow 检查是否允许事件
-func (swl *SlidingWindowLimiter) Allow(eventType inf.EventType) bool {
+func (swl *SlidingWindowLimiter) Allow(eventType def.EventType) bool {
 	return swl.AllowN(eventType, 1)
 }
 
 // AllowN 检查是否允许N个事件
-func (swl *SlidingWindowLimiter) AllowN(eventType inf.EventType, n int) bool {
+func (swl *SlidingWindowLimiter) AllowN(eventType def.EventType, n int) bool {
 	swl.mu.Lock()
 	defer swl.mu.Unlock()
 
@@ -235,7 +235,7 @@ func (swl *SlidingWindowLimiter) AllowN(eventType inf.EventType, n int) bool {
 }
 
 // Reserve 预约 (滑动窗口不支持预约)
-func (swl *SlidingWindowLimiter) Reserve(eventType inf.EventType) Reservation {
+func (swl *SlidingWindowLimiter) Reserve(eventType def.EventType) Reservation {
 	if swl.Allow(eventType) {
 		return Reservation{
 			eventType: eventType,
@@ -252,7 +252,7 @@ func (swl *SlidingWindowLimiter) Reserve(eventType inf.EventType) Reservation {
 }
 
 // Wait 等待可用
-func (swl *SlidingWindowLimiter) Wait(eventType inf.EventType) error {
+func (swl *SlidingWindowLimiter) Wait(eventType def.EventType) error {
 	reservation := swl.Reserve(eventType)
 	if reservation.granted {
 		return nil
@@ -263,7 +263,7 @@ func (swl *SlidingWindowLimiter) Wait(eventType inf.EventType) error {
 }
 
 // GetStats 获取统计信息
-func (swl *SlidingWindowLimiter) GetStats(eventType inf.EventType) *LimiterStats {
+func (swl *SlidingWindowLimiter) GetStats(eventType def.EventType) *LimiterStats {
 	swl.mu.RLock()
 	defer swl.mu.RUnlock()
 
@@ -312,7 +312,7 @@ func (swl *SlidingWindowLimiter) updateRate() {
 
 // ThrottleManager 限流管理器
 type ThrottleManager struct {
-	limiters map[inf.EventType]RateLimiter // 每个事件类型的限制器
+	limiters map[def.EventType]RateLimiter // 每个事件类型的限制器
 	registry *EventRegistry                // 事件注册表
 	mu       sync.RWMutex                  // 读写锁
 }
@@ -320,13 +320,13 @@ type ThrottleManager struct {
 // NewThrottleManager 创建限流管理器
 func NewThrottleManager(registry *EventRegistry) *ThrottleManager {
 	return &ThrottleManager{
-		limiters: make(map[inf.EventType]RateLimiter),
+		limiters: make(map[def.EventType]RateLimiter),
 		registry: registry,
 	}
 }
 
 // GetOrCreateLimiter 获取或创建限制器
-func (tm *ThrottleManager) GetOrCreateLimiter(eventType inf.EventType) RateLimiter {
+func (tm *ThrottleManager) GetOrCreateLimiter(eventType def.EventType) RateLimiter {
 	tm.mu.RLock()
 	if limiter, exists := tm.limiters[eventType]; exists {
 		tm.mu.RUnlock()
@@ -364,25 +364,25 @@ func (tm *ThrottleManager) GetOrCreateLimiter(eventType inf.EventType) RateLimit
 }
 
 // Allow 检查是否允许事件
-func (tm *ThrottleManager) Allow(eventType inf.EventType) bool {
+func (tm *ThrottleManager) Allow(eventType def.EventType) bool {
 	limiter := tm.GetOrCreateLimiter((eventType))
 	return limiter.Allow(eventType)
 }
 
 // AllowN 检查是否允许N个事件
-func (tm *ThrottleManager) AllowN(eventType inf.EventType, n int) bool {
+func (tm *ThrottleManager) AllowN(eventType def.EventType, n int) bool {
 	limiter := tm.GetOrCreateLimiter(eventType)
 	return limiter.AllowN(eventType, n)
 }
 
 // Wait 等待事件可用
-func (tm *ThrottleManager) Wait(eventType inf.EventType) error {
+func (tm *ThrottleManager) Wait(eventType def.EventType) error {
 	limiter := tm.GetOrCreateLimiter(eventType)
 	return limiter.Wait(eventType)
 }
 
 // GetStats 获取限流统计信息
-func (tm *ThrottleManager) GetStats(eventType inf.EventType) *LimiterStats {
+func (tm *ThrottleManager) GetStats(eventType def.EventType) *LimiterStats {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -394,11 +394,11 @@ func (tm *ThrottleManager) GetStats(eventType inf.EventType) *LimiterStats {
 }
 
 // GetAllStats 获取所有限制器的统计信息
-func (tm *ThrottleManager) GetAllStats() map[inf.EventType]*LimiterStats {
+func (tm *ThrottleManager) GetAllStats() map[def.EventType]*LimiterStats {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	stats := make(map[inf.EventType]*LimiterStats)
+	stats := make(map[def.EventType]*LimiterStats)
 	for eventType, limiter := range tm.limiters {
 		stats[eventType] = limiter.GetStats(eventType)
 	}
@@ -407,7 +407,7 @@ func (tm *ThrottleManager) GetAllStats() map[inf.EventType]*LimiterStats {
 }
 
 // Reset 重置指定事件类型的限制器
-func (tm *ThrottleManager) Reset(eventType inf.EventType) {
+func (tm *ThrottleManager) Reset(eventType def.EventType) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -419,7 +419,7 @@ func (tm *ThrottleManager) ResetAll() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	tm.limiters = make(map[inf.EventType]RateLimiter)
+	tm.limiters = make(map[def.EventType]RateLimiter)
 }
 
 // min 返回较小值

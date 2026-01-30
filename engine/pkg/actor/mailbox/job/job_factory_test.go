@@ -17,7 +17,7 @@ func TestCreateJob_Builtins(t *testing.T) {
 		{"internal_event", def.MailboxJobTypeInternalEvent},
 		{"timer", def.MailboxJobTypeTimer},
 		{"concurrent_callback", def.MailboxJobTypeConcurrentCallback},
-		{"sysctl", def.MailboxJobSysCtl},
+		{"sysctl", def.MailboxJobTypeSysCtl},
 	}
 
 	for _, tc := range cases {
@@ -37,9 +37,9 @@ func TestCreateJob_Builtins(t *testing.T) {
 func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
 	const customType def.MailboxJobType = 10001
 
-	creator1 := func() inf.IMailboxJob { return NewMsgJob() }
+	creator1 := func() inf.IMailboxJob { return NewRpcJob() }
 	creator2 := func() inf.IMailboxJob { return NewTimerJob() }
-	getter1 := func(j inf.IMailboxJob) any { return j.(*MsgJob).GetPayload() }
+	getter1 := func(j inf.IMailboxJob) any { return j.(*RpcJob).GetPayload() }
 	getter2 := func(j inf.IMailboxJob) any { return j.(*TimerJob).GetPayload() }
 
 	if err := RegisterJobFactory(customType, creator1, getter1); err != nil {

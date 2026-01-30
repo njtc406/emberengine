@@ -178,7 +178,7 @@ func (rm *RpcMonitor) listen() {
 			wg.Add(1)
 			if err := asynclib.Go(func() {
 				defer wg.Done()
-				if err := t.Do(); err != nil {
+				if err := t.Do(rm.ctx); err != nil {
 					log.SysLogger.Errorf("rpc monitor: %s callback failed,error:%s", name, err)
 				}
 			}); err != nil {
@@ -205,7 +205,7 @@ func (rm *RpcMonitor) GenSeq() uint64 {
 
 func (rm *RpcMonitor) Add(state *CallState) {
 	reqId := state.ReqID()
-	timerId, err := rm.sd.AfterFunc(state.Timeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
+	timerId, err := rm.sd.AfterFunc(state.Timeout(), "rpc monitor", func(ctx context.Context, tm *timingwheel.Timer, args ...interface{}) error {
 		seq := args[0].(uint64)
 		b := rm.bucket(seq)
 		b.mu.Lock()

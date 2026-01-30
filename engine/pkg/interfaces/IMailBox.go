@@ -79,15 +79,13 @@ type IMailboxJob interface {
 
 // IMailboxChannel 消息接口
 type IMailboxChannel interface {
-	// TODO 这里是不是可以把ctx,timeout都放入job中?
 	PostJob(job IMailboxJob) error
-	// TODO 是否需要增加带超时的接口，还是就使用一个接口,用其他方式来携带超时信息
 }
 
 // IMessageInvoker 处理消息
 type IMessageInvoker interface {
 	GetServiceName() string
-	InvokeJob(ctx context.Context, job IMailboxJob) error
+	ExecuteJob(ctx context.Context, job IMailboxJob) error
 	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
 }
 

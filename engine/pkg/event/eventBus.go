@@ -752,7 +752,7 @@ func (eb *Bus) GetEventMetrics() *EventMetrics {
 }
 
 // GetThrottleStats 获取限流统计
-func (eb *Bus) GetThrottleStats() map[int32]*LimiterStats {
+func (eb *Bus) GetThrottleStats() map[def.EventType]*LimiterStats {
 	return eb.throttleManager.GetAllStats()
 }
 

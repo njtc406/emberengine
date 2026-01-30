@@ -13,8 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -58,7 +60,7 @@ type Service struct {
 
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
 
-	jobRegistry *JobHandlerRegistry // Job 处理器注册表
+	jobRegistry *jobHandlerRegistry // Job 处理器注册表
 
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
@@ -395,27 +397,26 @@ func (s *Service) release() {
 
 }
 
-func (s *Service) PushEvent(ctx context.Context, evt inf.IEvent) error {
-	//if !s.isRunning() {
-	//	return def.ErrServiceIsUnavailable
-	//}
-	// 所有权转移：调用方在 PushEvent 后不得再使用 evt。
-	// mailbox/service 会在处理完毕后 Release；若入队失败，这里负责释放避免泄露。
-	err := s.mailbox.PostMessage(ctx, evt)
-	if err != nil {
-		evt.Release()
-	}
-	return err
+func (s *Service) PostJob(job inf.IMailboxJob) error {
+	return s.mailbox.PostJob(job)
 }
 
 func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurrentCallback) error {
-	env := event.NewCallbackEnvelope(evt)
-	return s.mailbox.PostMessage(ctx, env)
+	j := job.NewConcurrentCallbackJob()
+	j.SetContext(ctx)
+	j.SetPriority(def.PriorityNormal)
+	j.SetDispatcherKey(uuid.NewString())
+	j.SetPayload(evt)
+	return s.mailbox.PostJob(j)
 }
 
 func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) error {
-	env := event.NewTimerEnvelope(t, t.GetName()) // 保证相同的回调在同一个worker处理
-	return s.mailbox.PostMessage(ctx, env)
+	j := job.NewTimerJob()
+	j.SetContext(ctx)
+	j.SetPriority(def.PriorityNormal)
+	j.SetDispatcherKey(uuid.NewString())
+	j.SetPayload(t)
+	return s.mailbox.PostJob(j)
 }
 
 func (s *Service) SetName(name string) {
@@ -531,8 +532,4 @@ func (s *Service) GetLoggerX() log.ILoggerX {
 
 func (s *Service) IsPrimarySecondaryMode() bool {
 	return s.isPrimarySecondaryMode
-}
-
-func (s *Service) SetJobHandler(handler func(job inf.IMailboxJob) (err error)) {
-	s.jobHandler = handler
 }

@@ -64,7 +64,7 @@ func (d *inlineDispatcher) PostMessage(ctx context.Context, evt inf.IEvent) erro
 			env.Payload.DoCallback(ctx)
 		}
 	}
-	// 模拟 Service.InvokeJob 的 defer Release
+	// 模拟 Service.ExecuteJob 的 defer Release
 	evt.Release()
 	return nil
 }
