@@ -47,7 +47,7 @@ func getTimerEnvelopePool() pool.IPool[*TimerEnvelope] {
 //   - dispatcherKey: 分发键（通常使用 timer.GetName() 保证相同回调在同一 worker 处理）
 func NewTimerEnvelope(timer timingwheel.ITimer, dispatcherKey string) *TimerEnvelope {
 	e := getTimerEnvelopePool().Get()
-	e.Type = ServiceTimerCallback
+	e.Type = int32(ServiceTimerCallback)
 	e.Priority = def.PriorityNormal
 	e.DispatcherKey = dispatcherKey
 	e.Payload = timer

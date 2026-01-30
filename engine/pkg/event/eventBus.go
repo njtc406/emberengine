@@ -423,6 +423,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 		for _, ch := range subMap {
 			j := job.NewEventBusJob()
 			j.SetType(def.MailboxJobTypeEvent)
+			j.SetPayload(e.GetPayload())
 			j.SetContext(ctx)
 			j.SetDispatcherKey(e.GetDispatcherKey())
 			j.SetPriority(def.Priority(e.GetPriority()))
@@ -477,6 +478,7 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 			for _, ch := range subMap {
 				j := job.NewEventBusJob()
 				j.SetType(def.MailboxJobTypeEvent)
+				j.SetPayload(e.GetPayload())
 				j.SetContext(ctx)
 				j.SetDispatcherKey(e.GetDispatcherKey())
 				j.SetPriority(def.Priority(e.GetPriority()))
@@ -573,6 +575,7 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 			for _, ch := range subMap {
 				j := job.NewEventBusJob()
 				j.SetType(def.MailboxJobTypeEvent)
+				j.SetPayload(e.GetPayload())
 				j.SetContext(ctx)
 				j.SetDispatcherKey(e.GetDispatcherKey())
 				j.SetPriority(def.Priority(e.GetPriority()))

@@ -65,9 +65,9 @@ func (em *EndpointManager) Start() {
 	}
 
 	// 新增、修改服务事件
-	em.IEventProcessor.RegEventReceiverFunc(event.SysEventETCDPut, em.IEventHandler, em.updateServiceInfo)
+	em.IEventProcessor.RegEventReceiver(event.SysEventETCDPut, em.IEventHandler, em.updateServiceInfo)
 	// 删除服务事件
-	em.IEventProcessor.RegEventReceiverFunc(event.SysEventETCDDel, em.IEventHandler, em.removeServiceInfo)
+	em.IEventProcessor.RegEventReceiver(event.SysEventETCDDel, em.IEventHandler, em.removeServiceInfo)
 }
 
 func (em *EndpointManager) Stop() {

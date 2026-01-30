@@ -19,7 +19,7 @@ type mockTimer struct {
 	name string
 }
 
-func (t *mockTimer) GetType() int32            { return ServiceTimerCallback }
+func (t *mockTimer) GetType() int32            { return int32(ServiceTimerCallback) }
 func (t *mockTimer) GetPriority() def.Priority { return def.PriorityNormal }
 func (t *mockTimer) GetDispatcherKey() string  { return "" }
 func (t *mockTimer) Release()                  { mockTimerPool.Put(t) }
@@ -107,7 +107,7 @@ var benchTimerEnvelopePool = sync.Pool{
 func newBenchTimerEnvelope(timer ITimer, dispatcherKey string) *benchTimerEnvelope {
 	e := benchTimerEnvelopePool.Get().(*benchTimerEnvelope)
 	e.Ref()
-	e.Type = ServiceTimerCallback
+	e.Type = int32(ServiceTimerCallback)
 	e.Priority = def.PriorityNormal
 	e.DispatcherKey = dispatcherKey
 	e.Payload = timer
@@ -201,7 +201,7 @@ func BenchmarkEventWithData(b *testing.B) {
 			evt.Priority = def.PriorityNormal
 			evt.DispatcherKey = "dispatcher-key"
 			evt.Data = timer
-			_ = evt.GetType()
+			_ = evt.GetEventType()
 			_ = evt.GetPriority()
 			_ = evt.GetDispatcherKey()
 			// 模拟处理：需要断言
@@ -223,7 +223,7 @@ func BenchmarkEventWithData(b *testing.B) {
 				evt.Priority = def.PriorityNormal
 				evt.DispatcherKey = "dispatcher-key"
 				evt.Data = timer
-				_ = evt.GetType()
+				_ = evt.GetEventType()
 				_ = evt.GetPriority()
 				_ = evt.GetDispatcherKey()
 				t := evt.Data.(ITimer)

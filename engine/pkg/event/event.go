@@ -12,24 +12,28 @@ import (
 type Event struct {
 	dto.DataRef
 
-	Type          int32
+	Type          def.EventType
 	Priority      def.Priority
 	DispatcherKey string
 	Data          interface{}
 }
 
 func (e *Event) Reset() {
-	e.Type = 0
+	e.Type = UnknownEvent
 	e.Priority = def.PriorityNormal
 	e.DispatcherKey = ""
 	e.Data = nil
 }
 
-func (e *Event) GetType() int32 {
+func (e *Event) GetEventType() def.EventType {
 	if e.IsRef() {
 		return e.Type
 	}
 	return UnknownEvent
+}
+
+func (e *Event) GetData() any {
+	return e.Data
 }
 
 func (e *Event) GetPriority() def.Priority {

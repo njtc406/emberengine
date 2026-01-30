@@ -6,8 +6,6 @@
 package interfaces
 
 import (
-	"context"
-
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
@@ -34,7 +32,7 @@ type IModuleIdentity interface {
 	GetModuleID() uint32     // 获取模块ID
 	GetModuleName() string   // 获取模块名称
 	NewModuleID() uint32     // 生成模块ID
-
+	GetService() IService    // 获取服务
 }
 
 type IModuleHierarchy interface {
@@ -49,10 +47,8 @@ type IModuleHierarchy interface {
 }
 
 type IModuleServiceEvent interface {
-	GetService() IService                       // 获取服务
-	GetEventHandler() IEventHandler             // 获取事件处理器
-	GetEventProcessor() IEventProcessor         // 获取事件管理器
-	NotifyEvent(ctx context.Context, ev IEvent) // 通知事件
+	GetEventHandler() ITriggerHandler // 获取事件处理器
+	GetEventProcessor() ITrigger      // 获取事件管理器
 }
 
 type IMethodMgr interface {

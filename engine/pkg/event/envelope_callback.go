@@ -47,7 +47,7 @@ func getCallbackEnvelopePool() pool.IPool[*CallbackEnvelope] {
 //   - callback: 回调实例
 func NewCallbackEnvelope(callback inf.IConcurrentCallback) *CallbackEnvelope {
 	e := getCallbackEnvelopePool().Get()
-	e.Type = ServiceConcurrentCallback
+	e.Type = int32(ServiceConcurrentCallback)
 	e.Priority = def.PriorityNormal
 	e.DispatcherKey = ""
 	e.Payload = callback
@@ -61,7 +61,7 @@ func NewCallbackEnvelope(callback inf.IConcurrentCallback) *CallbackEnvelope {
 //   - dispatcherKey: 分发键
 func NewCallbackEnvelopeWithName(callback inf.IConcurrentCallback, dispatcherKey string) *CallbackEnvelope {
 	e := getCallbackEnvelopePool().Get()
-	e.Type = ServiceConcurrentCallback
+	e.Type = int32(ServiceConcurrentCallback)
 	e.Priority = def.PriorityNormal
 	e.DispatcherKey = dispatcherKey
 	e.Payload = callback
@@ -117,7 +117,7 @@ func getRpcCallbackEnvelopePool() pool.IPool[*RpcCallbackEnvelope] {
 
 func NewRpcCallbackEnvelope(callback inf.IRpcCallback, priority def.Priority, dispatcherKey string) *RpcCallbackEnvelope {
 	e := getRpcCallbackEnvelopePool().Get()
-	e.Type = RpcMsg
+	e.Type = int32(RpcMsg)
 	e.Priority = priority
 	e.DispatcherKey = dispatcherKey
 	e.Payload = callback

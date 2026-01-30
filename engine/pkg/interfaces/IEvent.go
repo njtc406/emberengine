@@ -21,44 +21,38 @@ type IEvent interface {
 	GetEventType() def.EventType
 }
 
-type IEventChannel interface {
-	PushEvent(ctx context.Context, ev IEvent) error // 使用接口时,请注意数据引用问题!!
-}
-
 type IListener interface {
 	IMailboxChannel
 	IServer
 }
 
-type IEventListener interface {
-	IEventChannel
-	IMailboxChannel
-	IServer
+type IEventChannel interface {
+	PushEvent(ctx context.Context, event IEvent)
 }
 
 type IEventProcessor interface {
-	IEventChannel
+	//IEventChannel
 
-	Init(eventChannel IEventListener)
+	Init(eventChannel IListener)
 	EventHandler(ctx context.Context, ev IEvent)
 	// 普通事件
-	RegEventReceiverFunc(eventType def.EventType, receiver IEventHandler, callback EventCallBack)
-	UnRegEventReceiverFun(eventType def.EventType, receiver IEventHandler)
+	RegEventReceiver(eventType def.EventType, receiver IEventHandler, callback EventCallBack)
+	UnRegEventReceiver(eventType def.EventType, receiver IEventHandler)
 	// 全局事件
-	RegGlobalEventReceiverFunc(eventType def.EventType, receiver IEventHandler, callback EventCallBack)
-	UnRegGlobalEventReceiverFun(eventType def.EventType, receiver IEventHandler)
+	RegGlobalEventReceiver(eventType def.EventType, receiver IEventHandler, callback EventCallBack)
+	UnRegGlobalEventReceiver(eventType def.EventType, receiver IEventHandler)
 	// 发布全局事件
 	PublishGlobal(ctx context.Context, eventType def.EventType, data proto.Message) error
 
 	// 服务器事件
-	RegServerEventReceiverFunc(eventType def.EventType, receiver IEventHandler, callback EventCallBack)
-	UnRegServerEventReceiverFun(eventType def.EventType, receiver IEventHandler)
+	RegServerEventReceiver(eventType def.EventType, receiver IEventHandler, callback EventCallBack)
+	UnRegServerEventReceiver(eventType def.EventType, receiver IEventHandler)
 	// 发布服务器事件
 	PublishServer(ctx context.Context, eventType def.EventType, data proto.Message) error
 
 	// 特定服务事件
-	RegSpecificEventReceiverFunc(eventType def.EventType, serviceUid string, receiver IEventHandler, callback EventCallBack)
-	UnRegSpecificEventReceiverFun(eventType def.EventType, serviceUid string, receiver IEventHandler)
+	RegSpecificEventReceiver(eventType def.EventType, serviceUid string, receiver IEventHandler, callback EventCallBack)
+	UnRegSpecificEventReceiver(eventType def.EventType, serviceUid string, receiver IEventHandler)
 	// 发布特定服务事件
 	PublishSpecific(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error
 
@@ -72,7 +66,7 @@ type IEventProcessor interface {
 type IEventHandler interface {
 	Init(p IEventProcessor)
 	GetEventProcessor() IEventProcessor
-	NotifyEvent(ctx context.Context, ev IEvent)
+	TriggerEvent(ctx context.Context, ev IEvent)
 	Destroy()
 	//注册了事件
 	AddRegInfo(eventType def.EventType, eventProcessor IEventProcessor)

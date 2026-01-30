@@ -33,10 +33,6 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 		creator: func() inf.IMailboxJob { return NewEventBusJob() },
 		getter:  func(j inf.IMailboxJob) any { return j.(*EventBusJob).GetPayload() },
 	},
-	def.MailboxJobTypeInternalEvent: {
-		creator: func() inf.IMailboxJob { return NewInternalEventJob() },
-		getter:  func(j inf.IMailboxJob) any { return j.(*InternalEventJob).GetPayload() },
-	},
 	def.MailboxJobTypeTimer: {
 		creator: func() inf.IMailboxJob { return NewTimerJob() },
 		getter:  func(j inf.IMailboxJob) any { return j.(*TimerJob).GetPayload() },
@@ -240,34 +236,4 @@ func getSysCtlJobPool() pool.IPool[*SysCtlJob] {
 		)
 	})
 	return sysCtlJobPool
-}
-
-var internalEventJobPool pool.IPool[*InternalEventJob]
-var internalEventJobPoolOnce sync.Once
-
-func getInternalEventJobPool() pool.IPool[*InternalEventJob] {
-	internalEventJobPoolOnce.Do(func() {
-		internalEventJobPool = pool.NewSyncPoolWrapper[*InternalEventJob](
-			func() *InternalEventJob {
-				return &InternalEventJob{}
-			},
-			func() pool.IStatsRecorder {
-				if config.IsDebug() {
-					return pool.NewStatsRecorder("InternalEventJobPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithReset[*InternalEventJob](func(j *InternalEventJob) {
-				j.Reset()
-			}),
-			pool.WithRef[*InternalEventJob](func(j *InternalEventJob) {
-				j.Ref()
-			}),
-			pool.WithUnRef[*InternalEventJob](func(j *InternalEventJob) bool {
-				return j.UnRef()
-			}),
-		)
-	})
-	return internalEventJobPool
 }

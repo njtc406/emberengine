@@ -47,7 +47,7 @@ func NewActorEventEnvelope(event *actor.Event) *ActorEventEnvelope {
 	e := getActorEventEnvelopePool().Get()
 	// 直接使用业务事件类型，让事件进入 Processor 的常规分发链路，
 	// 从而避免 core.handleGlobalEvent 再次封装/转发。
-	e.Type = event.EventType
+	e.Type = event.GetType()
 	e.Priority = def.Priority(event.GetPriority())
 	e.DispatcherKey = event.GetDispatcherKey()
 	e.Payload = event

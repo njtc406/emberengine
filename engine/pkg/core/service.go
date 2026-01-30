@@ -50,9 +50,8 @@ type Service struct {
 	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 	isPrimarySecondaryMode bool         // 是否是主从模式
 
-	mailbox              *mailbox.Mailbox // 邮箱
-	eventProcessor       *event.Processor // 事件管理器
-	globalEventProcessor *event.Processor // 全局事件管理器(由eventBus触发的事件)
+	mailbox        *mailbox.Mailbox // 邮箱
+	eventProcessor *event.Trigger   // 事件管理器
 
 	profiler *profiler.Profiler // 性能监控
 
@@ -182,14 +181,11 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.moduleName = s.name
 
 	// 创建事件处理器
-	s.eventProcessor = event.NewProcessor()
-	s.eventProcessor.Init(s)
+	s.eventProcessor = event.NewTrigger()
+	s.eventProcessor.Init()
 	// 注册事件管理器
-	s.eventHandler = event.NewHandler()
+	s.eventHandler = event.NewTriggerHandler()
 	s.eventHandler.Init(s.eventProcessor)
-
-	s.globalEventProcessor = event.NewProcessor()
-	s.globalEventProcessor.Init(s)
 
 	s.IConcurrent = concurrent.NewTaskScheduler(s.ILoggerX)
 
@@ -286,41 +282,42 @@ func (s *Service) Stop() {
 // RequestStop 请求停止（非阻塞）：向 mailbox 投递 FinalizeEvent。
 // 可在 mailbox worker 内安全调用。
 func (s *Service) RequestStop() {
+	// TODO 需要重构这部分
 	// 防止重复投递
-	if !s.stopRequested.CompareAndSwap(false, true) {
-		return
-	}
-
-	// 标记进入关闭中状态（CAS 保护，仅从运行态转换）
-	for {
-		old := atomic.LoadInt32(&s.status)
-		if old >= def.SvcStatusClosing {
-			// 已经在关闭流程中
-			return
-		}
-		if atomic.CompareAndSwapInt32(&s.status, old, def.SvcStatusClosing) {
-			break
-		}
-	}
-
-	// 挂起邮箱（只允许 Finalize 等必要消息进入）
-	if s.mailbox != nil {
-		s.mailbox.Suspend()
-	}
-
-	// 投递 FinalizeEvent 到 mailbox，由 worker 在 actor 语义内执行清理
-	ev := event.NewEvent()
-	ev.Type = event.ServiceFinalize
-	ev.Priority = def.PriorityUrgent // 确保能通过挂起策略
-	if err := s.mailbox.PostMessage(xcontext.New(nil), ev); err != nil {
-		// 如果投递失败（mailbox 已关闭），先确保 mailbox 停止，再清理
-		ev.Release()
-		s.Warnf("FinalizeEvent post failed: %v, triggering direct finalize", err)
-		if s.mailbox != nil {
-			s.mailbox.BeginStop()
-		}
-		s.doFinalizeDirectly()
-	}
+	//if !s.stopRequested.CompareAndSwap(false, true) {
+	//	return
+	//}
+	//
+	//// 标记进入关闭中状态（CAS 保护，仅从运行态转换）
+	//for {
+	//	old := atomic.LoadInt32(&s.status)
+	//	if old >= def.SvcStatusClosing {
+	//		// 已经在关闭流程中
+	//		return
+	//	}
+	//	if atomic.CompareAndSwapInt32(&s.status, old, def.SvcStatusClosing) {
+	//		break
+	//	}
+	//}
+	//
+	//// 挂起邮箱（只允许 Finalize 等必要消息进入）
+	//if s.mailbox != nil {
+	//	s.mailbox.Suspend()
+	//}
+	//
+	//// 投递 FinalizeEvent 到 mailbox，由 worker 在 actor 语义内执行清理
+	//ev := event.NewEvent()
+	//ev.Type = event.ServiceFinalize
+	//ev.Priority = def.PriorityUrgent // 确保能通过挂起策略
+	//if err := s.mailbox.PostMessage(xcontext.New(nil), ev); err != nil {
+	//	// 如果投递失败（mailbox 已关闭），先确保 mailbox 停止，再清理
+	//	ev.Release()
+	//	s.Warnf("FinalizeEvent post failed: %v, triggering direct finalize", err)
+	//	if s.mailbox != nil {
+	//		s.mailbox.BeginStop()
+	//	}
+	//	s.doFinalizeDirectly()
+	//}
 }
 
 // WaitStopped 等待服务完全停止（阻塞）。

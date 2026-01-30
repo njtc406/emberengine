@@ -25,9 +25,9 @@ func (d *daemon) OnInit() error {
 	event.GetEventBus().SubscribeGlobal(event.ServiceNew, d)
 	event.GetEventBus().SubscribeGlobal(event.ServiceClose, d)
 
-	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
-	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)
-	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceReload, d.GetEventHandler(), d.serviceReload)
+	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
+	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)
+	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceReload, d.GetEventHandler(), d.serviceReload)
 	return nil
 }
 

@@ -22,11 +22,10 @@ import (
 )
 
 var (
-	_ inf.IModule             = (*Module)(nil)
-	_ inf.IModuleLifecycle    = (*Module)(nil)
-	_ inf.IModuleIdentity     = (*Module)(nil)
-	_ inf.IModuleHierarchy    = (*Module)(nil)
-	_ inf.IModuleServiceEvent = (*Module)(nil)
+	_ inf.IModule          = (*Module)(nil)
+	_ inf.IModuleLifecycle = (*Module)(nil)
+	_ inf.IModuleIdentity  = (*Module)(nil)
+	_ inf.IModuleHierarchy = (*Module)(nil)
 )
 
 type Module struct {
@@ -43,7 +42,7 @@ type Module struct {
 	root         inf.IModule            // 根模块
 	rootContains map[uint32]inf.IModule // 根模块下所有模块(包括所有的子模块)
 
-	eventHandler inf.IEventHandler // 事件处理器
+	eventHandler *event.TriggerHandler // 事件处理器
 	timingwheel.ITimerScheduler
 	inf.IRpcHandler                // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
 	methodMgr       inf.IMethodMgr // 接口信息管理器
@@ -84,8 +83,8 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 		"mName": pModule.GetModuleName(),
 	})
 	pModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
-	pModule.eventHandler = event.NewHandler()
-	pModule.eventHandler.Init(m.eventHandler.GetEventProcessor())
+	pModule.eventHandler = event.NewTriggerHandler()
+	pModule.eventHandler.Init(m.eventHandler.GetTrigger())
 	pModule.IConcurrent = m.IConcurrent
 	pModule.IRpcHandler = rpc.NewHandler(pModule.self).Init(m.root.GetMethodMgr())
 	if err := module.OnInit(); err != nil {
@@ -190,11 +189,11 @@ func (m *Module) GetService() inf.IService {
 	return m.GetRoot().(inf.IService)
 }
 
-func (m *Module) GetEventProcessor() inf.IEventProcessor {
-	return m.eventHandler.GetEventProcessor()
+func (m *Module) GetEventProcessor() inf.ITrigger {
+	return m.eventHandler.GetTrigger()
 }
 
-func (m *Module) GetEventHandler() inf.IEventHandler {
+func (m *Module) GetEventHandler() inf.ITriggerHandler {
 	return m.eventHandler
 }
 
@@ -227,8 +226,8 @@ func (m *Module) reset() {
 	m.ILoggerX = nil
 }
 
-func (m *Module) NotifyEvent(ctx context.Context, ev inf.IEvent) {
-	m.eventHandler.NotifyEvent(ctx, ev)
+func (m *Module) TriggerEvent(ctx context.Context, tp def.EventType, ev inf.IEvent) {
+	m.eventHandler.Trigger(ctx, tp, ev)
 }
 
 func (m *Module) GetLogger() *log.Logger {

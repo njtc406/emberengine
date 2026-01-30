@@ -38,11 +38,13 @@ func newJobHandlerRegistry() *jobHandlerRegistry {
 	}
 }
 
-// registerJobHandler 泛型注册函数 - 自动完成类型断言绑定
+// registerJobHandler 注册 Job 处理器
+// registry: 目标注册表
+// jobType: 要注册的 job 类型
+// handler: 具体的处理器函数，接收 ctx 和 payload 作为参数
 // 使用方式: registerJobHandler(registry, def.MailboxJobTypeRpc, func(ctx context.Context, env inf.IEnvelope) error { ... })
 func registerJobHandler[T any](registry *jobHandlerRegistry, jobType def.MailboxJobType, handler JobHandler[T]) {
 	registry.handlers[jobType] = func(ctx context.Context, j inf.IMailboxJob) error {
-		// 自动断言: 从 job 中提取 payload 并转换为目标类型
 		payload := job.GetJobPayloadAs[T](j)
 		return handler(ctx, payload)
 	}
@@ -110,8 +112,7 @@ func (s *Service) initJobHandlers() {
 
 	// 注册内置的 job handlers - payload 类型在编译期确定
 	registerJobHandler(s.jobRegistry, def.MailboxJobTypeRpc, s.handleRpcJob)
-	registerJobHandler(s.jobRegistry, def.MailboxJobTypeEvent, s.handleEventBusJob)
-	registerJobHandler(s.jobRegistry, def.MailboxJobTypeInternalEvent, s.handleInternalEventJob)
+	registerJobHandler(s.jobRegistry, def.MailboxJobTypeEvent, s.handleEventJob)
 	registerJobHandler(s.jobRegistry, def.MailboxJobTypeTimer, s.handleTimerJob)
 	registerJobHandler(s.jobRegistry, def.MailboxJobTypeConcurrentCallback, s.handleConcurrentCallbackJob)
 	registerJobHandler(s.jobRegistry, def.MailboxJobTypeSysCtl, s.handleSysCtlJob)
@@ -148,16 +149,9 @@ func (s *Service) handleRpcJob(ctx context.Context, envelope inf.IEnvelope) erro
 	}
 }
 
-func (s *Service) handleEventBusJob(ctx context.Context, event *actor.Event) error {
+func (s *Service) handleEventJob(ctx context.Context, event *actor.Event) error {
 	return s.safeExec(func() error {
 		s.globalEventProcessor.EventHandler(ctx, event)
-		return nil
-	})
-}
-
-func (s *Service) handleInternalEventJob(ctx context.Context, ev inf.IEvent) error {
-	return s.safeExec(func() error {
-		s.eventProcessor.EventHandler(ctx, ev)
 		return nil
 	})
 }

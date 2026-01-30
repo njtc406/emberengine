@@ -76,9 +76,9 @@ func (s *MasterSlaverTest) OnInit() error {
 	// 把任何 master-only 的 goroutine 都绑定到 guard.Ctx() 即可做到失主即停。
 	s.guard = leadership.NewGuard(context.Background())
 
-	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceBecomeMaster, s.GetEventHandler(), s.becomeMaster) // 升级为主服务
-	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceBecomeSlaver, s.GetEventHandler(), s.becomeSlaver) // 降级为从服务
-	s.GetEventProcessor().RegEventReceiverFunc(event.ServiceLoseMaster, s.GetEventHandler(), s.loseMaster)     // 主服务降级
+	s.GetEventProcessor().RegEventReceiver(event.ServiceBecomeMaster, s.GetEventHandler(), s.becomeMaster) // 升级为主服务
+	s.GetEventProcessor().RegEventReceiver(event.ServiceBecomeSlaver, s.GetEventHandler(), s.becomeSlaver) // 降级为从服务
+	s.GetEventProcessor().RegEventReceiver(event.ServiceLoseMaster, s.GetEventHandler(), s.loseMaster)     // 主服务降级
 	return nil
 }
 

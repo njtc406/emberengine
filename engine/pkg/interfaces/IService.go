@@ -46,7 +46,6 @@ type IServiceHandler interface {
 type IIdentifiable interface {
 	IServer
 	INamed
-	IActor
 	IsClosed() bool // 服务是否已经关闭
 }
 

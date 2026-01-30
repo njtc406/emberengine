@@ -9,11 +9,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type Job[T any] struct {
@@ -113,7 +113,7 @@ func (j *RpcJob) Release() {
 }
 
 type EventBusJob struct {
-	Job[*actor.Event]
+	Job[*anypb.Any]
 }
 
 func NewEventBusJob() *EventBusJob {
@@ -166,18 +166,4 @@ func NewSysCtlJob() *SysCtlJob {
 
 func (j *SysCtlJob) Release() {
 	getSysCtlJobPool().Put(j)
-}
-
-type InternalEventJob struct {
-	Job[inf.IEvent]
-}
-
-func NewInternalEventJob() *InternalEventJob {
-	j := getInternalEventJobPool().Get()
-	j.SetType(def.MailboxJobTypeInternalEvent)
-	return j
-}
-
-func (j *InternalEventJob) Release() {
-	getInternalEventJobPool().Put(j)
 }

@@ -82,8 +82,8 @@ func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf)
 	e.registry = &etcdServiceRegistry{d: e}
 	e.election = &etcdMasterElection{d: e}
 
-	proc.RegEventReceiverFunc(event.SysEventServiceReg, e.handler, e.onRegister)
-	proc.RegEventReceiverFunc(event.SysEventServiceDis, e.handler, e.onUnregister)
+	proc.RegEventReceiver(event.SysEventServiceReg, e.handler, e.onRegister)
+	proc.RegEventReceiver(event.SysEventServiceDis, e.handler, e.onUnregister)
 	return nil
 }
 
