@@ -9,10 +9,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
-func (e *Event) GetData() any {
-	return e.Payload
-}
-
 func (e *Event) GetEventType() def.EventType {
 	return def.EventType(e.Type)
 }

@@ -51,7 +51,7 @@ type Service struct {
 	isPrimarySecondaryMode bool         // 是否是主从模式
 
 	mailbox        *mailbox.Mailbox // 邮箱
-	eventProcessor *event.Trigger   // 事件管理器
+	eventProcessor *event.Processor // 事件管理器
 
 	profiler *profiler.Profiler // 性能监控
 
@@ -182,7 +182,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	// 创建事件处理器
 	s.eventProcessor = event.NewTrigger()
-	s.eventProcessor.Init()
+	s.eventProcessor.Init(s)
 	// 注册事件管理器
 	s.eventHandler = event.NewTriggerHandler()
 	s.eventHandler.Init(s.eventProcessor)
@@ -396,6 +396,15 @@ func (s *Service) release() {
 
 func (s *Service) PostJob(job inf.IMailboxJob) error {
 	return s.mailbox.PostJob(job)
+}
+
+func (s *Service) PushEvent(ctx context.Context, ev inf.IEvent) error {
+	j := job.NewInternalEventJob()
+	j.SetContext(ctx)
+	j.SetPriority(def.PrioritySys)
+	j.SetDispatcherKey(uuid.NewString())
+	j.SetPayload(ev)
+	return s.mailbox.PostJob(j)
 }
 
 func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurrentCallback) error {

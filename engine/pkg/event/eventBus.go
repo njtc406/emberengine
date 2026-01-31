@@ -423,7 +423,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 		for _, ch := range subMap {
 			j := job.NewEventBusJob()
 			j.SetType(def.MailboxJobTypeEvent)
-			j.SetPayload(e.GetPayload())
+			j.SetPayload(e)
 			j.SetContext(ctx)
 			j.SetDispatcherKey(e.GetDispatcherKey())
 			j.SetPriority(def.Priority(e.GetPriority()))
@@ -478,7 +478,7 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 			for _, ch := range subMap {
 				j := job.NewEventBusJob()
 				j.SetType(def.MailboxJobTypeEvent)
-				j.SetPayload(e.GetPayload())
+				j.SetPayload(e)
 				j.SetContext(ctx)
 				j.SetDispatcherKey(e.GetDispatcherKey())
 				j.SetPriority(def.Priority(e.GetPriority()))
@@ -575,7 +575,7 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 			for _, ch := range subMap {
 				j := job.NewEventBusJob()
 				j.SetType(def.MailboxJobTypeEvent)
-				j.SetPayload(e.GetPayload())
+				j.SetPayload(e)
 				j.SetContext(ctx)
 				j.SetDispatcherKey(e.GetDispatcherKey())
 				j.SetPriority(def.Priority(e.GetPriority()))
@@ -699,7 +699,7 @@ func (eb *Bus) unSubscribe(key string) {
 	}
 }
 
-func (eb *Bus) UnSubscribeGlobal(eventType def.EventType, svc inf.IListener) {
+func (eb *Bus) UnSubscribeGlobal(eventType def.EventType, svc inf.IActor) {
 	key := eb.genKey(eb.globalPrefix, eventType)
 	eb.globalLock.Lock(key)
 	defer eb.globalLock.Unlock(key)
@@ -716,16 +716,16 @@ func (eb *Bus) UnSubscribeGlobal(eventType def.EventType, svc inf.IListener) {
 	}
 }
 
-func (eb *Bus) UnSubscribeServer(eventType def.EventType, svc inf.IListener) {
-	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPartition())
+func (eb *Bus) UnSubscribeServer(eventType def.EventType, svc inf.IActor) {
+	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPid().GetPartition())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needUnListen bool
 	if subMap, ok := eb.serverSubscribers[eventType]; ok {
-		if nameMap, ok := subMap[svc.GetPartition()]; ok {
+		if nameMap, ok := subMap[svc.GetPid().GetPartition()]; ok {
 			delete(nameMap, svc.GetPid().GetServiceUid())
 			if len(nameMap) == 0 {
-				delete(subMap, svc.GetPartition())
+				delete(subMap, svc.GetPid().GetPartition())
 				needUnListen = true
 			}
 		}

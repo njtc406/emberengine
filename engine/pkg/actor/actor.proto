@@ -66,3 +66,9 @@ message Event {
   // === 上下文元数据（仅用于 tracing/metadata） ===
   map<string, string> ContextHeaders  = 8;  // 上下文头（traceId 等）
 }
+
+message MasterStateData {
+  bool OldStateIsMaster = 1;
+  int64 PrevEpoch = 2;
+  int64 NewEpoch = 3;
+}

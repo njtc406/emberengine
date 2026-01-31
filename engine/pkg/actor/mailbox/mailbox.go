@@ -6,8 +6,10 @@
 package mailbox
 
 import (
+	"context"
 	"sync/atomic"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -146,4 +148,12 @@ func (m *Mailbox) Wait() {
 func (m *Mailbox) Stop() {
 	m.BeginStop()
 	m.Wait()
+}
+
+func (m *Mailbox) PushEvent(ctx context.Context, ev inf.IEvent) error {
+	j := job.NewInternalEventJob()
+	j.SetContext(ctx)
+	j.SetPriority(def.PrioritySys)
+	j.SetPayload(ev)
+	return m.PostJob(j)
 }

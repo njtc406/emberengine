@@ -48,7 +48,7 @@ type ctxEvent struct {
 func (c *Cluster) Init() {
 	c.closed = make(chan struct{})
 	c.eventChannel = make(chan ctxEvent, 1024)
-	c.eventProcessor = event.NewProcessor()
+	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(c)
 
 	c.endpoints = endpoints.GetEndpointManager().Init(c.eventProcessor)
@@ -123,6 +123,11 @@ func (c *Cluster) GetPid() *actor.PID {
 func (c *Cluster) GetPartition() int32 {
 	// 这里没有实质内容,为了凑接口
 	return 0
+}
+
+func (c *Cluster) PostJob(job inf.IMailboxJob) error {
+	// Cluster 不使用 mailbox，忽略 PostJob
+	return nil
 }
 
 func (c *Cluster) IsClusterMode() bool {

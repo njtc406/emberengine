@@ -89,6 +89,11 @@ type IMessageInvoker interface {
 	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
 }
 
+type IListener interface {
+	IMailboxChannel
+	IServer
+}
+
 // ================TODO 下面这些还未验证===================
 
 type IMailboxStatistics interface {

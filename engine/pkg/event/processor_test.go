@@ -47,7 +47,7 @@ func TestTrigger_Basic(t *testing.T) {
 	}
 
 	// 通过名称取消注册
-	handler.Unregister(def.EventType(1), "test-handler")
+	handler.UnregisterEvent(def.EventType(1), "test-handler")
 
 	// 再次触发，不应该调用handler
 	trigger.Trigger(context.Background(), def.EventType(1), &TestData{Message: "world", Value: 100})
@@ -261,7 +261,7 @@ func TestTrigger_HasHandler(t *testing.T) {
 		t.Error("expected HasHandler to return true after registration")
 	}
 
-	handler.Unregister(def.EventType(1), "test-handler")
+	handler.UnregisterEvent(def.EventType(1), "test-handler")
 
 	if trigger.HasHandler(def.EventType(1)) {
 		t.Error("expected HasHandler to return false after unregister")

@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
@@ -149,7 +149,6 @@ func (s *CallState) NeedCallback() bool { return len(s.callbacks) > 0 }
 func (s *CallState) Complete() {
 	if s.NeedCallback() {
 		// 需要回调执行
-		// TODO 重写
 		envelopeResp := msgenvelope.NewMsgEnvelope()
 		meta := msgenvelope.NewMeta()
 		envelopeResp.SetMeta(meta)
@@ -157,8 +156,11 @@ func (s *CallState) Complete() {
 		data.SetResponse(s.Response())
 		data.SetError(s.Error())
 		envelopeResp.SetData(data)
-		envelopeResp.SetContext(s.XContext)
-		s.dispatcher.PostJob(envelopeResp)
+
+		rpcJob := job.NewRpcJob()
+		rpcJob.SetContext(s.XContext)
+		rpcJob.SetPayload(envelopeResp)
+		s.dispatcher.PostJob(rpcJob)
 		getCallStatePool().Put(s)
 		return
 	}
@@ -173,11 +175,12 @@ func (s *CallState) dispatchCallbackEvent() {
 		getCallStatePool().Put(s)
 		return
 	}
-	// 使用 CallbackEnvelope 包装投递
-	env := event.NewCallbackEnvelope(s)
-	env.SetContext(s.XContext)
-	if err := s.dispatcher.PostJob(env); err != nil {
-		env.Release()
+	// 使用 ConcurrentCallbackJob 包装投递
+	j := job.NewConcurrentCallbackJob()
+	j.SetContext(s.XContext)
+	j.SetPayload(s)
+	if err := s.dispatcher.PostJob(j); err != nil {
+		j.Release()
 		getCallStatePool().Put(s)
 	}
 }

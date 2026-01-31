@@ -14,7 +14,6 @@ func TestCreateJob_Builtins(t *testing.T) {
 	}{
 		{"rpc", def.MailboxJobTypeRpc},
 		{"event", def.MailboxJobTypeEvent},
-		{"internal_event", def.MailboxJobTypeInternalEvent},
 		{"timer", def.MailboxJobTypeTimer},
 		{"concurrent_callback", def.MailboxJobTypeConcurrentCallback},
 		{"sysctl", def.MailboxJobTypeSysCtl},

@@ -8,12 +8,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -297,17 +300,40 @@ Slave:
 	return
 }
 
-func (w *watcher) notifyService(evtType int32, oldStateIsMaster bool, prevEpoch, newEpoch int64) {
-	evt := event.NewEvent()
-	evt.Type = evtType
-	evt.Priority = def.PrioritySys
-	evt.Data = &event.MasterStateData{
+func (w *watcher) notifyService(evtType def.EventType, oldStateIsMaster bool, prevEpoch, newEpoch int64) {
+	//evt := event.NewEvent()
+	//evt.Type = evtType
+	//evt.Priority = def.PrioritySys
+	//evt.Data = &event.MasterStateData{
+	//	OldStateIsMaster: oldStateIsMaster,
+	//	PrevEpoch:        prevEpoch,
+	//	NewEpoch:         newEpoch,
+	//}
+
+	evt := &actor.Event{
+		Type: int32(evtType),
+	}
+
+	data := &actor.MasterStateData{
 		OldStateIsMaster: oldStateIsMaster,
 		PrevEpoch:        prevEpoch,
 		NewEpoch:         newEpoch,
 	}
-	if err := w.svc.PushEvent(w.ctx, evt); err != nil {
-		log.SysLogger.Errorf("push event[%d] error: %v", evtType, err)
+
+	dataAny, err := codec.EncodeToAny(data)
+	if err != nil {
+		log.SysLogger.Errorf("encode data to any error: %v", err)
+		return
+	}
+	evt.Payload = dataAny
+
+	j := job.NewEventBusJob()
+	j.SetPriority(def.PrioritySys)
+	j.SetPayload(evt)
+
+	if err = w.svc.PostJob(j); err != nil {
+		log.SysLogger.Errorf("post job error: %v", err)
+		return
 	}
 }
 

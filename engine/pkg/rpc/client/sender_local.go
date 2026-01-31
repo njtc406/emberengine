@@ -9,6 +9,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
@@ -29,9 +30,6 @@ func (lc *localSender) Close() {
 
 func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if lc == nil || lc.IsClosed() {
-		if envelope != nil {
-			envelope.Release()
-		}
 		return def.ErrServiceIsClosedOrExited
 	}
 	if envelope == nil {
@@ -40,7 +38,7 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 
 	data := envelope.GetData()
 	if data != nil && data.IsReply() {
-		// 本地回复：reply 复用的是“当前正在处理的请求 envelope”，
+		// 本地回复：reply 复用的是"当前正在处理的请求 envelope"，
 		// envelope 的最终释放由对端 mailbox 的 ExecuteJob 统一负责。
 		// 这里提前 Release 会导致对象过早回到池里，被并发复用后出现 meta/data=nil 等异常。
 		state := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId())
@@ -49,15 +47,17 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 		}
 		state.SetResult(data.GetResponse(), data.GetError())
 		state.Complete()
-		envelope.Release()
 		return nil
 	}
 
 	// 本地请求：投递到对端 mailbox。
 	// envelope 的最终 Release 由对端 mailbox 统一处理。
-	if err := dispatcher.PostJob(ctx, envelope); err != nil {
+	rpcJob := job.NewRpcJob()
+	rpcJob.SetContext(ctx)
+	rpcJob.SetPayload(envelope)
+	if err := dispatcher.PostJob(rpcJob); err != nil {
 		// PostJob 失败说明未能把 envelope 交给对端 mailbox，当前方需要负责回收。
-		envelope.Release()
+		rpcJob.Release()
 		return err
 	}
 	return nil

@@ -28,6 +28,9 @@ type IEnvelope interface {
 	// Option
 
 	ToProtoMsg(ctx context.Context) (*actor.Message, error)
+
+	// Release 释放信封资源
+	Release()
 }
 
 type IEnvelopeMeta interface {

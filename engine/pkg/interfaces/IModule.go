@@ -47,8 +47,8 @@ type IModuleHierarchy interface {
 }
 
 type IModuleServiceEvent interface {
-	GetEventHandler() ITriggerHandler // 获取事件处理器
-	GetEventProcessor() ITrigger      // 获取事件管理器
+	GetEventHandler() IEventHandler     // 获取事件处理器
+	GetEventProcessor() IEventProcessor // 获取事件管理器
 }
 
 type IMethodMgr interface {

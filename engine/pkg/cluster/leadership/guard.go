@@ -85,7 +85,7 @@ func (g *Guard) OnEvent(ctx context.Context, ev inf.IEvent) bool {
 		return false
 	}
 
-	typeVal := ev.GetType()
+	typeVal := ev.GetEventType()
 	switch typeVal {
 	case event.ServiceBecomeMaster:
 		// 从 Event.Data 中获取 epoch 信息

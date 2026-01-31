@@ -1,6 +1,6 @@
 module github.com/njtc406/emberengine
 
-go 1.23.1
+go 1.24
 
 require (
 	github.com/alibaba/sentinel-golang v1.0.4

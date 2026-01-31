@@ -7,6 +7,7 @@ package endpoints
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -17,6 +18,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -24,8 +26,8 @@ import (
 var endMgr = &EndpointManager{}
 
 type EndpointManager struct {
-	inf.IEventProcessor
-	inf.IEventHandler
+	eventProcessor *event.Processor
+	eventHandler   *event.Handler
 
 	nodeUid       string
 	isClusterMode bool
@@ -38,19 +40,18 @@ func GetEndpointManager() *EndpointManager {
 	return endMgr
 }
 
-func (em *EndpointManager) Init(eventProcessor inf.IEventProcessor) *EndpointManager {
+func (em *EndpointManager) Init(eventProcessor *event.Processor) *EndpointManager {
 	em.nodeUid = uuid.NewString()
 	em.remotes = make(map[string]*remote.Remote)
 	for _, cfg := range config.Conf.ClusterConf.RPCServers {
 		em.remotes[cfg.Type] = remote.NewRemote().Init(cfg, em)
 	}
 
-	em.IEventProcessor = eventProcessor
+	em.eventProcessor = eventProcessor
 
 	// 事件管理
-	em.IEventProcessor = eventProcessor
-	em.IEventHandler = event.NewHandler()
-	em.IEventHandler.Init(em.IEventProcessor)
+	em.eventHandler = event.NewTriggerHandler()
+	em.eventHandler.Init(em.eventProcessor)
 
 	em.repository = repository.NewRepository()
 
@@ -65,9 +66,13 @@ func (em *EndpointManager) Start() {
 	}
 
 	// 新增、修改服务事件
-	em.IEventProcessor.RegEventReceiver(event.SysEventETCDPut, em.IEventHandler, em.updateServiceInfo)
+	if err := event.RegisterHandler(em.eventHandler, event.SysEventETCDPut, "service_update", em.updateServiceInfo); err != nil {
+		log.SysLogger.Panicf("register service_update error: %v", err)
+	}
 	// 删除服务事件
-	em.IEventProcessor.RegEventReceiver(event.SysEventETCDDel, em.IEventHandler, em.removeServiceInfo)
+	if err := event.RegisterHandler(em.eventHandler, event.SysEventETCDDel, "service_update", em.removeServiceInfo); err != nil {
+		log.SysLogger.Panicf("register service_update error: %v", err)
+	}
 }
 
 func (em *EndpointManager) Stop() {
@@ -85,41 +90,37 @@ func (em *EndpointManager) SetClusterMode(isClusterMode bool) {
 }
 
 // updateServiceInfo 更新远程服务信息事件
-func (em *EndpointManager) updateServiceInfo(ctx context.Context, e inf.IEvent) {
-	log.SysLogger.Debugf("endpoints receive update service event: %+v", e.GetType())
-	ev := e.(*event.Event)
-	kv := ev.Data.(*mvccpb.KeyValue)
-	if kv.Value != nil {
-		var pid actor.PID
-		if err := protojson.Unmarshal(kv.Value, &pid); err != nil {
-			log.SysLogger.Errorf("unmarshal pid error: %v", err)
-			return
-		}
-
-		if pid.GetNodeUid() == em.nodeUid {
-			log.SysLogger.Debugf("endpointmgr ignore local service -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
-			// 本地服务,忽略
-			return
-		}
-		log.SysLogger.Infof("endpointmgr add remote service: %s, key: %s", pid.String(), string(kv.Key))
-		em.repository.Add(string(kv.Key), client.NewDispatcher(&pid, nil))
+func (em *EndpointManager) updateServiceInfo(ctx context.Context, kv *mvccpb.KeyValue) error {
+	if kv == nil || kv.Key == nil {
+		log.SysLogger.WithContext(ctx).Errorf("update service error: key is nil")
+		return fmt.Errorf("key is nil")
 	}
-}
 
-type delKey struct {
-	Key string
+	var pid actor.PID
+	if err := protojson.Unmarshal(kv.Value, &pid); err != nil {
+		log.SysLogger.WithContext(ctx).Errorf("unmarshal pid error: %v", err)
+		return fmt.Errorf("unmarshal pid error: %v", err)
+	}
+
+	if pid.GetNodeUid() == em.nodeUid {
+		log.SysLogger.WithContext(ctx).Debugf("endpointmgr ignore local service -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
+		// 本地服务,忽略
+		return fmt.Errorf("ignore local service")
+	}
+	log.SysLogger.WithContext(ctx).Infof("endpointmgr add remote service: %s, key: %s", pid.String(), string(kv.Key))
+	em.repository.Add(string(kv.Key), client.NewDispatcher(&pid, nil))
+	return nil
 }
 
 // removeServiceInfo 删除远程服务信息事件
-func (em *EndpointManager) removeServiceInfo(ctx context.Context, e inf.IEvent) {
-	ev := e.(*event.Event)
-	kv := ev.Data.(*mvccpb.KeyValue)
-	if kv.Key != nil {
-		log.SysLogger.Infof("endpointmgr remove remote service: %s", string(kv.Key))
-		em.repository.Remove(string(kv.Key))
-	} else {
-		log.SysLogger.Errorf("remove service error: key is nil")
+func (em *EndpointManager) removeServiceInfo(ctx context.Context, kv *mvccpb.KeyValue) error {
+	if kv == nil || kv.Key == nil {
+		log.SysLogger.WithContext(ctx).Errorf("remove service error: key is nil")
+		return fmt.Errorf("key is nil")
 	}
+	log.SysLogger.Infof("endpointmgr remove remote service: %s", string(kv.Key))
+	em.repository.Remove(string(kv.Key))
+	return nil
 }
 
 // AddService 添加本地服务到服务发现中
@@ -146,11 +147,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 
 	// 这是同步执行的
 	// 将服务信息发布到集群
-	ev := event.NewEvent()
-	defer ev.Release()
-	ev.Type = event.SysEventServiceReg
-	ev.Data = svc
-	em.IEventProcessor.EventHandler(context.Background(), ev)
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceReg, svc)
 
 	return
 }
@@ -165,20 +162,12 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 
 	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
 
-	// 将服务信息发布到集群
-	ev := event.NewEvent()
-	defer ev.Release()
-	ev.Type = event.SysEventServiceDis
-	ev.Data = pid
-	em.IEventProcessor.EventHandler(context.Background(), ev)
+	// 通知集群服务下线
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())
 }
 
 func (em *EndpointManager) ToPrivateService(svc inf.IService) {
-	ev := event.NewEvent()
-	defer ev.Release()
-	ev.Type = event.SysEventServiceDis
-	ev.Data = svc.GetPid()
-	em.IEventProcessor.EventHandler(context.Background(), ev)
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())
 }
 
 func (em *EndpointManager) GetRepository() *repository.Repository {

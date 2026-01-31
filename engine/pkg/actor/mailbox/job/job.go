@@ -9,11 +9,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type Job[T any] struct {
@@ -113,7 +113,7 @@ func (j *RpcJob) Release() {
 }
 
 type EventBusJob struct {
-	Job[*anypb.Any]
+	Job[*actor.Event]
 }
 
 func NewEventBusJob() *EventBusJob {

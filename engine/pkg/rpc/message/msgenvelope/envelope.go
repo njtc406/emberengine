@@ -113,7 +113,7 @@ func (e *MsgEnvelope) GetData() inf.IEnvelopeData {
 
 func (e *MsgEnvelope) GetType() int32 {
 	// MsgEnvelope 始终是 RPC 消息类型
-	return event.RpcMsg
+	return int32(event.RpcMsg)
 }
 
 func (e *MsgEnvelope) GetPriority() def.Priority {
