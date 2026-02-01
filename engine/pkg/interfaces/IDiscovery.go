@@ -10,7 +10,7 @@ import (
 )
 
 type IDiscovery interface {
-	Init(eventProcessor IEventProcessor, conf *config.ClusterConf) error
+	Init(conf *config.ClusterConf, eventProcessor IEventProcessor, evtCh IEventChannel) error
 	Start()
 	Close()
 }

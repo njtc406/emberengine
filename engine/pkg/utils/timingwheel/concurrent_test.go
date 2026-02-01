@@ -1,12 +1,15 @@
 package timingwheel
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
@@ -24,10 +27,20 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 	var executedCount atomic.Int32
 	var stoppedCount atomic.Int32
 
+	ctx := context.Background()
+	// 消费回调通道，否则同步任务只会被投递但不会执行。
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for tm := range scheduler.GetTimerCbChannel() {
+			_ = tm.Do(ctx)
+		}
+	}()
+
 	// Create 100 timers
 	timers := make([]uint64, 100)
 	for i := 0; i < 100; i++ {
-		tId, err := scheduler.AfterFunc(time.Millisecond*10, "test", func(timer *Timer, args ...interface{}) error {
+		tId, err := scheduler.AfterFunc(time.Millisecond*10, "test", func(ctx context.Context, timer *Timer, args ...interface{}) error {
 			executedCount.Add(1)
 			time.Sleep(time.Millisecond)
 			return nil
@@ -68,6 +81,7 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 	}
 
 	scheduler.Stop()
+	<-consumerDone
 }
 
 // TestTimerABAProblem tests Timer object pool reuse ABA problem
@@ -97,14 +111,12 @@ func TestTimerABAProblem(t *testing.T) {
 	var executedByB atomic.Int32
 	var wrongExecution atomic.Int32 // Count of wrong executions (A executes B's task)
 
-	// Simulate high load scenario for service A
-	chanA := make(chan ITimer, 1000)
-	chanB := make(chan ITimer, 1000)
+	ctx := context.Background()
 
 	// Service A: Register 100 Timers, immediately cancel half
 	for i := 0; i < 100; i++ {
 		name := fmt.Sprintf("taskA_%d", i)
-		tId, err := schedulerA.AfterFunc(time.Millisecond*5, name, func(timer *Timer, args ...interface{}) error {
+		tId, err := schedulerA.AfterFunc(time.Millisecond*5, name, func(ctx context.Context, timer *Timer, args ...interface{}) error {
 			executedByA.Add(1)
 			return nil
 		})
@@ -125,7 +137,7 @@ func TestTimerABAProblem(t *testing.T) {
 	// Service B: Register 100 Timers (will reuse cancelled Timer objects)
 	for i := 0; i < 100; i++ {
 		name := fmt.Sprintf("taskB_%d", i)
-		_, err := schedulerB.AfterFunc(time.Millisecond*50, name, func(timer *Timer, args ...interface{}) error {
+		_, err := schedulerB.AfterFunc(time.Millisecond*50, name, func(ctx context.Context, timer *Timer, args ...interface{}) error {
 			executedByB.Add(1)
 			return nil
 		})
@@ -136,28 +148,32 @@ func TestTimerABAProblem(t *testing.T) {
 
 	// Simulate service A starting to process mailbox (Timer may already be reused)
 	go func() {
-		for timer := range chanA {
-			// Check if it's service A's Timer
-			if len(timer.GetName()) >= 6 && timer.GetName()[:6] != "taskA_" {
-				wrongExecution.Add(1)
-				t.Logf("Service A executed wrong timer: %s", timer.GetName())
+		for tm := range schedulerA.GetTimerCbChannel() {
+			err := tm.Do(ctx)
+			if errors.Is(err, def.ErrTimerReuse) {
+				// 这是 ABA 防护生效的预期结果：旧引用被复用后应拒绝执行。
+				continue
 			}
-
-			// Verify generation and execute (simulates service's handleTimerCallback)
-			timer.Do()
+			if err != nil {
+				continue
+			}
+			// Do 成功才算“真的执行了任务”，此时名称不应该跨服务。
+			name := tm.GetName()
+			if len(name) >= 6 && name[:6] != "taskA_" {
+				wrongExecution.Add(1)
+				t.Logf("Service A executed wrong timer: %s", name)
+			}
 		}
 	}()
 
 	go func() {
-		for timer := range chanB {
-			timer.Do()
+		for tm := range schedulerB.GetTimerCbChannel() {
+			_ = tm.Do(ctx)
 		}
 	}()
 
 	// Wait for execution to complete
 	time.Sleep(time.Millisecond * 100)
-	close(chanA)
-	close(chanB)
 
 	t.Logf("Executed by A: %d", executedByA.Load())
 	t.Logf("Executed by B: %d", executedByB.Load())

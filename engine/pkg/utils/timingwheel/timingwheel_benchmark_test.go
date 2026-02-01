@@ -1,6 +1,7 @@
 package timingwheel_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,8 +16,10 @@ func genD(i int) time.Duration {
 
 var dp timingwheel.ITimerScheduler
 
-func printTask1(t *timingwheel.Timer, args ...interface{}) error {
+func printTask1(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+	_ = ctx
+	_ = t
 	return nil
 }
 

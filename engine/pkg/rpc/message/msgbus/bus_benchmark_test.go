@@ -8,14 +8,13 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
@@ -40,18 +39,21 @@ func benchInitRPC() {
 }
 
 type benchMailbox struct {
-	handler func(ctx context.Context, ev inf.IEvent)
+	handler func(ctx context.Context, job inf.IMailboxJob)
 }
 
-func (m *benchMailbox) PostMessage(ctx context.Context, ev inf.IEvent) error {
-	if ev == nil {
+func (m *benchMailbox) PostJob(job inf.IMailboxJob) error {
+	if job == nil {
 		return nil
 	}
-	if !ev.IsRef() {
-		return nil
+	ctx := job.GetContext()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	defer ev.Release()
-	m.handler(ctx, ev)
+	defer job.Release()
+	if m.handler != nil {
+		m.handler(ctx, job)
+	}
 	return nil
 }
 
@@ -73,26 +75,37 @@ func newBenchRPCPair() benchRPCPair {
 	clientBox := &benchMailbox{}
 	serverBox := &benchMailbox{}
 
-	// client mailbox: only needs to execute concurrent callbacks.
-	clientBox.handler = func(ctx context.Context, ev inf.IEvent) {
-		if ev.GetType() != event.ServiceConcurrentCallback {
+	// client mailbox: best-effort drain for callback jobs (and any rpc job dispatched by CallState.Complete).
+	clientBox.handler = func(ctx context.Context, j inf.IMailboxJob) {
+		switch j.GetType() {
+		case def.MailboxJobTypeConcurrentCallback:
+			cb := mbjob.GetJobPayloadAs[inf.IConcurrentCallback](j)
+			if cb == nil {
+				return
+			}
+			cb.DoCallback(ctx)
+			// CallState（来自 monitor 的超时回调）需要归还对象池。
+			if st, ok := cb.(*monitor.CallState); ok {
+				st.Release()
+			}
+		case def.MailboxJobTypeRpc:
+			// AsyncCall 完成路径当前会 Post 一个 RpcJob（payload 是一个临时 envelope）。
+			// 这里不做业务处理，只让 job.Release() 回收 payload。
+			_ = mbjob.GetJobPayloadAs[inf.IEnvelope](j)
+		default:
 			return
-		}
-		if env, ok := ev.(*event.CallbackEnvelope); ok {
-			env.Payload.DoCallback(ctx)
 		}
 	}
 
 	// server mailbox: handle local rpc request and (optionally) reply.
-	serverBox.handler = func(ctx context.Context, ev inf.IEvent) {
-		if ev.GetType() != event.RpcMsg {
+	serverBox.handler = func(ctx context.Context, j inf.IMailboxJob) {
+		if j.GetType() != def.MailboxJobTypeRpc {
 			return
 		}
-		env, ok := ev.(inf.IEnvelope)
-		if !ok {
+		env := mbjob.GetJobPayloadAs[inf.IEnvelope](j)
+		if env == nil {
 			return
 		}
-
 		data := env.GetData()
 		if data == nil || data.IsReply() {
 			return
@@ -109,23 +122,17 @@ func newBenchRPCPair() benchRPCPair {
 				resp = int(1)
 			}
 
-			respEnv := msgenvelope.NewMsgEnvelope()
-			respData := msgenvelope.NewData()
-			respData.SetMethod(method)
-			respData.SetReply()
-			respData.SetResponse(resp)
-			respData.SetNeedResponse(false)
-			respEnv.SetData(respData)
-
-			respMeta := msgenvelope.NewMeta()
-			respMeta.SetReqId(env.GetMeta().GetReqId())
-			respMeta.SetSenderPid(serverPid)
-			respMeta.SetReceiverPid(clientPid)
-			respMeta.SetDispatcher(env.GetMeta().GetDispatcher())
-			respEnv.SetMeta(respMeta)
-
-			_ = env.GetMeta().GetDispatcher().Deliver(ctx, respEnv)
-			respEnv.Release()
+			// 基准里复用请求 envelope 作为 reply：
+			// - local sender 的 reply 路径不会 Release envelope；
+			// - request envelope 的最终释放由 server mailbox 的 job.Release() 统一负责。
+			data.SetRequest(nil)
+			data.SetResponse(resp)
+			data.SetError(nil)
+			data.SetReply()
+			data.SetNeedResponse(false)
+			if meta := env.GetMeta(); meta != nil && meta.GetDispatcher() != nil {
+				_ = meta.GetDispatcher().Deliver(ctx, env)
+			}
 			return
 		}
 

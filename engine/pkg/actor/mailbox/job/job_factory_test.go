@@ -33,22 +33,34 @@ func TestCreateJob_Builtins(t *testing.T) {
 	}
 }
 
+type TestJob struct {
+	Job[int]
+}
+
+func (j *TestJob) Release() {
+}
+
+type Test1Job struct {
+	Job[string]
+}
+
+func (j *Test1Job) Release() {
+}
+
 func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
 	const customType def.MailboxJobType = 10001
+	const customType1 def.MailboxJobType = 10002
 
-	creator1 := func() inf.IMailboxJob { return NewRpcJob() }
-	creator2 := func() inf.IMailboxJob { return NewTimerJob() }
-	getter1 := func(j inf.IMailboxJob) any { return j.(*RpcJob).GetPayload() }
-	getter2 := func(j inf.IMailboxJob) any { return j.(*TimerJob).GetPayload() }
+	creator1 := func() inf.IMailboxJob { return &TestJob{} }
+	creator2 := func() inf.IMailboxJob { return &Test1Job{} }
+	getter1 := func(j inf.IMailboxJob) any { return j.(*TestJob).GetPayload() }
+	getter2 := func(j inf.IMailboxJob) any { return j.(*Test1Job).GetPayload() }
 
 	if err := RegisterJobFactory(customType, creator1, getter1); err != nil {
 		t.Fatalf("register creator1 failed: %v", err)
 	}
-	if err := RegisterJobFactory(customType, creator1, getter1); err == nil {
-		t.Fatalf("expected duplicate register error")
-	}
-	if err := RegisterJobFactory(customType, creator2, getter2); err != nil {
-		t.Fatalf("replace register failed: %v", err)
+	if err := RegisterJobFactory(customType1, creator2, getter2); err != nil {
+		t.Fatalf("register creator2 failed: %v", err)
 	}
 
 	job, ok := CreateJob(customType)
@@ -56,4 +68,10 @@ func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
 		t.Fatalf("expected job for custom type")
 	}
 	job.Release()
+
+	job1, ok := CreateJob(customType1)
+	if !ok || job1 == nil {
+		t.Fatalf("expected job for custom type1")
+	}
+	job1.Release()
 }

@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -37,18 +37,18 @@ func benchInitMonitor() {
 }
 
 type benchMailbox struct {
-	handler func(ctx context.Context, ev inf.IEvent)
+	handler func(ctx context.Context, j inf.IMailboxJob)
 }
 
-func (m *benchMailbox) PostMessage(ctx context.Context, ev inf.IEvent) error {
-	if ev == nil {
+func (m *benchMailbox) PostJob(j inf.IMailboxJob) error {
+	if j == nil {
 		return nil
 	}
-	if !ev.IsRef() {
-		return nil
+	ctx := j.GetContext()
+	defer j.Release()
+	if m.handler != nil {
+		m.handler(ctx, j)
 	}
-	defer ev.Release()
-	m.handler(ctx, ev)
 	return nil
 }
 
@@ -73,12 +73,16 @@ func BenchmarkCallState_Complete_Async_Dispatch(b *testing.B) {
 	b.ReportAllocs()
 
 	mb := &benchMailbox{}
-	mb.handler = func(ctx context.Context, ev inf.IEvent) {
-		if ev.GetType() != event.ServiceConcurrentCallback {
+	mb.handler = func(ctx context.Context, j inf.IMailboxJob) {
+		// 当前框架中：CallState.Complete()（NeedCallback=true）会 Post 一个 RpcJob。
+		// 这里模拟 service.handleRpcJob 最终回收 envelope。
+		rpcJob, ok := j.(*mbjob.RpcJob)
+		if !ok {
 			return
 		}
-		if env, ok := ev.(*event.CallbackEnvelope); ok {
-			env.Payload.DoCallback(ctx)
+		env := rpcJob.GetPayload()
+		if env != nil {
+			env.Release()
 		}
 	}
 	disp := &fakeDispatcher{mailbox: mb}
@@ -150,12 +154,18 @@ func BenchmarkRpcMonitor_CallTimeout_Async(b *testing.B) {
 	b.ReportAllocs()
 
 	mb := &benchMailbox{}
-	mb.handler = func(ctx context.Context, ev inf.IEvent) {
-		if ev.GetType() != event.ServiceConcurrentCallback {
+	mb.handler = func(ctx context.Context, j inf.IMailboxJob) {
+		cbJob, ok := j.(*mbjob.ConcurrentCallbackJob)
+		if !ok {
 			return
 		}
-		if env, ok := ev.(*event.CallbackEnvelope); ok {
-			env.Payload.DoCallback(ctx)
+		cb := cbJob.GetPayload()
+		if cb == nil {
+			return
+		}
+		cb.DoCallback(ctx)
+		if st, ok := cb.(*CallState); ok {
+			st.Release()
 		}
 	}
 	disp := &fakeDispatcher{mailbox: mb}
@@ -174,15 +184,18 @@ func BenchmarkRpcMonitor_CallTimeout_Async(b *testing.B) {
 
 type fakeDispatcher struct {
 	mailbox inf.IMailboxChannel
+	pid     *actor.PID
 }
 
-func (d *fakeDispatcher) PostMessage(ctx context.Context, evt inf.IEvent) error {
-	return d.mailbox.PostJob(ctx, evt)
+func (d *fakeDispatcher) PostJob(j inf.IMailboxJob) error {
+	return d.mailbox.PostJob(j)
 }
 
 func (d *fakeDispatcher) Deliver(ctx context.Context, _ inf.IEnvelope) error { return nil }
 
-func (d *fakeDispatcher) Close()              {}
-func (d *fakeDispatcher) IsClosed() bool      { return false }
-func (d *fakeDispatcher) SetPid(_ *actor.PID) {}
-func (d *fakeDispatcher) GetPid() *actor.PID  { return nil }
+func (d *fakeDispatcher) Close()         {}
+func (d *fakeDispatcher) IsClosed() bool { return false }
+func (d *fakeDispatcher) SetPid(pid *actor.PID) {
+	d.pid = pid
+}
+func (d *fakeDispatcher) GetPid() *actor.PID { return d.pid }

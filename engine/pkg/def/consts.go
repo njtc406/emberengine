@@ -32,6 +32,7 @@ const (
 	DefaultWorkerNum         = 1000   // 默认协程数量
 	DefaultGoroutinePoolSize = 10     // 默认协程池大小
 	DefaultVirtualWorkerRate = 10     // 虚拟worker比率
+	DefaultEventChanSize     = 100    // 默认事件通道大小
 )
 
 const (

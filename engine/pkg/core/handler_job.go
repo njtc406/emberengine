@@ -10,16 +10,15 @@ import (
 	"fmt"
 	"runtime/debug"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // JobHandler 泛型 Job 处理器，T 是 payload 类型
@@ -151,18 +150,16 @@ func (s *Service) handleRpcJob(ctx context.Context, envelope inf.IEnvelope) erro
 	}
 }
 
-func (s *Service) handleEventJob(ctx context.Context, payload *anypb.Any) error {
+func (s *Service) handleEventJob(ctx context.Context, evt *actor.Event) error {
 	return s.safeExec(func() error {
 		// 将 anypb.Any 解码为具体类型
+		payload := evt.GetPayload()
 		data, err := codec.DecodeFromAny(payload)
 		if err != nil {
 			s.WithContext(ctx).Errorf("decode event payload error: %v", err)
 			return err
 		}
-		// 使用 Processor 方法触发本地事件处理（eventType 需要从其他途径获取）
-		// 注意：当前实现无法获取 eventType，需要重构 EventBusJob 的 payload 结构
-		// 暂时使用 UnknownEvent 作为占位
-		s.eventProcessor.Trigger(ctx, event.UnknownEvent, data)
+		s.eventProcessor.Trigger(ctx, evt.GetEventType(), data)
 		return nil
 	})
 }

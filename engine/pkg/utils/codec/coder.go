@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
+// 静态表,不允许动态注册
 var codecs = map[int32]inf.ICodec{}
 
 func RegisterCodec(coder inf.ICodec) {

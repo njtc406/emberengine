@@ -42,7 +42,7 @@ func (h *Handler) Init(trigger inf.IEventProcessor) {
 	h.regs = make([]regInfo, 0)
 }
 
-func (h *Handler) GetTrigger() inf.IEventProcessor {
+func (h *Handler) GetProcessor() inf.IEventProcessor {
 	return h.trigger
 }
 

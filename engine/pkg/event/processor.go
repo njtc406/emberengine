@@ -19,9 +19,9 @@ import (
 
 var _ inf.IEventProcessor = (*Processor)(nil)
 
-type triggerEntry struct {
-	name     string
-	callback inf.EventHandlerAny
+type callbackEntry struct {
+	name string
+	cb   inf.EventHandlerAny
 }
 
 type specificKey struct {
@@ -36,10 +36,12 @@ type Processor struct {
 	mu       sync.RWMutex
 	listener inf.IListener
 
-	local    map[def.EventType]map[inf.IEventHandler]*triggerEntry
-	global   map[def.EventType]map[inf.IEventHandler]*triggerEntry
-	server   map[def.EventType]map[inf.IEventHandler]*triggerEntry
-	specific map[specificKey]map[inf.IEventHandler]*triggerEntry
+	// 结构：map[事件类型]map[所属handler]map[回调名]entry
+	// 这样既能支持同一 module(handler) 多个 name 的注册，也能按 handler+name 精准解绑。
+	local    map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+	global   map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+	server   map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny
+	specific map[specificKey]map[inf.IEventHandler]map[string]inf.EventHandlerAny
 
 	// 订阅引用计数，避免重复订阅与提前取消
 	globalSubCnt   map[def.EventType]int
@@ -55,10 +57,10 @@ func (t *Processor) Init(listener inf.IListener) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.local = make(map[def.EventType]map[inf.IEventHandler]*triggerEntry)
-	t.global = make(map[def.EventType]map[inf.IEventHandler]*triggerEntry)
-	t.server = make(map[def.EventType]map[inf.IEventHandler]*triggerEntry)
-	t.specific = make(map[specificKey]map[inf.IEventHandler]*triggerEntry)
+	t.local = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.global = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.server = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.specific = make(map[specificKey]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
 
 	t.globalSubCnt = make(map[def.EventType]int)
 	t.serverSubCnt = make(map[def.EventType]int)
@@ -70,7 +72,32 @@ func (t *Processor) Init(listener inf.IListener) {
 func (t *Processor) HasHandler(eventType def.EventType) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return len(t.local[eventType])+len(t.global[eventType])+len(t.server[eventType]) > 0
+	for _, byName := range t.local[eventType] {
+		if len(byName) > 0 {
+			return true
+		}
+	}
+	for _, byName := range t.global[eventType] {
+		if len(byName) > 0 {
+			return true
+		}
+	}
+	for _, byName := range t.server[eventType] {
+		if len(byName) > 0 {
+			return true
+		}
+	}
+	for k, byHandler := range t.specific {
+		if k.eventType != eventType {
+			continue
+		}
+		for _, byName := range byHandler {
+			if len(byName) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (t *Processor) Clear() {
@@ -96,10 +123,10 @@ func (t *Processor) Clear() {
 		}
 	}
 
-	t.local = make(map[def.EventType]map[inf.IEventHandler]*triggerEntry)
-	t.global = make(map[def.EventType]map[inf.IEventHandler]*triggerEntry)
-	t.server = make(map[def.EventType]map[inf.IEventHandler]*triggerEntry)
-	t.specific = make(map[specificKey]map[inf.IEventHandler]*triggerEntry)
+	t.local = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.global = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.server = make(map[def.EventType]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+	t.specific = make(map[specificKey]map[inf.IEventHandler]map[string]inf.EventHandlerAny)
 
 	t.globalSubCnt = make(map[def.EventType]int)
 	t.serverSubCnt = make(map[def.EventType]int)
@@ -109,20 +136,30 @@ func (t *Processor) Clear() {
 func (t *Processor) BindHandler(eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	entry := &triggerEntry{name: name, callback: callback}
-	if t.local[eventType] == nil {
-		t.local[eventType] = make(map[inf.IEventHandler]*triggerEntry)
+	byHandler := t.local[eventType]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.local[eventType] = byHandler
 	}
-	t.local[eventType][handler] = entry
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	byName[name] = callback
 }
 
 func (t *Processor) UnbindHandler(eventType def.EventType, name string, handler inf.IEventHandler) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if m := t.local[eventType]; m != nil {
-		delete(m, handler)
-		if len(m) == 0 {
+	if byHandler := t.local[eventType]; byHandler != nil {
+		if byName := byHandler[handler]; byName != nil {
+			delete(byName, name)
+			if len(byName) == 0 {
+				delete(byHandler, handler)
+			}
+		}
+		if len(byHandler) == 0 {
 			delete(t.local, eventType)
 		}
 	}
@@ -185,14 +222,20 @@ func UnbindSpecificHandler(t inf.IEventProcessor, eventType def.EventType, servi
 func (t *Processor) BindGlobalHandler(eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	entry := &triggerEntry{name: name, callback: callback}
-	if t.global[eventType] == nil {
-		t.global[eventType] = make(map[inf.IEventHandler]*triggerEntry)
+	byHandler := t.global[eventType]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.global[eventType] = byHandler
 	}
-	t.global[eventType][handler] = entry
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	_, existed := byName[name]
+	byName[name] = callback
 
-	if t.listener != nil {
+	if t.listener != nil && !existed {
 		if t.globalSubCnt[eventType] == 0 {
 			GetEventBus().SubscribeGlobal(eventType, t.listener)
 		}
@@ -203,20 +246,29 @@ func (t *Processor) BindGlobalHandler(eventType def.EventType, name string, hand
 func (t *Processor) UnbindGlobalHandler(eventType def.EventType, name string, handler inf.IEventHandler) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	if m := t.global[eventType]; m != nil {
-		if _, exists := m[handler]; exists {
-			delete(m, handler)
-			if len(m) == 0 {
-				delete(t.global, eventType)
-			}
-			if t.listener != nil {
-				t.globalSubCnt[eventType]--
-				if t.globalSubCnt[eventType] <= 0 {
-					delete(t.globalSubCnt, eventType)
-					GetEventBus().UnSubscribeGlobal(eventType, t.listener)
-				}
-			}
+	byHandler := t.global[eventType]
+	if byHandler == nil {
+		return
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		return
+	}
+	if _, exists := byName[name]; !exists {
+		return
+	}
+	delete(byName, name)
+	if len(byName) == 0 {
+		delete(byHandler, handler)
+	}
+	if len(byHandler) == 0 {
+		delete(t.global, eventType)
+	}
+	if t.listener != nil {
+		t.globalSubCnt[eventType]--
+		if t.globalSubCnt[eventType] <= 0 {
+			delete(t.globalSubCnt, eventType)
+			GetEventBus().UnSubscribeGlobal(eventType, t.listener)
 		}
 	}
 }
@@ -224,14 +276,20 @@ func (t *Processor) UnbindGlobalHandler(eventType def.EventType, name string, ha
 func (t *Processor) BindServerHandler(eventType def.EventType, name string, handler inf.IEventHandler, callback inf.EventHandlerAny) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	entry := &triggerEntry{name: name, callback: callback}
-	if t.server[eventType] == nil {
-		t.server[eventType] = make(map[inf.IEventHandler]*triggerEntry)
+	byHandler := t.server[eventType]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.server[eventType] = byHandler
 	}
-	t.server[eventType][handler] = entry
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	_, existed := byName[name]
+	byName[name] = callback
 
-	if t.listener != nil {
+	if t.listener != nil && !existed {
 		if t.serverSubCnt[eventType] == 0 {
 			GetEventBus().SubscribeServer(eventType, t.listener)
 		}
@@ -242,20 +300,29 @@ func (t *Processor) BindServerHandler(eventType def.EventType, name string, hand
 func (t *Processor) UnbindServerHandler(eventType def.EventType, name string, handler inf.IEventHandler) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	if m := t.server[eventType]; m != nil {
-		if _, exists := m[handler]; exists {
-			delete(m, handler)
-			if len(m) == 0 {
-				delete(t.server, eventType)
-			}
-			if t.listener != nil {
-				t.serverSubCnt[eventType]--
-				if t.serverSubCnt[eventType] <= 0 {
-					delete(t.serverSubCnt, eventType)
-					GetEventBus().UnSubscribeServer(eventType, t.listener)
-				}
-			}
+	byHandler := t.server[eventType]
+	if byHandler == nil {
+		return
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		return
+	}
+	if _, exists := byName[name]; !exists {
+		return
+	}
+	delete(byName, name)
+	if len(byName) == 0 {
+		delete(byHandler, handler)
+	}
+	if len(byHandler) == 0 {
+		delete(t.server, eventType)
+	}
+	if t.listener != nil {
+		t.serverSubCnt[eventType]--
+		if t.serverSubCnt[eventType] <= 0 {
+			delete(t.serverSubCnt, eventType)
+			GetEventBus().UnSubscribeServer(eventType, t.listener)
 		}
 	}
 }
@@ -265,13 +332,20 @@ func (t *Processor) BindSpecificHandler(eventType def.EventType, serviceUid stri
 	defer t.mu.Unlock()
 
 	k := specificKey{eventType: eventType, serviceUid: serviceUid}
-	entry := &triggerEntry{name: name, callback: callback}
-	if t.specific[k] == nil {
-		t.specific[k] = make(map[inf.IEventHandler]*triggerEntry)
+	byHandler := t.specific[k]
+	if byHandler == nil {
+		byHandler = make(map[inf.IEventHandler]map[string]inf.EventHandlerAny)
+		t.specific[k] = byHandler
 	}
-	t.specific[k][handler] = entry
+	byName := byHandler[handler]
+	if byName == nil {
+		byName = make(map[string]inf.EventHandlerAny)
+		byHandler[handler] = byName
+	}
+	_, existed := byName[name]
+	byName[name] = callback
 
-	if t.listener != nil {
+	if t.listener != nil && !existed {
 		if t.specificSubCnt[k] == 0 {
 			GetEventBus().SubscribeSpecific(eventType, serviceUid, t.listener)
 		}
@@ -284,24 +358,34 @@ func (t *Processor) UnbindSpecificHandler(eventType def.EventType, serviceUid st
 	defer t.mu.Unlock()
 
 	k := specificKey{eventType: eventType, serviceUid: serviceUid}
-	if m := t.specific[k]; m != nil {
-		if _, exists := m[handler]; exists {
-			delete(m, handler)
-			if len(m) == 0 {
-				delete(t.specific, k)
-			}
-			if t.listener != nil {
-				t.specificSubCnt[k]--
-				if t.specificSubCnt[k] <= 0 {
-					delete(t.specificSubCnt, k)
-					GetEventBus().UnSubscribeSpecific(eventType, serviceUid, t.listener)
-				}
-			}
+	byHandler := t.specific[k]
+	if byHandler == nil {
+		return
+	}
+	byName := byHandler[handler]
+	if byName == nil {
+		return
+	}
+	if _, exists := byName[name]; !exists {
+		return
+	}
+	delete(byName, name)
+	if len(byName) == 0 {
+		delete(byHandler, handler)
+	}
+	if len(byHandler) == 0 {
+		delete(t.specific, k)
+	}
+	if t.listener != nil {
+		t.specificSubCnt[k]--
+		if t.specificSubCnt[k] <= 0 {
+			delete(t.specificSubCnt, k)
+			GetEventBus().UnSubscribeSpecific(eventType, serviceUid, t.listener)
 		}
 	}
 }
 
-// Processor 本地同步触发（不经过EventBus）
+// Trigger 本地同步触发
 func (t *Processor) Trigger(ctx context.Context, eventType def.EventType, data any) {
 	entries := t.snapshotLocal(eventType)
 	for _, e := range entries {
@@ -354,45 +438,53 @@ func (t *Processor) PublishSpecific(ctx context.Context, eventType def.EventType
 	return GetEventBus().PublishSpecific(ctx, eventType, serviceUid, data)
 }
 
-func (t *Processor) snapshotLocal(eventType def.EventType) []*triggerEntry {
+func (t *Processor) snapshotLocal(eventType def.EventType) []callbackEntry {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	m := t.local[eventType]
-	if len(m) == 0 {
+	byHandler := t.local[eventType]
+	if len(byHandler) == 0 {
 		return nil
 	}
-	out := make([]*triggerEntry, 0, len(m))
-	for _, e := range m {
-		out = append(out, e)
-	}
-	return out
-}
-
-func (t *Processor) snapshotCluster(eventType def.EventType, targetServiceUid string) []*triggerEntry {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var out []*triggerEntry
-	for _, e := range t.global[eventType] {
-		out = append(out, e)
-	}
-	for _, e := range t.server[eventType] {
-		out = append(out, e)
-	}
-	if targetServiceUid != "" {
-		k := specificKey{eventType: eventType, serviceUid: targetServiceUid}
-		for _, e := range t.specific[k] {
-			out = append(out, e)
+	out := make([]callbackEntry, 0)
+	for _, byName := range byHandler {
+		for name, cb := range byName {
+			out = append(out, callbackEntry{name: name, cb: cb})
 		}
 	}
 	return out
 }
 
-func (t *Processor) safeExec(entry *triggerEntry, ctx context.Context, eventType def.EventType, data any) error {
+func (t *Processor) snapshotCluster(eventType def.EventType, targetServiceUid string) []callbackEntry {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var out []callbackEntry
+	for _, byName := range t.global[eventType] {
+		for name, cb := range byName {
+			out = append(out, callbackEntry{name: name, cb: cb})
+		}
+	}
+	for _, byName := range t.server[eventType] {
+		for name, cb := range byName {
+			out = append(out, callbackEntry{name: name, cb: cb})
+		}
+	}
+	if targetServiceUid != "" {
+		k := specificKey{eventType: eventType, serviceUid: targetServiceUid}
+		for _, byName := range t.specific[k] {
+			for name, cb := range byName {
+				out = append(out, callbackEntry{name: name, cb: cb})
+			}
+		}
+	}
+	return out
+}
+
+func (t *Processor) safeExec(entry callbackEntry, ctx context.Context, eventType def.EventType, data any) error {
 	defer func() {
 		if err := recover(); err != nil {
 			log.SysLogger.Errorf("trigger handler panic: eventType=%d, name=%s, err=%v", eventType, entry.name, err)
 		}
 	}()
-	return entry.callback(ctx, data)
+	return entry.cb(ctx, data)
 }

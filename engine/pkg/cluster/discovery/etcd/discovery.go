@@ -15,6 +15,7 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/syncx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/connectivity"
@@ -46,15 +47,15 @@ type EtcdDiscovery struct {
 	provider disc.IClientProvider
 	closed   atomic.Bool
 
-	proc    inf.IEventProcessor
 	handler *event.Handler
+	evtCh   inf.IEventChannel
 }
 
 func NewEtcdDiscovery() *EtcdDiscovery { return &EtcdDiscovery{} }
 
 func init() { disc.Register("etcd", NewEtcdDiscovery()) }
 
-func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf) error {
+func (e *EtcdDiscovery) Init(conf *config.ClusterConf, eventProcessor inf.IEventProcessor, evtCh inf.IEventChannel) error {
 	if len(conf.ETCDConf.Endpoints) == 0 {
 		log.SysLogger.Debugf("etcd end points is empty")
 		return nil
@@ -62,9 +63,9 @@ func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf)
 	e.etcdConf = conf.ETCDConf
 	log.SysLogger.Debugf("etcd discovery conf: %+v", e.etcdConf)
 	e.conf = normalizeConf(conf.DiscoveryConf)
-	e.proc = proc
 	e.handler = event.NewTriggerHandler()
-	e.handler.Init(proc)
+	e.handler.Init(eventProcessor)
+	e.evtCh = evtCh
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.ctx = ctx
@@ -152,7 +153,14 @@ func (e *EtcdDiscovery) syncInitialState() {
 	for _, kv := range resp.Kvs {
 		log.SysLogger.Debugf("syncing service: key=%s", string(kv.Key))
 		data := *kv
-		e.proc.Trigger(e.ctx, event.SysEventETCDPut, &data)
+		evt := event.NewDiscoveryEvent()
+		evt.Context = xcontext.New(nil)
+		evt.EventType = event.SysEventETCDPut
+		evt.Data = &data
+
+		if err := e.evtCh.PushEvent(evt); err != nil {
+			log.SysLogger.WithContext(evt.Context).Errorf("push discovery event failed: %v", err)
+		}
 	}
 }
 
@@ -212,8 +220,14 @@ func (e *EtcdDiscovery) watchLoop() {
 				}
 				log.SysLogger.Debugf("etcd event: type=%v, key=%s", ev.Type, string(ev.Kv.Key))
 				data := *ev.Kv
+				evt := event.NewDiscoveryEvent()
+				evt.Context = xcontext.New(nil)
+				evt.EventType = evType
+				evt.Data = &data
 
-				e.proc.Trigger(e.ctx, evType, &data)
+				if err := e.evtCh.PushEvent(evt); err != nil {
+					log.SysLogger.WithContext(evt.Context).Errorf("push discovery event failed: %v", err)
+				}
 			}
 		}
 	}

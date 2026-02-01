@@ -50,7 +50,8 @@ type Service struct {
 	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 	isPrimarySecondaryMode bool         // 是否是主从模式
 
-	mailbox        *mailbox.Mailbox // 邮箱
+	mailbox *mailbox.Mailbox // 邮箱
+
 	eventProcessor *event.Processor // 事件管理器
 
 	profiler *profiler.Profiler // 性能监控
@@ -100,6 +101,10 @@ func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 		if serviceInitConf.TimerConf.TimerBucketSize <= 0 {
 			serviceInitConf.TimerConf.TimerBucketSize = def.DefaultTimerBucketSize
 		}
+	}
+	// 事件通道大小
+	if serviceInitConf.EventChanSize <= 0 {
+		serviceInitConf.EventChanSize = def.DefaultEventChanSize
 	}
 
 	return serviceInitConf
@@ -396,15 +401,6 @@ func (s *Service) release() {
 
 func (s *Service) PostJob(job inf.IMailboxJob) error {
 	return s.mailbox.PostJob(job)
-}
-
-func (s *Service) PushEvent(ctx context.Context, ev inf.IEvent) error {
-	j := job.NewInternalEventJob()
-	j.SetContext(ctx)
-	j.SetPriority(def.PrioritySys)
-	j.SetDispatcherKey(uuid.NewString())
-	j.SetPayload(ev)
-	return s.mailbox.PostJob(j)
 }
 
 func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurrentCallback) error {

@@ -7,62 +7,31 @@ import (
 	"testing"
 	"time"
 
+	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
-// mockEvent 用于测试的模拟事件
-type mockEvent struct {
-	priority      def.Priority
-	dispatcherKey string
+func newBenchJob(ctx context.Context, priority def.Priority, dispatcherKey string) inf.IMailboxJob {
+	j := mbjob.NewEventBusJob()
+	j.SetContext(ctx)
+	j.SetPriority(priority)
+	j.SetDispatcherKey(dispatcherKey)
+	return j
 }
 
-func (e *mockEvent) GetPriority() def.Priority { return e.priority }
-func (e *mockEvent) GetDispatcherKey() string  { return e.dispatcherKey }
-func (e *mockEvent) GetType() int32            { return 0 }
-func (e *mockEvent) GetEventType() int32       { return 0 }
-func (e *mockEvent) Release()                  {}
-func (e *mockEvent) IsRef() bool               { return false }
-func (e *mockEvent) Ref()                      {}
-func (e *mockEvent) UnRef() bool               { return false }
-func (e *mockEvent) GetCallID() uint64         { return 0 }
-func (e *mockEvent) SetCallID(uint64)          {}
-func (e *mockEvent) IsRPCReply() bool          { return false }
-func (e *mockEvent) IsCallback() bool          { return false }
-func (e *mockEvent) GetData() interface{}      { return nil }
-func (e *mockEvent) SetData(interface{})       {}
-func (e *mockEvent) GetServiceName() string    { return "" }
-func (e *mockEvent) SetServiceName(string)     {}
-func (e *mockEvent) GetMethodName() string     { return "" }
-func (e *mockEvent) SetMethodName(string)      {}
-func (e *mockEvent) GetArgs() []interface{}    { return nil }
-func (e *mockEvent) SetArgs([]interface{})     {}
-func (e *mockEvent) GetReply() interface{}     { return nil }
-func (e *mockEvent) SetReply(interface{})      {}
-func (e *mockEvent) GetError() error           { return nil }
-func (e *mockEvent) SetError(error)            {}
-func (e *mockEvent) GetTimeout() time.Duration { return 0 }
-func (e *mockEvent) SetTimeout(time.Duration)  {}
-func (e *mockEvent) GetDeadline() time.Time    { return time.Time{} }
-func (e *mockEvent) SetDeadline(time.Time)     {}
-func (e *mockEvent) IsExpired() bool           { return false }
-func (e *mockEvent) GetSource() string         { return "" }
-func (e *mockEvent) SetSource(string)          {}
-func (e *mockEvent) GetTarget() string         { return "" }
-func (e *mockEvent) SetTarget(string)          {}
-
-// ============================================================================
 // 基准测试：单个中间件性能
 // ============================================================================
 
 // BenchmarkDispatchKeyStatsMiddleware_OnReceive 测试 DispatchKey 统计中间件
 func BenchmarkDispatchKeyStatsMiddleware_OnReceive(b *testing.B) {
 	m := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10)
-	evt := &mockEvent{dispatcherKey: "test-key"}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "test-key")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			m.OnReceive(mctx)
 		}
@@ -76,10 +45,12 @@ func BenchmarkDispatchKeyStatsMiddleware_HighCardinality(b *testing.B) {
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		i := 0
 		for pb.Next() {
-			evt := &mockEvent{dispatcherKey: "key-" + itoa(i%1000)} // 1000个不同的key
-			mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
+			job.SetDispatcherKey("key-" + itoa(i%1000)) // 1000个不同的key
 			m.OnReceive(mctx)
 			i++
 		}
@@ -90,11 +61,11 @@ func BenchmarkDispatchKeyStatsMiddleware_HighCardinality(b *testing.B) {
 // BenchmarkRateLimitMiddleware_OnReceive 测试限流中间件
 func BenchmarkRateLimitMiddleware_OnReceive(b *testing.B) {
 	m := NewRateLimitMiddleware(100000, 10000) // 10w QPS, 1w burst
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			m.OnReceive(mctx)
 		}
@@ -107,14 +78,14 @@ func BenchmarkRateLimitMiddleware_WithSkip(b *testing.B) {
 	m := NewRateLimitMiddleware(
 		100000, 10000,
 		WithRateLimitSkipFunc(func(mctx inf.IMiddlewareContext) bool {
-			return mctx.Event().GetPriority() <= def.PriorityUrgent
+			return mctx.Job().GetPriority() <= def.PriorityUrgent
 		}),
 	)
-	evt := &mockEvent{priority: def.PriorityUrgent}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityUrgent, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			m.OnReceive(mctx)
 		}
@@ -125,11 +96,11 @@ func BenchmarkRateLimitMiddleware_WithSkip(b *testing.B) {
 // BenchmarkCircuitBreakerMiddleware_Closed 测试熔断器关闭状态（快速路径）
 func BenchmarkCircuitBreakerMiddleware_Closed(b *testing.B) {
 	m := NewCircuitBreakerMiddleware(5, 3)
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			m.OnReceive(mctx)
 		}
@@ -142,12 +113,11 @@ func BenchmarkCircuitBreakerMiddleware_Open(b *testing.B) {
 	m := NewCircuitBreakerMiddleware(5, 3)
 	m.state.Store(int32(StateOpen))
 	m.lastFailTime.Store(time.Now().UnixNano())
-
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			m.OnReceive(mctx)
 		}
@@ -160,12 +130,11 @@ func BenchmarkCircuitBreakerMiddleware_HalfOpen(b *testing.B) {
 	m := NewCircuitBreakerMiddleware(5, 3)
 	m.state.Store(int32(StateHalfOpen))
 	m.halfOpenReqs.Store(0)
-
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			m.OnReceive(mctx)
 		}
@@ -175,8 +144,9 @@ func BenchmarkCircuitBreakerMiddleware_HalfOpen(b *testing.B) {
 
 // BenchmarkCircuitBreakerMiddleware_StateTransition 测试状态转换性能
 func BenchmarkCircuitBreakerMiddleware_StateTransition(b *testing.B) {
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
+	job := newBenchJob(context.Background(), def.PriorityNormal, "")
+	defer job.Release()
+	mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 
 	b.Run("Closed->Open", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
@@ -218,13 +188,14 @@ func BenchmarkCircuitBreakerMiddleware_StateTransition(b *testing.B) {
 // BenchmarkMiddlewareChain_Empty 测试空中间件链
 func BenchmarkMiddlewareChain_Empty(b *testing.B) {
 	chain := NewMiddlewareChain()
-	evt := &mockEvent{}
 	ctx := context.Background()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(ctx, def.PriorityNormal, "")
+		defer job.Release()
 		for pb.Next() {
-			chain.ExecuteOnReceive(ctx, evt, "test-service")
+			chain.ExecuteOnReceive(job, "test-service")
 		}
 	})
 	b.ReportAllocs()
@@ -234,13 +205,14 @@ func BenchmarkMiddlewareChain_Empty(b *testing.B) {
 func BenchmarkMiddlewareChain_Single(b *testing.B) {
 	m := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10)
 	chain := NewMiddlewareChain(m)
-	evt := &mockEvent{dispatcherKey: "test-key"}
 	ctx := context.Background()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(ctx, def.PriorityNormal, "test-key")
+		defer job.Release()
 		for pb.Next() {
-			chain.ExecuteOnReceive(ctx, evt, "test-service")
+			chain.ExecuteOnReceive(job, "test-service")
 		}
 	})
 	b.ReportAllocs()
@@ -253,13 +225,14 @@ func BenchmarkMiddlewareChain_Multiple(b *testing.B) {
 	breaker := NewCircuitBreakerMiddleware(5, 3)
 
 	chain := NewMiddlewareChain(stats, rateLimit, breaker)
-	evt := &mockEvent{dispatcherKey: "test-key"}
 	ctx := context.Background()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(ctx, def.PriorityNormal, "test-key")
+		defer job.Release()
 		for pb.Next() {
-			chain.ExecuteOnReceive(ctx, evt, "test-service")
+			chain.ExecuteOnReceive(job, "test-service")
 		}
 	})
 	b.ReportAllocs()
@@ -272,13 +245,14 @@ func BenchmarkMiddlewareChain_OnComplete(b *testing.B) {
 	breaker := NewCircuitBreakerMiddleware(5, 3)
 
 	chain := NewMiddlewareChain(stats, rateLimit, breaker)
-	evt := &mockEvent{dispatcherKey: "test-key"}
 	ctx := context.Background()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(ctx, def.PriorityNormal, "test-key")
+		defer job.Release()
 		for pb.Next() {
-			_, mctx := chain.ExecuteOnReceive(ctx, evt, "test-service")
+			_, mctx := chain.ExecuteOnReceive(job, "test-service")
 			chain.ExecuteOnComplete(mctx, nil, nil)
 		}
 	})
@@ -292,17 +266,18 @@ func BenchmarkMiddlewareChain_OnComplete(b *testing.B) {
 // BenchmarkCircuitBreakerMiddleware_ConcurrentStateChange 测试并发状态转换
 func BenchmarkCircuitBreakerMiddleware_ConcurrentStateChange(b *testing.B) {
 	m := NewCircuitBreakerMiddleware(5, 3, WithCooldownDuration(100*time.Microsecond))
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
 
 	var successCount atomic.Uint64
 	var failCount atomic.Uint64
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			result := m.OnReceive(mctx)
-			if result.Action == inf.ActionContinue {
+			if result.Action == def.ActionContinue {
 				successCount.Add(1)
 				// 模拟50%失败率
 				if successCount.Load()%2 == 0 {
@@ -322,17 +297,18 @@ func BenchmarkCircuitBreakerMiddleware_ConcurrentStateChange(b *testing.B) {
 // BenchmarkRateLimitMiddleware_Contention 测试限流竞争场景
 func BenchmarkRateLimitMiddleware_Contention(b *testing.B) {
 	m := NewRateLimitMiddleware(10000, 1000) // 降低速率以触发限流
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
 
 	var accepted atomic.Uint64
 	var rejected atomic.Uint64
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(context.Background(), def.PriorityNormal, "")
+		defer job.Release()
+		mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 		for pb.Next() {
 			result := m.OnReceive(mctx)
-			if result.Action == inf.ActionContinue {
+			if result.Action == def.ActionContinue {
 				accepted.Add(1)
 			} else {
 				rejected.Add(1)
@@ -351,20 +327,22 @@ func BenchmarkRateLimitMiddleware_Contention(b *testing.B) {
 
 // BenchmarkMiddlewareContext_Creation 测试中间件上下文创建
 func BenchmarkMiddlewareContext_Creation(b *testing.B) {
-	evt := &mockEvent{}
 	ctx := context.Background()
+	job := newBenchJob(ctx, def.PriorityNormal, "")
+	defer job.Release()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		NewMiddlewareContext(ctx, evt, "test-service")
+		NewMiddlewareContext(ctx, job, "test-service")
 	}
 	b.ReportAllocs()
 }
 
 // BenchmarkMiddlewareContext_SetGet 测试上下文数据存取
 func BenchmarkMiddlewareContext_SetGet(b *testing.B) {
-	evt := &mockEvent{}
-	mctx := NewMiddlewareContext(context.Background(), evt, "test-service")
+	job := newBenchJob(context.Background(), def.PriorityNormal, "")
+	defer job.Release()
+	mctx := NewMiddlewareContext(job.GetContext(), job, "test-service")
 
 	b.Run("Set", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
@@ -407,17 +385,17 @@ func BenchmarkRealisticWorkload(b *testing.B) {
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(ctx, def.PriorityNormal, "")
+		defer job.Release()
 		i := 0
 		for pb.Next() {
 			// 模拟不同的 dispatcherKey（1000个不同的key）
-			evt := &mockEvent{
-				dispatcherKey: "user-" + itoa(i%1000),
-				priority:      def.PriorityNormal,
-			}
+			job.SetDispatcherKey("user-" + itoa(i%1000))
+			job.SetPriority(def.PriorityNormal)
 
 			// 执行中间件链
-			result, mctx := chain.ExecuteOnReceive(ctx, evt, "test-service")
-			if result.Action == inf.ActionContinue {
+			result, mctx := chain.ExecuteOnReceive(job, "test-service")
+			if result.Action == def.ActionContinue {
 				// 模拟5%的失败率
 				var err error
 				if i%20 == 0 {
@@ -441,11 +419,13 @@ func BenchmarkHighThroughputScenario(b *testing.B) {
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
+		job := newBenchJob(ctx, def.PriorityNormal, "")
+		defer job.Release()
 		i := 0
 		for pb.Next() {
-			evt := &mockEvent{dispatcherKey: "key-" + itoa(i%100)}
-			result, mctx := chain.ExecuteOnReceive(ctx, evt, "test-service")
-			if result.Action == inf.ActionContinue {
+			job.SetDispatcherKey("key-" + itoa(i%100))
+			result, mctx := chain.ExecuteOnReceive(job, "test-service")
+			if result.Action == def.ActionContinue {
 				chain.ExecuteOnComplete(mctx, nil, nil)
 			}
 			i++

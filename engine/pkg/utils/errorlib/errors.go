@@ -10,6 +10,7 @@
 package errorlib
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -120,5 +121,5 @@ func CombineErr(errs ...error) error {
 		builder.WriteString("\n")
 	}
 
-	return fmt.Errorf(builder.String())
+	return errors.New(builder.String())
 }

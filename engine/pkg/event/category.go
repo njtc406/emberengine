@@ -6,6 +6,7 @@
 package event
 
 import (
+	"sync"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -75,6 +76,7 @@ type EventClassification struct {
 
 // EventRegistry 事件注册表
 type EventRegistry struct {
+	mu              sync.RWMutex
 	classifications map[def.EventType]*EventClassification
 	categoryStats   map[EventCategory]*CategoryStats
 }
@@ -211,9 +213,12 @@ func NewEventRegistry() *EventRegistry {
 
 // GetClassification 获取事件分类信息
 func (r *EventRegistry) GetClassification(eventType def.EventType) *EventClassification {
+	r.mu.RLock()
 	if classification, exists := r.classifications[eventType]; exists {
+		r.mu.RUnlock()
 		return classification
 	}
+	r.mu.RUnlock()
 
 	// 返回默认分类
 	return &EventClassification{
@@ -231,11 +236,15 @@ func (r *EventRegistry) GetClassification(eventType def.EventType) *EventClassif
 
 // RegisterClassification 注册自定义事件分类
 func (r *EventRegistry) RegisterClassification(classification *EventClassification) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.classifications[classification.EventType] = classification
 }
 
 // UpdateCategoryStats 更新分类统计信息
 func (r *EventRegistry) UpdateCategoryStats(category EventCategory, processed bool, latency int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if stats, exists := r.categoryStats[category]; exists {
 		stats.TotalEvents++
 		if processed {
@@ -255,8 +264,16 @@ func (r *EventRegistry) UpdateCategoryStats(category EventCategory, processed bo
 
 // GetCategoryStats 获取分类统计信息
 func (r *EventRegistry) GetCategoryStats(category EventCategory) *CategoryStats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if stats, exists := r.categoryStats[category]; exists {
-		return stats
+		return &CategoryStats{
+			TotalEvents:     stats.TotalEvents,
+			ProcessedEvents: stats.ProcessedEvents,
+			DroppedEvents:   stats.DroppedEvents,
+			AvgLatency:      stats.AvgLatency,
+			LastEventTime:   stats.LastEventTime,
+		}
 	}
 	return nil
 }

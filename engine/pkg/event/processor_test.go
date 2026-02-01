@@ -7,12 +7,34 @@ package event
 
 import (
 	"context"
+	"os"
 	"sync/atomic"
 	"testing"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
+
+func TestMain(m *testing.M) {
+	// Processor 在 panic recover / error 路径会写日志；确保 SysLogger 初始化避免 nil panic。
+	log.Init(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "error"}, true)
+	os.Exit(m.Run())
+}
+
+func registerTyped[T any](t *testing.T, h *Handler, eventType def.EventType, name string, cb func(ctx context.Context, data T)) {
+	t.Helper()
+	err := h.RegisterEvent(eventType, name, func(ctx context.Context, data any) error {
+		v, ok := data.(T)
+		if !ok {
+			return nil
+		}
+		cb(ctx, v)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RegisterEvent failed: %v", err)
+	}
+}
 
 // TestData 测试用数据结构
 type TestData struct {
@@ -22,7 +44,7 @@ type TestData struct {
 
 func TestTrigger_Basic(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
@@ -30,8 +52,7 @@ func TestTrigger_Basic(t *testing.T) {
 	var callCount int32
 	var receivedData *TestData
 
-	// 使用泛型注册
-	inf.Register(handler, def.EventType(1), "test-handler", func(ctx context.Context, eventType def.EventType, data *TestData) {
+	registerTyped(t, handler, def.EventType(1), "test-handler", func(ctx context.Context, data *TestData) {
 		atomic.AddInt32(&callCount, 1)
 		receivedData = data
 	})
@@ -59,41 +80,27 @@ func TestTrigger_Basic(t *testing.T) {
 
 func TestTrigger_MultipleHandlers(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
 
-	var order []int
-
-	// 注册多个handler
-	inf.Register(handler, def.EventType(1), "handler-1", func(ctx context.Context, eventType def.EventType, data string) {
-		order = append(order, 1)
-	})
-	inf.Register(handler, def.EventType(1), "handler-2", func(ctx context.Context, eventType def.EventType, data string) {
-		order = append(order, 2)
-	})
-	inf.Register(handler, def.EventType(1), "handler-3", func(ctx context.Context, eventType def.EventType, data string) {
-		order = append(order, 3)
-	})
+	called := make(map[int]bool)
+	registerTyped(t, handler, def.EventType(1), "handler-1", func(ctx context.Context, data string) { called[1] = true })
+	registerTyped(t, handler, def.EventType(1), "handler-2", func(ctx context.Context, data string) { called[2] = true })
+	registerTyped(t, handler, def.EventType(1), "handler-3", func(ctx context.Context, data string) { called[3] = true })
 
 	// 触发事件
 	trigger.Trigger(context.Background(), def.EventType(1), "test")
 
-	// 验证按顺序执行
-	if len(order) != 3 {
-		t.Errorf("expected 3 handlers called, got %d", len(order))
-	}
-	for i, v := range order {
-		if v != i+1 {
-			t.Errorf("expected order[%d]=%d, got %d", i, i+1, v)
-		}
+	if len(called) != 3 || !called[1] || !called[2] || !called[3] {
+		t.Errorf("expected all 3 handlers called, got %+v", called)
 	}
 }
 
 func TestTrigger_MultipleModules(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	// 模拟两个module，各有自己的handler
 	handler1 := NewTriggerHandler()
@@ -104,10 +111,10 @@ func TestTrigger_MultipleModules(t *testing.T) {
 
 	var module1Called, module2Called bool
 
-	inf.Register(handler1, def.EventType(1), "module1-handler", func(ctx context.Context, eventType def.EventType, data int) {
+	registerTyped(t, handler1, def.EventType(1), "module1-handler", func(ctx context.Context, data int) {
 		module1Called = true
 	})
-	inf.Register(handler2, def.EventType(1), "module2-handler", func(ctx context.Context, eventType def.EventType, data int) {
+	registerTyped(t, handler2, def.EventType(1), "module2-handler", func(ctx context.Context, data int) {
 		module2Called = true
 	})
 
@@ -140,17 +147,17 @@ func TestTrigger_MultipleModules(t *testing.T) {
 
 func TestTrigger_DifferentEventTypes(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
 
 	var type1Called, type2Called bool
 
-	inf.Register(handler, def.EventType(1), "type1-handler", func(ctx context.Context, eventType def.EventType, data string) {
+	registerTyped(t, handler, def.EventType(1), "type1-handler", func(ctx context.Context, data string) {
 		type1Called = true
 	})
-	inf.Register(handler, def.EventType(2), "type2-handler", func(ctx context.Context, eventType def.EventType, data string) {
+	registerTyped(t, handler, def.EventType(2), "type2-handler", func(ctx context.Context, data string) {
 		type2Called = true
 	})
 
@@ -167,20 +174,20 @@ func TestTrigger_DifferentEventTypes(t *testing.T) {
 
 func TestTrigger_UnregisterAll(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
 
 	var callCount int32
 
-	inf.Register(handler, def.EventType(1), "handler-a", func(ctx context.Context, eventType def.EventType, data string) {
+	registerTyped(t, handler, def.EventType(1), "handler-a", func(ctx context.Context, data string) {
 		atomic.AddInt32(&callCount, 1)
 	})
-	inf.Register(handler, def.EventType(1), "handler-b", func(ctx context.Context, eventType def.EventType, data string) {
+	registerTyped(t, handler, def.EventType(1), "handler-b", func(ctx context.Context, data string) {
 		atomic.AddInt32(&callCount, 1)
 	})
-	inf.Register(handler, def.EventType(2), "handler-c", func(ctx context.Context, eventType def.EventType, data string) {
+	registerTyped(t, handler, def.EventType(2), "handler-c", func(ctx context.Context, data string) {
 		atomic.AddInt32(&callCount, 1)
 	})
 
@@ -198,14 +205,14 @@ func TestTrigger_UnregisterAll(t *testing.T) {
 
 func TestTrigger_GetRegisteredEvents(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
 
-	inf.Register(handler, def.EventType(1), "login-handler", func(ctx context.Context, eventType def.EventType, data string) {})
-	inf.Register(handler, def.EventType(1), "audit-handler", func(ctx context.Context, eventType def.EventType, data string) {})
-	inf.Register(handler, def.EventType(2), "notify-handler", func(ctx context.Context, eventType def.EventType, data string) {})
+	registerTyped(t, handler, def.EventType(1), "login-handler", func(ctx context.Context, data string) {})
+	registerTyped(t, handler, def.EventType(1), "audit-handler", func(ctx context.Context, data string) {})
+	registerTyped(t, handler, def.EventType(2), "notify-handler", func(ctx context.Context, data string) {})
 
 	events := handler.GetRegisteredEvents()
 
@@ -219,7 +226,7 @@ func TestTrigger_GetRegisteredEvents(t *testing.T) {
 
 func TestTrigger_PanicRecovery(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
@@ -227,14 +234,15 @@ func TestTrigger_PanicRecovery(t *testing.T) {
 	var secondHandlerCalled bool
 
 	// 第一个handler会panic
-	inf.Register(handler, def.EventType(1), "panic-handler", func(ctx context.Context, eventType def.EventType, data string) {
+	err := handler.RegisterEvent(def.EventType(1), "panic-handler", func(ctx context.Context, data any) error {
 		panic("test panic")
 	})
+	if err != nil {
+		t.Fatalf("RegisterEvent failed: %v", err)
+	}
 
 	// 第二个handler应该仍然被调用
-	inf.Register(handler, def.EventType(1), "normal-handler", func(ctx context.Context, eventType def.EventType, data string) {
-		secondHandlerCalled = true
-	})
+	registerTyped(t, handler, def.EventType(1), "normal-handler", func(ctx context.Context, data string) { secondHandlerCalled = true })
 
 	// 触发事件，不应该panic
 	trigger.Trigger(context.Background(), def.EventType(1), "test")
@@ -246,7 +254,7 @@ func TestTrigger_PanicRecovery(t *testing.T) {
 
 func TestTrigger_HasHandler(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
@@ -255,7 +263,7 @@ func TestTrigger_HasHandler(t *testing.T) {
 		t.Error("expected HasHandler to return false for unregistered event type")
 	}
 
-	inf.Register(handler, def.EventType(1), "test-handler", func(ctx context.Context, eventType def.EventType, data string) {})
+	registerTyped(t, handler, def.EventType(1), "test-handler", func(ctx context.Context, data string) {})
 
 	if !trigger.HasHandler(def.EventType(1)) {
 		t.Error("expected HasHandler to return true after registration")
@@ -270,7 +278,7 @@ func TestTrigger_HasHandler(t *testing.T) {
 
 func TestTrigger_TypeSafety(t *testing.T) {
 	trigger := NewTrigger()
-	trigger.Init()
+	trigger.Init(nil)
 
 	handler := NewTriggerHandler()
 	handler.Init(trigger)
@@ -278,9 +286,7 @@ func TestTrigger_TypeSafety(t *testing.T) {
 	var receivedValue int
 
 	// 注册期望int类型的handler
-	inf.Register(handler, def.EventType(1), "int-handler", func(ctx context.Context, eventType def.EventType, data int) {
-		receivedValue = data
-	})
+	registerTyped(t, handler, def.EventType(1), "int-handler", func(ctx context.Context, data int) { receivedValue = data })
 
 	// 传入正确类型
 	trigger.Trigger(context.Background(), def.EventType(1), 42)

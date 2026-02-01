@@ -1,9 +1,9 @@
 package monitor
 
 import (
-	"time"
-
+	"context"
 	"testing"
+	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -28,7 +28,7 @@ func TestRpcMonitor_Add(t *testing.T) {
 	rm.Start()
 	defer rm.Stop()
 	reqId := rm.GenSeq()
-	state := NewCallState(nil, reqId, "test", time.Second, nil, nil, nil)
+	state := NewCallState(context.Background(), reqId, "test", time.Second, nil, nil, nil)
 	rm.Add(state)
 }
 
@@ -49,7 +49,7 @@ func TestRpcMonitor_Remove(t *testing.T) {
 	rm.Start()
 	defer rm.Stop()
 	const reqId = 1
-	state := NewCallState(nil, reqId, "test", time.Second, nil, nil, nil)
+	state := NewCallState(context.Background(), reqId, "test", time.Second, nil, nil, nil)
 	rm.Add(state)
 	st := rm.Remove(reqId)
 	if st != nil {

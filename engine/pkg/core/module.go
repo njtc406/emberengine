@@ -43,9 +43,12 @@ type Module struct {
 	rootContains map[uint32]inf.IModule // 根模块下所有模块(包括所有的子模块)
 
 	eventHandler *event.Handler // 事件处理器
+
 	timingwheel.ITimerScheduler
-	inf.IRpcHandler                // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
-	methodMgr       inf.IMethodMgr // 接口信息管理器
+
+	inf.IRpcHandler // rpc处理器(从service移动到这里,主要是为了能直接调用模块的接口,不需要都从service那层转一次)
+
+	methodMgr inf.IMethodMgr // 接口信息管理器
 
 	// 独立日志
 	enableLogging bool
@@ -84,7 +87,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	})
 	pModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pModule.eventHandler = event.NewTriggerHandler()
-	pModule.eventHandler.Init(m.eventHandler.GetTrigger().(*event.Processor))
+	pModule.eventHandler.Init(m.eventHandler.GetProcessor().(*event.Processor))
 	pModule.IConcurrent = m.IConcurrent
 	pModule.IRpcHandler = rpc.NewHandler(pModule.self).Init(m.root.GetMethodMgr())
 	if err := module.OnInit(); err != nil {
@@ -190,10 +193,14 @@ func (m *Module) GetService() inf.IService {
 }
 
 func (m *Module) GetEventProcessor() inf.IEventProcessor {
-	return m.eventHandler.GetTrigger()
+	return m.eventHandler.GetProcessor()
 }
 
 func (m *Module) GetEventHandler() inf.IEventHandler {
+	return m.eventHandler
+}
+
+func (m *Module) GetEventHandlerRegistry() inf.IEventHandlerRegistrar {
 	return m.eventHandler
 }
 

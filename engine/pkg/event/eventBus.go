@@ -41,6 +41,7 @@ type EventMetrics struct {
 }
 
 var bus *Bus
+var busOnce sync.Once
 
 type Bus struct {
 	nc     *nats.Conn // TODO 目前只支持nats,后续再看要不要扩展吧
@@ -73,13 +74,15 @@ type Bus struct {
 	eventBuffer     map[def.EventType][]*busEvent // 事件缓冲区 (按类型批处理)
 	bufferMutex     sync.RWMutex                  // 缓冲区锁
 	batchTicker     *time.Ticker                  // 批处理定时器
+	batchStop       chan struct{}                 // 停止批处理 goroutine
+	batchStopOnce   sync.Once                     // 确保只关闭一次
 	metrics         *EventMetrics                 // 事件指标
 }
 
 func GetEventBus() *Bus {
-	if bus == nil {
+	busOnce.Do(func() {
 		bus = &Bus{}
-	}
+	})
 	return bus
 }
 
@@ -120,6 +123,7 @@ func switchOpts(conf *config.NatsConf) []nats.Option {
 		}
 
 		if conf.Secure != "" {
+			// TODO 这里有风险，后续考虑完善TLS配置选项
 			opts = append(opts, nats.Secure(&tls.Config{InsecureSkipVerify: true}))
 		}
 
@@ -142,6 +146,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 	eb.metrics = &EventMetrics{}
 
 	// 启动批处理定时器 (每100ms处理一次缓冲)
+	eb.batchStop = make(chan struct{})
 	eb.batchTicker = time.NewTicker(100 * time.Millisecond)
 	go eb.processBatchedEvents()
 
@@ -208,7 +213,12 @@ func (eb *Bus) Stop() {
 		eb.nc = nil
 	}
 
-	// 停止批处理定时器
+	// 停止批处理 goroutine + 定时器
+	eb.batchStopOnce.Do(func() {
+		if eb.batchStop != nil {
+			close(eb.batchStop)
+		}
+	})
 	if eb.batchTicker != nil {
 		eb.batchTicker.Stop()
 	}
@@ -219,21 +229,36 @@ func (eb *Bus) Stop() {
 
 // processBatchedEvents 处理批量事件
 func (eb *Bus) processBatchedEvents() {
-	for range eb.batchTicker.C {
-		eb.flushAllBuffers()
+	for {
+		select {
+		case <-eb.batchTicker.C:
+			eb.flushAllBuffers()
+		case <-eb.batchStop:
+			return
+		}
 	}
 }
 
 // flushAllBuffers 刷新所有缓冲区
 func (eb *Bus) flushAllBuffers() {
+	// 注意：不要在持有 bufferMutex 时执行 publish/post job，避免阻塞批处理和生产者。
 	eb.bufferMutex.Lock()
-	defer eb.bufferMutex.Unlock()
-
+	if len(eb.eventBuffer) == 0 {
+		eb.bufferMutex.Unlock()
+		return
+	}
+	batches := make(map[def.EventType][]*busEvent, len(eb.eventBuffer))
 	for eventType, events := range eb.eventBuffer {
 		if len(events) > 0 {
-			eb.flushEventBatch(eventType, events)
-			delete(eb.eventBuffer, eventType)
+			batches[eventType] = events
 		}
+	}
+	// 直接替换 map，避免遍历时 delete
+	eb.eventBuffer = make(map[def.EventType][]*busEvent)
+	eb.bufferMutex.Unlock()
+
+	for eventType, events := range batches {
+		eb.flushEventBatch(eventType, events)
 	}
 }
 
@@ -422,7 +447,6 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 	if subMap, ok := eb.globalSubscribers[e.GetEventType()]; ok {
 		for _, ch := range subMap {
 			j := job.NewEventBusJob()
-			j.SetType(def.MailboxJobTypeEvent)
 			j.SetPayload(e)
 			j.SetContext(ctx)
 			j.SetDispatcherKey(e.GetDispatcherKey())
@@ -477,7 +501,6 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 		if subMap, ok := serverMap[e.GetPartition()]; ok {
 			for _, ch := range subMap {
 				j := job.NewEventBusJob()
-				j.SetType(def.MailboxJobTypeEvent)
 				j.SetPayload(e)
 				j.SetContext(ctx)
 				j.SetDispatcherKey(e.GetDispatcherKey())
@@ -574,7 +597,6 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 		if subMap, ok := eventMap[e.GetServiceUid()]; ok {
 			for _, ch := range subMap {
 				j := job.NewEventBusJob()
-				j.SetType(def.MailboxJobTypeEvent)
 				j.SetPayload(e)
 				j.SetContext(ctx)
 				j.SetDispatcherKey(e.GetDispatcherKey())
@@ -699,7 +721,7 @@ func (eb *Bus) unSubscribe(key string) {
 	}
 }
 
-func (eb *Bus) UnSubscribeGlobal(eventType def.EventType, svc inf.IActor) {
+func (eb *Bus) UnSubscribeGlobal(eventType def.EventType, svc inf.IListener) {
 	key := eb.genKey(eb.globalPrefix, eventType)
 	eb.globalLock.Lock(key)
 	defer eb.globalLock.Unlock(key)
@@ -716,16 +738,16 @@ func (eb *Bus) UnSubscribeGlobal(eventType def.EventType, svc inf.IActor) {
 	}
 }
 
-func (eb *Bus) UnSubscribeServer(eventType def.EventType, svc inf.IActor) {
-	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPid().GetPartition())
+func (eb *Bus) UnSubscribeServer(eventType def.EventType, svc inf.IListener) {
+	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPartition())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needUnListen bool
 	if subMap, ok := eb.serverSubscribers[eventType]; ok {
-		if nameMap, ok := subMap[svc.GetPid().GetPartition()]; ok {
+		if nameMap, ok := subMap[svc.GetPartition()]; ok {
 			delete(nameMap, svc.GetPid().GetServiceUid())
 			if len(nameMap) == 0 {
-				delete(subMap, svc.GetPid().GetPartition())
+				delete(subMap, svc.GetPartition())
 				needUnListen = true
 			}
 		}
