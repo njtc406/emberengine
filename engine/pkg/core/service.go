@@ -280,94 +280,28 @@ func (s *Service) startListenCallback() {
 // Stop 同步停止服务：请求停止并等待完成。
 // 注意：不要在 mailbox worker 内调用此方法，会死锁！
 func (s *Service) Stop() {
-	s.RequestStop()
-	s.WaitStopped()
-}
-
-// RequestStop 请求停止（非阻塞）：向 mailbox 投递 FinalizeEvent。
-// 可在 mailbox worker 内安全调用。
-func (s *Service) RequestStop() {
-	// TODO 需要重构这部分
 	// 防止重复投递
-	//if !s.stopRequested.CompareAndSwap(false, true) {
-	//	return
-	//}
-	//
-	//// 标记进入关闭中状态（CAS 保护，仅从运行态转换）
-	//for {
-	//	old := atomic.LoadInt32(&s.status)
-	//	if old >= def.SvcStatusClosing {
-	//		// 已经在关闭流程中
-	//		return
-	//	}
-	//	if atomic.CompareAndSwapInt32(&s.status, old, def.SvcStatusClosing) {
-	//		break
-	//	}
-	//}
-	//
-	//// 挂起邮箱（只允许 Finalize 等必要消息进入）
-	//if s.mailbox != nil {
-	//	s.mailbox.Suspend()
-	//}
-	//
-	//// 投递 FinalizeEvent 到 mailbox，由 worker 在 actor 语义内执行清理
-	//ev := event.NewEvent()
-	//ev.Type = event.ServiceFinalize
-	//ev.Priority = def.PriorityUrgent // 确保能通过挂起策略
-	//if err := s.mailbox.PostMessage(xcontext.New(nil), ev); err != nil {
-	//	// 如果投递失败（mailbox 已关闭），先确保 mailbox 停止，再清理
-	//	ev.Release()
-	//	s.Warnf("FinalizeEvent post failed: %v, triggering direct finalize", err)
-	//	if s.mailbox != nil {
-	//		s.mailbox.BeginStop()
-	//	}
-	//	s.doFinalizeDirectly()
-	//}
-}
+	if !s.stopRequested.CompareAndSwap(false, true) {
+		return
+	}
 
-// WaitStopped 等待服务完全停止（阻塞）。
-// 注意：不要在 mailbox worker 内调用此方法，会死锁！
-func (s *Service) WaitStopped() {
+	// 标记进入关闭中状态（CAS 保护，仅从运行态转换）
+	for {
+		old := atomic.LoadInt32(&s.status)
+		if old >= def.SvcStatusClosing {
+			// 已经在关闭流程中
+			return
+		}
+		if atomic.CompareAndSwapInt32(&s.status, old, def.SvcStatusClosing) {
+			break
+		}
+	}
+
+	// 挂起邮箱（只允许 Finalize 等必要消息进入）
 	if s.mailbox != nil {
-		s.mailbox.Wait()
-	}
-}
-
-// doFinalize 在 mailbox worker 内执行的清理逻辑（串行、无并发风险）。
-func (s *Service) doFinalize() {
-	s.doFinalizeCore()
-
-	// 等待窗口：允许短延迟回调/回复在关闭前最后进入并处理。
-	if s.stopGraceTimeout > 0 {
-		time.Sleep(s.stopGraceTimeout)
+		s.mailbox.Suspend()
 	}
 
-	// 发起 mailbox 停止（不等待，当前就是在 worker 内）
-	if s.mailbox != nil {
-		s.mailbox.BeginStop()
-	}
-
-	if s.enableLogging && s.logger != nil {
-		log.Release(s.logger)
-	}
-
-	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
-}
-
-// doFinalizeDirectly 在 PostJob 失败时由调用者协程直接执行清理。
-// 此时 mailbox 已经 BeginStop，不会有 worker 并发处理消息。
-func (s *Service) doFinalizeDirectly() {
-	s.doFinalizeCore()
-
-	if s.enableLogging && s.logger != nil {
-		log.Release(s.logger)
-	}
-
-	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
-}
-
-// doFinalizeCore 执行核心清理逻辑，供 doFinalize 和 doFinalizeDirectly 复用。
-func (s *Service) doFinalizeCore() {
 	// 关闭定时器
 	if s.ITimerScheduler != nil {
 		s.ITimerScheduler.Stop()
@@ -380,6 +314,12 @@ func (s *Service) doFinalizeCore() {
 
 	// 释放资源
 	s.release()
+
+	if s.enableLogging && s.logger != nil {
+		log.Release(s.logger)
+	}
+
+	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
 
 func (s *Service) release() {
@@ -396,7 +336,6 @@ func (s *Service) release() {
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
 	endpoints.GetEndpointManager().RemoveService(s)
-
 }
 
 func (s *Service) PostJob(job inf.IMailboxJob) error {

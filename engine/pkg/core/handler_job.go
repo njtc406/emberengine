@@ -85,6 +85,8 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob)
 		})
 	}()
 
+	// TODO 这里应该还需要一个回滚机制，如果执行失败，需要回滚数据
+
 	// 等待完成或超时/取消
 	select {
 	case err := <-done:

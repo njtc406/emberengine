@@ -1,4 +1,4 @@
-// Package mailbox
+// Package job
 // 模块名: 模块名
 // 功能描述: 描述
 // 作者:  yr  2026/1/29 00:18
@@ -109,6 +109,10 @@ func NewRpcJob() *RpcJob {
 }
 
 func (j *RpcJob) Release() {
+	// 先释放 payload (envelope)，避免 msgEnvelopePool 泄漏
+	if payload := j.GetPayload(); payload != nil {
+		payload.Release()
+	}
 	getMsgJobPool().Put(j)
 }
 

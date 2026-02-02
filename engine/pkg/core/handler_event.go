@@ -26,18 +26,6 @@ func (s *Service) handleServiceResumed(ctx context.Context, ev inf.IEvent) error
 	return nil
 }
 
-func (s *Service) handleServiceClose(ctx context.Context, ev inf.IEvent) error {
-	// 服务关闭：请求停止，由 handleServiceFinalize 在 mailbox 内完成清理
-	s.RequestStop()
-	return nil
-}
-
-// handleServiceFinalize 在 mailbox worker 内执行清理（串行、无并发风险）
-func (s *Service) handleServiceFinalize(ctx context.Context, ev inf.IEvent) error {
-	s.doFinalize()
-	return nil
-}
-
 func (s *Service) handleServiceHeartbeat(ctx context.Context, ev inf.IEvent) error {
 	// 服务健康检查
 	// TODO 需要回复服务负载等等信息
