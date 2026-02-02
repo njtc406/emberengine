@@ -98,10 +98,8 @@ func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
 		}
 	}()
 	// 挂起检查
-	if m.isSuspended() {
-		if !m.suspendPolicy.ShouldAllow(job) {
-			return def.ErrMailboxSuspended
-		}
+	if m.isSuspended() && !m.suspendPolicy.ShouldAllow(job) {
+		return def.ErrMailboxSuspended
 	}
 
 	// 执行中间件链的 OnReceive
