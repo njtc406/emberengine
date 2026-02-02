@@ -6,9 +6,9 @@ import "strings"
 type DrainPolicy int32
 
 const (
-	// DrainExecute 继续执行剩余消息（保持现有语义）。
+	// DrainExecute 关闭服务时，继续执行剩余消息
 	DrainExecute DrainPolicy = iota
-	// DrainDiscard 丢弃剩余消息（仅回收与触发 OnComplete，不执行业务）。
+	// DrainDiscard 关闭服务时，丢弃剩余消息（仅回收与触发 OnComplete，不执行业务）。
 	DrainDiscard
 )
 
