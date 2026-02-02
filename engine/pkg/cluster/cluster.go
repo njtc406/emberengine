@@ -12,7 +12,6 @@ import (
 	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -86,9 +85,9 @@ func (c *Cluster) PushEvent(data inf.IEvent) error {
 	select {
 	case <-data.GetContext().Done():
 		return data.GetContext().Err()
-	case c.eventChannel <- data: // 发送成功则里面释放
-	default:
-		return def.ErrEventChannelIsFull
+	case c.eventChannel <- data: // 发送成功则里面释放(需要阻塞等待,不能丢弃事件)
+		//default:
+		//	return def.ErrEventChannelIsFull
 	}
 
 	return nil

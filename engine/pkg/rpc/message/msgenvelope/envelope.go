@@ -58,6 +58,11 @@ type MsgEnvelope struct {
 
 	meta *Meta
 	data *Data
+
+	// 优先级
+	priority def.Priority
+	// 分发键
+	dispatchKey string
 }
 
 func (e *MsgEnvelope) Reset() {
@@ -91,6 +96,18 @@ func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 	}
 }
 
+func (e *MsgEnvelope) SetPriority(priority def.Priority) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.priority = priority
+}
+
+func (e *MsgEnvelope) SetDispatchKey(key string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.dispatchKey = key
+}
+
 //--------------------------------get------------------------------------
 
 func (e *MsgEnvelope) GetMeta() inf.IEnvelopeMeta {
@@ -116,14 +133,21 @@ func (e *MsgEnvelope) GetType() int32 {
 	return int32(event.RpcMsg)
 }
 
-func (e *MsgEnvelope) GetPriority() def.Priority {
-	// TODO 需要修改为能设置优先级
-	return def.PriorityNormal
-}
-
 func (e *MsgEnvelope) GetDispatcherKey() string {
 	// RPC 消息不使用分发键
 	return ""
+}
+
+func (e *MsgEnvelope) GetPriority() def.Priority {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.priority
+}
+
+func (e *MsgEnvelope) GetDispatchKey() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.dispatchKey
 }
 
 //-----------------------------Option-----------------------------------
@@ -155,10 +179,8 @@ func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 		msg.ReceiverPid = receiverPid
 	}
 	// 从 ctx 获取调度信息
-	dispatcherKey, _ := emberctx.GetHeaderValue(ctx, def.DefaultDispatcherKey).(string)
-	priority, _ := emberctx.GetHeaderValue(ctx, def.DefaultPriorityKey).(def.Priority)
-	msg.Priority = int32(priority)
-	msg.DispatcherKey = dispatcherKey
+	msg.Priority = int32(e.GetPriority())
+	msg.DispatcherKey = e.GetDispatchKey()
 	msg.Method = e.data.GetMethod()
 	msg.Request = nil
 	msg.Response = nil

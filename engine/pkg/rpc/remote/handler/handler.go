@@ -25,13 +25,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 	for k, v := range req.ContextHeaders {
 		headers[k] = v
 	}
-	// 从显式字段恢复调度信息到 headers
-	if req.DispatcherKey != "" {
-		headers[def.DefaultDispatcherKey] = req.DispatcherKey
-	}
-	if req.Priority != 0 {
-		headers[def.DefaultPriorityKey] = def.Priority(req.Priority)
-	}
+
 	if req.Reply {
 		// 回复
 		// 需要回复的信息都会加入monitor中,找到对应的信封数据
@@ -79,6 +73,8 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 
 		// 构建消息
 		envelope := msgenvelope.NewMsgEnvelope()
+		envelope.SetDispatchKey(req.DispatcherKey)
+		envelope.SetPriority(def.Priority(req.Priority))
 
 		data := msgenvelope.NewData()
 		data.SetMethod(req.Method)

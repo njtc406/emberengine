@@ -36,7 +36,7 @@ type EtcdDiscovery struct {
 	cancel      context.CancelFunc
 	initialized atomic.Bool
 	started     atomic.Bool
-	watchers    syncx.Map[string, *watcher] // map[string]*watcher
+	watchers    *syncx.Map[string, *watcher] // map[string]*watcher
 
 	// 组件接口
 	watcher  disc.IDiscoveryServiceWatcher
@@ -66,6 +66,7 @@ func (e *EtcdDiscovery) Init(conf *config.ClusterConf, eventProcessor inf.IEvent
 	e.handler = event.NewTriggerHandler()
 	e.handler.Init(eventProcessor)
 	e.evtCh = evtCh
+	e.watchers = syncx.NewMap[string, *watcher]()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.ctx = ctx

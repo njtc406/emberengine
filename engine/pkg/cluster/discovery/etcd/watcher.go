@@ -360,13 +360,21 @@ func (w *watcher) startWatchMaster(masterKey string) {
 		case resp := <-watchChan:
 			if resp.Err() != nil {
 				log.SysLogger.Errorf("watch master error: %v", resp.Err())
-				go w.electMaster()
+				go func() {
+					if err := w.electMaster(); err != nil {
+						log.SysLogger.Errorf("elect master error: %v", err)
+					}
+				}()
 				return
 			}
 			for _, ev := range resp.Events {
 				if ev.Type == clientv3.EventTypeDelete {
 					log.SysLogger.Debugf("master node lost, re-electing")
-					go w.electMaster()
+					go func() {
+						if err := w.electMaster(); err != nil {
+							log.SysLogger.Errorf("elect master error: %v", err)
+						}
+					}()
 					return
 				}
 			}

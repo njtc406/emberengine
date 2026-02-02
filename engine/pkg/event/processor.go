@@ -7,6 +7,7 @@ package event
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -483,7 +484,7 @@ func (t *Processor) snapshotCluster(eventType def.EventType, targetServiceUid st
 func (t *Processor) safeExec(entry callbackEntry, ctx context.Context, eventType def.EventType, data any) error {
 	defer func() {
 		if err := recover(); err != nil {
-			log.SysLogger.Errorf("trigger handler panic: eventType=%d, name=%s, err=%v", eventType, entry.name, err)
+			log.SysLogger.Errorf("trigger handler panic: eventType=%d, name=%s, err=%v\nstack=%s", eventType, entry.name, err, string(debug.Stack()))
 		}
 	}()
 	return entry.cb(ctx, data)

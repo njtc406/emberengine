@@ -8,6 +8,7 @@ package dto
 import (
 	"context"
 
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
@@ -91,6 +92,8 @@ type BusOption struct {
 	CallbackParams *AsyncCallParams
 	NotRecycle     bool  // 不回收bus
 	CallMode       int32 // 调用模式: CallModeAny(任意返回即返回) 或 CallModeAll(所有返回后才返回)
+	Priority       def.Priority
+	DispatchKey    string // 分发key,用于将job分发给不同的worker
 }
 
 func (o *BusOption) Reset() {
@@ -152,4 +155,12 @@ func WithCallModeAny() BusOptionBuilder {
 // WithCallModeAll 设置为全部模式(所有节点调用完成后才返回)
 func WithCallModeAll() BusOptionBuilder {
 	return func(opt *BusOption) { opt.CallMode = CallModeAll }
+}
+
+func WithPriority(priority def.Priority) BusOptionBuilder {
+	return func(opt *BusOption) { opt.Priority = priority }
+}
+
+func WithDispatchKey(key string) BusOptionBuilder {
+	return func(opt *BusOption) { opt.DispatchKey = key }
 }

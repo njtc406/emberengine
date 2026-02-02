@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -19,11 +20,15 @@ type IEnvelope interface {
 
 	SetMeta(meta IEnvelopeMeta)
 	SetData(data IEnvelopeData)
+	SetPriority(priority def.Priority)
+	SetDispatchKey(key string)
 
 	// Get
 
 	GetMeta() IEnvelopeMeta
 	GetData() IEnvelopeData
+	GetPriority() def.Priority
+	GetDispatchKey() string
 
 	// Option
 
@@ -61,7 +66,6 @@ type IEnvelopeData interface {
 	SetError(err error)
 	SetErrStr(err string)
 	SetNeedResponse(need bool)
-	//SetRequestBuff(reqBuff *anypb.Any)
 
 	// Get
 

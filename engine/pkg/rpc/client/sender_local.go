@@ -55,6 +55,8 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 	rpcJob := job.NewRpcJob()
 	rpcJob.SetContext(ctx)
 	rpcJob.SetPayload(envelope)
+	rpcJob.SetPriority(envelope.GetPriority())
+	rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
 	if err := dispatcher.PostJob(rpcJob); err != nil {
 		// PostJob 失败说明未能把 envelope 交给对端 mailbox，当前方需要负责回收。
 		rpcJob.Release()
