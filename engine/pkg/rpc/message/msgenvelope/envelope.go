@@ -189,6 +189,7 @@ func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 	msg.Reply = e.data.IsReply()
 	msg.ReqId = e.meta.GetReqId()
 	msg.NeedResp = e.data.NeedResponse()
+	msg.Deadline = e.meta.GetDeadline().UnixNano()
 
 	var anyData *anypb.Any
 

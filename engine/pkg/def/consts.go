@@ -16,7 +16,7 @@ const (
 
 	DefaultConnectInterval             = 2 * time.Second
 	DefaultCheckRpcCallTimeoutInterval = 1 * time.Second
-	DefaultRpcTimeout                  = time.Second
+	DefaultRpcTimeout                  = time.Second * 5
 )
 
 const (

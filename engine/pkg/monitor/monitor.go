@@ -214,7 +214,7 @@ func (rm *RpcMonitor) Add(state *CallState) {
 		}
 
 		if log.SysLogger != nil {
-			log.SysLogger.WithContext(st.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s",
+			log.SysLogger.WithContext(state.ctx).Debugf("RPC call takes more than %d seconds,method is %s",
 				int64(st.Timeout().Seconds()), st.Method())
 		}
 		rm.callTimeout(st)
@@ -222,15 +222,11 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	}, reqId)
 	if err != nil {
 		if log.SysLogger != nil {
-			log.SysLogger.WithContext(state.GetContext()).Errorf("add monitor failed,error:%s", err)
+			log.SysLogger.WithContext(state.ctx).Errorf("add monitor failed,error:%s", err)
 		}
 		// 无法加入 monitor：避免 Call 永久阻塞 / AsyncCall 永远不回调。
 		state.SetResult(nil, err)
-		if state.NeedCallback() {
-			state.dispatchCallbackEvent()
-			return
-		}
-		state.signalDone()
+		state.Complete() // TODO 这里需要考虑异步调用是否需要通知回复
 		return
 	}
 	state.setTimerID(timerId)

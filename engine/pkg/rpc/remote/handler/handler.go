@@ -34,7 +34,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 			if err == nil && req.Err != "" {
 				err = errors.New(req.Err)
 			}
-			state.XContext.AddHeaders(headers)
+
 			state.SetResult(response, err)
 			state.Complete()
 			return nil
@@ -86,6 +86,8 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		meta := msgenvelope.NewMeta()
 		meta.SetReceiverPid(req.ReceiverPid)
 		meta.SetReqId(req.ReqId)
+		meta.SetDeadline(req.Deadline)
+
 		if req.NeedResp {
 			// 需要回复的才设置sender
 			meta.SetSenderPid(req.SenderPid)

@@ -7,6 +7,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -46,6 +47,7 @@ type IEnvelopeMeta interface {
 	SetReceiverPid(receiver *actor.PID)
 	SetDispatcher(client IRpcDispatcher)
 	SetReqId(reqId uint64)
+	SetDeadline(deadline int64)
 
 	// Get
 
@@ -53,6 +55,7 @@ type IEnvelopeMeta interface {
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher
 	GetReqId() uint64
+	GetDeadline() time.Time
 }
 
 type IEnvelopeData interface {

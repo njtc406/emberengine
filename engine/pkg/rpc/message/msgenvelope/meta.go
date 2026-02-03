@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -164,6 +165,7 @@ type Meta struct {
 	receiverPid *actor.PID         // 接收者
 	sender      inf.IRpcDispatcher // 发送者客户端(用于回复)
 	reqID       uint64             // 请求ID(主要用于monitor区分不同的call)
+	deadline    int64              // 超时时间(单位: 纳秒)
 }
 
 func (e *Meta) Reset() {
@@ -196,6 +198,11 @@ func (e *Meta) SetReqId(reqId uint64) {
 	defer e.locker.Unlock()
 	e.reqID = reqId
 }
+func (e *Meta) SetDeadline(deadline int64) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.deadline = deadline
+}
 
 func (e *Meta) GetSenderPid() *actor.PID {
 	e.locker.RLock()
@@ -219,4 +226,10 @@ func (e *Meta) GetReqId() uint64 {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.reqID
+}
+
+func (e *Meta) GetDeadline() time.Time {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return time.Unix(0, e.deadline)
 }

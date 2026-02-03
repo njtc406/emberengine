@@ -56,6 +56,7 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 	rpcJob.SetPayload(envelope)
 	rpcJob.SetPriority(envelope.GetPriority())
 	rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
+	rpcJob.SetDeadline(envelope.GetMeta().GetDeadline())
 	if err := dispatcher.PostJob(rpcJob); err != nil {
 		rpcJob.Release()
 		return err

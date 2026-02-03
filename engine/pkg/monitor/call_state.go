@@ -13,7 +13,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 // CallState 承载一次 RPC 调用（Call/AsyncCall）的等待/回调状态。
@@ -33,8 +32,8 @@ import (
 // (CallState 不包含锁，只包含轻量字段)
 type CallState struct {
 	dto.DataRef
-	name string
-	xcontext.XContext
+	name       string
+	ctx        context.Context
 	reqID      uint64
 	timerID    uint64
 	timeout    time.Duration // nanoseconds
@@ -80,7 +79,7 @@ func newCallState() *CallState {
 
 func (s *CallState) Reset() {
 	s.name = ""
-	s.XContext.Reset()
+	s.ctx = nil
 	s.reqID = 0
 	s.timerID = 0
 	s.timeout = 0
@@ -111,7 +110,7 @@ func (s *CallState) GetName() string {
 
 func NewCallState(ctx context.Context, reqID uint64, method string, timeout time.Duration, dispatcher inf.IRpcDispatcher, callbacks []dto.CompletionFunc, cbParams []interface{}) *CallState {
 	s := newCallState()
-	s.XContext = xcontext.New(ctx)
+	s.ctx = ctx
 	s.reqID = reqID
 	s.method = method
 	s.timeout = timeout
@@ -159,7 +158,7 @@ func (s *CallState) Complete() {
 		envelopeResp.SetData(data)
 
 		rpcJob := job.NewRpcJob()
-		rpcJob.SetContext(s.XContext)
+		rpcJob.SetContext(s.ctx)
 		rpcJob.SetPayload(envelopeResp)
 		if err := s.dispatcher.PostJob(rpcJob); err != nil {
 			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
@@ -181,7 +180,7 @@ func (s *CallState) dispatchCallbackEvent() {
 	}
 	// 使用 ConcurrentCallbackJob 包装投递
 	j := job.NewConcurrentCallbackJob()
-	j.SetContext(s.XContext)
+	j.SetContext(s.ctx)
 	j.SetPayload(s)
 	if err := s.dispatcher.PostJob(j); err != nil {
 		j.Release()

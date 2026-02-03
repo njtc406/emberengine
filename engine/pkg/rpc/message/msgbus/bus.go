@@ -20,9 +20,9 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/errorlib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
@@ -119,10 +119,14 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	}
 
 	var timeout time.Duration
+	var deadline time.Time
+	var ok bool
 	if ctx != nil {
-		deadline, ok := ctx.Deadline()
+		deadline, ok = ctx.Deadline()
 		if ok {
 			timeout = time.Until(deadline)
+		} else {
+			deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
 		}
 	}
 
@@ -145,6 +149,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	meta.SetSenderPid(mb.sender.GetPid())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
+	meta.SetDeadline(deadline.UnixNano())
 	envelope.SetMeta(meta)
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
@@ -157,8 +162,12 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(),
-			data.GetMethod(), err)
+		log.SysLogger.WithContext(ctx).Errorf(
+			"service[%s] send message[%s] request to client failed, error: %v",
+			mb.sender.GetPid().GetName(),
+			data.GetMethod(),
+			err,
+		)
 		return def.ErrRPCCallFailed
 	}
 
@@ -287,10 +296,14 @@ func (mb *MessageBus) callInternal(ctx context.Context, method string, in, out i
 func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64,
 	error) {
 	var timeout time.Duration
+	var deadline time.Time
+	var ok bool
 	if ctx != nil {
-		deadline, ok := ctx.Deadline()
+		deadline, ok = ctx.Deadline()
 		if ok {
 			timeout = time.Until(deadline)
+		} else {
+			deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
 		}
 	}
 
@@ -298,10 +311,8 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 		timeout = config.GetDefaultRpcTimeout()
 	}
 
-	// 处理ctx，只保留携带信息
-	headers := emberctx.GetHeader(ctx)
-	newCtx := xcontext.New(context.Background())
-	newCtx.SetHeaders(headers)
+	// 处理ctx，只保留携带信息；但保留原deadline，避免外部ctx取消影响异步调用
+	newCtx := xcontext.NewWithCloneCtx(ctx)
 
 	mt := monitor.GetRpcMonitor()
 	reqId := mt.GenSeq()
@@ -322,7 +333,7 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 	meta.SetSenderPid(mb.sender.GetPid())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
-
+	meta.SetDeadline(deadline.UnixNano())
 	envelope.SetMeta(meta)
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
@@ -424,6 +435,14 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 		return fmt.Errorf("receiver is nil")
 	}
 
+	var deadline time.Time
+	deadlineTime, ok := ctx.Deadline()
+	if ok {
+		deadline = deadlineTime
+	} else {
+		deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+	}
+
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
 
@@ -440,6 +459,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	meta.SetReqId(monitor.GetRpcMonitor().GenSeq()) // 必须创建reqId，否则会导致重复调用
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
+	meta.SetDeadline(deadline.UnixNano())
 	envelope.SetMeta(meta)
 
 	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
