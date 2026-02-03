@@ -121,9 +121,6 @@ func (c *Dispatcher) IsClosed() bool {
 
 func (c *Dispatcher) Deliver(ctx context.Context, envelope inf.IEnvelope) error {
 	if c.pid == nil {
-		if envelope != nil {
-			envelope.Release()
-		}
 		return def.ErrServiceNotFound
 	}
 

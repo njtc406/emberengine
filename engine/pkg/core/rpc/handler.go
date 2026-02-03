@@ -375,6 +375,7 @@ func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
 
 	if err := dispatcher.Deliver(ctx, respEnv); err != nil {
 		h.WithContext(ctx).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
+		respEnv.Release()
 	}
 }
 

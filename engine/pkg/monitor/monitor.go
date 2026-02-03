@@ -207,15 +207,11 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	reqId := state.ReqID()
 	timerId, err := rm.sd.AfterFunc(state.Timeout(), "rpc monitor", func(ctx context.Context, tm *timingwheel.Timer, args ...interface{}) error {
 		seq := args[0].(uint64)
-		b := rm.bucket(seq)
-		b.mu.Lock()
-		st, ok := b.m[seq]
-		if !ok || st == nil || st.timerId() != tm.GetTimerId() {
-			b.mu.Unlock()
+		st := rm.Remove(seq)
+		if st == nil {
+			// 已经删除
 			return nil
 		}
-		delete(b.m, seq)
-		b.mu.Unlock()
 
 		if log.SysLogger != nil {
 			log.SysLogger.WithContext(st.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s",

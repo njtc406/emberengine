@@ -333,6 +333,7 @@ func (w *watcher) notifyService(evtType def.EventType, oldStateIsMaster bool, pr
 
 	if err = w.svc.PostJob(j); err != nil {
 		log.SysLogger.Errorf("post job error: %v", err)
+		j.Release()
 		return
 	}
 }

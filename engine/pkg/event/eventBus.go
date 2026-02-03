@@ -456,6 +456,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 			j.SetDeadline(t)
 			if err := ch.PostJob(j); err != nil {
 				log.SysLogger.WithContext(ctx).Errorf("push global event error: %v", err)
+				j.Release()
 			}
 		}
 	}
@@ -510,6 +511,7 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 				j.SetDeadline(t)
 				if err := ch.PostJob(j); err != nil {
 					log.SysLogger.Errorf("push server event error: %v", err)
+					j.Release()
 				}
 			}
 		}
@@ -607,6 +609,7 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 
 				if err := ch.PostJob(j); err != nil {
 					log.SysLogger.Errorf("push specific event error: %v", err)
+					j.Release()
 				}
 			}
 		}

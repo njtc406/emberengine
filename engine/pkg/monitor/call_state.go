@@ -10,6 +10,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -160,7 +161,10 @@ func (s *CallState) Complete() {
 		rpcJob := job.NewRpcJob()
 		rpcJob.SetContext(s.XContext)
 		rpcJob.SetPayload(envelopeResp)
-		s.dispatcher.PostJob(rpcJob)
+		if err := s.dispatcher.PostJob(rpcJob); err != nil {
+			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+			rpcJob.Release()
+		}
 		getCallStatePool().Put(s)
 		return
 	}

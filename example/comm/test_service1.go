@@ -35,41 +35,41 @@ func (s *Service1) OnInit() error {
 	//var ctx context.Context
 
 	// 复用bus
-	s.AfterFunc(time.Second, "method test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	_, _ = s.AfterFunc(time.Second, "method test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 		startTime := timelib.Now()
 		// 调用Service2.APITest2
-		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
+		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second)
 		defer cancel()
 		// 获取消息总线
 		bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithPartition(1))
 		defer bus.Release()
 
 		// 发送消息
-		var out int
-		if err := bus.CallWithOpt(
-			ctxWithTimeout,
-			dto.WithMethod("APISum"),
-			dto.WithNotRecycle(),
-			dto.WithIn([]interface{}{1, 2}),
-			dto.WithOut(&out),
-		); err != nil {
-			s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
-		}
-		s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
-
-		s.WithContext(ctxWithTimeout).State().Debugf("==========================================1111")
-		if err := bus.SendWithOpt(
-			ctxWithTimeout,
-			dto.WithMethod("APITest2"),
-			dto.WithNotRecycle(),
-		); err != nil {
-			s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
-		}
+		//var out int
+		//if err := bus.CallWithOpt(
+		//	ctxWithTimeout,
+		//	dto.WithNotRecycle(), // 不回收bus
+		//	dto.WithMethod("APISum"),
+		//	dto.WithIn([]interface{}{1, 2}),
+		//	dto.WithOut(&out),
+		//); err != nil {
+		//	s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+		//}
+		//s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
+		//
+		//s.WithContext(ctxWithTimeout).State().Debugf("==========================================1111")
+		//if err := bus.SendWithOpt(
+		//	ctxWithTimeout,
+		//	dto.WithNotRecycle(),
+		//	dto.WithMethod("APITest2"),
+		//); err != nil {
+		//	s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+		//}
 		s.WithContext(ctxWithTimeout).State().Debugf("==========================================2222")
 		if _, err := bus.AsyncCallWithOpt(
-			ctxWithTimeout,
-			dto.WithMethod("APISum"),
+			ctxWithTimeout, // 这里使用timeout的ctx会有问题，因为是异步，如果这里调用结束ctx就释放了，会导致任务被直接取消
 			dto.WithNotRecycle(),
+			dto.WithMethod("APISum"),
 			dto.WithIn([]interface{}{1, 2}),
 			dto.WithCallbacks(func(ctx context.Context, data interface{}, err error, params ...interface{}) {
 				s.WithContext(ctx).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
@@ -80,97 +80,97 @@ func (s *Service1) OnInit() error {
 		s.WithContext(ctxWithTimeout).State().Debugf("==========================================33333")
 
 		// 循环call
-		for i := 0; i < 10; i++ {
-			callCtx := xcontext.New(nil)
-			if err := bus.CallWithOpt(
-				callCtx,
-				dto.WithMethod("APITest2"),
-				dto.WithNotRecycle(),
-			); err != nil {
-				s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
-			} else {
-				s.WithContext(callCtx).Debugf(">>>>call Service2.APITest2 success")
-			}
-		}
-		s.WithContext(ctxWithTimeout).Debugf("==========================================4444")
-		s.WithContext(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
+		//for i := 0; i < 10; i++ {
+		//	callCtx := xcontext.New(nil)
+		//	if err := bus.CallWithOpt(
+		//		callCtx,
+		//		dto.WithNotRecycle(),
+		//		dto.WithMethod("APITest2"),
+		//	); err != nil {
+		//		s.WithContext(callCtx).Errorf("call Service2.APITest2 failed, err:%v", err)
+		//	} else {
+		//		s.WithContext(callCtx).Debugf(">>>>call Service2.APITest2 success")
+		//	}
+		//}
+		//s.Debugf("==========================================4444")
+		s.Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
 		return nil
 	})
-	s.AfterFunc(time.Second, "method test demo1", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		// 调用Service2.APITest2 带返回参数
-		// 创建context
-		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
-		defer cancel()
-		var out int
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctxWithTimeout, "APISum", []interface{}{1, 2}, &out); err != nil {
-			s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
-		}
-		s.WithContext(ctxWithTimeout).Debugf("==========================================5555")
-		s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
-		return nil
-	})
-
-	s.AfterFunc(time.Second*3, "method test demo2", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		// 调用Service2.APITest2 不同类型入参
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintParams", []interface{}{1, "2"}, nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APIPrintParams failed, err:%v", err)
-		}
-		s.GetLogger().Debugf("==========================================666666")
-		// 模拟有入参,但是不传
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintParams", nil, nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APIPrintParams failed, err:%v", err)
-		}
-		s.GetLogger().Debugf("==========================================777777777")
-		return nil
-	})
-	s.AfterFunc(time.Second*4, "method test demo3", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		// 调用Service2.APITest2 可变参数
-		type abc struct{ a, b int }
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintIndefiniteParams", []interface{}{1, "2", abc{1, 2}, "ddddd"}, nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APIPrintIndefiniteParams failed, err:%v", err)
-		}
-		s.GetLogger().Debugf("==========================================888888888")
-		return nil
-	})
-	s.AfterFunc(time.Second*5, "method test demo4", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		// 调用Service2.APITest2 多返回值
-		var out int
-		var out2 string
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIMultiRet", nil, []interface{}{&out, &out2}); err != nil {
-			log.SysLogger.Errorf("call Service2.APIMultiRet failed, err:%v", err)
-		}
-		s.GetLogger().Debugf("==========================================99999999999")
-		log.SysLogger.Debugf("call Service2.APIMultiRet out:%d, out2:%s", out, out2)
-		return nil
-	})
-
-	s.AfterFunc(time.Second*6, "method test demo5", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		// 调用Service2.APICallback 两个service相互调用(请注意,如果是相互调用,只能是非阻塞类型的调用!!!不然会发生死锁!!!)
-		if err := s.Select(rpc.WithName(ServiceNameTest2)).Send(ctx, "APICallback", nil); err != nil {
-			log.SysLogger.Errorf("call Service2.APICallback failed, err:%v", err)
-		}
-
-		s.GetLogger().Debugf("==========================================10")
-		return nil
-	})
+	//s.AfterFunc(time.Second, "method test demo1", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	//	// 调用Service2.APITest2 带返回参数
+	//	// 创建context
+	//	ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second*1)
+	//	defer cancel()
+	//	var out int
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctxWithTimeout, "APISum", []interface{}{1, 2}, &out); err != nil {
+	//		s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+	//	}
+	//	s.WithContext(ctxWithTimeout).Debugf("==========================================5555")
+	//	s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
+	//	return nil
+	//})
 	//
-	////rpc test demo
+	//s.AfterFunc(time.Second*3, "method test demo2", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	//	// 调用Service2.APITest2 不同类型入参
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintParams", []interface{}{1, "2"}, nil); err != nil {
+	//		log.SysLogger.Errorf("call Service2.APIPrintParams failed, err:%v", err)
+	//	}
+	//	s.GetLogger().Debugf("==========================================666666")
+	//	// 模拟有入参,但是不传
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintParams", nil, nil); err != nil {
+	//		log.SysLogger.Errorf("call Service2.APIPrintParams failed, err:%v", err)
+	//	}
+	//	s.GetLogger().Debugf("==========================================777777777")
+	//	return nil
+	//})
+	//s.AfterFunc(time.Second*4, "method test demo3", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	//	// 调用Service2.APITest2 可变参数
+	//	type abc struct{ a, b int }
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIPrintIndefiniteParams", []interface{}{1, "2", abc{1, 2}, "ddddd"}, nil); err != nil {
+	//		log.SysLogger.Errorf("call Service2.APIPrintIndefiniteParams failed, err:%v", err)
+	//	}
+	//	s.GetLogger().Debugf("==========================================888888888")
+	//	return nil
+	//})
+	//s.AfterFunc(time.Second*5, "method test demo4", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	//	// 调用Service2.APITest2 多返回值
+	//	var out int
+	//	var out2 string
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Call(ctx, "APIMultiRet", nil, []interface{}{&out, &out2}); err != nil {
+	//		log.SysLogger.Errorf("call Service2.APIMultiRet failed, err:%v", err)
+	//	}
+	//	s.GetLogger().Debugf("==========================================99999999999")
+	//	log.SysLogger.Debugf("call Service2.APIMultiRet out:%d, out2:%s", out, out2)
+	//	return nil
+	//})
 	//
-	s.AfterFunc(time.Second*1, "rpc test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-		}
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*1000)
-		defer cancel()
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("2")).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-		}
-		s.WithContext(ctxWithTimeout).Debugf("==========================================11")
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Send(ctx, "RPCTest2", nil); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
-		}
-		return nil
-	})
+	//s.AfterFunc(time.Second*6, "method test demo5", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	//	// 调用Service2.APICallback 两个service相互调用(请注意,如果是相互调用,只能是非阻塞类型的调用!!!不然会发生死锁!!!)
+	//	if err := s.Select(rpc.WithName(ServiceNameTest2)).Send(ctx, "APICallback", nil); err != nil {
+	//		log.SysLogger.Errorf("call Service2.APICallback failed, err:%v", err)
+	//	}
+	//
+	//	s.GetLogger().Debugf("==========================================10")
+	//	return nil
+	//})
+	////
+	//////rpc test demo
+	////
+	//s.AfterFunc(time.Second*1, "rpc test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
+	//		log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+	//	}
+	//	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*1000)
+	//	defer cancel()
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("2")).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
+	//		log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+	//	}
+	//	s.WithContext(ctxWithTimeout).Debugf("==========================================11")
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Send(ctx, "RPCTest2", nil); err != nil {
+	//		log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
+	//	}
+	//	return nil
+	//})
 	//s.AfterFunc(time.Second*8, "rpc test demo1", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 	//	out := &msg.Msg_Test_Resp{}
 	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, out); err != nil {

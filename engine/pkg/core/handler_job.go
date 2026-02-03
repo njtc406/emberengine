@@ -15,6 +15,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -65,13 +66,16 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob)
 	var cancel context.CancelFunc
 
 	deadline := job.GetDeadline()
+	log.SysLogger.Debugf("------->deadline:%v", deadline)
 	if !deadline.IsZero() {
 		timeout := deadline.Sub(timelib.Now())
 		if timeout <= 0 {
 			return def.ErrJobTimeout
 		}
+		log.SysLogger.Debugf("------->timeout:%v", timeout)
 		ctxx, cancel = xcontext.NewWithTimeout(ctx, timeout)
 	} else {
+		log.SysLogger.Debugf("------->no deadline")
 		ctxx, cancel = xcontext.NewWithCancel(ctx)
 	}
 	defer cancel()
@@ -90,9 +94,11 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob)
 	// 等待完成或超时/取消
 	select {
 	case err := <-done:
+		log.SysLogger.Debugf("===============================1")
 		return err
 	case <-ctxx.Done():
 		// 超时或被取消
+		log.SysLogger.Debugf("===============================2")
 		return ctxx.Err()
 	}
 }
@@ -205,7 +211,7 @@ func (s *Service) handleSysCtl(ctx context.Context, cmd dto.SysCmd) error {
 func (s *Service) ExecuteJob(ctx context.Context, job inf.IMailboxJob) error {
 	err := s.jobRegistry.InvokeJob(ctx, job)
 	if err != nil {
-		s.WithContext(ctx).Errorf("invoke job error: %v", err)
+		s.WithContext(ctx).Errorf("invoke job[%+v] error: %v\nstack:%s", job, err, string(debug.Stack()))
 		return err
 	}
 	return nil

@@ -20,8 +20,10 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/errorlib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 var busPool pool.IPool[*MessageBus]
@@ -154,6 +156,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
 		_ = mt.Remove(reqId)
 		state.Release()
+		envelope.Release()
 		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(),
 			data.GetMethod(), err)
 		return def.ErrRPCCallFailed
@@ -295,13 +298,18 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 		timeout = config.GetDefaultRpcTimeout()
 	}
 
+	// 处理ctx，只保留携带信息
+	headers := emberctx.GetHeader(ctx)
+	newCtx := xcontext.New(context.Background())
+	newCtx.SetHeaders(headers)
+
 	mt := monitor.GetRpcMonitor()
 	reqId := mt.GenSeq()
 	var cbParams []interface{}
 	if param != nil {
 		cbParams = param.Params
 	}
-	state := monitor.NewCallState(ctx, reqId, data.GetMethod(), timeout, mb.sender, callbacks, cbParams)
+	state := monitor.NewCallState(newCtx, reqId, data.GetMethod(), timeout, mb.sender, callbacks, cbParams)
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
@@ -323,10 +331,11 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 	mt.Add(state)
 
 	// 发送消息：调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+	if err := mb.receiver.Deliver(newCtx, envelope); err != nil {
 		_ = mt.Remove(reqId)
 		state.Release()
-		log.SysLogger.WithContext(ctx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
+		envelope.Release()
+		log.SysLogger.WithContext(newCtx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
 		return 0, def.ErrRPCCallFailed
 	}
 
@@ -434,7 +443,11 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	envelope.SetMeta(meta)
 
 	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	return mb.receiver.Deliver(ctx, envelope)
+	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+		envelope.Release()
+		return err
+	}
+	return nil
 }
 
 // Send 无返回调用

@@ -96,6 +96,7 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 
 		err := sf.GetDispatcher(req.ReceiverPid).Deliver(ctx, envelope)
 		if err != nil {
+			envelope.Release()
 			return err
 		}
 

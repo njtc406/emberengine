@@ -348,7 +348,12 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	j.SetPriority(def.PriorityNormal)
 	j.SetDispatcherKey(uuid.NewString())
 	j.SetPayload(evt)
-	return s.mailbox.PostJob(j)
+	if err := s.mailbox.PostJob(j); err != nil {
+		log.SysLogger.Errorf("post job error: %v", err)
+		j.Release()
+		return err
+	}
+	return nil
 }
 
 func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) error {
@@ -357,7 +362,12 @@ func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) e
 	j.SetPriority(def.PriorityNormal)
 	j.SetDispatcherKey(uuid.NewString())
 	j.SetPayload(t)
-	return s.mailbox.PostJob(j)
+	if err := s.mailbox.PostJob(j); err != nil {
+		log.SysLogger.Errorf("post job error: %v", err)
+		j.Release()
+		return err
+	}
+	return nil
 }
 
 func (s *Service) SetName(name string) {

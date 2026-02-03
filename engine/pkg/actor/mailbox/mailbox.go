@@ -92,11 +92,6 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 //  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
 //  3. 将事件和中间件上下文交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
 func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
-	defer func() {
-		if err != nil {
-			job.Release()
-		}
-	}()
 	// 挂起检查
 	if m.isSuspended() && !m.suspendPolicy.ShouldAllow(job) {
 		return def.ErrMailboxSuspended
