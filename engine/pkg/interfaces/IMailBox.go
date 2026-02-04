@@ -50,7 +50,7 @@ type IMailboxJob interface {
 	// SetContext 设置上下文
 	SetContext(ctx context.Context)
 	// SetDeadline 设置截止时间
-	SetDeadline(t time.Time)
+	SetDeadline(t int64)
 	// SetPriority 设置优先级
 	SetPriority(priority def.Priority)
 	// SetDispatcherKey 设置分发key,用于将job分发给不同的worker
@@ -69,7 +69,7 @@ type IMailboxJob interface {
 	// GetContext 获取上下文
 	GetContext() context.Context
 	// GetDeadline 获取截止时间
-	GetDeadline() time.Time
+	GetDeadline() int64
 	// GetMiddlewareContext 获取中间件上下文
 	GetMiddlewareContext() IMiddlewareContext
 

@@ -93,7 +93,7 @@ func (s *Service1) OnInit() error {
 		//	}
 		//}
 		//s.Debugf("==========================================4444")
-		s.Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
+		s.WithContext(ctxWithTimeout).Debugf("call Service2 cost:%d us", timelib.Since(startTime).Microseconds()) // 微秒
 		return nil
 	})
 	//s.AfterFunc(time.Second, "method test demo1", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {

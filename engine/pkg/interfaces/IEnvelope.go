@@ -7,10 +7,10 @@ package interfaces
 
 import (
 	"context"
-	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -48,6 +48,7 @@ type IEnvelopeMeta interface {
 	SetDispatcher(client IRpcDispatcher)
 	SetReqId(reqId uint64)
 	SetDeadline(deadline int64)
+	SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{})
 
 	// Get
 
@@ -55,7 +56,8 @@ type IEnvelopeMeta interface {
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher
 	GetReqId() uint64
-	GetDeadline() time.Time
+	GetDeadline() int64
+	GetCallback() (dto.CompletionFuncs, []interface{})
 }
 
 type IEnvelopeData interface {

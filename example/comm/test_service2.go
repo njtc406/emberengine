@@ -19,7 +19,7 @@ type Service2TestModule struct {
 }
 
 func (s *Service2TestModule) APISum(ctx context.Context, a, b int) int {
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 200)
 	s.WithContext(ctx).Debugf(">>>>>>>>>>> call %s func APISum, a:%d, b:%d", s.GetModuleName(), a, b)
 	return a + b
 }

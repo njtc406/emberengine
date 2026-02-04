@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
@@ -55,8 +56,8 @@ func registerJobHandler[T any](registry *jobHandlerRegistry, jobType def.Mailbox
 // InvokeJob 调用已注册的处理器
 // ctx: 仅携带上下文信息（如 traceId），不带取消控制
 // 超时控制由 job.GetDeadline() 决定，在此函数内部强制执行
-func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob) error {
-	handler, ok := r.handlers[job.GetType()]
+func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob) error {
+	handler, ok := r.handlers[mJob.GetType()]
 	if !ok {
 		// TODO 后面这些错误信息都使用errorx来包裹
 		return def.ErrJobHandlerNotFound
@@ -65,10 +66,11 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob)
 	var ctxx *xcontext.XContext
 	var cancel context.CancelFunc
 
-	deadline := job.GetDeadline()
+	deadline := mJob.GetDeadline()
 	log.SysLogger.Debugf("------->deadline:%v", deadline)
-	if !deadline.IsZero() {
-		timeout := deadline.Sub(timelib.Now())
+	if deadline > 0 {
+		deadlineTime := time.Unix(deadline, 0)
+		timeout := deadlineTime.Sub(timelib.Now())
 		if timeout <= 0 {
 			return def.ErrJobTimeout
 		}
@@ -85,7 +87,7 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob)
 	go func() {
 		done <- r.safeExec(func() error {
 			// 执行 job handler 并返回结果
-			return handler(ctxx, job)
+			return handler(ctx, mJob)
 		})
 	}()
 
@@ -94,11 +96,12 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, job inf.IMailboxJob)
 	// 等待完成或超时/取消
 	select {
 	case err := <-done:
-		log.SysLogger.Debugf("===============================1")
+		payload := job.GetJobPayload(mJob)
+		log.SysLogger.Debugf("===============================1 job:%+v payload:%+v err:%v", mJob, payload, err)
 		return err
 	case <-ctxx.Done():
 		// 超时或被取消
-		log.SysLogger.Debugf("===============================2")
+		log.SysLogger.Debugf("===============================2 job:%+v", mJob)
 		return ctxx.Err()
 	}
 }
@@ -135,6 +138,9 @@ func RegisterCustomJobHandler[T any](s *Service, jobType def.MailboxJobType, han
 // ============= 具体 Handler 实现 =============
 
 func (s *Service) handleRpcJob(ctx context.Context, envelope inf.IEnvelope) error {
+	defer func() {
+		envelope.Release()
+	}()
 	meta := envelope.GetMeta()
 	data := envelope.GetData()
 

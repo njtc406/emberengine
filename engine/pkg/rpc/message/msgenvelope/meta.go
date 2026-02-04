@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -166,6 +165,8 @@ type Meta struct {
 	sender      inf.IRpcDispatcher // 发送者客户端(用于回复)
 	reqID       uint64             // 请求ID(主要用于monitor区分不同的call)
 	deadline    int64              // 超时时间(单位: 纳秒)
+	callbacks   dto.CompletionFuncs
+	cbParams    []interface{}
 }
 
 func (e *Meta) Reset() {
@@ -173,6 +174,9 @@ func (e *Meta) Reset() {
 	e.receiverPid = nil
 	e.sender = nil
 	e.reqID = 0
+	e.deadline = 0
+	e.callbacks = nil
+	e.cbParams = nil
 }
 
 func (e *Meta) SetSenderPid(senderPid *actor.PID) {
@@ -204,6 +208,13 @@ func (e *Meta) SetDeadline(deadline int64) {
 	e.deadline = deadline
 }
 
+func (e *Meta) SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.callbacks = callbacks
+	e.cbParams = cbParams
+}
+
 func (e *Meta) GetSenderPid() *actor.PID {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
@@ -228,8 +239,14 @@ func (e *Meta) GetReqId() uint64 {
 	return e.reqID
 }
 
-func (e *Meta) GetDeadline() time.Time {
+func (e *Meta) GetDeadline() int64 {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	return time.Unix(0, e.deadline)
+	return e.deadline
+}
+
+func (e *Meta) GetCallback() (callback dto.CompletionFuncs, cbParams []interface{}) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	return e.callbacks, e.cbParams
 }

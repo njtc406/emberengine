@@ -231,7 +231,15 @@ func (rm *RpcMonitor) Add(state *CallState) {
 		return
 	}
 	reqId := state.ReqID()
-	timerId, err := rm.sd.AfterFunc(state.Timeout(), "rpc monitor", func(ctx context.Context, tm *timingwheel.Timer, args ...interface{}) error {
+	timeout := state.Timeout()
+	method := state.Method()
+	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(ctx context.Context, tm *timingwheel.Timer, args ...interface{}) error {
+		defer func() {
+			if log.SysLogger != nil {
+				log.SysLogger.WithContext(state.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
+					timeout.Seconds(), method)
+			}
+		}()
 		seq := args[0].(uint64)
 		st := rm.Remove(seq)
 		if st == nil {
@@ -239,11 +247,8 @@ func (rm *RpcMonitor) Add(state *CallState) {
 			return nil
 		}
 
-		if log.SysLogger != nil {
-			log.SysLogger.WithContext(state.ctx).Debugf("RPC call takes more than %d seconds,method is %s",
-				int64(st.Timeout().Seconds()), st.Method())
-		}
-		rm.callTimeout(st)
+		st.SetResult(nil, def.ErrRPCCallTimeout)
+		st.Complete()
 		return nil
 	}, reqId)
 	if err != nil {
@@ -286,15 +291,6 @@ func (rm *RpcMonitor) Get(seqId uint64) *CallState {
 	}
 	b := rm.bucket(seqId)
 	return b.Get(seqId)
-}
-
-func (rm *RpcMonitor) callTimeout(state *CallState) {
-	state.SetResult(nil, def.ErrRPCCallTimeout)
-	if state.NeedCallback() {
-		state.dispatchCallbackEvent()
-		return
-	}
-	state.signalDone()
 }
 
 func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {

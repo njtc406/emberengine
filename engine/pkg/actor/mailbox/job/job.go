@@ -7,7 +7,6 @@ package job
 
 import (
 	"context"
-	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -28,7 +27,7 @@ type Job[T any] struct {
 	payload T
 
 	ctx      context.Context
-	deadline time.Time
+	deadline int64
 	mctx     inf.IMiddlewareContext
 }
 
@@ -44,7 +43,7 @@ func (j *Job[T]) SetContext(ctx context.Context) {
 	j.ctx = ctx
 }
 
-func (j *Job[T]) SetDeadline(t time.Time) {
+func (j *Job[T]) SetDeadline(t int64) {
 	j.deadline = t
 }
 
@@ -89,7 +88,7 @@ func (j *Job[T]) GetContext() context.Context {
 	return j.ctx
 }
 
-func (j *Job[T]) GetDeadline() time.Time {
+func (j *Job[T]) GetDeadline() int64 {
 	return j.deadline
 }
 
@@ -110,9 +109,9 @@ func NewRpcJob() *RpcJob {
 
 func (j *RpcJob) Release() {
 	// 先释放 payload (envelope)，避免 msgEnvelopePool 泄漏
-	if payload := j.GetPayload(); payload != nil {
-		payload.Release()
-	}
+	//if payload := j.GetPayload(); payload != nil {
+	//	payload.Release() // TODO 不应该释放,应该由业务自己控制数据的释放
+	//}
 	getMsgJobPool().Put(j)
 }
 

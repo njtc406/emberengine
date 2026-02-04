@@ -135,11 +135,10 @@ func BenchmarkRpcMonitor_CallTimeout_Sync(b *testing.B) {
 	benchInitMonitor()
 	b.ReportAllocs()
 
-	rm := GetRpcMonitor()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		st := NewCallState(context.Background(), uint64(i+1), "m", time.Second, nil, nil, nil)
-		rm.callTimeout(st)
+		st.Complete()
 		st.Wait()
 		if st.Error() != def.ErrRPCCallTimeout {
 			b.Fatal("unexpected error")
@@ -171,11 +170,10 @@ func BenchmarkRpcMonitor_CallTimeout_Async(b *testing.B) {
 	disp := &fakeDispatcher{mailbox: mb}
 	callbacks := []dto.CompletionFunc{func(ctx context.Context, resp interface{}, err error, params ...interface{}) {}}
 
-	rm := GetRpcMonitor()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		st := NewCallState(context.Background(), uint64(i+1), "m", time.Second, disp, callbacks, nil)
-		rm.callTimeout(st)
+		st.Complete()
 	}
 }
 

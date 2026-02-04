@@ -83,9 +83,9 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 		ctx:             ctx,
 		cancel:          cancel,
 		logger:          logger,
-		statsEnabled:    config.IsDebug(),
-		statsInterval:   10 * time.Second,
-		dispatchCnt:     make(map[int]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
+		//statsEnabled:    config.IsDebug(), // TODO 改成配置吧
+		statsInterval: 10 * time.Second,
+		dispatchCnt:   make(map[int]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
 	}
 }
 
@@ -365,7 +365,7 @@ func (p *WorkerPool) logDispatchStatsOnce() {
 		msg += "w" + itoa(items[i].id) + "=" + itoaU64(items[i].count)
 	}
 
-	p.logger.Infof(msg)
+	//p.logger.Infof(msg)
 }
 
 // 自动调整 worker 数量

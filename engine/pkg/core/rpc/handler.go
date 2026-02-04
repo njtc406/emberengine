@@ -18,7 +18,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 )
 
@@ -393,13 +392,13 @@ func (h *Handler) HandleResponse(ctx context.Context, envelope inf.IEnvelope) er
 		return nil
 	}
 
-	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
-	if state == nil {
+	cb, params := meta.GetCallback()
+	if cb == nil {
 		return nil
 	}
 
-	state.SetResult(data.GetResponse(), data.GetError())
-	state.Complete()
+	cb.DoCallback(ctx, data.GetResponse(), data.GetError(), params...)
+
 	return nil
 }
 

@@ -151,8 +151,10 @@ func (s *CallState) Complete() {
 		// 需要回调执行
 		envelopeResp := msgenvelope.NewMsgEnvelope()
 		meta := msgenvelope.NewMeta()
+		meta.SetCallbacks(s.callbacks, s.cbParams)
 		envelopeResp.SetMeta(meta)
 		data := msgenvelope.NewData()
+		data.SetReply()
 		data.SetResponse(s.Response())
 		data.SetError(s.Error())
 		envelopeResp.SetData(data)
@@ -164,28 +166,12 @@ func (s *CallState) Complete() {
 			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
 			rpcJob.Release()
 		}
+
+		// TODO 这两句有问题，异步call的时候也需要wait，
 		getCallStatePool().Put(s)
 		return
 	}
 	s.signalDone()
-}
-
-// dispatchCallbackEvent 用于超时/失败场景，需要投递到 mailbox 执行回调。
-//
-// 此方法在 monitor goroutine 或定时器 goroutine 中调用，需要投递事件到 service mailbox。
-func (s *CallState) dispatchCallbackEvent() {
-	if s.dispatcher == nil || s.dispatcher.IsClosed() {
-		getCallStatePool().Put(s)
-		return
-	}
-	// 使用 ConcurrentCallbackJob 包装投递
-	j := job.NewConcurrentCallbackJob()
-	j.SetContext(s.ctx)
-	j.SetPayload(s)
-	if err := s.dispatcher.PostJob(j); err != nil {
-		j.Release()
-		getCallStatePool().Put(s)
-	}
 }
 
 func (s *CallState) signalDone() {

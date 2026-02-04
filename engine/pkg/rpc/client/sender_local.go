@@ -12,7 +12,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/monitor"
 )
 
 // localSender 本地服务的Client
@@ -33,19 +32,6 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 		return def.ErrServiceIsClosedOrExited
 	}
 	if envelope == nil {
-		return nil
-	}
-
-	data := envelope.GetData()
-	if data != nil && data.IsReply() {
-		// 本地回复：这里使用的是新创建的 respEnv，处理完后需要释放
-		defer envelope.Release()
-		state := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId())
-		if state == nil {
-			return def.ErrEnvelopeNotFound
-		}
-		state.SetResult(data.GetResponse(), data.GetError())
-		state.Complete()
 		return nil
 	}
 
