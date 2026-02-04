@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
@@ -78,13 +77,6 @@ func (rc *rpcxSender) Close() {
 func (rc *rpcxSender) send(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if rc.IsClosed() {
 		return def.ErrRPCHadClosed
-	}
-
-	_, ok := ctx.Deadline()
-	if !ok {
-		newCtx, cancel := context.WithTimeout(ctx, config.GetDefaultRpcTimeout())
-		defer cancel()
-		ctx = newCtx
 	}
 
 	// 构建发送消息

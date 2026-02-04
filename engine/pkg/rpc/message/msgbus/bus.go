@@ -134,9 +134,11 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		timeout = def.DefaultRpcTimeout
 	}
 
+	newCtx := xcontext.NewWithCloneCtx(ctx)
+
 	mt := monitor.GetRpcMonitor()
 	reqId := mt.GenSeq()
-	state := monitor.NewCallState(ctx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
+	state := monitor.NewCallState(newCtx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
@@ -158,11 +160,11 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	mt.Add(state)
 
 	// 发送消息：调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+	if err := mb.receiver.Deliver(newCtx, envelope); err != nil {
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(ctx).Errorf(
+		log.SysLogger.WithContext(newCtx).Errorf(
 			"service[%s] send message[%s] request to client failed, error: %v",
 			mb.sender.GetPid().GetName(),
 			data.GetMethod(),
@@ -311,7 +313,7 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 		timeout = config.GetDefaultRpcTimeout()
 	}
 
-	// 处理ctx，只保留携带信息；但保留原deadline，避免外部ctx取消影响异步调用
+	// 处理ctx，只保留携带信息
 	newCtx := xcontext.NewWithCloneCtx(ctx)
 
 	mt := monitor.GetRpcMonitor()
@@ -442,7 +444,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	} else {
 		deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
 	}
-
+	newCtx := xcontext.NewWithCloneCtx(ctx)
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
 
@@ -463,7 +465,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	envelope.SetMeta(meta)
 
 	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+	if err := mb.receiver.Deliver(newCtx, envelope); err != nil {
 		envelope.Release()
 		return err
 	}

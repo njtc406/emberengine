@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -61,13 +60,6 @@ func (rc *grpcSender) Close() {
 func (rc *grpcSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	if rc.IsClosed() {
 		return def.ErrRPCHadClosed
-	}
-
-	_, ok := ctx.Deadline()
-	if !ok {
-		newCtx, cancel := context.WithTimeout(ctx, config.GetDefaultRpcTimeout())
-		defer cancel()
-		ctx = newCtx
 	}
 
 	// 构建发送消息
