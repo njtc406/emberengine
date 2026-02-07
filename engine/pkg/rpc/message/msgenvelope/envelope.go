@@ -51,6 +51,9 @@ func getMsgEnvelopePool() pool.IPool[*MsgEnvelope] {
 	return msgEnvelopePool
 }
 
+// MsgEnvelope 消息信封
+//
+// 作为信息传递的载体，包含了所有的调用信息
 type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!

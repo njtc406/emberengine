@@ -65,7 +65,7 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob
 
 	var ctxx *xcontext.XContext
 	var cancel context.CancelFunc
-
+	payload := job.GetJobPayload(mJob)
 	deadline := mJob.GetDeadline()
 	log.SysLogger.Debugf("------->deadline:%v", deadline)
 	if deadline > 0 {
@@ -96,11 +96,10 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob
 	// 等待完成或超时/取消
 	select {
 	case err := <-done:
-		payload := job.GetJobPayload(mJob)
 		log.SysLogger.Debugf("===============================1 job:%+v payload:%+v err:%v", mJob, payload, err)
 		return err
 	case <-ctxx.Done():
-		// 超时或被取消
+		// 超时或被取消 TODO 这里取消执行后，如果是call类型的，需要回复？
 		log.SysLogger.Debugf("===============================2 job:%+v", mJob)
 		return ctxx.Err()
 	}
