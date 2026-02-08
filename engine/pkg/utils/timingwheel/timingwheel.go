@@ -188,52 +188,78 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 		return
 	}
 
-	// 在执行前冻结snapGen，防止ABA问题
+	// 标记执行中，阻止 Reset() 在 runTimer 期间清理字段
+	if !t.executing.CompareAndSwap(false, true) {
+		// 已经在执行中
+		return
+	}
+	t.execWg.Add(1)
+
+	// 再次检查，防止 stop() 在 CAS 之前已完成
+	if !t.isActive() {
+		t.executing.Store(false)
+		t.execWg.Done()
+		return
+	}
+
+	// 在持锁期间快照拷贝所有需要的字段，后续只用快照值
+	// 这样即使 Timer 被并发取消/回收，快照值依然有效
 	t.snapGen.Store(t.generation.Load())
 	taskArgs := t.taskArgs
 	loop := t.loop
+	asyncTask := t.asyncTask
+	task := t.task
+	name := t.name
+	scheduler := t.taskScheduler
+	timerId := t.GetTimerId()
 
-	if t.asyncTask != nil {
+	// 释放执行锁（字段已快照完毕，后续不再直接读取 t 的可变字段）
+	t.executing.Store(false)
+	t.execWg.Done()
+
+	if asyncTask != nil {
 		// 异步任务,在独立goroutine中执行
-		asyncTask := t.asyncTask
 		go func() {
 			defer func() {
 				if err := recover(); err != nil {
 					if tw.logger != nil {
-						tw.logger.Errorf("task panic, task_name:%s, err:%v", t.name, err)
+						tw.logger.Errorf("task panic, task_name:%s, err:%v", name, err)
 					} else {
-						fmt.Printf("task panic, task_name:%s, err:%v\n", t.name, err)
+						fmt.Printf("task panic, task_name:%s, err:%v\n", name, err)
 					}
 				}
-				if loop == nil {
+				if loop == nil && scheduler != nil {
 					// 不是循环任务，释放
-					t.taskScheduler.CancelTimer(t.GetTimerId())
+					scheduler.CancelTimer(timerId)
 				}
 			}()
 			asyncTask(taskArgs...)
 		}()
-	} else if t.task != nil {
+	} else if task != nil {
 		// 同步任务,投递到callback channel,由消费者执行
+		if scheduler == nil {
+			return
+		}
 		select {
-		case t.taskScheduler.GetTimerCbChannel() <- t:
+		case scheduler.GetTimerCbChannel() <- t:
 			// 投递成功
 		default:
 			// 队列已满,本次不执行
 			if tw.logger != nil {
-				tw.logger.Errorf("task queue is full, task will not be executed, task_name:%s", t.name)
+				tw.logger.Errorf("task queue is full, task will not be executed, task_name:%s", name)
 			} else {
-				fmt.Printf("task queue is full, task will not be executed, task_name:%s\n", t.name)
+				fmt.Printf("task queue is full, task will not be executed, task_name:%s\n", name)
 			}
 			if loop == nil {
 				// 不是循环任务，释放
-				t.taskScheduler.CancelTimer(t.GetTimerId())
+				scheduler.CancelTimer(timerId)
 			}
 		}
 	}
 
-	if runLoop && t.loop != nil {
-		// 循环任务,再次加入
-		t.loop()
+	if runLoop && loop != nil {
+		// 循环任务,再次加入（使用快照的 loop，即使 t.loop 已被清空也安全）
+		loop()
 	}
 }
 
@@ -361,7 +387,9 @@ func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
 	t.loop = func() {
 		// 如果timingwheel已关闭，不能添加任务
 		if tw.closed.Load() {
-			t.taskScheduler.CancelTimer(t.GetTimerId())
+			if t.taskScheduler != nil {
+				t.taskScheduler.CancelTimer(t.GetTimerId())
+			}
 			return
 		}
 		if !t.isActive() {
@@ -376,7 +404,9 @@ func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
 				expiration = t.Next(now)
 				if expiration.IsZero() {
 					// 无法计算出有效的下次执行时间，取消定时器
-					t.taskScheduler.CancelTimer(t.GetTimerId())
+					if t.taskScheduler != nil {
+						t.taskScheduler.CancelTimer(t.GetTimerId())
+					}
 					return
 				}
 			}

@@ -14,11 +14,16 @@ import (
 type IRpcDispatcher interface {
 	IMailboxChannel
 
-	// Deliver 投递一条 envelope。
+	// DeliverRequest 投递一条请求 envelope 到目标服务。
 	// 语义：调用方在调用后不得再使用该 envelope（所有权转移）。
-	// 本地路径：通常会 PostJob 到对端 mailbox，由对端处理后 Release。
+	// 本地路径：PostJob 到对端 mailbox，由对端处理后 Release。
 	// 远端路径：发送完成后由 sender 负责 Release。
-	Deliver(ctx context.Context, envelope IEnvelope) error
+	DeliverRequest(ctx context.Context, envelope IEnvelope) error
+
+	// DeliverResponse 投递一条回复 envelope 给调用方。
+	// 本地路径：直接唤醒同步 Call 的等待方，或投递异步回调到 mailbox。
+	// 远端路径：序列化后通过网络发送回调用节点。
+	DeliverResponse(ctx context.Context, envelope IEnvelope) error
 
 	IActor
 	Close()
@@ -27,9 +32,14 @@ type IRpcDispatcher interface {
 
 // TODO 还有优化空间,可以参考grpc.ClientConnInterface
 type IRpcSender interface {
-	// Deliver 由具体 sender 将 envelope 投递到 dispatcher 指向的目标。
-	// 语义同 IRpcDispatcher.Deliver：调用后 envelope 所有权转移。
-	Deliver(ctx context.Context, dispatcher IRpcDispatcher, envelope IEnvelope) error
+	// DeliverRequest 将请求 envelope 投递到 dispatcher 指向的目标服务。
+	// 调用后 envelope 所有权转移。
+	DeliverRequest(ctx context.Context, dispatcher IRpcDispatcher, envelope IEnvelope) error
+
+	// DeliverResponse 将回复 envelope 投递回调用方。
+	// 本地路径负责处理 CallState 唤醒；远端路径通过网络发回。
+	DeliverResponse(ctx context.Context, dispatcher IRpcDispatcher, envelope IEnvelope) error
+
 	Close()
 	IsClosed() bool
 }

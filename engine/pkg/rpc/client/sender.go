@@ -119,19 +119,29 @@ func (c *Dispatcher) IsClosed() bool {
 	return c.pid == nil
 }
 
-func (c *Dispatcher) Deliver(ctx context.Context, envelope inf.IEnvelope) error {
-	if c.pid == nil {
-		return def.ErrServiceNotFound
-	}
-
+func (c *Dispatcher) getSender() inf.IRpcSender {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
 			c.localHandler = senderMap[def.RpcTypeLocal]("")
 		}
-		return c.localHandler.Deliver(ctx, c, envelope)
+		return c.localHandler
 	}
-	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType()).Deliver(ctx, c, envelope)
+	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType())
+}
+
+func (c *Dispatcher) DeliverRequest(ctx context.Context, envelope inf.IEnvelope) error {
+	if c.pid == nil {
+		return def.ErrServiceNotFound
+	}
+	return c.getSender().DeliverRequest(ctx, c, envelope)
+}
+
+func (c *Dispatcher) DeliverResponse(ctx context.Context, envelope inf.IEnvelope) error {
+	if c.pid == nil {
+		return def.ErrServiceNotFound
+	}
+	return c.getSender().DeliverResponse(ctx, c, envelope)
 }
 
 func NewDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {

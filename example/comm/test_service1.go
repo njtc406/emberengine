@@ -40,11 +40,11 @@ func (s *Service1) OnInit() error {
 		// 调用Service2.APITest2
 		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second)
 		defer cancel()
-		// 获取消息总线
+		//// 获取消息总线
 		bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithPartition(1))
 		defer bus.Release()
-
-		// 发送消息
+		//
+		//// 发送消息
 		var out int
 		if err := bus.CallWithOpt(
 			ctxWithTimeout,
@@ -57,27 +57,28 @@ func (s *Service1) OnInit() error {
 		}
 		s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
 		//
-		//s.WithContext(ctxWithTimeout).State().Debugf("==========================================1111")
-		//if err := bus.SendWithOpt(
-		//	ctxWithTimeout,
-		//	dto.WithNotRecycle(),
-		//	dto.WithMethod("APITest2"),
-		//); err != nil {
-		//	s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
-		//}
-		//s.WithContext(ctxWithTimeout).State().Debugf("==========================================2222")
-		//if _, err := bus.AsyncCallWithOpt(
-		//	ctxWithTimeout, // 这里使用timeout的ctx会有问题，因为是异步，如果这里调用结束ctx就释放了，会导致任务被直接取消
-		//	dto.WithNotRecycle(),
-		//	dto.WithMethod("APISum"),
-		//	dto.WithIn([]interface{}{1, 2}),
-		//	dto.WithCallbacks(func(ctx context.Context, data interface{}, err error, params ...interface{}) {
-		//		s.WithContext(ctx).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
-		//	}),
-		//); err != nil {
-		//	s.WithContext(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
-		//}
-		//s.WithContext(ctxWithTimeout).State().Debugf("==========================================33333")
+		s.WithContext(ctxWithTimeout).State().Debugf("==========================================1111")
+		if err := bus.SendWithOpt(
+			ctxWithTimeout,
+			dto.WithNotRecycle(),
+			dto.WithMethod("APISum"),
+			dto.WithIn([]interface{}{2, 3}),
+		); err != nil {
+			s.WithContext(ctxWithTimeout).Errorf("call Service2.APITest2 failed, err:%v", err)
+		}
+		s.WithContext(ctxWithTimeout).State().Debugf("==========================================2222")
+		if _, err := bus.AsyncCallWithOpt(
+			ctxWithTimeout, // 这里使用timeout的ctx会有问题，因为是异步，如果这里调用结束ctx就释放了，会导致任务被直接取消
+			dto.WithNotRecycle(),
+			dto.WithMethod("APISum"),
+			dto.WithIn([]interface{}{4, 5}),
+			dto.WithCallbacks(func(ctx context.Context, data interface{}, err error, params ...interface{}) {
+				s.WithContext(ctx).Debugf("******async call Service2.APISum callback, data:%v, err:%v, params:%v", data, err, params)
+			}),
+		); err != nil {
+			s.WithContext(ctxWithTimeout).Errorf("loop call Service2.APITest2 failed, err:%v", err)
+		}
+		s.WithContext(ctxWithTimeout).State().Debugf("==========================================33333")
 
 		// 循环call
 		//for i := 0; i < 10; i++ {

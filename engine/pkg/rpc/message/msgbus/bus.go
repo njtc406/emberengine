@@ -134,9 +134,11 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		timeout = def.DefaultRpcTimeout
 	}
 
+	newCtx := xcontext.NewWithCloneCtx(ctx)
+
 	mt := monitor.GetRpcMonitor()
 	reqId := mt.GenSeq()
-	state := monitor.NewCallState(ctx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
+	state := monitor.NewCallState(newCtx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
 
 	// 创建请求
 	envelope := msgenvelope.NewMsgEnvelope()
@@ -154,15 +156,15 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 
 	//log.SysLogger.Debugf("call envelope: %+v", envelope)
 
-	// 加入等待队列（仅保存 CallState，不再跨 goroutine 传递可释放 envelope）
+	// 加入等待队列
 	mt.Add(state)
 
 	// 发送消息：调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+	if err := mb.receiver.DeliverRequest(newCtx, envelope); err != nil {
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(ctx).Errorf(
+		log.SysLogger.WithContext(newCtx).Errorf(
 			"service[%s] send message[%s] request to client failed, error: %v",
 			mb.sender.GetPid().GetName(),
 			data.GetMethod(),
@@ -171,7 +173,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		return def.ErrRPCCallFailed
 	}
 
-	// 等待回复（由 CallState 唤醒）
+	// 等待回复
 	state.Wait()
 
 	if err := state.Error(); err != nil {
@@ -340,7 +342,7 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 	mt.Add(state)
 
 	// 发送消息：调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	if err := mb.receiver.Deliver(newCtx, envelope); err != nil {
+	if err := mb.receiver.DeliverRequest(newCtx, envelope); err != nil {
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
@@ -466,7 +468,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	envelope.SetMeta(meta)
 
 	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
-	if err := mb.receiver.Deliver(ctx, envelope); err != nil {
+	if err := mb.receiver.DeliverRequest(ctx, envelope); err != nil {
 		envelope.Release()
 		return err
 	}

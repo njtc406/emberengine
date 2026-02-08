@@ -131,7 +131,7 @@ func newBenchRPCPair() benchRPCPair {
 			data.SetReply()
 			data.SetNeedResponse(false)
 			if meta := env.GetMeta(); meta != nil && meta.GetDispatcher() != nil {
-				_ = meta.GetDispatcher().Deliver(ctx, env)
+				_ = meta.GetDispatcher().DeliverResponse(ctx, env)
 			}
 			return
 		}

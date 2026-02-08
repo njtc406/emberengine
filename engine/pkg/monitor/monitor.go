@@ -233,15 +233,15 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	reqId := state.ReqID()
 	timeout := state.Timeout()
 	method := state.Method()
-	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(ctx context.Context, tm *timingwheel.Timer, args ...interface{}) error {
+	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(_ context.Context, tm *timingwheel.Timer, args ...interface{}) error {
 		defer func() {
 			if log.SysLogger != nil {
 				log.SysLogger.WithContext(state.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
-					timeout.Seconds(), method)
+					timeout.Milliseconds(), method)
 			}
 		}()
 		seq := args[0].(uint64)
-		st := rm.Remove(seq)
+		st := rm.remove(seq) // 这里只需要移除monitor,不需要取消timer,timer已经触发了
 		if st == nil {
 			// 已经删除
 			return nil
@@ -257,7 +257,7 @@ func (rm *RpcMonitor) Add(state *CallState) {
 		}
 		// 无法加入 monitor：避免 Call 永久阻塞 / AsyncCall 永远不回调。
 		state.SetResult(nil, err)
-		state.Complete() // TODO 这里需要考虑异步调用是否需要通知回复
+		state.Complete()
 		return
 	}
 	state.setTimerID(timerId)
@@ -265,7 +265,7 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	b.Add(reqId, state)
 }
 
-func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
+func (rm *RpcMonitor) remove(seqId uint64) *CallState {
 	if rm.isClosed() {
 		return nil
 	}
@@ -273,7 +273,11 @@ func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
 		return nil
 	}
 	b := rm.bucket(seqId)
-	state := b.Del(seqId)
+	return b.Del(seqId)
+}
+
+func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
+	state := rm.remove(seqId)
 	if state != nil {
 		if rm.sd != nil && !rm.isClosed() {
 			rm.sd.CancelTimer(state.timerId())

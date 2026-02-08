@@ -167,7 +167,7 @@ func (t *Timer) Do(ctx context.Context) (err error) {
 		t.executing.Store(false)
 		t.execWg.Done()
 		// 不是循环任务, 执行完成后停止（循环任务会在timingwheel的addorrun弹出时就重新添加）
-		if t.loop == nil && !errors.Is(err, def.ErrTimerReuse) { // timer被复用时不能停止
+		if t.loop == nil && !errors.Is(err, def.ErrTimerReuse) && t.taskScheduler != nil { // timer被复用时不能停止
 			t.taskScheduler.CancelTimer(t.timerId)
 		}
 	}()

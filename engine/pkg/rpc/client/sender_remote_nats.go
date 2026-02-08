@@ -192,7 +192,12 @@ func (rc *natsSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	return conn.Publish(def.NatsDefaultTopic+meta.GetReceiverPid().GetNodeUid(), data)
 }
 
-func (rc *natsSender) Deliver(ctx context.Context, _ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *natsSender) DeliverRequest(ctx context.Context, _ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+	defer envelope.Release()
+	return rc.send(ctx, envelope)
+}
+
+func (rc *natsSender) DeliverResponse(ctx context.Context, _ inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
 	return rc.send(ctx, envelope)
 }

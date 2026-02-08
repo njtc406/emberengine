@@ -16,7 +16,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -65,19 +64,15 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob
 
 	var ctxx *xcontext.XContext
 	var cancel context.CancelFunc
-	payload := job.GetJobPayload(mJob)
 	deadline := mJob.GetDeadline()
-	log.SysLogger.Debugf("------->deadline:%v", deadline)
 	if deadline > 0 {
 		deadlineTime := time.Unix(deadline, 0)
 		timeout := deadlineTime.Sub(timelib.Now())
 		if timeout <= 0 {
 			return def.ErrJobTimeout
 		}
-		log.SysLogger.Debugf("------->timeout:%v", timeout)
 		ctxx, cancel = xcontext.NewWithTimeout(ctx, timeout)
 	} else {
-		log.SysLogger.Debugf("------->no deadline")
 		ctxx, cancel = xcontext.NewWithCancel(ctx)
 	}
 	defer cancel()
@@ -96,11 +91,8 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob
 	// 等待完成或超时/取消
 	select {
 	case err := <-done:
-		log.SysLogger.Debugf("===============================1 job:%+v payload:%+v err:%v", mJob, payload, err)
 		return err
 	case <-ctxx.Done():
-		// 超时或被取消 TODO 这里取消执行后，如果是call类型的，需要回复？
-		log.SysLogger.Debugf("===============================2 job:%+v", mJob)
 		return ctxx.Err()
 	}
 }

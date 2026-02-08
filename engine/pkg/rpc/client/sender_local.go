@@ -12,6 +12,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/monitor"
 )
 
 // localSender 本地服务的Client
@@ -27,7 +28,8 @@ func (lc *localSender) Close() {
 	atomic.StoreInt32(&lc.closed, 1)
 }
 
-func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+// DeliverRequest 将请求投递到目标服务的 mailbox。
+func (lc *localSender) DeliverRequest(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if lc == nil || lc.IsClosed() {
 		return def.ErrServiceIsClosedOrExited
 	}
@@ -47,6 +49,50 @@ func (lc *localSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatche
 		rpcJob.Release()
 		return err
 	}
+	return nil
+}
+
+// DeliverResponse 处理回复信息：唤醒同步 Call 等待方，或投递异步回调到调用方 mailbox。
+func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+	if lc == nil || lc.IsClosed() {
+		return def.ErrServiceIsClosedOrExited
+	}
+	if envelope == nil {
+		return nil
+	}
+
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
+	if meta == nil || data == nil {
+		return def.ErrRpcMsgMetaOrDataIsNil
+	}
+
+	// 移除 monitor 监听
+	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
+	if state != nil {
+		if state.NeedCallback() {
+			// 异步回调：将 callback 信息写入 envelope meta，投递到调用方 mailbox 执行
+			meta.SetCallbacks(state.GetCallbacks())
+			rpcJob := job.NewRpcJob()
+			rpcJob.SetContext(ctx)
+			rpcJob.SetPayload(envelope)
+			rpcJob.SetPriority(envelope.GetPriority())
+			rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
+			rpcJob.SetDeadline(meta.GetDeadline())
+			if err := dispatcher.PostJob(rpcJob); err != nil {
+				rpcJob.Release()
+				return err
+			}
+			return nil
+		}
+
+		// 同步 Call：直接设置结果并唤醒等待方
+		state.SetResult(data.GetResponse(), data.GetError())
+		state.Complete()
+	}
+
+	// state 为 nil 说明已超时被清除，直接释放回复 envelope
+	envelope.Release()
 	return nil
 }
 

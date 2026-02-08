@@ -372,7 +372,7 @@ func (h *Handler) doResponse(ctx context.Context, envelope inf.IEnvelope) {
 	respMeta.SetDispatcher(dispatcher)
 	respEnv.SetMeta(respMeta)
 
-	if err := dispatcher.Deliver(ctx, respEnv); err != nil {
+	if err := dispatcher.DeliverResponse(ctx, respEnv); err != nil {
 		h.WithContext(ctx).Errorf("service[%s] send response failed: %v", h.GetModuleName(), err)
 		respEnv.Release()
 	}

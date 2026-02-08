@@ -111,7 +111,12 @@ func (rc *rpcxSender) send(ctx context.Context, dispatcher inf.IRpcDispatcher, e
 	return nil
 }
 
-func (rc *rpcxSender) Deliver(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+func (rc *rpcxSender) DeliverRequest(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+	defer envelope.Release()
+	return rc.send(ctx, dispatcher, envelope)
+}
+
+func (rc *rpcxSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	defer envelope.Release()
 	return rc.send(ctx, dispatcher, envelope)
 }

@@ -167,7 +167,6 @@ func (s *CallState) Complete() {
 			rpcJob.Release()
 		}
 
-		// TODO 这两句有问题，异步call的时候也需要wait，
 		getCallStatePool().Put(s)
 		return
 	}
@@ -190,6 +189,10 @@ func (s *CallState) DoCallback(ctx context.Context) {
 	for _, cb := range s.callbacks {
 		cb(ctx, s.resp, s.err, s.cbParams...)
 	}
+}
+
+func (s *CallState) GetCallbacks() ([]dto.CompletionFunc, []interface{}) {
+	return s.callbacks, s.cbParams
 }
 
 // Release 仅用于同步 Call 路径：调用方在 Wait 结束后手动释放。
