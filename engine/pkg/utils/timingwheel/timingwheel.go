@@ -38,9 +38,10 @@ type TimingWheel struct {
 	timeOffsetNs atomic.Int64
 
 	// adjustMu 保护时间偏移调整操作
-	adjusting     atomic.Bool // 是否正在调整时间偏移
-	pendingTimers chan *Timer // 时间调整期间的待处理 timer 缓冲队列
-	adjustMu      sync.Mutex  // 保护整个调整过程，确保串行执行
+	adjusting     *atomic.Bool  // 是否正在调整时间偏移（所有层级共享顶层指针）
+	pendingTimers chan *Timer   // 时间调整期间的待处理 timer 缓冲队列（所有层级共享顶层 channel）
+	adjustDone    chan struct{} // adjusting 结束时广播通知，替代 busy-wait
+	adjustMu      sync.Mutex    // 保护整个调整过程，确保串行执行
 }
 
 // NewTimingWheel 使用指定的刻度和轮大小创建一个 TimingWheel 实例。
@@ -87,6 +88,9 @@ func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqu
 	for i := range buckets {
 		buckets[i] = newBucket()
 	}
+	adjustingFlag := new(atomic.Bool)
+	pendingCh := make(chan *Timer, 10000)
+	adjustDoneCh := make(chan struct{})
 	return &TimingWheel{
 		tick:          tickMs,
 		wheelSize:     wheelSize,
@@ -97,8 +101,33 @@ func newTimingWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqu
 		exitC:         make(chan struct{}),
 		logger:        logger,
 		closed:        closed,
-		pendingTimers: make(chan *Timer, 10000), // 缓冲队列，容量可配置
+		adjusting:     adjustingFlag,
+		pendingTimers: pendingCh,
+		adjustDone:    adjustDoneCh,
 		// timeOffsetNs 默认为0，无需显式初始化
+	}
+}
+
+// newOverflowWheel 创建 overflow wheel，共享父层的 adjusting/pendingTimers/adjustDone，
+// 避免 overflow wheel 的 add() 绕过顶层的 adjusting 保护。
+func newOverflowWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue, logger log.ILoggerX, closed *atomic.Bool, adjusting *atomic.Bool, pendingTimers chan *Timer, adjustDone chan struct{}) *TimingWheel {
+	buckets := make([]*bucket, wheelSize)
+	for i := range buckets {
+		buckets[i] = newBucket()
+	}
+	return &TimingWheel{
+		tick:          tickMs,
+		wheelSize:     wheelSize,
+		currentTime:   truncate(startMs, tickMs),
+		interval:      tickMs * wheelSize,
+		buckets:       buckets,
+		queue:         queue,
+		exitC:         make(chan struct{}),
+		logger:        logger,
+		closed:        closed,
+		adjusting:     adjusting,
+		pendingTimers: pendingTimers,
+		adjustDone:    adjustDone,
 	}
 }
 
@@ -115,15 +144,11 @@ func (tw *TimingWheel) add(t *Timer) bool {
 		case tw.pendingTimers <- t:
 			return true // 已加入缓冲队列
 		default:
-			// 缓冲队列已满,等待adjusting标志重置后重试
-			// 由于SetTimeOffset会持有adjustMu写锁,这里只需等待标志重置即可
+			// 缓冲队列已满，等待 adjusting 完成再重试（使用 channel 通知替代 busy-wait）
 			if tw.logger != nil {
 				tw.logger.Warnf("[TimingWheel] Pending timer queue is full, waiting for SetTimeOffset to complete")
 			}
-			// 等待调整完成
-			for tw.adjusting.Load() {
-				time.Sleep(time.Millisecond)
-			}
+			<-tw.adjustDone
 			// 调整完成后再次尝试
 			return tw.addInternal(t)
 		}
@@ -163,21 +188,25 @@ func (tw *TimingWheel) addInternal(t *Timer) bool {
 		// Out of the interval. Put it into the overflow wheel
 		overflowWheel := atomic.LoadPointer(&tw.overflowWheel)
 		if overflowWheel == nil {
+			childWheel := newOverflowWheel(
+				tw.interval,
+				tw.wheelSize,
+				currentTime,
+				tw.queue,
+				tw.logger,
+				tw.closed,
+				tw.adjusting,
+				tw.pendingTimers,
+				tw.adjustDone,
+			)
 			atomic.CompareAndSwapPointer(
 				&tw.overflowWheel,
 				nil,
-				unsafe.Pointer(newTimingWheel(
-					tw.interval,
-					tw.wheelSize,
-					currentTime,
-					tw.queue,
-					tw.logger,
-					tw.closed,
-				)),
+				unsafe.Pointer(childWheel),
 			)
 			overflowWheel = atomic.LoadPointer(&tw.overflowWheel)
 		}
-		return (*TimingWheel)(overflowWheel).add(t)
+		return (*TimingWheel)(overflowWheel).addInternal(t)
 	}
 }
 
@@ -240,21 +269,35 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 		if scheduler == nil {
 			return
 		}
-		select {
-		case scheduler.GetTimerCbChannel() <- t:
-			// 投递成功
-		default:
-			// 队列已满,本次不执行
-			if tw.logger != nil {
-				tw.logger.Errorf("task queue is full, task will not be executed, task_name:%s", name)
-			} else {
-				fmt.Printf("task queue is full, task will not be executed, task_name:%s\n", name)
+
+		// P1#6: 防止往已关闭的 channel 发送导致 panic。
+		// jobScheduler.Stop() 会先设置 closed=1 再 close(c)，
+		// 但 runTimer 使用的是快照 scheduler，时序上仍可能在 close 后投递。
+		// 使用 defer/recover 作为最终安全网。
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if tw.logger != nil {
+						tw.logger.Warnf("send to closed scheduler channel, task_name:%s, recover:%v", name, r)
+					}
+				}
+			}()
+			select {
+			case scheduler.GetTimerCbChannel() <- t:
+				// 投递成功
+			default:
+				// 队列已满,本次不执行
+				if tw.logger != nil {
+					tw.logger.Errorf("task queue is full, task will not be executed, task_name:%s", name)
+				} else {
+					fmt.Printf("task queue is full, task will not be executed, task_name:%s\n", name)
+				}
+				if loop == nil {
+					// 不是循环任务，释放
+					scheduler.CancelTimer(timerId)
+				}
 			}
-			if loop == nil {
-				// 不是循环任务，释放
-				scheduler.CancelTimer(timerId)
-			}
-		}
+		}()
 	}
 
 	if runLoop && loop != nil {
@@ -291,7 +334,13 @@ func (tw *TimingWheel) addOrRunDirect(t *Timer) {
 }
 
 func (tw *TimingWheel) genTimerId() uint64 {
-	return atomic.AddUint64(&tw.timerIdSeed, 1)
+	for {
+		id := atomic.AddUint64(&tw.timerIdSeed, 1)
+		if id != 0 {
+			return id
+		}
+		// uint64 溢出回 0 时跳过，因为 CancelTimer(0) 是 no-op
+	}
 }
 
 // getNow 以无锁方式返回应用偏移后的当前时间
@@ -437,7 +486,13 @@ func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
 
 	// 设置调整标志,阻止新的timer直接插入
 	tw.adjusting.Store(true)
-	defer tw.adjusting.Store(false)
+	defer func() {
+		tw.adjusting.Store(false)
+		// 广播通知所有等待者（替代 busy-wait）
+		close(tw.adjustDone)
+		// 重新创建 channel 供下次使用
+		tw.adjustDone = make(chan struct{})
+	}()
 
 	// 原子读取旧的offset并计算差值
 	oldOffsetNs := tw.timeOffsetNs.Load()
@@ -571,30 +626,31 @@ func (tw *TimingWheel) adjustOffsetInternal(offsetMs int64) {
 // processPendingTimers 处理缓冲队列中所有累积的pending timers
 // 此方法会持续排空队列,直到没有新的timer为止
 func (tw *TimingWheel) processPendingTimers() {
-	// 持续排空,直到队列为空且短时间内没有新的timer进入
+	// 持续排空，直到队列为空且短时间内没有新的 timer 进入
 	for {
 		processed := 0
-		// 一次性处理当前队列中的所有timer
+		// 一次性处理当前队列中的所有 timer
+	drain:
 		for {
 			select {
 			case pendingTimer := <-tw.pendingTimers:
-				// 使用普通的add方法,此时adjusting已经是false
-				tw.addOrRun(pendingTimer)
+				// 使用 addOrRunDirect 跳过 adjusting 检查，因为 processPendingTimers
+				// 在 adjusting=true 期间被调用，若用 addOrRun 会再次放入 pendingTimers 死循环
+				tw.addOrRunDirect(pendingTimer)
 				processed++
 			default:
-				// 队列已空,退出内层循环
-				goto CHECK
+				// 队列已空，退出内层循环
+				break drain
 			}
 		}
-	CHECK:
 		if processed == 0 {
-			// 本轮没有处理任何timer,说明队列已空
+			// 本轮没有处理任何 timer，说明队列已空
 			break
 		}
-		if tw.logger != nil && processed > 0 {
+		if tw.logger != nil {
 			tw.logger.Infof("[TimingWheel] Processed %d pending timers", processed)
 		}
-		// 继续下一轮,确保处理期间新进入的timer
+		// 继续下一轮，确保处理期间新进入的 timer
 	}
 }
 

@@ -152,11 +152,13 @@ func (dq *DelayQueue) Poll(exitC chan struct{}, nowF func() int64) {
 				}
 			} else if delta > 0 {
 				// At least one item is pending.
+				delayTimer := time.NewTimer(time.Duration(delta) * time.Millisecond)
 				select {
 				case <-dq.wakeupC:
 					// A new item with an "earlier" expiration than the current "earliest" one is added.
+					delayTimer.Stop()
 					continue
-				case <-time.After(time.Duration(delta) * time.Millisecond):
+				case <-delayTimer.C:
 					// The current "earliest" item expires.
 
 					// Reset the sleeping state since there's no need to receive from wakeupC.
@@ -167,6 +169,7 @@ func (dq *DelayQueue) Poll(exitC chan struct{}, nowF func() int64) {
 					}
 					continue
 				case <-exitC:
+					delayTimer.Stop()
 					goto exit
 				}
 			}

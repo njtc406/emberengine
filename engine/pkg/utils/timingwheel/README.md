@@ -65,13 +65,6 @@ defer scheduler.Stop()
 #### 一次性定时器
 
 ```go
-// 不保存的定时器（无法通过ID取消）
-timer := scheduler.AfterFunc(time.Second*5, "myTimer", 
-    func(t *timingwheel.Timer, args ...interface{}) {
-        fmt.Println("Timer fired!")
-    }, "arg1", "arg2")
-
-// 保存的定时器（返回ID，可通过ID取消）
 timerId, err := scheduler.AfterFunc(time.Second*5, "myTimer",
     func(t *timingwheel.Timer, args ...interface{}) {
         fmt.Println("Timer fired!")
@@ -83,12 +76,6 @@ timerId, err := scheduler.AfterFunc(time.Second*5, "myTimer",
 ```go
 // 每5秒执行一次
 timer := scheduler.TickerFunc(time.Second*5, "tickerTimer",
-    func(t *timingwheel.Timer, args ...interface{}) {
-        fmt.Println("Tick!")
-    })
-
-// 保存的循环定时器
-timerId, err := scheduler.TickerFunc(time.Second*5, "tickerTimer",
     func(t *timingwheel.Timer, args ...interface{}) {
         fmt.Println("Tick!")
     })
@@ -126,9 +113,6 @@ timer := scheduler.AfterAsyncFunc(time.Second*5, "asyncTimer",
 ```go
 // 通过ID取消
 scheduler.CancelTimer(timerId)
-
-// 或直接调用Timer的Stop方法
-timer.Stop()
 ```
 
 ### 5. 监听回调（Service集成）
