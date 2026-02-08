@@ -140,6 +140,10 @@ func (scheduler *jobScheduler) getShard(timerId uint64) *timerBucket {
 }
 
 func (scheduler *jobScheduler) add(t *Timer) bool {
+	// P1#6: 调度器已关闭，拒绝添加
+	if scheduler.isClosed() {
+		return false
+	}
 
 	if !t.isActive() {
 		// 任务已经被取消
@@ -164,6 +168,11 @@ func (scheduler *jobScheduler) remove(taskId uint64) *Timer {
 
 func (scheduler *jobScheduler) GetTimerCbChannel() chan ITimer {
 	return scheduler.c
+}
+
+// isClosed 返回调度器是否已关闭
+func (scheduler *jobScheduler) isClosed() bool {
+	return atomic.LoadInt32(&scheduler.closed) == 1
 }
 
 // AfterFunc 延时任务
@@ -307,14 +316,23 @@ func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
 
 func (scheduler *jobScheduler) Stop() {
 	atomic.StoreInt32(&scheduler.closed, 1)
+
+	// 先在锁内收集所有 timer，再在锁外释放，避免 releaseTimer → stop → execWg.Wait
+	// 与正在执行的 Do() → CancelTimer → shard.Lock 形成死锁。
+	var toRelease []*Timer
 	for _, shard := range scheduler.shards {
 		shard.Lock()
 		for timerId, t := range shard.tasks {
-			scheduler.releaseTimer(t)
+			toRelease = append(toRelease, t)
 			delete(shard.tasks, timerId)
 		}
 		shard.Unlock()
 	}
+
+	for _, t := range toRelease {
+		scheduler.releaseTimer(t)
+	}
+
 	close(scheduler.c)
 }
 
@@ -328,6 +346,10 @@ func (scheduler *jobScheduler) releaseTimer(t *Timer) {
 	if t.IsRef() {
 		// 防止重复释放
 		t.stop()
-		scheduler.timerPool.Put(t)
+		// 异步放回池中：pool.Put → Reset → execWg.Wait 可能阻塞（如 runTimer 正在
+		// 快照字段），若在 Do() 回调链中同步调用会导致死锁。异步化后不阻塞调用方。
+		go func() {
+			scheduler.timerPool.Put(t)
+		}()
 	}
 }

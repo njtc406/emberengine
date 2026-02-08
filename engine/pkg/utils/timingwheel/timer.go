@@ -68,6 +68,11 @@ func (t *Timer) Reset() {
 	// 递增版本号，使得旧的引用失效
 	t.generation.Add(1)
 
+	// 安全地将 timer 从所属 bucket 中移除（通过 b.mu 保护 element 的读写）
+	for b := t.getBucket(); b != nil; b = t.getBucket() {
+		b.Remove(t)
+	}
+
 	t.name = ""
 	t.timerId = 0
 	t.expiration.Store(0)
@@ -81,23 +86,40 @@ func (t *Timer) Reset() {
 	t.taskScheduler = nil
 	t.loop = nil
 	t.asyncTask = nil
-	t.b = nil
-	t.element = nil
 }
 
 func (t *Timer) GetName() string {
 	if !t.isActive() {
 		return ""
 	}
-	// TODO 这里实际上有风险，需要修改一下,并发时会出现data race
-	if t.name != "" {
-		return t.name
+	// 并发安全地读取字段，防止与 Reset() 产生 data race。
+	// 场景1: 在 Do() 回调内调用 → executing 已经是 true，Reset 会被 execWg.Wait 阻塞，字段安全。
+	// 场景2: 外部调用 → 通过 CAS 短暂持有 executing 锁来保护字段读取。
+	needRelease := false
+	if !t.executing.Load() {
+		// 外部调用，尝试 CAS 保护
+		if !t.executing.CompareAndSwap(false, true) {
+			// CAS 失败说明正在 Reset 或其他操作中
+			return ""
+		}
+		needRelease = true
 	}
-	if t.task != nil {
-		return runtime.FuncForPC(reflect.ValueOf(t.task).Pointer()).Name()
+	// 此时 executing=true，Reset 不会修改字段
+	name := t.name
+	task := t.task
+	asyncTask := t.asyncTask
+	if needRelease {
+		t.executing.Store(false)
 	}
-	if t.asyncTask != nil {
-		return runtime.FuncForPC(reflect.ValueOf(t.asyncTask).Pointer()).Name()
+
+	if name != "" {
+		return name
+	}
+	if task != nil {
+		return runtime.FuncForPC(reflect.ValueOf(task).Pointer()).Name()
+	}
+	if asyncTask != nil {
+		return runtime.FuncForPC(reflect.ValueOf(asyncTask).Pointer()).Name()
 	}
 
 	return ""
@@ -131,8 +153,9 @@ func (t *Timer) stop() bool {
 		return false
 	}
 
-	// 等待正在执行的任务完成（使用WaitGroup，避免忙等待）
-	t.execWg.Wait()
+	// 不再等待 execWg：stop() 可能从 Do() 回调链中被调用（如 CancelTimer），
+	// 此时等待 execWg 会导致死锁。cancel 标志已设置，Do() 会在后续检查中发现
+	// 并提前返回。Reset()（池回收时）仍会等待 execWg 确保安全。
 
 	stopped := false
 	for b := t.getBucket(); b != nil; b = t.getBucket() {
