@@ -12,7 +12,7 @@ TimingWheel 是一个基于时间轮算法的高性能定时器库，专为多�
 - ✅ **ABA问题防护** - 通过generation版本号机制防止对象复用导致的错误执行
 - ✅ **多种定时器类型** - 支持一次性定时器、循环定时器、Cron表达式定时器
 - ✅ **异步执行支持** - 支持在独立goroutine中执行任务
-- ✅ **时间调整支持** - 开发环境支持时间调整,所有定时器自动重算(仅开发环境)
+- ✅ **时间偏移支持** - 开发环境支持时间偏移调整,所有定时器自动重算(仅开发环境)
 
 ## 架构设计
 
@@ -40,23 +40,42 @@ TimingWheel 是一个基于时间轮算法的高性能定时器库，专为多�
 ### 1. 初始化全局时间轮
 
 ```go
-import "github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+import (
+    "time"
+    "github.com/njtc406/emberengine/engine/pkg/log"
+    "github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+)
+
+// 创建日志器（可选，传 nil 会使用默认日志器）
+logger, _ := log.NewDefaultLogger(nil)
 
 // 启动全局时间轮
 // interval: 时间轮的tick间隔
 // wheelSize: 时间轮的槽位数量
-timingwheel.Start(time.Millisecond, 20)
+// logger: 日志器
+timingwheel.Start(time.Millisecond, 100, logger)
 defer timingwheel.Stop()
 ```
 
 ### 2. 创建调度器
 
-每个服务应该创建自己的TaskScheduler：
+每个服务应该创建自己的JobScheduler：
 
 ```go
+// jobName: 调度器名称（用于日志）
 // chanSize: 回调通道大小
 // bucketSize: Timer分片数量
-scheduler := timingwheel.NewTaskScheduler(1000, 10)
+// tw: 时间轮实例（传 nil 使用全局时间轮）
+// logger: 日志器
+// isDebug: 是否开启调试模式（开启后会记录对象池统计）
+scheduler := timingwheel.NewJobScheduler(
+    "myService",
+    1000, 
+    10, 
+    timingwheel.GetTimingWheel(),
+    log.NewLoggerX(logger, log.Fields{"pkg": "myService"}),
+    false,
+)
 defer scheduler.Stop()
 ```
 
@@ -66,8 +85,9 @@ defer scheduler.Stop()
 
 ```go
 timerId, err := scheduler.AfterFunc(time.Second*5, "myTimer",
-    func(t *timingwheel.Timer, args ...interface{}) {
+    func(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
         fmt.Println("Timer fired!")
+        return nil
     }, "arg1", "arg2")
 ```
 
@@ -75,9 +95,10 @@ timerId, err := scheduler.AfterFunc(time.Second*5, "myTimer",
 
 ```go
 // 每5秒执行一次
-timer := scheduler.TickerFunc(time.Second*5, "tickerTimer",
-    func(t *timingwheel.Timer, args ...interface{}) {
+timerId, err := scheduler.TickerFunc(time.Second*5, "tickerTimer",
+    func(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
         fmt.Println("Tick!")
+        return nil
     })
 ```
 
@@ -85,23 +106,25 @@ timer := scheduler.TickerFunc(time.Second*5, "tickerTimer",
 
 ```go
 // 每分钟执行一次
-timer := scheduler.CronFunc("0 */1 * * * *", "cronTimer",
-    func(t *timingwheel.Timer, args ...interface{}) {
+timerId, err := scheduler.CronFunc("0 */1 * * * *", "cronTimer",
+    func(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
         fmt.Println("Cron fired!")
+        return nil
     })
 
 // 或使用 @every 语法
-timer := scheduler.CronFunc("@every 5s", "cronTimer",
-    func(t *timingwheel.Timer, args ...interface{}) {
+timerId, err := scheduler.CronFunc("@every 5s", "cronTimer",
+    func(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
         fmt.Println("Every 5 seconds!")
+        return nil
     })
 ```
 
 #### 异步定时器
 
 ```go
-// 在独立goroutine中执行
-timer := scheduler.AfterAsyncFunc(time.Second*5, "asyncTimer",
+// 在独立goroutine中执行（注意：异步回调不需要context和返回error）
+timerId, err := scheduler.AfterAsyncFunc(time.Second*5, "asyncTimer",
     func(args ...interface{}) {
         // 在独立goroutine中执行
         fmt.Println("Async execution!")
@@ -128,8 +151,9 @@ func (s *Service) startListenCallback() {
             if !ok {
                 return
             }
-            if err := s.pushTimerCallback(t); err != nil {
-                s.logger.Errorf("submit timer callback error: %v", err)
+            // 执行timer回调（内部会自动验证版本号防止ABA问题）
+            if err := t.Do(context.Background()); err != nil {
+                s.logger.Errorf("timer callback error: %v", err)
             }
         }
     }
@@ -156,30 +180,38 @@ func (s *Service) startListenCallback() {
 // Timer结构体包含两个版本号
 type Timer struct {
     generation atomic.Uint64  // 每次Reset递增
-    snapGen    atomic.Uint64  // 在addOrRun中冻结，用于验证
+    snapGen    atomic.Uint64  // 在runTimer中冻结，用于验证
     execWg     sync.WaitGroup // 等待执行完成（避免忙等待）
     // ... 其他字段
 }
 
 // TimingWheel在Timer到期时冻结版本号
-func (tw *TimingWheel) addOrRun(t *Timer) {
-    if !tw.add(t) {
-        // 任务已经过期，立即执行
-        // 在执行前冻结snapGen，防止ABA问题
-        t.snapGen.Store(t.generation.Load())
-        // ... 投递到channel
+func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
+    // 标记执行中，阻止 Reset() 在 runTimer 期间清理字段
+    if !t.executing.CompareAndSwap(false, true) {
+        return
     }
+    t.execWg.Add(1)
+    
+    // 冻结snapGen，防止ABA问题
+    t.snapGen.Store(t.generation.Load())
+    // ... 快照拷贝其他字段
+    
+    t.executing.Store(false)
+    t.execWg.Done()
+    
+    // ... 投递到channel或执行
 }
 
 // Timer.Do()执行时验证版本号
-func (t *Timer) Do() {
+func (t *Timer) Do(ctx context.Context) error {
     t.execWg.Add(1)
     defer t.execWg.Done()
     
     // 对比snapGen和generation
     if t.snapGen.Load() != t.generation.Load() {
         // 版本号不匹配，Timer已被回收并复用，丢弃
-        return
+        return def.ErrTimerReuse
     }
     // ... 执行任务
 }
@@ -195,14 +227,17 @@ func (t *Timer) Reset() {
 **时序保证：**
 ```
 T1: TimingWheel检测到Timer到期
-T2: addOrRun()被调用
-T3: snapGen = generation （冻结版本号）✓
-T4: c <- t (投递到channel)
+T2: runTimer()被调用
+T3: 检查并设置 executing 标志
+T4: snapGen = generation （冻结版本号）✓
+T5: 快照拷贝所有需要的字段
+T6: 释放 executing 标志
+T7: c <- t (投递到channel) 或 执行异步任务
 --- 即使这里Timer被Stop()并回收，snapGen已经冻结 ---
-T5: Service从channel接收timer
-T6: 执行Timer.Do()
-T7: Do()内部验证 snapGen == generation
-T8: 验证通过则执行，否则直接返回
+T8: Service从channel接收timer
+T9: 执行Timer.Do(ctx)
+T10: Do()内部验证 snapGen == generation
+T11: 验证通过则执行，否则返回ErrTimerReuse
 ```
 
 **优势：**
@@ -301,10 +336,11 @@ defer scheduler.CancelTimer(timerId)
 ```go
 // 同步定时器：回调在Service的Worker线程中顺序执行
 // 适用于需要保证执行顺序的业务逻辑
-scheduler.AfterFunc(time.Second, "syncTimer", func(t *Timer, args ...interface{}) {
+scheduler.AfterFunc(time.Second, "syncTimer", func(ctx context.Context, t *Timer, args ...interface{}) error {
     // 在Service的mailbox线程中执行
     // 保证与其他消息的执行顺序
     db.Update(...)  // 可以安全执行耗时操作，不会阻塞时间轮
+    return nil
 })
 
 // 异步定时器：回调在独立goroutine中执行
@@ -326,9 +362,13 @@ scheduler.AfterAsyncFunc(time.Second, "asyncTimer", func(args ...interface{}) {
 
 ```go
 // 根据并发定时器数量设置
-scheduler := NewTaskScheduler(
+scheduler := timingwheel.NewJobScheduler(
+    "myService",
     10000,  // 回调通道大小
     10,     // 分片数量
+    timingwheel.GetTimingWheel(),
+    logger,
+    false,  // isDebug
 )
 ```
 
@@ -340,82 +380,103 @@ scheduler := NewTaskScheduler(
 4. **回调执行上下文**：回调在Service的Worker线程中执行,可安全访问Service状态
 5. **Cron表达式**：使用标准Cron格式（秒 分 时 日 月 周）或`@every`语法
 
-## 时间调整功能(仅开发环境)
+## 时间偏移功能(仅开发环境)
 
 ### 使用场景
 
-在开发环境中,可能需要快速调试某个时间点的功能,此时可以使用时间调整功能。**注意:这个功能只应该在开发/测试环境使用,生产环境不应该调整时间。**
+在开发环境中,可能需要快速调试某个时间点的功能,此时可以使用时间偏移功能。**注意:这个功能只应该在开发/测试环境使用,生产环境不应该调整时间偏移。**
 
 ### 使用方法
 
 ```go
 import (
     "time"
-    "github.com/njtc406/emberengine/engine/pkg/utils/timelib"
     "github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
-// 1. 先调整 timelib 的时间偏移
-offset := int64(10 * time.Hour) // 向前跳10小时
-timelib.SetTimeOffset(offset)
+// 设置时间偏移（向前跳10小时）
+timingwheel.SetTimeOffset(10 * time.Hour)
 
-// 2. 再调整时间轮中的所有定时器
-timingwheel.AdjustTime(offset / int64(time.Millisecond))
+// 也可以向后偏移
+timingwheel.SetTimeOffset(-30 * time.Minute)
 
-// 或者使用 TaskScheduler 接口
-scheduler.AdjustTime(offset / int64(time.Millisecond))
+// 恢复正常时间
+timingwheel.SetTimeOffset(0)
 ```
 
 ### 工作原理
 
-当调用 `AdjustTime` 时,时间轮会执行以下操作:
+当调用 `SetTimeOffset` 时,时间轮会执行以下操作:
 
-1. **收集所有活跃的定时器** - 遍历所有bucket,收集正在等待的Timer
-2. **清空所有bucket** - 移除所有Timer,准备重新插入
-3. **调整currentTime** - 更新时间轮的当前时间
-4. **调整Timer过期时间** - 对每个Timer的过期时间应用offset
-5. **重新插入Timer** - 将调整后的Timer重新插入到正确的bucket
-6. **递归调整overflow wheel** - 如果有多层时间轮,递归调整
+1. **设置调整标志** - 阻止新的timer直接插入，改为放入缓冲队列
+2. **收集所有活跃的定时器** - 递归遍历所有层级的bucket,收集正在等待的Timer
+3. **清空所有bucket** - 移除所有Timer,准备重新插入
+4. **调整currentTime** - 更新时间轮的当前时间
+5. **处理跨越执行点的Timer** - 对于正向偏移，检查并执行已跨越执行时间的任务
+6. **重新插入Timer** - 将调整后的Timer重新插入到正确的bucket
+7. **处理缓冲队列** - 处理调整期间累积的pending timers
+8. **递归调整overflow wheel** - 如果有多层时间轮,递归调整
 
 ```go
 // 内部实现示例
-func (tw *TimingWheel) AdjustTime(offsetMs int64) {
+func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
     tw.adjustMu.Lock()
     defer tw.adjustMu.Unlock()
+    
+    // 设置调整标志
+    tw.adjusting.Store(true)
+    defer func() {
+        tw.adjusting.Store(false)
+        close(tw.adjustDone)
+        tw.adjustDone = make(chan struct{})
+    }()
+    
+    // 计算偏移差值
+    oldOffsetNs := tw.timeOffsetNs.Load()
+    newOffsetNs := int64(offset)
+    offsetDeltaNs := newOffsetNs - oldOffsetNs
+    
+    // 原子更新offset
+    tw.timeOffsetNs.Store(newOffsetNs)
+    offsetDeltaMs := offsetDeltaNs / int64(time.Millisecond)
     
     // 1. 收集所有活跃的 timer
     allTimers := tw.collectAllTimers()
     
-    // 2. 清空所有 bucket
-    tw.clearAllBuckets()
-    
-    // 3. 调整 currentTime
-    oldCurrentTime := atomic.LoadInt64(&tw.currentTime)
-    newCurrentTime := oldCurrentTime + offsetMs
+    // 2. 清空所有 bucket 并调整 currentTime
+    tw.clearAllBucketsRecursive()
+    newCurrentTime := oldCurrentTime + offsetDeltaMs
     atomic.StoreInt64(&tw.currentTime, truncate(newCurrentTime, tw.tick))
     
-    // 4. 调整所有 timer 的过期时间并重新插入
-    for _, t := range allTimers {
-        oldExpiration := t.GetExpiration()
-        newExpiration := oldExpiration + offsetMs
-        t.SetExpiration(newExpiration)
-        tw.addOrRun(t) // 重新插入
+    // 3. 处理跨越执行点的Timer（正向偏移时）
+    if offsetDeltaMs > 0 {
+        for _, t := range allTimers {
+            if newCurrentTime >= t.GetExpiration() {
+                tw.runTimer(t, false) // 执行
+                // 周期性任务重新计算下次执行时间
+            }
+        }
     }
     
-    // 5. 递归调整 overflow wheel
-    if overflowWheel != nil {
-        overflowWheel.adjustTimeInternal(offsetMs)
+    // 4. 重新插入未执行的Timer
+    for _, t := range allTimers {
+        tw.addOrRunDirect(t)
     }
+    
+    // 5. 处理缓冲队列
+    tw.processPendingTimers()
 }
 ```
 
 ### 性能考虑
 
-**警告:** 时间调整是一个**昂贵的操作**,会:
+**警告:** 时间偏移调整是一个**昂贵的操作**,会:
+- 设置调整标志，阻塞新的定时器操作
 - 遍历所有bucket收集Timer (O(n))
 - 清空所有bucket (O(n))
+- 检查并执行跨越执行点的Timer
 - 重新插入所有Timer (O(n))
-- 期间会加写锁,阻塞所有定时器操作
+- 处理缓冲队列中的pending timers
 
 因此:
 - ✅ **适用场景**: 开发/测试环境,快速调试时间相关功能
@@ -429,25 +490,23 @@ func (tw *TimingWheel) AdjustTime(offsetMs int64) {
 ```go
 // 创建一个每天0点执行的任务
 timerId, _ := scheduler.CronFunc("0 0 0 * * *", "daily_task", 
-    func(t *Timer, args ...interface{}) error {
+    func(ctx context.Context, t *Timer, args ...interface{}) error {
         fmt.Println("执行每日任务")
         return nil
     })
 
-// 不想等到明天0点,直接跳到明天0点
-tomorrow := timelib.GetDayStartTime(timelib.Now().Add(24 * time.Hour))
-offset := tomorrow.Sub(timelib.Now())
+// 不想等到明天0点,直接设置时间偏移到明天0点
+tomorrow := time.Now().Truncate(24 * time.Hour).Add(24 * time.Hour)
+offset := tomorrow.Sub(time.Now())
 
-// 调整时间
-timelib.SetTimeOffset(int64(offset))
-timingwheel.AdjustTime(int64(offset / time.Millisecond))
+// 设置时间偏移
+timingwheel.SetTimeOffset(offset)
 
 // 等待任务执行
 time.Sleep(2 * time.Second)
 
-// 恢复时间
-timelib.SetTimeOffset(0)
-timingwheel.AdjustTime(-int64(offset / time.Millisecond))
+// 恢复正常时间
+timingwheel.SetTimeOffset(0)
 ```
 
 #### 场景2: 测试时间回退
@@ -455,31 +514,61 @@ timingwheel.AdjustTime(-int64(offset / time.Millisecond))
 ```go
 // 测试时间回退后定时器是否正常
 timerId, _ := scheduler.AfterFunc(5*time.Second, "test", 
-    func(t *Timer, args ...interface{}) error {
+    func(ctx context.Context, t *Timer, args ...interface{}) error {
         fmt.Println("5秒后执行")
         return nil
     })
 
 // 回退10秒
-offset := int64(-10 * time.Second)
-timelib.SetTimeOffset(offset)
-timingwheel.AdjustTime(offset / int64(time.Millisecond))
+timingwheel.SetTimeOffset(-10 * time.Second)
 
-// 现在定时器还需要等待 5+10=15秒才会执行
+// 现在定时器还需要等待更长时间才会执行
 time.Sleep(3 * time.Second)
 // 任务不应该执行
 
-time.Sleep(13 * time.Second)
+// 恢复正常时间后继续等待
+timingwheel.SetTimeOffset(0)
+time.Sleep(5 * time.Second)
 // 现在任务应该执行了
 ```
 
 ### 测试用例
 
 完整的测试用例请参考 `time_adjust_test.go`:
-- `TestTimeAdjustment` - 基础时间调整测试
-- `TestTimeAdjustmentWithMultipleTimers` - 多定时器调整测试
-- `TestTimeAdjustmentWithTickerTimer` - 循环定时器调整测试
+- `TestTimeAdjustment` - 基础时间偏移测试
+- `TestTimeAdjustmentWithMultipleTimers` - 多定时器偏移测试
+- `TestTimeAdjustmentWithTickerTimer` - 循环定时器偏移测试
 - `TestTimeAdjustmentBackward` - 时间回退测试
+
+## ITimerScheduler 接口
+
+```go
+type ITimerScheduler interface {
+    // 一次性定时器
+    AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
+    AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+    
+    // 循环定时器
+    TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
+    TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+    
+    // Cron定时器
+    CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
+    CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+    
+    // 取消定时器
+    CancelTimer(taskId uint64)
+    
+    // 停止调度器
+    Stop()
+    
+    // 获取回调通道
+    GetTimerCbChannel() chan ITimer
+}
+
+// 回调函数类型
+type TimerCallback func(ctx context.Context, timer *Timer, args ...interface{}) error
+```
 
 ## 示例
 
