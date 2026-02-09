@@ -105,12 +105,11 @@ func (rm *RpcMonitor) initBuckets(bucketCount int, initCap int) {
 func GetRpcMonitor() *RpcMonitor {
 	monitorOnce.Do(func() {
 		rpcMonitor = &RpcMonitor{}
-		rpcMonitor.Init()
 	})
 	return rpcMonitor
 }
 
-func (rm *RpcMonitor) Init() *RpcMonitor {
+func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf) *RpcMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
 	rm.ctx = ctx
 	rm.cancel = cancel
@@ -121,7 +120,6 @@ func (rm *RpcMonitor) Init() *RpcMonitor {
 	rm.seq = 0
 	// Buckets are sharded to reduce lock contention.
 	// BucketCount must be power-of-two; otherwise we round up.
-	conf := config.Conf.NodeConf.RpcMonitorConf
 	bucketCount := defaultWaitBucketCount
 	if conf != nil && conf.WaitBucketCount > 0 {
 		bucketCount = conf.WaitBucketCount

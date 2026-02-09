@@ -115,6 +115,9 @@ func Start(opts ...StartOption) {
 	// TODO 做成配置吧,有些精度要求不高的场景可以直接使用秒
 	timingwheel.Start(config.Conf.NodeConf.TimingWheelConf.Interval, config.Conf.NodeConf.TimingWheelConf.WheelSize, log.SysLogger)
 
+	// 初始化rpc监控
+	monitor.GetRpcMonitor().Init(config.Conf.NodeConf.RpcMonitorConf)
+
 	// 记录pid
 	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
 	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
