@@ -169,7 +169,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	// 创建定时器调度器
 	s.ITimerScheduler = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize,
-		timingwheel.GetTimingWheel(), s.ILoggerX, config.IsDebug())
+		timingwheel.GetTimingWheel(), s.ILoggerX)
 
 	// 根据配置创建中间件，并与用户自定义中间件合并
 	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.ILoggerX, config.IsDebug())

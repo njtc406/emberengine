@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
 // ITimerScheduler 定时器调度器接口
@@ -70,18 +69,17 @@ func (b *timerBucket) remove(timerId uint64) *Timer {
 }
 
 type jobScheduler struct {
-	closed    int32
-	shards    []*timerBucket
-	c         chan ITimer
-	tw        *TimingWheel // 关联的timingwheel实例
-	timerPool pool.IPool[*Timer]
-	logger    log.ILoggerX
+	closed int32
+	shards []*timerBucket
+	c      chan ITimer
+	tw     *TimingWheel // 关联的timingwheel实例
+	logger log.ILoggerX
 }
 
 // NewJobScheduler 创建一个新的任务调度器
 // chanSize: 回调通道大小
 // bucketSize: 桶数量，用于分片存储任务以提高并发性能
-func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, logger log.ILoggerX, isDebug bool) ITimerScheduler {
+func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, logger log.ILoggerX) ITimerScheduler {
 	if logger == nil {
 		l, err := log.NewDefaultLogger(nil)
 		if err != nil {
@@ -111,27 +109,7 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, 
 		shards: shards,
 		c:      make(chan ITimer, chanSize),
 		tw:     tw,
-		timerPool: pool.NewSyncPoolWrapper(
-			func() *Timer {
-				return &Timer{}
-			},
-			func() pool.IStatsRecorder {
-				if isDebug {
-					return pool.NewStatsRecorder("timerPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithRef(func(t *Timer) {
-				t.Ref()
-			}),
-			pool.WithUnRef(func(t *Timer) bool {
-				return t.UnRef()
-			}),
-			pool.WithReset(func(t *Timer) {
-				t.Reset()
-			}),
-		),
+		logger: logger,
 	}
 }
 
@@ -186,7 +164,7 @@ func (scheduler *jobScheduler) AfterFunc(d time.Duration, name string, f TimerCa
 
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
 	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
+		t.stop()
 		return 0, fmt.Errorf("after task add failed")
 	}
 
@@ -205,7 +183,7 @@ func (scheduler *jobScheduler) AfterAsyncFunc(d time.Duration, name string, f fu
 	t.taskScheduler = scheduler
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
 	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
+		t.stop()
 		return 0, fmt.Errorf("after async task add failed")
 	}
 	scheduler.tw.AfterFunc(d, t)
@@ -223,7 +201,7 @@ func (scheduler *jobScheduler) TickerFunc(d time.Duration, name string, f TimerC
 	t.taskScheduler = scheduler
 
 	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
+		t.stop()
 		return 0, fmt.Errorf("ticker task add failed")
 	}
 
@@ -245,7 +223,7 @@ func (scheduler *jobScheduler) TickerAsyncFunc(d time.Duration, name string, f f
 	t.taskScheduler = scheduler
 
 	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
+		t.stop()
 		return 0, fmt.Errorf("ticker async task add failed")
 	}
 	// 加入任务
@@ -272,7 +250,7 @@ func (scheduler *jobScheduler) CronFunc(spec string, name string, f TimerCallbac
 
 	// 加入任务
 	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
+		t.stop()
 		return 0, fmt.Errorf("cron task add failed")
 	}
 	if err := scheduler.tw.ScheduleFunc(t); err != nil {
@@ -293,7 +271,7 @@ func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f func(..
 
 	// 加入任务
 	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
+		t.stop()
 		return 0, fmt.Errorf("cron async task add failed")
 	}
 	// 创建task
@@ -311,45 +289,26 @@ func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
 	if t == nil {
 		return
 	}
-	scheduler.releaseTimer(t)
+	t.stop()
 }
 
 func (scheduler *jobScheduler) Stop() {
 	atomic.StoreInt32(&scheduler.closed, 1)
 
-	// 先在锁内收集所有 timer，再在锁外释放，避免 releaseTimer → stop → execWg.Wait
-	// 与正在执行的 Do() → CancelTimer → shard.Lock 形成死锁。
-	var toRelease []*Timer
 	for _, shard := range scheduler.shards {
 		shard.Lock()
 		for timerId, t := range shard.tasks {
-			toRelease = append(toRelease, t)
+			t.stop()
 			delete(shard.tasks, timerId)
 		}
 		shard.Unlock()
-	}
-
-	for _, t := range toRelease {
-		scheduler.releaseTimer(t)
 	}
 
 	close(scheduler.c)
 }
 
 func (scheduler *jobScheduler) createTimer() *Timer {
-	t := scheduler.timerPool.Get()
-	t.SetTimerId(scheduler.tw.genTimerId())
+	t := &Timer{}
+	t.timerId = scheduler.tw.genTimerId()
 	return t
-}
-
-func (scheduler *jobScheduler) releaseTimer(t *Timer) {
-	if t.IsRef() {
-		// 防止重复释放
-		t.stop()
-		// 异步放回池中：pool.Put → Reset → execWg.Wait 可能阻塞（如 runTimer 正在
-		// 快照字段），若在 Do() 回调链中同步调用会导致死锁。异步化后不阻塞调用方。
-		go func() {
-			scheduler.timerPool.Put(t)
-		}()
-	}
 }

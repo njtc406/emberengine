@@ -2,14 +2,11 @@ package timingwheel
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
@@ -17,7 +14,7 @@ import (
 //
 // 约定：
 // - 每个 Test 上方用中文说明：验证点、覆盖的边界/竞态时序。
-// - 测试函数命名遵循“测什么叫什么”，不使用 P0/P1/P2 前缀。
+// - 测试函数命名遵循"测什么叫什么"，不使用 P0/P1/P2 前缀。
 
 // ---------------------------------------------------------------------------
 // Timer.Do() defer + nil scheduler
@@ -48,7 +45,7 @@ func TestTimerDo_NilScheduler_NoPanic(t *testing.T) {
 //
 // 验证点：ScheduleFunc 设置的 loop 在 timingwheel 已关闭且 scheduler=nil 时不 panic。
 // 边界：
-// - tw.closed=true（loop 触发“关闭时取消”逻辑）
+// - tw.closed=true（loop 触发"关闭时取消"逻辑）
 // - t.taskScheduler=nil（历史上可能出现 nil.CancelTimer）
 // - 直接调用 loop()（模拟最坏时序）
 // ---------------------------------------------------------------------------
@@ -79,263 +76,50 @@ func TestScheduleFuncLoop_WheelClosedAndNilScheduler_NoPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// posted-then-cancelled timer pointer + pool reuse
+// 已取消的 timer 调用 Do() 应跳过执行
 //
-// 验证点：Timer 已过期并被投递到 cb channel 后，又被 Cancel/Reset 回收复用，
-// 消费者随后执行旧指针时：
-// - 不 panic（避免 nil bucket/element 访问）
-// - 返回 ErrTimerReuse（ABA/复用保护生效）
-//
+// 验证点：timer 被 cancel 后，Do() 直接返回 nil，不执行 task。
 // 边界：
-// - 先让 timer 过期 -> 进入 cb channel，但不消费
-// - 再 CancelTimer（触发 stop/reset/pool.Put）
-// - 最后才启动/放开消费者去 Do()（最大化“旧指针”概率）
+// - cancel.Store(true) 后 Do() 应短路返回
 // ---------------------------------------------------------------------------
-func TestPostedThenCancelled_TimerReuseProtection(t *testing.T) {
-	logger, err := log.NewDefaultLogger(nil)
-	if err != nil {
-		t.Fatalf("Failed to create logger: %v", err)
-	}
-
-	Start(time.Millisecond, 64, logger)
-	defer Stop()
-
-	const n = 2000
-	scheduler := NewJobScheduler(
-		"posted-then-cancelled",
-		n+100, // ensure channel won't get full
-		16,
-		GetTimingWheel(),
-		log.NewLoggerX(logger, log.Fields{"pkg": "posted-then-cancelled"}),
-		false,
-	)
-
-	ids := make([]uint64, 0, n)
-	for i := 0; i < n; i++ {
-		id, err := scheduler.AfterFunc(time.Millisecond, fmt.Sprintf("timer_%d", i), func(ctx context.Context, timer *Timer, args ...interface{}) error {
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("AfterFunc failed: %v", err)
-		}
-		ids = append(ids, id)
-	}
-
-	// Let timers expire and get posted to callback channel, but don't consume yet.
-	time.Sleep(10 * time.Millisecond)
-
-	// Cancel all timers while old timer pointers may already be in callback channel.
-	for _, id := range ids {
-		scheduler.CancelTimer(id)
-	}
-
-	ctx := context.Background()
-	var reuseErrCount atomic.Int32
-	var okCount atomic.Int32
-	var otherErrCount atomic.Int32
-
-	consumerDone := make(chan struct{})
-	go func() {
-		defer close(consumerDone)
-		for it := range scheduler.GetTimerCbChannel() {
-			err := it.Do(ctx)
-			if errors.Is(err, def.ErrTimerReuse) {
-				reuseErrCount.Add(1)
-				continue
-			}
-			if err == nil {
-				okCount.Add(1)
-				continue
-			}
-			otherErrCount.Add(1)
-		}
-	}()
-
-	// Give consumer time to drain, then stop scheduler to close the channel.
-	time.Sleep(20 * time.Millisecond)
-	scheduler.Stop()
-	<-consumerDone
-
-	if reuseErrCount.Load() == 0 {
-		// If this is zero, the test didn't hit the critical path (timer reset while pointer is still pending).
-		t.Fatalf("expected some ErrTimerReuse, got 0 (ok=%d otherErr=%d)", okCount.Load(), otherErrCount.Load())
-	}
-	if otherErrCount.Load() != 0 {
-		t.Fatalf("unexpected non-nil errors: %d (reuse=%d ok=%d)", otherErrCount.Load(), reuseErrCount.Load(), okCount.Load())
-	}
-	if okCount.Load() != 0 {
-		// Ideally all should be rejected as reuse because we cancelled before consuming.
-		t.Fatalf("expected okCount=0, got %d (reuse=%d)", okCount.Load(), reuseErrCount.Load())
-	}
-}
-
-// ---------------------------------------------------------------------------
-// posted-then-cancelled 多批次压力
-//
-// 验证点：同上，但多批次/大数量，增强覆盖不同 interleaving。
-// 边界：
-// - 批量创建 -> 等过期 -> 批量取消
-// - 所有批次都取消后才启动消费者（尽可能处理 stale pointers）
-// ---------------------------------------------------------------------------
-func TestPostedThenCancelled_StressManyBatches(t *testing.T) {
-	logger, err := log.NewDefaultLogger(nil)
-	if err != nil {
-		t.Fatalf("Failed to create logger: %v", err)
-	}
-
-	Start(time.Millisecond, 128, logger)
-	defer Stop()
-
-	scheduler := NewJobScheduler(
-		"posted-then-cancelled-stress",
-		200000,
-		32,
-		GetTimingWheel(),
-		log.NewLoggerX(logger, log.Fields{"pkg": "posted-then-cancelled-stress"}),
-		false,
-	)
-
-	ctx := context.Background()
-	var reuseErrCount atomic.Int32
-	var okCount atomic.Int32
-	var otherErrCount atomic.Int32
-
-	const (
-		batches   = 20
-		perBatch  = 2000
-		expireDur = 2 * time.Millisecond
-	)
-
-	for b := 0; b < batches; b++ {
-		ids := make([]uint64, 0, perBatch)
-		for i := 0; i < perBatch; i++ {
-			id, err := scheduler.AfterFunc(expireDur, "stress", func(ctx context.Context, timer *Timer, args ...interface{}) error {
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("AfterFunc failed (batch=%d i=%d): %v", b, i, err)
-			}
-			ids = append(ids, id)
-		}
-
-		// Ensure most timers have expired and been posted before cancelling them.
-		time.Sleep(10 * time.Millisecond)
-		for _, id := range ids {
-			scheduler.CancelTimer(id)
-		}
-	}
-
-	// Start consumer only AFTER cancellations, so it processes stale timer pointers.
-	consumerDone := make(chan struct{})
-	go func() {
-		defer close(consumerDone)
-		for it := range scheduler.GetTimerCbChannel() {
-			err := it.Do(ctx)
-			if errors.Is(err, def.ErrTimerReuse) {
-				reuseErrCount.Add(1)
-				continue
-			}
-			if err == nil {
-				okCount.Add(1)
-				continue
-			}
-			otherErrCount.Add(1)
-		}
-	}()
-
-	// Let consumer drain.
-	time.Sleep(50 * time.Millisecond)
-	scheduler.Stop()
-	<-consumerDone
-
-	if otherErrCount.Load() != 0 {
-		t.Fatalf("unexpected non-nil errors: %d (reuse=%d ok=%d)", otherErrCount.Load(), reuseErrCount.Load(), okCount.Load())
-	}
-	if reuseErrCount.Load() == 0 {
-		// Not strictly required for correctness, but indicates we exercised the critical path.
-		t.Fatalf("expected some ErrTimerReuse in stress test, got 0 (ok=%d)", okCount.Load())
-	}
-}
-
-// ---------------------------------------------------------------------------
-// GetName() 与 Reset 并发
-//
-// 验证点：GetName 与 Reset 并发不 panic。
-// 边界：
-// - Reset 可能清空 name/task 等字段
-// - GetName 并发读取，确保内部同步/快照逻辑安全
-// ---------------------------------------------------------------------------
-func TestTimerGetName_ConcurrentWithReset_NoPanic(t *testing.T) {
-	const n = 500
-	var wg sync.WaitGroup
-
-	for i := 0; i < n; i++ {
-		tm := &Timer{}
-		tm.name = "hello"
-		tm.task = func(ctx context.Context, timer *Timer, args ...interface{}) error { return nil }
-
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			// Simulate Reset path
-			tm.Reset()
-		}()
-		go func() {
-			defer wg.Done()
-			// Concurrent GetName — should not panic or race
-			_ = tm.GetName()
-		}()
-	}
-	wg.Wait()
-}
-
-// 边界补充：在 Do() 回调内部调用 GetName()（同一 timer 正在执行中）。
-func TestTimerGetName_InsideDo_ReturnsCorrectName(t *testing.T) {
+func TestPostedThenCancelled_DoSkipsExecution(t *testing.T) {
+	var executed atomic.Bool
 	tm := &Timer{}
-	tm.name = "inside-do-test"
 	tm.task = func(ctx context.Context, timer *Timer, args ...interface{}) error {
-		name := timer.GetName()
-		if name != "inside-do-test" {
-			t.Errorf("expected name 'inside-do-test', got '%s'", name)
-		}
+		executed.Store(true)
 		return nil
 	}
 
-	if err := tm.Do(context.Background()); err != nil {
-		t.Fatalf("Do() unexpected error: %v", err)
+	// Cancel the timer before calling Do
+	tm.cancel.Store(true)
+
+	err := tm.Do(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error from cancelled timer: %v", err)
+	}
+	if executed.Load() {
+		t.Fatal("cancelled timer should not have executed its task")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Reset() 与 bucket.Flush 并发（element 读写）
+// Timer.GetName() 在 Do() 内部可正确返回名字
 //
-// 验证点：Reset() 与 bucket.Flush 并发时不 panic。
-// 边界：
-// - Flush 读取 element 链表
-// - Reset 通过 bucket.Remove 安全清理 element（避免裸写 nil）
+// 验证点：Do() 执行回调时，GetName() 返回正确的 name。
 // ---------------------------------------------------------------------------
-func TestTimerReset_ConcurrentWithBucketFlush_NoPanic(t *testing.T) {
-	b := newBucket()
-	const n = 200
-	var wg sync.WaitGroup
-
-	for i := 0; i < n; i++ {
-		tm := &Timer{}
-		b.Add(tm)
-
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			// Concurrent Flush (reads element)
-			b.Flush(func(timer *Timer) {})
-		}()
-		go func() {
-			defer wg.Done()
-			// Concurrent Reset (clears element safely via Remove)
-			tm.Reset()
-		}()
+func TestTimerGetName_InsideDo_ReturnsCorrectName(t *testing.T) {
+	tm := &Timer{}
+	tm.name = "my-test-timer"
+	var gotName string
+	tm.task = func(ctx context.Context, timer *Timer, args ...interface{}) error {
+		gotName = timer.GetName()
+		return nil
 	}
-	wg.Wait()
+
+	_ = tm.Do(context.Background())
+	if gotName != "my-test-timer" {
+		t.Fatalf("expected name 'my-test-timer', got %q", gotName)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +145,6 @@ func TestJobSchedulerStop_NoSendOnClosedChannelPanic(t *testing.T) {
 		4,
 		GetTimingWheel(),
 		log.NewLoggerX(logger, log.Fields{"pkg": "closed-send"}),
-		false,
 	)
 
 	// Create some timers that will expire soon
@@ -404,7 +187,6 @@ func TestJobScheduler_ConcurrentAddAndStop_NoPanic(t *testing.T) {
 			4,
 			GetTimingWheel(),
 			log.NewLoggerX(logger, log.Fields{"pkg": "concurrent-stop"}),
-			false,
 		)
 
 		ctx := context.Background()
@@ -470,7 +252,6 @@ func TestJobSchedulerStop_NoDeadlock_WhenCallbackCancelsTimer(t *testing.T) {
 		4,
 		GetTimingWheel(),
 		log.NewLoggerX(logger, log.Fields{"pkg": "stop-deadlock"}),
-		false,
 	)
 
 	// Store timer IDs so the callback can cancel other timers
@@ -545,7 +326,6 @@ func TestSetTimeOffset_ConcurrentWithTimers_ExecutesSome(t *testing.T) {
 		8,
 		GetTimingWheel(),
 		log.NewLoggerX(logger, log.Fields{"pkg": "offset-race"}),
-		false,
 	)
 
 	ctx := context.Background()
@@ -663,7 +443,7 @@ func TestOverflowWheel_SharesAdjustingState(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("overflow-adjusting", 1000, 10, tw, nil, true)
+	scheduler := NewJobScheduler("overflow-adjusting", 1000, 10, tw, nil)
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -720,7 +500,7 @@ func TestSetTimeOffset_WithOverflowTimers_NoDeadlock(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("offset-with-overflow", 1000, 10, tw, nil, true)
+	scheduler := NewJobScheduler("offset-with-overflow", 1000, 10, tw, nil)
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -769,14 +549,14 @@ func TestSetTimeOffset_WithOverflowTimers_NoDeadlock(t *testing.T) {
 // 边界：
 // - 高频 AfterFunc
 // - 多次 SetTimeOffset
-// - 用耗时阈值作为“busy-wait 回退”的代理检测
+// - 用耗时阈值作为"busy-wait 回退"的代理检测
 // ---------------------------------------------------------------------------
 func TestAddDuringAdjust_NoBusyWait(t *testing.T) {
 	tw := NewTimingWheel(time.Millisecond, 20, nil)
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("no-busy-wait", 1000, 10, tw, nil, true)
+	scheduler := NewJobScheduler("no-busy-wait", 1000, 10, tw, nil)
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -835,7 +615,7 @@ func TestProcessPendingTimers_DrainsAndExecutes(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("pending-drain", 2000, 10, tw, nil, true)
+	scheduler := NewJobScheduler("pending-drain", 2000, 10, tw, nil)
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -892,7 +672,7 @@ func TestDelayQueue_NoTimerLeakUnderChurn(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("delayqueue-churn", 1000, 10, tw, nil, true)
+	scheduler := NewJobScheduler("delayqueue-churn", 1000, 10, tw, nil)
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -935,7 +715,7 @@ func TestTimingWheel_CombinedStress_OverflowAndTimeOffset(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("combined-stress", 2000, 10, tw, nil, true)
+	scheduler := NewJobScheduler("combined-stress", 2000, 10, tw, nil)
 	defer scheduler.Stop()
 
 	ctx := context.Background()

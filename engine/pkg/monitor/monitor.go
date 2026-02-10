@@ -141,7 +141,7 @@ func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf) *RpcMonitor {
 	rm.initBuckets(bucketCount, initCap)
 	rm.sd = timingwheel.NewJobScheduler("rpc_monitor", config.Conf.NodeConf.RpcMonitorConf.MonitorTimerSize,
 		config.Conf.NodeConf.RpcMonitorConf.MonitorBucketSize,
-		nil, log.NewLoggerX(log.SysLogger, log.Fields{"component": "rpc monitor"}), config.IsDebug())
+		nil, log.NewLoggerX(log.SysLogger, log.Fields{"component": "rpc monitor"}))
 	return rm
 }
 

@@ -37,7 +37,6 @@ func Example_scheduleTimer() {
 		10,
 		timingwheel.GetTimingWheel(),
 		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_example"}),
-		false,
 	)
 	defer dp.Stop()
 

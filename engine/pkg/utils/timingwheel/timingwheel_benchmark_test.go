@@ -37,7 +37,6 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 		10,
 		timingwheel.GetTimingWheel(),
 		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_benchmark"}),
-		false,
 	)
 
 	cases := []struct {
