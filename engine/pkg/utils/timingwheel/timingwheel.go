@@ -9,6 +9,7 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel/delayqueue"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
 // adjustState 封装时间偏移调整相关的状态，所有层级（包括 overflow wheel）共享同一实例。
@@ -202,7 +203,7 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 		return
 	}
 
-	if t.asyncTask != nil {
+	if t.asyncTask {
 		// 异步任务,在独立goroutine中执行
 		go func() {
 			defer func() {
@@ -218,7 +219,13 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 					t.taskScheduler.CancelTimer(t.timerId)
 				}
 			}()
-			t.asyncTask(t.taskArgs...)
+			if err := t.task(xcontext.New(nil), t, t.taskArgs...); err != nil {
+				if tw.logger != nil {
+					tw.logger.Errorf("async task execute failed, task_name:%s, err:%v", t.name, err)
+				} else {
+					fmt.Printf("async task execute failed, task_name:%s, err:%v\n", t.name, err)
+				}
+			}
 		}()
 	} else if t.task != nil {
 		// 同步任务,投递到callback channel,由消费者执行

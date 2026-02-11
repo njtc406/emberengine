@@ -39,15 +39,15 @@ type Timer struct {
 	element *list.Element
 
 	// 以下字段需要在Timer创建初始化时设置,执行期间只读,因此是并发安全的
-	name          string               // 任务名称
-	interval      time.Duration        // 间隔时间 > 0 表示循环执行
-	spec          string               // cron表达式
-	isCron        bool                 // 是否为cron定时器(用于时间调整时的特殊处理)
-	task          TimerCallback        // 任务
-	taskArgs      []interface{}        // 任务参数
-	loop          func()               // 循环执行
-	asyncTask     func(...interface{}) // 异步任务
-	taskScheduler ITimerScheduler      // 任务调度器
+	name          string          // 任务名称
+	interval      time.Duration   // 间隔时间 > 0 表示循环执行
+	spec          string          // cron表达式
+	isCron        bool            // 是否为cron定时器(用于时间调整时的特殊处理)
+	task          TimerCallback   // 任务
+	taskArgs      []interface{}   // 任务参数
+	loop          func()          // 循环执行
+	asyncTask     bool            // 异步任务
+	taskScheduler ITimerScheduler // 任务调度器
 }
 
 func (t *Timer) GetName() string {
@@ -56,9 +56,6 @@ func (t *Timer) GetName() string {
 	}
 	if t.task != nil {
 		return runtime.FuncForPC(reflect.ValueOf(t.task).Pointer()).Name()
-	}
-	if t.asyncTask != nil {
-		return runtime.FuncForPC(reflect.ValueOf(t.asyncTask).Pointer()).Name()
 	}
 
 	return ""

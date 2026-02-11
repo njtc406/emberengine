@@ -19,15 +19,15 @@ import (
 type ITimerScheduler interface {
 	AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	// AfterAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
-	AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+	AfterAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 
 	TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	// TickerAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
-	TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+	TickerAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 
 	CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	// CronAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
-	CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+	CronAsyncFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
 
 	CancelTimer(taskId uint64)
 	Stop()
@@ -174,11 +174,12 @@ func (scheduler *jobScheduler) AfterFunc(d time.Duration, name string, f TimerCa
 }
 
 // AfterAsyncFunc 异步执行任务
-func (scheduler *jobScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) AfterAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
-	t.asyncTask = f
+	t.asyncTask = true
+	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
@@ -214,11 +215,12 @@ func (scheduler *jobScheduler) TickerFunc(d time.Duration, name string, f TimerC
 }
 
 // TickerAsyncFunc 异步循环任务
-func (scheduler *jobScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) TickerAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	t := scheduler.createTimer()
 	t.name = name
 	t.interval = d
-	t.asyncTask = f
+	t.asyncTask = true
+	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
@@ -260,12 +262,13 @@ func (scheduler *jobScheduler) CronFunc(spec string, name string, f TimerCallbac
 }
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
-func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	t := scheduler.createTimer()
 	t.name = name
 	t.spec = spec
 	t.isCron = true // 标记为cron定时器
-	t.asyncTask = f
+	t.asyncTask = true
+	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 

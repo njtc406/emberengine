@@ -231,6 +231,7 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	reqId := state.ReqID()
 	timeout := state.Timeout()
 	method := state.Method()
+	// TODO 这里可以直接使用异步timer,但是需要评估性能,因为现在使用的是线程池
 	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(_ context.Context, tm *timingwheel.Timer, args ...interface{}) error {
 		defer func() {
 			if log.SysLogger != nil {
@@ -238,8 +239,8 @@ func (rm *RpcMonitor) Add(state *CallState) {
 					timeout.Milliseconds(), method)
 			}
 		}()
-		seq := args[0].(uint64)
-		st := rm.remove(seq) // 这里只需要移除monitor,不需要取消timer,timer已经触发了
+		seqId := args[0].(uint64)
+		st := rm.remove(seqId) // 这里只需要移除monitor,不需要取消timer,timer已经触发了
 		if st == nil {
 			// 已经删除
 			return nil
