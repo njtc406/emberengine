@@ -11,7 +11,7 @@ import (
 
 type AutoScalerStrategy interface {
 	ShouldScaleUp(workers []inf.IMailboxWorker) bool
-	ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool
+	ShouldScaleDown(workers []inf.IMailboxWorker, min int32) bool
 }
 
 // CompositeStrategy 组合自动扩容器
@@ -46,7 +46,7 @@ func (c *CompositeStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	return false
 }
 
-func (c *CompositeStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
+func (c *CompositeStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int32) bool {
 	if c.Mode == "all" {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleDown(workers, min) {
@@ -86,8 +86,8 @@ func (d *MaxLoadStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 	return false
 }
 
-func (d *MaxLoadStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int) bool {
-	if len(workers) <= min {
+func (d *MaxLoadStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int32) bool {
+	if len(workers) <= int(min) {
 		return false
 	}
 

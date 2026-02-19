@@ -25,6 +25,9 @@ type Job[T any] struct {
 	DispatcherKey string
 	// 负载数据
 	payload T
+	// 读写模式标记（实现 IRWModeJob 接口）
+	// 零值 RWModeWrite 保证未标记时默认为写操作
+	rwMode def.RWMode
 
 	ctx      context.Context
 	deadline int64
@@ -35,8 +38,13 @@ func (j *Job[T]) Reset() {
 	j.Type = def.MailboxJobTypeNone
 	j.Priority = def.PriorityNormal
 	j.DispatcherKey = ""
+	j.rwMode = def.RWModeWrite // 重置时回归默认模式
 	var zero T
 	j.payload = zero
+	// 完整清零所有字段，防止 sync.Pool 回收后带脏状态
+	j.ctx = nil
+	j.deadline = 0
+	j.mctx = nil
 }
 
 func (j *Job[T]) SetContext(ctx context.Context) {
@@ -94,6 +102,16 @@ func (j *Job[T]) GetDeadline() int64 {
 
 func (j *Job[T]) GetMiddlewareContext() inf.IMiddlewareContext {
 	return j.mctx
+}
+
+// SetRWMode 实现 IRWModeJob 接口
+func (j *Job[T]) SetRWMode(mode def.RWMode) {
+	j.rwMode = mode
+}
+
+// GetRWMode 实现 IRWModeJob 接口
+func (j *Job[T]) GetRWMode() def.RWMode {
+	return j.rwMode
 }
 
 // RpcJob rpc消息任务

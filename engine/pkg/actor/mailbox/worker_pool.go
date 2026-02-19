@@ -7,6 +7,8 @@ package mailbox
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -18,7 +20,11 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
+	"gorm.io/gorm/utils"
 )
+
+// ErrRWDisableTimeout SetRWEnabled(false) 超时，有泄漏的读 goroutine
+var ErrRWDisableTimeout = errors.New("RW disable timeout: leaked read goroutines prevent safe switch")
 
 func formatFloat1(v float64) string {
 	// keep it short: 1 decimal, no fmt
@@ -37,7 +43,7 @@ func formatFloat1(v float64) string {
 }
 
 type IScaler interface {
-	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int, reason string, ok bool)
+	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int32, reason string, ok bool)
 }
 
 type WorkerPool struct {
@@ -46,22 +52,29 @@ type WorkerPool struct {
 	wg              sync.WaitGroup
 	ctx             context.Context
 	cancel          context.CancelFunc
-	workers         map[int]inf.IMailboxWorker // 工作线程
-	ring            *hashring.HashRing[int]    // 一致性哈希环，用于分派事件
-	invoker         inf.IMessageInvoker        // 消息处理器
-	middlewareChain *MiddlewareChain           // 中间件链
-	profiler        *profiler.Profiler         // 性能分析
-	autoScaler      IScaler                    // 自动扩容器
+	workers         map[int32]inf.IMailboxWorker // 工作线程
+	ring            *hashring.HashRing[int32]    // 一致性哈希环，用于分派事件
+	invoker         inf.IMessageInvoker          // 消息处理器
+	middlewareChain *MiddlewareChain             // 中间件链
+	profiler        *profiler.Profiler           // 性能分析
+	autoScaler      IScaler                      // 自动扩容器
 	logger          log.ILoggerX
-	workerCount     int // 当前 worker 数量（用于扩缩容）
+	workerCount     atomic.Int32 // 当前 worker 数量（用于扩缩容），atomic 以支持 RW 模式下无锁读取
 
 	// 停机时队列处理策略（由 Mailbox 下发）
 	drainPolicy DrainPolicy
 
+	// ---- RW 增强字段（Mailbox 级共享） ----
+	enableRW       atomic.Bool   // 是否启用 RW 模式（atomic：支持运行时动态开关）
+	rwMu           sync.RWMutex  // 全 Service 共享读写锁，所有 Worker 引用
+	writeRequested atomic.Int32  // 正在等待写锁的 Writer 计数，读路径检查 >0 时让步避免写饥饿
+	readSem        chan struct{} // 全 Service 读并发信号量（nil = 不限制）
+	stopTimeout    time.Duration // Stop 时等待 in-flight 读 goroutine 的最大时间
+
 	// Debug-only dispatch distribution stats.
 	statsEnabled  bool // 是否开启统计（仅在 Debug 模式下）
 	statsInterval time.Duration
-	dispatchCnt   map[int]*atomic.Uint64 // 每个 worker 的事件计数
+	dispatchCnt   map[int32]*atomic.Uint64 // 每个 worker 的事件计数
 }
 
 func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
@@ -74,24 +87,36 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	}
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
-	return &WorkerPool{
+	pool := &WorkerPool{
 		conf:            conf,
-		workers:         make(map[int]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
+		workers:         make(map[int32]inf.IMailboxWorker, conf.SchedulePolicy.InitialWorkerNum),
 		invoker:         invoker,
-		ring:            hashring.NewHashRing[int](conf.SchedulePolicy.VirtualWorkerRate),
+		ring:            hashring.NewHashRing[int32](conf.SchedulePolicy.VirtualWorkerRate),
 		middlewareChain: NewMiddlewareChain(middlewares...),
 		ctx:             ctx,
 		cancel:          cancel,
 		logger:          logger,
 		//statsEnabled:    config.IsDebug(), // TODO 改成配置吧
 		statsInterval: 10 * time.Second,
-		dispatchCnt:   make(map[int]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
+		dispatchCnt:   make(map[int32]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
+		stopTimeout:   conf.StopTimeout,
 	}
+
+	// ---- RW 共享状态初始化 ----
+	pool.enableRW.Store(conf.EnableRWMode)
+	if conf.EnableRWMode && conf.MaxConcurrentReads > 0 {
+		pool.readSem = make(chan struct{}, conf.MaxConcurrentReads)
+	}
+	if pool.enableRW.Load() && pool.stopTimeout <= 0 {
+		pool.stopTimeout = 10 * time.Second
+	}
+
+	return pool
 }
 
 func (p *WorkerPool) Start() {
 	p.mu.Lock()
-	for i := 0; i < p.conf.SchedulePolicy.InitialWorkerNum; i++ {
+	for i := int32(0); i < p.conf.SchedulePolicy.InitialWorkerNum; i++ {
 		worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 		if worker == nil {
 			p.logger.Fatalf("service[%s] Failed to create worker, conf:%v", p.invoker.GetServiceName(), p.conf)
@@ -104,7 +129,7 @@ func (p *WorkerPool) Start() {
 			p.dispatchCnt[i] = &atomic.Uint64{}
 		}
 	}
-	p.workerCount = p.conf.SchedulePolicy.InitialWorkerNum
+	p.workerCount.Store(int32(p.conf.SchedulePolicy.InitialWorkerNum))
 	p.mu.Unlock()
 
 	// 启动中间件链
@@ -190,7 +215,7 @@ func (p *WorkerPool) DispatchJob(job inf.IMailboxJob) error {
 	// 通过一致性哈希+虚拟节点解决 将事件分派给worker执行
 	var worker inf.IMailboxWorker
 	var exists bool
-	var workerID int
+	var workerID int32
 	ctx := job.GetContext()
 	p.mu.RLock() // 加个锁,防止在调整worker数量时,hash环还没有更新
 	if len(p.workers) > 1 {
@@ -224,17 +249,16 @@ func (p *WorkerPool) DispatchJob(job inf.IMailboxJob) error {
 	return worker.SubmitJob(job)
 }
 
-func (p *WorkerPool) resizeWorkers(newSize int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if newSize == p.workerCount {
+func (p *WorkerPool) resizeWorkers(newSize int32) {
+	currentCount := p.workerCount.Load()
+	if newSize == currentCount {
 		return
 	}
 
-	if newSize > p.workerCount {
+	if newSize > currentCount {
 		// 扩容：新增 worker，并受 MaxWorkerNum 约束
-		maxWorkers := 0
+		p.mu.Lock()
+		maxWorkers := int32(0)
 		if p.conf != nil && p.conf.SchedulePolicy != nil && p.conf.SchedulePolicy.ScalingStrategy != nil {
 			maxWorkers = p.conf.SchedulePolicy.ScalingStrategy.MaxWorkerNum
 		}
@@ -243,7 +267,7 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 			newSize = maxWorkers
 		}
 
-		for i := p.workerCount; i < newSize; i++ {
+		for i := currentCount; i < newSize; i++ {
 			worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 			p.workers[i] = worker
 			worker.Start()
@@ -252,26 +276,94 @@ func (p *WorkerPool) resizeWorkers(newSize int) {
 				p.dispatchCnt[i] = &atomic.Uint64{}
 			}
 		}
+		p.workerCount.Store(newSize)
+		p.mu.Unlock()
 	} else {
-		// 缩容：关闭并移除多余 worker
-		removeMap := make(map[int]struct{}, p.workerCount-newSize)
-		for i := newSize; i < p.workerCount; i++ {
+		// 缩容：【P0 修复】先 Unlock 后 Stop + 原地排空 Drain，消除死锁风险。
+		// 流程：Lock → 从 hash ring 移除 → 取出 Worker 引用 → Unlock → Stop → Lock → 清理 map
+		p.mu.Lock()
+		removeMap := make(map[int32]struct{}, currentCount-newSize)
+		removedWorkers := make([]inf.IMailboxWorker, 0, currentCount-newSize)
+		removedIds := make([]int32, 0, currentCount-newSize)
+		for i := newSize; i < currentCount; i++ {
 			if worker, exists := p.workers[i]; exists {
-				// 停止worker时会自动将队列中所有事件处理完成
-				worker.Stop()
-				delete(p.workers, i)
+				removedWorkers = append(removedWorkers, worker)
+				removedIds = append(removedIds, i)
 				removeMap[i] = struct{}{}
-				if p.statsEnabled {
-					delete(p.dispatchCnt, i)
-				}
 			}
 		}
-		// 一次性移除哈希环上的节点
+		// 从哈希环移除（新 Job 不再路由到这些 Worker）
 		p.ring.RemoveMany(removeMap)
-	}
+		p.workerCount.Store(int32(newSize))
+		p.mu.Unlock() // ← 先释放 pool 锁，避免 Drain handler 自投递死锁
 
-	// 更新当前 worker 数量
-	p.workerCount = newSize
+		// 在 pool 锁外停止 Worker（Worker 会原地排空 Drain 队列残留 Job）
+		for _, w := range removedWorkers {
+			w.BeginStop()
+		}
+		for _, w := range removedWorkers {
+			w.Wait()
+		}
+
+		// 重新获取锁清理 map 数据结构
+		p.mu.Lock()
+		for _, id := range removedIds {
+			delete(p.workers, id)
+			if p.statsEnabled {
+				delete(p.dispatchCnt, id)
+			}
+		}
+		p.mu.Unlock()
+	}
+}
+
+// IsRWEnabled 返回当前 RW 模式是否启用
+func (p *WorkerPool) IsRWEnabled() bool {
+	return p.enableRW.Load()
+}
+
+// GetEnableRWPtr 返回 enableRW 的指针，供 MethodMgr 等外部组件引用。
+// 仅在服务初始化阶段调用一次，用于建立跨组件引用关系。
+func (p *WorkerPool) GetEnableRWPtr() *atomic.Bool {
+	return &p.enableRW
+}
+
+// SetRWEnabled 运行时动态开关 RW 模式（§10.14 安全协议）
+// 关闭时通过 rwMu.Lock() + RLock-after-check 协议保证切换窗口无数据竞争
+func (p *WorkerPool) SetRWEnabled(enabled bool) error {
+	if !enabled && p.enableRW.Load() {
+		// 关闭 RW 模式：获取 WLock，等待所有 RLock 释放 + 阻止新的 RLock 进入
+		deadline := time.Now().Add(p.stopTimeout)
+		for !p.rwMu.TryLock() {
+			if time.Now().After(deadline) {
+				return ErrRWDisableTimeout
+			}
+			runtime.Gosched()
+		}
+		// 持有 WLock 期间翻转标志——此刻无任何 goroutine 访问共享状态
+		p.enableRW.Store(false)
+		p.rwMu.Unlock()
+		p.logger.Warnf("RW mode disabled at runtime")
+	} else if enabled && !p.enableRW.Load() {
+		// 开启 RW 模式：翻转标志前确保 readSem 已初始化
+		if p.readSem == nil {
+			maxReads := p.conf.MaxConcurrentReads
+			// 初始 EnableRWMode=false 时 fixConf 会将 MaxConcurrentReads 设为 0，
+			// 运行时启用需要计算默认值
+			if maxReads <= 0 {
+				maxReads = runtime.NumCPU() * 4
+				if maxReads > 64 {
+					maxReads = 64
+				}
+			}
+			p.readSem = make(chan struct{}, maxReads)
+			p.conf.MaxConcurrentReads = maxReads // 回写，供后续 SetRWEnabled 使用
+		}
+		p.enableRW.Store(true)
+		p.logger.Warnf("RW mode enabled at runtime, readSem initialized with cap=%d",
+			cap(p.readSem))
+	}
+	return nil
 }
 
 func (p *WorkerPool) logDispatchStatsLoop() {
@@ -294,6 +386,7 @@ func (p *WorkerPool) logDispatchStatsLoop() {
 	}
 }
 
+// logDispatchStatsOnce 打印一次 dispatch 统计
 func (p *WorkerPool) logDispatchStatsOnce() {
 	if p == nil || p.logger == nil || !p.statsEnabled {
 		return
@@ -306,7 +399,7 @@ func (p *WorkerPool) logDispatchStatsOnce() {
 	}
 
 	type wc struct {
-		id    int
+		id    int32
 		count uint64
 	}
 	items := make([]wc, 0, len(p.dispatchCnt))
@@ -362,7 +455,7 @@ func (p *WorkerPool) logDispatchStatsOnce() {
 		if i > 0 {
 			msg += ", "
 		}
-		msg += "w" + itoa(items[i].id) + "=" + itoaU64(items[i].count)
+		msg += "w" + utils.ToString(items[i].id) + "=" + itoaU64(items[i].count)
 	}
 
 	//p.logger.Infof(msg)
@@ -452,6 +545,32 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	}
 	if conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff <= 0 {
 		conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff = 1000
+	}
+
+	// ---- RW 模式配置校验（单 worker 场景不允许开启 RW 模式） ----
+	// 单 Worker 下读写分离无意义：主循环串行处理 Job，spawn 的读 goroutine
+	// 反而引入额外并发开销和锁竞争，且无法通过多 Worker 主循环消费写 Job
+	// 来掩盖读 goroutine 的排空等待。强制关闭并忽略相关配置。
+	if conf.EnableRWMode && conf.SchedulePolicy.InitialWorkerNum <= 1 {
+		conf.EnableRWMode = false
+		conf.MaxConcurrentReads = 0
+		conf.StopTimeout = 0
+	}
+	if conf.EnableRWMode {
+		// 默认值: min(runtime.NumCPU() * 4, 64)，避免大核机器上默认值过高
+		if conf.MaxConcurrentReads <= 0 {
+			conf.MaxConcurrentReads = runtime.NumCPU() * 4
+			if conf.MaxConcurrentReads > 64 {
+				conf.MaxConcurrentReads = 64
+			}
+		}
+		// StopTimeout 默认 10s
+		if conf.StopTimeout <= 0 {
+			conf.StopTimeout = 10 * time.Second
+		}
+	} else {
+		// 未启用 RW 时忽略相关配置
+		conf.MaxConcurrentReads = 0
 	}
 
 	return conf

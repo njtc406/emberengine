@@ -181,6 +181,24 @@ type MailboxConf struct {
 
 	// MiddlewareConf 中间件配置
 	MiddlewareConf *MailboxMiddlewareConf `binding:""`
+
+	// EnableRWMode 启用 Mailbox 级读写分离
+	// 开启后，标记为 ReadOnly 的 RPC 方法可跨 Worker 并发执行（RLock），
+	// 写操作全 Service 独占串行（WLock）。
+	// 默认: false（关闭，与当前完全一致）
+	EnableRWMode bool `binding:""`
+
+	// MaxConcurrentReads 整个 Service 最大并发读执行数（硬上限）
+	// 仅在 EnableRWMode=true 时生效。
+	// 默认: min(runtime.NumCPU()*4, 64)
+	// 0 表示使用默认值，显式设为负数也回退到默认值。
+	MaxConcurrentReads int `binding:""`
+
+	// StopTimeout RW 模式下 Worker Stop 的最大等待时间
+	// 超时后 Worker 放弃等待泄漏的读 goroutine，强制继续 Drain 并退出。
+	// 仅在 EnableRWMode=true 时生效。
+	// 默认: 10s
+	StopTimeout time.Duration `binding:""`
 }
 
 // MailboxMiddlewareConf 邮箱中间件配置
@@ -287,8 +305,8 @@ type ServiceLogConf struct {
 type WorkerStrategyConfig struct {
 	Name           string                  `binding:""` // 策略名称
 	Params         map[string]interface{}  `binding:""` // 策略参数,如果是复合策略,需要固定给一个map["mode"]="all/any"
-	MinWorkerNum   int                     `binding:""` // 最小工作线程数量(只有开启了动态worker扩展,这个值才会生效)
-	MaxWorkerNum   int                     `binding:""` // 最大工作线程数量(只有开启了动态worker扩展,这个值才会生效)
+	MinWorkerNum   int32                   `binding:""` // 最小工作线程数量(只有开启了动态worker扩展,这个值才会生效)
+	MaxWorkerNum   int32                   `binding:""` // 最大工作线程数量(只有开启了动态worker扩展,这个值才会生效)
 	GrowthFactor   float64                 `binding:""` // 扩容因子(线程池的数量=当前线程池数量*扩容因子)
 	ShrinkFactor   float64                 `binding:""` // 缩容因子(线程池的数量=当前线程池数量*缩容因子)
 	ResizeCoolDown time.Duration           `binding:""` // 缩容冷却时间(默认1秒)(当负载小于最小负载时,则关闭多余的线程)
@@ -385,7 +403,7 @@ type WorkerSchedulePolicy struct {
 	// 启动时创建的Worker数量
 	// 建议: 单核场景设为1，多核场景设为CPU核心数的1-2倍
 	// 默认: 1
-	InitialWorkerNum int `binding:""`
+	InitialWorkerNum int32 `binding:""`
 
 	// VirtualWorkerRate 虚拟节点倍率
 	// 一致性哈希环中每个Worker对应的虚拟节点数量

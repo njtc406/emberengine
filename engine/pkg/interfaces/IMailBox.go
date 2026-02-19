@@ -38,7 +38,7 @@ type IMailboxWorker interface {
 	// Stop 便捷方法：BeginStop + Wait。
 	Stop()
 
-	GetWorkerId() int
+	GetWorkerId() int32
 	// GetJobLen 获取当前队列中的任务数量
 	GetJobLen() int
 
@@ -214,4 +214,31 @@ type ISuspendPolicy interface {
 	// ShouldAllow 判断挂起状态下是否允许该事件通过。
 	// 返回 true 表示放行，false 表示拒绝。
 	ShouldAllow(job IMailboxJob) bool
+}
+
+// IRWModeJob 读写模式接口（新增独立接口，不修改 IMailboxJob）
+// Job[T] 同时实现 IMailboxJob 和 IRWModeJob。
+// 调用方通过类型断言按需使用，不强制所有 IMailboxJob 实现者补充方法。
+type IRWModeJob interface {
+	// SetRWMode 设置读写模式
+	SetRWMode(mode def.RWMode)
+	// GetRWMode 获取读写模式（零值 RWModeWrite 保证未设置时默认为写）
+	GetRWMode() def.RWMode
+}
+
+// IReadOnlyMethodMgr 只读方法管理扩展接口（新增独立接口，不修改 IMethodMgr）
+// 由 MethodMgr 实现，调用方通过类型断言使用。
+type IReadOnlyMethodMgr interface {
+	// MarkReadOnly 将指定方法标记为只读
+	MarkReadOnly(name string)
+	// IsReadOnly 查询指定方法是否为只读（未注册的方法返回 false，即默认写）
+	IsReadOnly(name string) bool
+}
+
+// IReadOnlyDeclarer 只读方法声明接口（可选实现）
+// 服务可实现此接口手动声明只读方法，适用于已有大量 RpcXxx 方法不便改名的场景。
+type IReadOnlyDeclarer interface {
+	// ReadOnlyMethods 返回只读方法名列表
+	// 列表中的方法名应与注册的方法名完全一致（含前缀）
+	ReadOnlyMethods() []string
 }
