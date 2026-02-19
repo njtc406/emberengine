@@ -6,12 +6,15 @@
 package mailbox
 
 import (
+	"context"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -33,20 +36,22 @@ const (
 //   - 使用 idle.AdaptiveController 在队列为空时进行条件等待或退避，避免空转占用 CPU；
 //   - 在 Stop 时，通过 queueManager.DrainAll 将队列中剩余事件处理完毕，保证关闭过程无消息丢失。
 type Worker struct {
-	workerId     int
-	closed       atomic.Bool
-	closing      atomic.Bool
-	submitters   atomic.Int64
-	pool         *WorkerPool
-	wg           sync.WaitGroup
-	queueManager IQueueManager            // 队列管理器（可以是双队列或多优先级队列）
-	idler        *idle.AdaptiveController // 自适应空闲控制器
-	count        atomic.Int64
-	drainPolicy  DrainPolicy
+	workerId      int32
+	closed        atomic.Bool
+	closing       atomic.Bool
+	submitters    atomic.Int64
+	pool          *WorkerPool
+	wg            sync.WaitGroup
+	inflightReads sync.WaitGroup           // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
+	pendingJob    inf.IMailboxJob          // 单值字段：TryLock/读路径轮询检测到 closed=true 时暂存已出队未执行 Job
+	queueManager  IQueueManager            // 队列管理器（可以是双队列或多优先级队列）
+	idler         *idle.AdaptiveController // 自适应空闲控制器
+	count         atomic.Int64
+	drainPolicy   DrainPolicy
 }
 
 // newWorker 创建统一Worker
-func newWorker(workerId int, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
+func newWorker(workerId int32, conf *config.MailboxConf, pool *WorkerPool) inf.IMailboxWorker {
 	w := &Worker{
 		workerId: workerId,
 		pool:     pool,
@@ -102,11 +107,11 @@ func createQueueManager(conf *config.MailboxConf) IQueueManager {
 }
 
 // GetWorkerId 获取Worker的ID
-func (w *Worker) GetWorkerId() int {
+func (w *Worker) GetWorkerId() int32 {
 	return w.workerId
 }
 
-// SubmitEvent 提交事件到队列
+// SubmitJob 提交任务到队列
 func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
 	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
 	if w.closing.Load() || w.closed.Load() {
@@ -150,39 +155,86 @@ func (w *Worker) Start() {
 //
 // 循环逻辑：
 //  1. 尝试从 queueManager.NextJob() 获取下一个事件；
-//  2. 若获取成功，则调用 safeExec 执行并继续下一轮；
+//  2. 若获取成功，根据 enableRW 决定走 RW 或串行路径；
 //  3. 若当前没有事件，则调用 idler.Idle() 进行条件等待或退避；
-//  4. 当 closed 标记为 true 时，循环退出，并在 defer 中通过 DrainAll 处理所有残留事件。
+//  4. 当 closed 标记为 true 时，循环退出，并在 defer 中处理所有残留事件。
 func (w *Worker) run() {
 	defer w.wg.Done()
 
-	// 退出时处理所有剩余消息
+	// 退出时：先等待本 Worker 的 in-flight 读完成（带超时兜底），再在 WLock 下 drain 残留消息
 	defer func() {
+		// ① 等待本 Worker 的 in-flight 读 goroutine 完成（带超时保护）
+		stopTimedOut := false
+		if w.pool.enableRW.Load() {
+			done := make(chan struct{})
+			go func() {
+				w.inflightReads.Wait() // per-Worker：仅等待本 Worker spawn 的读 goroutine
+				close(done)
+			}()
+			select {
+			case <-done:
+				// 本 Worker 的所有读 goroutine 正常完成
+			case <-time.After(w.pool.stopTimeout):
+				// 超时：标记不安全关闭，强制继续
+				stopTimedOut = true
+				w.pool.logger.Errorf("Worker %d: StopTimeout (%v) exceeded, "+
+					"read goroutines still in-flight. "+
+					"Drain forced to DrainDiscard to avoid data race with leaked goroutines.",
+					w.workerId, w.pool.stopTimeout)
+			}
+		}
+
 		if w.queueManager == nil {
 			return
 		}
-		switch w.drainPolicy {
+
+		// 确定有效的 Drain 策略（超时后强制降级为 DrainDiscard）
+		effectiveDrainPolicy := w.drainPolicy
+		if stopTimedOut {
+			effectiveDrainPolicy = DrainDiscard
+		}
+
+		switch effectiveDrainPolicy {
 		case DrainDiscard:
+			// DrainDiscard 不需要 WLock（不执行业务逻辑，不访问服务共享状态）
+			if w.pendingJob != nil {
+				w.discardExec(w.pendingJob)
+				w.pendingJob = nil
+			}
 			w.queueManager.DrainAll(func(e inf.IMailboxJob) {
 				w.discardExec(e)
 			})
 		default:
+			// ② Drain 阶段获取 WLock，保证跨 Worker Drain 串行 + 与读 goroutine 互斥
+			if w.pool.enableRW.Load() {
+				w.pool.rwMu.Lock()
+			}
+			if w.pendingJob != nil {
+				w.safeExec(w.pendingJob)
+				w.pendingJob = nil
+			}
 			w.queueManager.DrainAll(func(e inf.IMailboxJob) {
 				w.safeExec(e)
 			})
+			if w.pool.enableRW.Load() {
+				w.pool.rwMu.Unlock()
+			}
 		}
 	}()
 
 	// 主处理循环
 	for !w.closed.Load() {
-		// 尝试获取下一个事件
-		if e, ok := w.queueManager.NextJob(); ok {
-			w.safeExec(e)
+		e, ok := w.queueManager.NextJob()
+		if !ok {
+			w.idler.Idle()
 			continue
 		}
 
-		// 队列为空，使用空闲控制器等待
-		w.idler.Idle()
+		if w.pool.enableRW.Load() {
+			w.execWithRW(e)
+		} else {
+			w.safeExec(e) // 未启用 RW，保持原有串行行为
+		}
 	}
 }
 
@@ -244,15 +296,32 @@ func (w *Worker) discardExec(job inf.IMailboxJob) {
 	w.pool.logger.WithContext(ctx).Errorf("Worker %d discard job %v", w.workerId, job)
 }
 
-// safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析：
-//   - 捕获业务处理中的 panic，调用 invoker.EscalateFailure 上报错误；
-//   - 可选地通过 profiler.Analyzer 记录每类事件的处理耗时；
-//   - 在业务处理完成后，调用中间件链的 OnComplete 回调。
+// safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析（向后兼容，skipProfiler=false）。
 func (w *Worker) safeExec(job inf.IMailboxJob) {
+	w.safeExecInternal(job, false)
+}
+
+// safeExecSkipProfiler RW 模式下读 goroutine 专用（跳过共享 Profiler，避免并发安全问题）
+func (w *Worker) safeExecSkipProfiler(job inf.IMailboxJob) {
+	w.safeExecInternal(job, true)
+}
+
+// safeExecInternal 统一的 Job 执行逻辑：panic 恢复 + 可选 Profiler + 中间件 OnComplete + Job Release。
+// skipProfiler=true 时跳过共享 Profiler（读 goroutine 专用），避免并发安全问题和 stack 语义破坏。
+func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipProfiler bool) {
 	ctx := job.GetContext()
 	mctx := job.GetMiddlewareContext()
 	var execErr error
 	var panicVal interface{}
+
+	// 读 goroutine 路径：向 context 中注入 RWModeRead，
+	// 业务层可通过 ctx.Value(def.RWModeContextKey) 检测当前是否在 ReadOnly 上下文中执行。
+	// 框架层在 Service.PostJob 中检测此标记，拒绝 ReadOnly handler 的自投递。
+	// 同时注入 RWSourceServiceKey 标记源 Service，用于区分自投递和跨服务调用。
+	if skipProfiler && w.pool.enableRW.Load() {
+		ctx = context.WithValue(ctx, def.RWModeContextKey, def.RWModeRead)
+		ctx = context.WithValue(ctx, def.RWSourceServiceKey, w.pool.invoker.GetServiceName())
+	}
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -272,18 +341,18 @@ func (w *Worker) safeExec(job inf.IMailboxJob) {
 
 		// 调用中间件链的 OnComplete（逆序执行）
 		if mctx != nil {
-			// 可以在这里执行数据回滚操作
 			w.pool.middlewareChain.ExecuteOnComplete(mctx, execErr, panicVal)
 		}
 
-		// job执行后需要释放
+		// job 执行后需要释放
 		if job != nil {
 			job.Release()
 		}
 	}()
 
 	var analyzer *profiler.Analyzer
-	if w.pool.profiler != nil {
+	// skipProfiler=true 时跳过共享 Profiler，避免并发安全问题和 stack 语义破坏
+	if w.pool.profiler != nil && !skipProfiler {
 		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE ]%s", reflect.TypeOf(job).String()))
 	}
 
@@ -296,6 +365,167 @@ func (w *Worker) safeExec(job inf.IMailboxJob) {
 		analyzer.Pop()
 		analyzer = nil
 	}
+}
+
+// ---- RW 读写分离核心方法 ----
+
+// getRWMode 从 Job 中安全获取 RWMode（兜底为 RWModeWrite）
+func getRWMode(job inf.IMailboxJob) def.RWMode {
+	if rwJob, ok := job.(inf.IRWModeJob); ok {
+		return rwJob.GetRWMode()
+	}
+	return def.RWModeWrite // 未实现 IRWModeJob 的 Job 默认为写
+}
+
+// execWithRW 根据 Job 的 RWMode 执行读写分离逻辑
+func (w *Worker) execWithRW(job inf.IMailboxJob) {
+	if getRWMode(job) == def.RWModeRead {
+		w.execRead(job)
+	} else {
+		w.execWrite(job)
+	}
+}
+
+// execRead 读操作：统一轮询获取前置条件后 spawn goroutine 并发执行。
+//
+// 统一轮询循环完成三项前置检查：
+// ① closed 检查（响应 Stop）；② writeRequested 自旋让步（防止写饥饿）；
+// ③ 信号量令牌获取（MaxConcurrentReads 硬上限）。
+func (w *Worker) execRead(job inf.IMailboxJob) {
+	readBackoff := time.Duration(0)
+	const maxReadBackoff = 100 * time.Microsecond
+	for {
+		// ① 优先检查 Stop 状态
+		if w.closed.Load() {
+			w.pendingJob = job
+			return
+		}
+		// ② 若有 pending writer，退避让步（让已有的读 goroutine 完成 RUnlock）
+		if w.pool.writeRequested.Load() > 0 {
+			if readBackoff == 0 {
+				runtime.Gosched()
+				readBackoff = time.Microsecond
+			} else {
+				// 加入随机 jitter，避免惊群效应
+				wcFactor := int64(w.pool.workerCount.Load())
+				if wcFactor < 1 {
+					wcFactor = 1
+				}
+				if wcFactor > 8 {
+					wcFactor = 8
+				}
+				jitterBase := int64(readBackoff) * 2 / 5
+				jitterRange := jitterBase * wcFactor
+				if jitterRange > 0 {
+					jitter := time.Duration(rand.Int63n(jitterRange)) - time.Duration(jitterRange/2)
+					time.Sleep(readBackoff + jitter)
+				} else {
+					time.Sleep(readBackoff)
+				}
+				readBackoff *= 2
+				if readBackoff > maxReadBackoff {
+					readBackoff = maxReadBackoff
+				}
+			}
+			continue
+		}
+		// ③ 信号量令牌获取（非阻塞尝试，失败则退避后重新进入循环）
+		if w.pool.readSem != nil {
+			select {
+			case w.pool.readSem <- struct{}{}:
+				// 获取令牌成功
+			default:
+				// 令牌已满，退避后重试
+				if readBackoff == 0 {
+					runtime.Gosched()
+					readBackoff = time.Microsecond
+				} else {
+					time.Sleep(readBackoff)
+					readBackoff *= 2
+					if readBackoff > maxReadBackoff {
+						readBackoff = maxReadBackoff
+					}
+				}
+				continue
+			}
+		}
+		break
+	}
+
+	// 获取读锁
+	w.pool.rwMu.RLock()
+
+	// 【关键：RLock-after-check 重检查（§10.14 动态开关安全协议）】
+	// 防止在 SetRWEnabled(false) 切换窗口内误 spawn 读 goroutine
+	if !w.pool.enableRW.Load() {
+		w.pool.rwMu.RUnlock()
+		// 必须释放轮询循环中已获取的信号量令牌
+		if w.pool.readSem != nil {
+			<-w.pool.readSem
+		}
+		w.safeExec(job) // 降级为串行执行
+		return
+	}
+
+	// 【关键时序】inflightReads.Add 必须在 spawn goroutine 之前、
+	// 在 RLock + enableRW 重检查之后同步执行
+	w.inflightReads.Add(1)
+
+	go func() {
+		// WaitGroup + 锁 + 信号量泄漏防护
+		var rlockReleased atomic.Bool
+		defer func() {
+			// 归还信号量令牌
+			if w.pool.readSem != nil {
+				func() {
+					defer func() { recover() }()
+					<-w.pool.readSem
+				}()
+			}
+			// 释放读锁（必须在 Done 之前）
+			if rlockReleased.CompareAndSwap(false, true) {
+				w.pool.rwMu.RUnlock()
+			}
+			// WaitGroup Done（最后释放）
+			w.inflightReads.Done()
+		}()
+
+		w.safeExecSkipProfiler(job) // 读 goroutine 跳过共享 Profiler
+	}()
+}
+
+// execWrite 写操作：等待所有 in-flight 读完成，然后独占执行。
+//
+// 使用 TryLock 而非 Lock，允许在等待写锁期间检查 closed 标志，
+// 保证 BeginStop() 能在有限时间内让主循环退出。
+func (w *Worker) execWrite(job inf.IMailboxJob) {
+	w.pool.writeRequested.Add(1)
+	backoff := time.Duration(0)
+	const maxBackoff = 1 * time.Millisecond
+	for !w.pool.rwMu.TryLock() {
+		if w.closed.Load() {
+			w.pool.writeRequested.Add(-1)
+			// Worker 正在停止但无法获取写锁，暂存到 pendingJob 由 Drain 处理
+			w.pendingJob = job
+			return
+		}
+		if backoff == 0 {
+			runtime.Gosched()
+			backoff = time.Microsecond
+		} else {
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+	// defer 保证 Unlock 在 Add(-1) 之前执行（LIFO）
+	// 确保 writeRequested.Add(-1) 在 Unlock 之后：
+	// 读路径看到 writeRequested==0 时 WLock 必定已释放
+	defer w.pool.writeRequested.Add(-1)
+	defer w.pool.rwMu.Unlock()
+	w.safeExec(job)
 }
 
 // GetJobLen 获取队列中的任务总数

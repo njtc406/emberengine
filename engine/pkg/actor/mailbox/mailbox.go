@@ -140,3 +140,14 @@ func (m *Mailbox) Stop() {
 	m.BeginStop()
 	m.Wait()
 }
+
+// IsRWEnabled 返回当前 RW 模式是否启用
+func (m *Mailbox) IsRWEnabled() bool {
+	return m.workerPool.IsRWEnabled()
+}
+
+// GetEnableRWPtr 返回 WorkerPool 内 enableRW 的指针，供 MethodMgr 等外部组件引用。
+// 仅在服务初始化阶段调用一次。
+func (m *Mailbox) GetEnableRWPtr() *atomic.Bool {
+	return m.workerPool.GetEnableRWPtr()
+}

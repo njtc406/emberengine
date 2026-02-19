@@ -62,6 +62,8 @@ type Service struct {
 
 	jobRegistry *jobHandlerRegistry // Job 处理器注册表
 
+	txHookMgr TxHookManager // 事务钩子管理器（值类型，Init 注册，写路径 WLock 串行保护）
+
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
 }
@@ -209,6 +211,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	// 初始化根节点rpc处理器
 	s.methodMgr = rpc.NewMethodMgr(s.ILoggerX)
+	// 将 WorkerPool 的 enableRW 引用传递给 MethodMgr，用于 RemoveMethods 防御性校验
+	if rwMgr, ok := s.methodMgr.(*rpc.MethodMgr); ok {
+		rwMgr.SetEnableRW(s.mailbox.GetEnableRWPtr())
+	}
 	s.IRpcHandler = rpc.NewHandler(s.self).Init(s.methodMgr)
 
 	if s.src != nil {
@@ -338,8 +344,69 @@ func (s *Service) release() {
 	endpoints.GetEndpointManager().RemoveService(s)
 }
 
-func (s *Service) PostJob(job inf.IMailboxJob) error {
-	return s.mailbox.PostJob(job)
+func (s *Service) PostJob(j inf.IMailboxJob) error {
+	// 【RW 安全约束】检测 ReadOnly handler 中的自投递（仅同 Service）
+	// ReadOnly handler 运行在读 goroutine 中（持有 RLock），如果它尝试投递
+	// 新的 Write Job 到同一 Service，该 Write Job 最终需要 WLock 执行，
+	// 而当前读 goroutine 正持有 RLock —— 虽然不会形成死锁（写 Job
+	// 进入队列等待后续处理），但这暗示 ReadOnly handler
+	// 存在副作用（触发写操作），应被标记为 Write 而非 Read。
+	//
+	// 通过 RWSourceServiceKey 区分自投递和跨服务调用：
+	// 仅当源 Service 与当前 Service 相同时才拦截，允许跨服务 RPC。
+	if s.mailbox.IsRWEnabled() {
+		if ctx := j.GetContext(); ctx != nil {
+			if mode, ok := ctx.Value(def.RWModeContextKey).(def.RWMode); ok && mode == def.RWModeRead {
+				if srcSvc, ok := ctx.Value(def.RWSourceServiceKey).(string); ok && srcSvc == s.GetServiceName() {
+					s.Warnf("ReadOnly handler attempted to PostJob (self-posting detected). "+
+						"This method should NOT be marked as ReadOnly. job_type=%v", j.GetType())
+					return def.ErrReadOnlyPostJob
+				}
+			}
+		}
+	}
+
+	// RW 模式下，为 RPC 请求 Job 设置 RWMode
+	if s.mailbox.IsRWEnabled() {
+		s.setJobRWMode(j)
+	}
+
+	return s.mailbox.PostJob(j)
+}
+
+// setJobRWMode 根据 methodMgr 的只读标记为 RPC 请求 Job 注入 RWMode。
+// 只有 RPC 请求（非回复）且方法被标记为 ReadOnly 时，才设置为 RWModeRead。
+// 其他所有 Job（Timer、Event、Concurrent 等）一律保持零值 RWModeWrite。
+func (s *Service) setJobRWMode(j inf.IMailboxJob) {
+	// 只有 RPC 请求才可能是 Read，其他所有 Job 类型一律为 Write
+	if j.GetType() != def.MailboxJobTypeRpc {
+		return
+	}
+
+	rwJob, ok := j.(inf.IRWModeJob)
+	if !ok {
+		return
+	}
+
+	// 从 RPC Job 中提取 envelope，获取方法名
+	envelope := job.GetJobPayloadAs[inf.IEnvelope](j)
+	if envelope == nil {
+		return
+	}
+
+	// 只有请求（非回复）才检查 ReadOnly
+	data := envelope.GetData()
+	if data == nil || data.IsReply() {
+		return // 响应/异步回调 → 始终为 Write
+	}
+
+	// 查询方法是否为只读（通过 IReadOnlyMethodMgr 类型断言）
+	if roMgr, ok := s.methodMgr.(inf.IReadOnlyMethodMgr); ok {
+		if roMgr.IsReadOnly(data.GetMethod()) {
+			rwJob.SetRWMode(def.RWModeRead)
+		}
+	}
+	// 未匹配时 Job 零值为 RWModeWrite
 }
 
 func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurrentCallback) error {

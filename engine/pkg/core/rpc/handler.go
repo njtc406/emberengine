@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -25,17 +26,25 @@ var emptyError = reflect.TypeOf((*error)(nil))
 
 // MethodMgr 管理所有注册的方法
 type MethodMgr struct {
-	mu        sync.RWMutex
-	rpcCnt    int // rpc 接口数量
-	methodMap map[string]def.MethodCallFunc
-	logger    log.ILoggerX
+	mu          sync.RWMutex
+	rpcCnt      int
+	methodMap   map[string]def.MethodCallFunc
+	readOnlyMap map[string]bool // 方法名 → 是否只读
+	enableRW    *atomic.Bool    // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
+	logger      log.ILoggerX
 }
 
 func NewMethodMgr(logger log.ILoggerX) inf.IMethodMgr {
 	return &MethodMgr{
-		methodMap: make(map[string]def.MethodCallFunc),
-		logger:    logger,
+		methodMap:   make(map[string]def.MethodCallFunc),
+		readOnlyMap: make(map[string]bool),
+		logger:      logger,
 	}
+}
+
+// SetEnableRW 设置 enableRW 引用，用于 RemoveMethods 防御检查
+func (m *MethodMgr) SetEnableRW(flag *atomic.Bool) {
+	m.enableRW = flag
 }
 
 func (m *MethodMgr) IsPrivate() bool {
@@ -51,7 +60,8 @@ func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if hasRpcPrefix(name) {
+	// RpcRo/RPCRo 前缀是 Rpc/RPC 的超集，先检查 ReadOnly 前缀，短路防重复计数
+	if hasRpcReadOnlyPrefix(name) || hasRpcPrefix(name) {
 		m.rpcCnt++
 	}
 	m.methodMap[name] = fn
@@ -65,12 +75,25 @@ func (m *MethodMgr) GetMethodFunc(name string) (def.MethodCallFunc, bool) {
 }
 
 func (m *MethodMgr) RemoveMethods(names []string) bool {
+	// 【防御性校验】RW 模式下，运行期 GetMethodFunc()/IsReadOnly() 并发读 methodMap/readOnlyMap，
+	// 如果此时 RemoveMethods 写入 map → map concurrent read/write fatal。
+	// 正常调用时机是 shutdown 阶段（Worker 已停止），此校验防止误用。
+	if m.enableRW != nil && m.enableRW.Load() {
+		m.logger.Errorf("RemoveMethods called while RW mode is active! "+
+			"This may cause data race. Caller should ensure all Workers are stopped. names=%v", names)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	oldRpcCnt := m.rpcCnt
 	for _, name := range names {
+		if _, ok := m.methodMap[name]; !ok {
+			continue
+		}
 		delete(m.methodMap, name)
-		if hasRpcPrefix(name) {
+		delete(m.readOnlyMap, name)
+		// RpcRo/RPCRo 前缀是 Rpc/RPC 的超集，与 AddMethodFunc 保持一致（仅 Rpc 前缀计入 rpcCnt）
+		if hasRpcReadOnlyPrefix(name) || hasRpcPrefix(name) {
 			m.rpcCnt--
 		}
 		if m.rpcCnt < 0 {
@@ -80,6 +103,18 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 
 	// 只有一种情况会返回true,就是old>0&&now=0
 	return oldRpcCnt > 0 && m.rpcCnt == 0
+}
+
+// MarkReadOnly 标记指定方法为只读（启动阶段调用，供 IReadOnlyDeclarer 批量设置）
+// 实现 IReadOnlyMethodMgr 接口
+func (m *MethodMgr) MarkReadOnly(name string) {
+	m.readOnlyMap[name] = true
+}
+
+// IsReadOnly 查询方法是否为只读（无锁，运行期只读的静态表）
+// 实现 IReadOnlyMethodMgr 接口
+func (m *MethodMgr) IsReadOnly(name string) bool {
+	return m.readOnlyMap[name]
 }
 
 // Handler 用于处理 RPC 调用
@@ -109,6 +144,23 @@ func (h *Handler) registerMethod() {
 			h.Panic(err)
 		}
 	}
+
+	// 扫描完所有方法后，检查模块是否实现 IReadOnlyDeclarer，补充手动声明
+	if declarer, ok := h.IModule.(inf.IReadOnlyDeclarer); ok {
+		if roMgr, ok := h.mgr.(inf.IReadOnlyMethodMgr); ok {
+			for _, name := range declarer.ReadOnlyMethods() {
+				// 冲突检测：如果方法前缀不是 ReadOnly（如 Rpc/Api 前缀，无 Ro），
+				// 但 IReadOnlyDeclarer 却将其声明为 ReadOnly，输出警告
+				if !hasRpcReadOnlyPrefix(name) && !hasApiReadOnlyPrefix(name) &&
+					(hasRpcPrefix(name) || hasApiPrefix(name)) {
+					h.Warnf("Method '%s' has a write-style prefix (Rpc/Api) but is declared "+
+						"as ReadOnly by IReadOnlyDeclarer. Please verify this is intentional. "+
+						"If this method modifies state, it should NOT be in ReadOnlyMethods().", name)
+				}
+				roMgr.MarkReadOnly(name)
+			}
+		}
+	}
 }
 
 func isExported(name string) bool {
@@ -134,8 +186,9 @@ func (h *Handler) isExportedOrBuiltinType(t reflect.Type) bool {
 }
 
 func (h *Handler) suitableMethods(method reflect.Method) error {
-	// 只注册以 Api 或 Rpc 开头的方法
-	if !hasApiPrefix(method.Name) && !hasRpcPrefix(method.Name) {
+	// ReadOnly 前缀是普通前缀的超集（RpcRo 包含 Rpc，ApiRo 包含 Api），先检查 ReadOnly
+	isReadOnly := hasApiReadOnlyPrefix(method.Name) || hasRpcReadOnlyPrefix(method.Name)
+	if !isReadOnly && !hasApiPrefix(method.Name) && !hasRpcPrefix(method.Name) {
 		return nil
 	}
 
@@ -199,9 +252,15 @@ func (h *Handler) suitableMethods(method reflect.Method) error {
 			h,
 		),
 	)
+	// 如果是 ReadOnly 前缀，标记为只读方法 TODO 只读方法中不允许修改任何数据,这里需要想办法限制一下内部，如果是调用了只读方法，最后不执行commit
+	if isReadOnly {
+		if roMgr, ok := h.mgr.(inf.IReadOnlyMethodMgr); ok {
+			roMgr.MarkReadOnly(name)
+		}
+	}
 
 	h.methods = append(h.methods, name)
-	h.Debugf("method[%s] register success", name)
+	h.Debugf("method[%s] register success, readOnly=%v", name, isReadOnly)
 	return nil
 }
 

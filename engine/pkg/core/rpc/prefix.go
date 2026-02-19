@@ -42,8 +42,10 @@ func (idx *prefixBucketIndex) has(s string) bool {
 }
 
 var (
-	apiPrefixIndex = newPrefixBucketIndex([]string{"Api", "API"}) // 只允许node内部调用的方法
-	rpcPrefixIndex = newPrefixBucketIndex([]string{"Rpc", "RPC"}) // 允许rpc调用的方法
+	apiPrefixIndex   = newPrefixBucketIndex([]string{"Api", "API"})     // 只允许node内部调用的方法
+	rpcPrefixIndex   = newPrefixBucketIndex([]string{"Rpc", "RPC"})     // 允许rpc调用的方法
+	apiRoPrefixIndex = newPrefixBucketIndex([]string{"ApiRo", "APIRo"}) // API 只读前缀
+	rpcRoPrefixIndex = newPrefixBucketIndex([]string{"RpcRo", "RPCRo"}) // RPC 只读前缀
 )
 
 // SetApiPrefix 设置自定义api前缀
@@ -56,10 +58,30 @@ func SetRpcPrefix(prefix ...string) {
 	rpcPrefixIndex.add(prefix...)
 }
 
+// SetApiReadOnlyPrefix 设置自定义的 API 只读前缀
+func SetApiReadOnlyPrefix(prefix ...string) {
+	apiRoPrefixIndex.add(prefix...)
+}
+
+// SetRpcReadOnlyPrefix 设置自定义的 RPC 只读前缀
+func SetRpcReadOnlyPrefix(prefix ...string) {
+	rpcRoPrefixIndex.add(prefix...)
+}
+
 func hasApiPrefix(s string) bool {
 	return apiPrefixIndex.has(s)
 }
 
 func hasRpcPrefix(s string) bool {
 	return rpcPrefixIndex.has(s)
+}
+
+// hasApiReadOnlyPrefix 检查方法名是否有 API 只读前缀（ApiRo/APIRo）
+func hasApiReadOnlyPrefix(s string) bool {
+	return apiRoPrefixIndex.has(s)
+}
+
+// hasRpcReadOnlyPrefix 检查方法名是否有 RPC 只读前缀（RpcRo/RPCRo）
+func hasRpcReadOnlyPrefix(s string) bool {
+	return rpcRoPrefixIndex.has(s)
 }
