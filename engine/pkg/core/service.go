@@ -415,6 +415,12 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	j.SetPriority(def.PriorityNormal)
 	j.SetDispatcherKey(uuid.NewString())
 	j.SetPayload(evt)
+	// 显式标记为 Write：并发回调通常伴随状态更新（如写缓存、修改字段），必须独占执行。
+	j.SetRWMode(def.RWModeWrite)
+	// 框架内部投递，直接调用 mailbox.PostJob 而非 s.PostJob：
+	// 1. ctx 是全新的（无 RWModeContextKey），不会触发 ReadOnly 自投递检测；
+	// 2. 已显式设置 RWMode，无需经过 setJobRWMode 推断；
+	// 3. 避免框架内部投递承担 PostJob 中面向用户的检查开销。
 	if err := s.mailbox.PostJob(j); err != nil {
 		log.SysLogger.Errorf("post job error: %v", err)
 		j.Release()
@@ -429,6 +435,9 @@ func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) e
 	j.SetPriority(def.PriorityNormal)
 	j.SetDispatcherKey(uuid.NewString())
 	j.SetPayload(t)
+	// 显式标记为 Write：定时器回调通常伴随状态更新，必须独占执行。
+	j.SetRWMode(def.RWModeWrite)
+	// 框架内部投递，直接调用 mailbox.PostJob（理由同 pushConcurrentCallback）
 	if err := s.mailbox.PostJob(j); err != nil {
 		log.SysLogger.Errorf("post job error: %v", err)
 		j.Release()
