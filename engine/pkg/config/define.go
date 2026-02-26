@@ -29,7 +29,8 @@ func (c *conf) String() string {
 }
 
 type NodeConf struct {
-	NodeId           string            `binding:""`         // 节点ID(目前这个没用,节点id是节点启动的时候自动生成的)
+	NodeId           string            `binding:"required"` // 节点ID(目前这个只用于记录pid文件是组成生成路径)
+	NodeType         string            `binding:"required"` // 节点类型(默认ember)
 	SystemStatus     string            `binding:"required"` // 系统状态(debug/release)
 	PVCPath          string            `binding:"required"` // 数据持久化目录(默认./data)
 	PVPath           string            `binding:"required"` // 缓存目录(默认./run)

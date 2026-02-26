@@ -1,14 +1,6 @@
-// Package node
-// 模块名: 节点
-// 功能描述: 用于提供程序入口
-// 作者:  yr  2024/1/10 0010 23:43
-// 最后更新:  yr  2024/1/10 0010 23:43
 package node
 
 import (
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
@@ -27,15 +19,16 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/version"
 )
 
-var (
-	exitCh = make(chan os.Signal)
-	ID     int32
-	Type   string
-)
+type Node struct {
+	version   string
+	confPath  string
+	hooks     []HookFun
+	extra     map[any]any
+	startTime time.Time
+}
 
-func init() {
-	// 注册退出信号
-	signal.Notify(exitCh, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+func New() *Node {
+	return &Node{}
 }
 
 func fixVersion(v string) string {
@@ -45,65 +38,26 @@ func fixVersion(v string) string {
 	return v
 }
 
-type HookFun func(map[any]any)
-
-type StartParam struct {
-	Language translate.LanguageType // 语言
-	Version  string
-	ConfPath string
-	Hooks    []HookFun
-	Extra    map[any]any
-}
-
-type StartOption func(*StartParam)
-
-func WithLanguage(language translate.LanguageType) StartOption {
-	return func(p *StartParam) {
-		p.Language = language
-	}
-}
-
-func WithVersion(v string) StartOption {
-	return func(p *StartParam) {
-		p.Version = v
-	}
-}
-
-func WithConfPath(confPath string) StartOption {
-	return func(p *StartParam) {
-		p.ConfPath = confPath
-	}
-}
-
-func WithHooks(hooks ...HookFun) StartOption {
-	return func(p *StartParam) {
-		p.Hooks = hooks
-	}
-}
-
-func WithExtra(extra map[any]any) StartOption {
-	return func(p *StartParam) {
-		p.Extra = extra
-	}
-}
-
-func Start(opts ...StartOption) {
-	startTime := time.Now()
+func (n *Node) Start(opts ...StartOption) (*Node, error) {
+	n.startTime = time.Now() // 使用真实时间
 	param := StartParam{}
 	for _, f := range opts {
 		f(&param)
 	}
-	param.Version = fixVersion(param.Version)
+	n.version = fixVersion(param.Version)
+	n.confPath = param.ConfPath
+	n.hooks = param.Hooks
+	n.extra = param.Extra
 
 	if param.Language > 0 {
 		translate.SetLanguage(param.Language)
 	}
 
 	// 打印版本信息
-	title.EchoTitle(param.Version)
+	title.EchoTitle(n.version)
 
 	// 初始化节点配置
-	config.Init(param.ConfPath)
+	config.Init(n.confPath)
 
 	// 初始化日志
 	log.Init(config.Conf.SystemLogger, config.IsDebug())
@@ -119,8 +73,7 @@ func Start(opts ...StartOption) {
 	monitor.GetRpcMonitor().Init(config.Conf.NodeConf.RpcMonitorConf)
 
 	// 记录pid
-	pid.RecordPID(config.Conf.NodeConf.PVPath, ID, Type)
-	defer pid.DeletePID(config.Conf.NodeConf.PVPath, ID, Type)
+	pid.RecordPID(config.Conf.NodeConf.PVPath, config.Conf.NodeConf.NodeId, config.Conf.NodeConf.NodeType)
 
 	// 初始化rpc请求去重缓存器
 	dedup.Init(config.Conf.NodeConf.DeDuplicatorConf)
@@ -148,21 +101,12 @@ func Start(opts ...StartOption) {
 	// 启动服务
 	services.Start()
 
-	// 监听退出信号
-	select {
-	case sig := <-exitCh:
-		log.SysLogger.Infof("-------------->>received the signal: %v", sig)
-	}
-
-	log.SysLogger.Info("==================>>begin stop<<==================")
-
-	// 执行关闭流程
-	shutdownSequence(startTime, param.Version)
+	return n, nil
 }
 
-// shutdownSequence 关闭序列 - 独立函数便于调试
-// 在这个函数的任何地方都可以正常设置断点
-func shutdownSequence(startTime time.Time, version string) {
+func (n *Node) Stop() {
+	defer pid.DeletePID(config.Conf.NodeConf.PVPath, config.Conf.NodeConf.NodeId, config.Conf.NodeConf.NodeType)
+	log.SysLogger.Info("==================>>begin stop<<==================")
 	log.SysLogger.Info("[1/6] Stopping all services...")
 	services.StopAll()
 	log.SysLogger.Info("[1/6] All services stopped")
@@ -192,5 +136,5 @@ func shutdownSequence(startTime time.Time, version string) {
 	log.SysLogger.Info("server stopped, program exited...")
 	log.Close()
 	// 优雅退出
-	title.GracefulExit(time.Since(startTime), version)
+	title.GracefulExit(time.Since(n.startTime), n.version)
 }
