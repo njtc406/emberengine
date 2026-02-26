@@ -54,9 +54,10 @@ func (s *Service1) OnInit() error {
 			dto.WithOut(&out),
 		); err != nil {
 			s.WithContext(ctxWithTimeout).Errorf("call Service2.APISum failed, err:%v", err)
+		} else {
+			s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
 		}
-		s.WithContext(ctxWithTimeout).Debugf("call Service2.APISum out:%d", out)
-		//
+
 		s.WithContext(ctxWithTimeout).State().Debugf("==========================================1111")
 		if err := bus.SendWithOpt(
 			ctxWithTimeout,
