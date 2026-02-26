@@ -191,7 +191,8 @@ type IMiddlewareChain interface {
 
 	// ExecuteOnReceive 执行所有中间件的 OnReceive
 	// 返回最终结果和创建的上下文（用于后续 OnComplete）
-	ExecuteOnReceive(ctx context.Context, job IMailboxJob, serviceName string) (dto.MiddlewareResult, IMiddlewareContext)
+	// ctx 从 job.GetContext() 中获取，无需外部传入。
+	ExecuteOnReceive(job IMailboxJob, serviceName string) (dto.MiddlewareResult, IMiddlewareContext)
 
 	// ExecuteOnComplete 执行所有中间件的 OnComplete（逆序）
 	ExecuteOnComplete(mctx IMiddlewareContext, err error, panicVal interface{})

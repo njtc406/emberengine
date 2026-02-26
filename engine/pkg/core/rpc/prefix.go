@@ -35,6 +35,16 @@ func (idx *prefixBucketIndex) has(s string) bool {
 	cands := idx.byFirst[s[0]]
 	for _, p := range cands {
 		if strings.HasPrefix(s, p) {
+			// CamelCase 边界检查：如果前缀之后还有字符，下一个字符必须是大写字母，
+			// 确保正确的驼峰单词边界。
+			// 防止 "RpcRo" 误匹配 "RpcRoute"（下一字符 'u' 小写 → 不匹配），
+			// 而正确匹配 "RpcRoGetUser"（下一字符 'G' 大写 → 匹配）。
+			if len(s) > len(p) {
+				next := s[len(p)]
+				if next < 'A' || next > 'Z' {
+					continue
+				}
+			}
 			return true
 		}
 	}

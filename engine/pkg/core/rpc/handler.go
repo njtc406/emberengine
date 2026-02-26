@@ -81,6 +81,7 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 	if m.enableRW != nil && m.enableRW.Load() {
 		m.logger.Errorf("RemoveMethods called while RW mode is active! "+
 			"This may cause data race. Caller should ensure all Workers are stopped. names=%v", names)
+		return false
 	}
 
 	m.mu.Lock()
@@ -108,13 +109,18 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 // MarkReadOnly 标记指定方法为只读（启动阶段调用，供 IReadOnlyDeclarer 批量设置）
 // 实现 IReadOnlyMethodMgr 接口
 func (m *MethodMgr) MarkReadOnly(name string) {
+	m.mu.Lock()
 	m.readOnlyMap[name] = true
+	m.mu.Unlock()
 }
 
-// IsReadOnly 查询方法是否为只读（无锁，运行期只读的静态表）
+// IsReadOnly 查询方法是否为只读
 // 实现 IReadOnlyMethodMgr 接口
 func (m *MethodMgr) IsReadOnly(name string) bool {
-	return m.readOnlyMap[name]
+	m.mu.RLock()
+	v := m.readOnlyMap[name]
+	m.mu.RUnlock()
+	return v
 }
 
 // Handler 用于处理 RPC 调用
