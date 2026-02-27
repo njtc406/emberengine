@@ -36,18 +36,24 @@ const (
 //   - 使用 idle.AdaptiveController 在队列为空时进行条件等待或退避，避免空转占用 CPU；
 //   - 在 Stop 时，通过 queueManager.DrainAll 将队列中剩余事件处理完毕，保证关闭过程无消息丢失。
 type Worker struct {
-	workerId      int32
-	closed        atomic.Bool
-	closing       atomic.Bool
-	submitters    atomic.Int64
-	pool          *WorkerPool
-	wg            sync.WaitGroup
-	inflightReads sync.WaitGroup           // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
-	pendingJob    inf.IMailboxJob          // 单值字段：TryLock/读路径轮询检测到 closed=true 时暂存已出队未执行 Job
-	queueManager  IQueueManager            // 队列管理器（可以是双队列或多优先级队列）
-	idler         *idle.AdaptiveController // 自适应空闲控制器
-	count         atomic.Int64
-	drainPolicy   DrainPolicy
+	workerId        int32
+	closed          atomic.Bool
+	closing         atomic.Bool
+	submitters      atomic.Int64
+	pool            *WorkerPool
+	wg              sync.WaitGroup
+	inflightReads   sync.WaitGroup  // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
+	inflightReadCnt atomic.Int64    // per-Worker：当前 in-flight 读 goroutine 数（WaitGroup 无法查询计数）
+	pendingJob      inf.IMailboxJob // 单值字段：TryLock/读路径轮询检测到 closed=true 时暂存已出队未执行 Job
+	queueManager    IQueueManager   // 队列管理器（可以是双队列或多优先级队列）
+	// per-Worker RW 指标（跨 goroutine 安全，WorkerPool 汇总时遍历累加）
+	rwReadDurationSum atomic.Int64             // 读操作累计耗时（纳秒），除以 rwReadCount 得平均值
+	rwReadCount       atomic.Int64             // 本 Worker 累计读操作数（用于计算平均读耗时）
+	rwWriteWaitSum    atomic.Int64             // 写操作累计等待耗时（纳秒）
+	rwWriteWaitCount  atomic.Int64             // 本 Worker 累计写等待次数
+	idler             *idle.AdaptiveController // 自适应空闲控制器
+	count             atomic.Int64
+	drainPolicy       DrainPolicy
 }
 
 // newWorker 创建统一Worker
@@ -293,7 +299,11 @@ func (w *Worker) discardExec(job inf.IMailboxJob) {
 	}()
 
 	// 记录日志
-	w.pool.logger.WithContext(ctx).Errorf("Worker %d discard job %v", w.workerId, job)
+	w.pool.logger.WithContext(ctx).Warnf("Worker %d discard job %v", w.workerId, job)
+	// RW 可观测性：丢弃计数
+	w.pool.rwDrainDiscardTotal.Add(1)
+	// 通知业务层 Job 被丢弃
+	w.pool.invoker.OnJobDiscarded(job, def.ErrMailboxNotRunning)
 }
 
 // safeExec 在执行事件处理逻辑时提供 panic 保护和可选的性能分析（向后兼容，skipProfiler=false）。
@@ -350,15 +360,38 @@ func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipProfiler bool) {
 		}
 	}()
 
+	// ---------- watchdog: 单 Job 执行超时告警 ----------
+	if maxExec := w.pool.maxJobExecTime; maxExec > 0 {
+		timer := time.AfterFunc(maxExec, func() {
+			w.pool.logger.WithContext(ctx).Warnf(
+				"Worker %d job execution exceeds %v: %v",
+				w.workerId, maxExec, job,
+			)
+		})
+		defer timer.Stop()
+	}
+
 	var analyzer *profiler.Analyzer
 	// skipProfiler=true 时跳过共享 Profiler，避免并发安全问题和 stack 语义破坏
 	if w.pool.profiler != nil && !skipProfiler {
 		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE ]%s", reflect.TypeOf(job).String()))
 	}
 
+	// ---------- 执行 Job + 读时长采集 ----------
+	var readStart time.Time
+	if skipProfiler {
+		readStart = time.Now()
+	}
+
 	// 调用消息处理器
 	if err := w.pool.invoker.ExecuteJob(ctx, job); err != nil {
 		execErr = err
+	}
+
+	if skipProfiler {
+		elapsed := time.Since(readStart).Nanoseconds()
+		w.rwReadDurationSum.Add(elapsed)
+		w.rwReadCount.Add(1)
 	}
 
 	if analyzer != nil {
@@ -470,6 +503,8 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 	// 【关键时序】inflightReads.Add 必须在 spawn goroutine 之前、
 	// 在 RLock + enableRW 重检查之后同步执行
 	w.inflightReads.Add(1)
+	w.inflightReadCnt.Add(1)  // 可观测性：暂存当前 in-flight 读数量
+	w.pool.rwReadTotal.Add(1) // 全局读计数
 
 	go func() {
 		// WaitGroup + 锁 + 信号量泄漏防护
@@ -486,6 +521,8 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 			if rlockReleased.CompareAndSwap(false, true) {
 				w.pool.rwMu.RUnlock()
 			}
+			// 可观测性：in-flight 读数量递减
+			w.inflightReadCnt.Add(-1)
 			// WaitGroup Done（最后释放）
 			w.inflightReads.Done()
 		}()
@@ -499,6 +536,8 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 // 使用 TryLock 而非 Lock，允许在等待写锁期间检查 closed 标志，
 // 保证 BeginStop() 能在有限时间内让主循环退出。
 func (w *Worker) execWrite(job inf.IMailboxJob) {
+	w.pool.rwWriteTotal.Add(1)   // 全局写计数
+	writeWaitStart := time.Now() // 写等待计时开始
 	w.pool.writeRequested.Add(1)
 	backoff := time.Duration(0)
 	const maxBackoff = 1 * time.Millisecond
@@ -520,6 +559,9 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 			}
 		}
 	}
+	// 写等待耗时指标
+	w.rwWriteWaitSum.Add(time.Since(writeWaitStart).Nanoseconds())
+	w.rwWriteWaitCount.Add(1)
 	// defer 保证 Unlock 在 Add(-1) 之前执行（LIFO）
 	// 确保 writeRequested.Add(-1) 在 Unlock 之后：
 	// 读路径看到 writeRequested==0 时 WLock 必定已释放

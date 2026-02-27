@@ -200,6 +200,13 @@ type MailboxConf struct {
 	// 仅在 EnableRWMode=true 时生效。
 	// 默认: 10s
 	StopTimeout time.Duration `binding:""`
+
+	// MaxJobExecutionTime 单个 Job 的最大执行时长
+	// 超过此阈值会打印 Warn 日志（watchdog 告警），不会中断执行。
+	// 仅在 EnableRWMode=true 时生效。
+	// 0 表示不启用 watchdog。
+	// 默认: 30s
+	MaxJobExecutionTime time.Duration `binding:""`
 }
 
 // MailboxMiddlewareConf 邮箱中间件配置
