@@ -1,6 +1,11 @@
-# EmberEngine 多 Node 单进程改进设计文档
+# EmberEngine Node 环境自包含改造设计文档
 
-> **目标**: 将当前分散在各个包中的全局/单例组件收归到 `Node` 结构体中管理，使得单个进程内可以启动多个独立的 `Node` 实例，以模拟分布式集群结构。
+> **目标**: 将当前分散在各个包中的全局/单例组件**全部收归到 `Node` 结构体**中管理，使 `Node` 成为完全自包含的运行时环境。
+>
+> **核心价值**:
+> 1. **可嵌入任意项目**: 框架不再通过包级全局变量污染宿主进程。任何 Go 项目只需 `node.New().Start(...)` 即可集成 EmberEngine，框架的配置、日志、协程池、时间轮、RPC 等所有运行时状态均封装在 `Node` 实例内部，不会与宿主项目的日志系统、协程模型、全局状态产生任何冲突。
+> 2. **单进程多 Node**: 同一进程可启动多个独立 `Node` 实例（如模拟分布式集群、跑集成测试），各 Node 的资源、生命周期、服务路由完全隔离。
+> 3. **干净的生命周期**: `Node.Start()` 创建一切，`Node.Stop()` 销毁一切。启动失败自动回滚，停止后零残留（无泄漏的 goroutine、连接、文件句柄）。
 
 ## 一、现状分析
 
@@ -18,7 +23,7 @@ type Node struct {
 
 当前 `Node` 只是一个轻量启动器，几乎不持有任何运行时状态。所有核心组件均以 **包级全局变量 + sync.Once/nil 检查** 的单例模式存在，整个进程共享同一份实例。
 
-> **改造目标**: 去除所有包级可变全局变量，不保留任何兼容写法，彻底完成一步到位的改造。
+> **改造目标**: 去除所有包级可变全局变量，不保留任何兼容写法，彻底完成一步到位的改造。使 `Node` 成为唯一的运行时上下文持有者——**框架的一切可变状态都在 `Node` 内部，外部无感知**。
 
 ### 1.2 启动流程中的全局组件调用链
 
@@ -38,15 +43,19 @@ Node.Start()
   └── services.Start()
 ```
 
-### 1.3 多 Node 冲突类型
+### 1.3 全局状态的危害
+
+当框架被嵌入第三方项目时，包级全局状态会产生以下冲突：
 
 | 冲突类型 | 说明 |
 |----------|------|
-| **配置覆盖** | 所有 Node 共享 `config.Conf`，NodeId/端口等节点级参数无法独立 |
-| **资源共享** | 时间轮、协程池、RPC 监控器、事件总线等为全局唯一 |
-| **关闭级联** | 任一 Node Stop 会销毁全局资源，导致其他 Node 崩溃 |
+| **宿主污染** | 框架的全局 logger、协程池、时间轮等在 `import` 时即占用进程资源，即使尚未调用 `Start()` |
+| **配置覆盖** | 所有 Node 共享 `config.Conf`，NodeId/端口等节点级参数无法独立；宿主项目若也使用 viper 则可能键名冲突 |
+| **资源共享** | 时间轮、协程池、RPC 监控器、事件总线等为全局唯一，无法按 Node 独立配置 |
+| **关闭级联** | 任一 Node Stop 会销毁全局资源，导致其他 Node 崩溃；宿主进程的 graceful shutdown 也可能被干扰 |
 | **服务路由污染** | 所有 Node 的服务注册到同一个 Repository，PID 路由完全混乱 |
-| **日志混杂** | 所有 Node 共享一个 SysLogger，日志无法按 Node 区分 |
+| **日志混杂** | 所有 Node 共享一个 SysLogger，日志无法按 Node 区分，且可能与宿主项目自身的日志系统冲突 |
+| **init() 副作用** | `sysService`、`discovery` 等包的 `init()` 在 import 时自动执行，宿主项目仅 import 框架包就会触发注册逻辑 |
 
 ---
 
@@ -115,22 +124,41 @@ type Node struct {
     
     // 连接池统计（原 pool.poolStates）
     PoolStats    *pool.PoolStats
+    
+    // 停止标志（防止 Stop() 重复调用）
+    stopped      atomic.Bool
 }
 ```
 
 ### 2.2 核心设计原则
 
-1. **NodeContext 模式**: 引入 `NodeContext` 接口/结构体，作为所有组件访问 Node 级资源的统一入口
-2. **依赖注入**: 各组件不再通过包级函数获取依赖，而是通过构造函数或 Init 方法接收 `NodeContext`
-3. **生命周期绑定**: 每个组件的创建和销毁都跟随其所属的 Node
-4. **彻底去除包级类型**: 删除所有包级全局变量、`sync.Once` 单例、`GetXxx()` 全局 getter、`init()` 中的注册逻辑。不保留任何兼容写法，一步到位完成改造
+1. **Node 即完整运行时**: `Node` 是框架面向外部的唯一入口。创建一个 `Node` = 创建一个完全独立的 EmberEngine 运行时环境，不依赖任何包级可变状态，不对宿主进程产生任何副作用
+2. **NodeContext 模式**: 引入 `NodeContext` 接口/结构体，作为所有组件访问 Node 级资源的统一入口
+3. **依赖注入**: 各组件不再通过包级函数获取依赖，而是通过构造函数或 Init 方法接收 `NodeContext`
+4. **生命周期绑定**: 每个组件的创建和销毁都跟随其所属的 Node
+5. **彻底去除包级类型**: 删除所有包级全局变量、`sync.Once` 单例、`GetXxx()` 全局 getter、`init()` 中的注册逻辑。不保留任何兼容写法，一步到位完成改造
+6. **错误透传，禁止 panic/fatal**: 原来包级初始化函数出错时多采用 `log.Fatal()` 或 `panic()` 直接终止进程。改造后所有组件的 `New*()`/`Init()`/`Start()` **必须返回 `error`**，由调用方（`Node.Start()`）统一决定是否终止。`Node.Start()` 内部通过 `defer` 回滚机制保证：任一组件初始化失败时，已成功创建的组件按逆序安全关闭，不留泄漏
 
 ### 2.3 改造后的 Node.Start() / Node.Stop() 流程
 
 **Node.Start()** — 改造后的完整创建与启动顺序:
 
+> **关键改动**: 所有组件的 `New*()`/`Init()`/`Start()` 均返回 `error`（不再 panic/fatal）。
+> `Start()` 使用 `cleanups` 栈 + `defer` 实现**启动失败自动回滚**：任一步骤出错时，
+> 已成功初始化的组件按逆序安全关闭，不留 goroutine/连接/文件泄漏。
+
 ```go
-func (n *Node) Start(opts ...StartOption) (*Node, error) {
+func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
+    // ── cleanups 栈：记录已完成的初始化步骤，失败时逆序回滚 ──
+    var cleanups []func()
+    defer func() {
+        if retErr != nil {
+            for i := len(cleanups) - 1; i >= 0; i-- {
+                cleanups[i]()
+            }
+        }
+    }()
+
     // 0. 应用选项
     param := &StartParam{}
     for _, opt := range opts {
@@ -140,6 +168,14 @@ func (n *Node) Start(opts ...StartOption) (*Node, error) {
     n.version = param.Version
     n.hooks = param.Hooks
     n.extra = param.Extra
+
+    // 0.1 语言设置（全局共享，仅第一个 Node 的设置生效）
+    if param.Language > 0 {
+        translate.SetLanguage(param.Language)
+    }
+
+    // 0.2 打印版本信息（多 Node 场景下仅首次调用有意义，重复调用无害）
+    title.EchoTitle(n.version)
 
     // 1. 配置（最先初始化 — 其他一切依赖配置）
     n.Config = config.NewConfig()
@@ -153,52 +189,95 @@ func (n *Node) Start(opts ...StartOption) (*Node, error) {
     if err != nil {
         return nil, fmt.Errorf("logger init: %w", err)
     }
+    cleanups = append(cleanups, func() { n.Logger.Close() })
 
     // 3. 基础设施层
-    n.AntsPool = asynclib.NewPool(n.Config.NodeConf.AntsPoolSize)
-    n.TimingWheel = timingwheel.NewTimingWheel(
+    n.AntsPool, err = asynclib.NewPool(n.Config.NodeConf.AntsPoolSize)
+    if err != nil {
+        return nil, fmt.Errorf("ants pool: %w", err)
+    }
+    cleanups = append(cleanups, func() { n.AntsPool.Release() })
+
+    n.TimingWheel, err = timingwheel.NewTimingWheel(
         time.Duration(n.Config.NodeConf.TimerWheelInterval) * time.Millisecond,
         int64(n.Config.NodeConf.TimerWheelSize),
         n.Logger,
     )
+    if err != nil {
+        return nil, fmt.Errorf("timing wheel: %w", err)
+    }
     n.TimingWheel.Start()
-    n.DeDuplicator = dedup.NewDeDuplicator(n.Config.NodeConf.DeDuplicatorConf)
+    cleanups = append(cleanups, func() { n.TimingWheel.Stop() })
+
+    n.DeDuplicator, err = dedup.NewDeDuplicator(n.Config.NodeConf.DeDuplicatorConf)
+    if err != nil {
+        return nil, fmt.Errorf("dedup: %w", err)
+    }
+    cleanups = append(cleanups, func() { n.DeDuplicator.Close() })
+
+    // 3.5 连接池统计 & 时间偏移
+    n.PoolStats = pool.NewPoolStats()
+    n.TimeOffset = n.Config.NodeConf.TimeOffset   // 默认 0；运行时可通过 Node.SetTimeOffset() 动态调整
 
     // 4. RPC 层
     n.RpcMonitor = monitor.NewRpcMonitor()
-    n.RpcMonitor.Init(n.Config.NodeConf.RpcMonitorConf, n.TimingWheel, n.Logger)
+    if err = n.RpcMonitor.Init(n.Config.NodeConf.RpcMonitorConf, n.TimingWheel, n.Logger); err != nil {
+        return nil, fmt.Errorf("rpc monitor init: %w", err)
+    }
     n.PoolManager = pool.NewPoolManager()
-    n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger)
+    n.SenderMgr, err = client.NewSenderManager(n.PoolManager, n.Logger)
+    if err != nil {
+        return nil, fmt.Errorf("sender manager: %w", err)
+    }
+    cleanups = append(cleanups, func() { n.SenderMgr.Close(); n.PoolManager.Close() })
     n.RpcMonitor.Start()
+    cleanups = append(cleanups, func() { n.RpcMonitor.Stop() })
 
     // 5. PID 文件
     utils.RecordPID(n.Config.NodeConf.PvPath, n.Config.NodeConf.NodeId, n.Config.NodeConf.NodeType)
+    cleanups = append(cleanups, func() {
+        utils.DeletePID(n.Config.NodeConf.PvPath, n.Config.NodeConf.NodeId, n.Config.NodeConf.NodeType)
+    })
 
-    // 6. 集群层（依赖 config, logger, event）
+    // 6. 事件总线 & 集群层
     n.EventBus = event.NewEventBus()
+    if err = n.EventBus.Init(n.Config.NodeConf.EventBusConf); err != nil {
+        return nil, fmt.Errorf("event bus init: %w", err)
+    }
+    cleanups = append(cleanups, func() { n.EventBus.Close() })
+
     n.Cluster = cluster.NewCluster()
-    n.Cluster.Init(n)  // n 实现 INodeContext 接口
-    n.Cluster.Start()
-    n.EventBus.Init(n.Config.NodeConf.EventBusConf)
+    if err = n.Cluster.Init(n); err != nil {
+        return nil, fmt.Errorf("cluster init: %w", err)
+    }
+    if err = n.Cluster.Start(); err != nil {
+        return nil, fmt.Errorf("cluster start: %w", err)
+    }
+    cleanups = append(cleanups, func() { n.Cluster.Close() })
 
     // 7. 路由 & Profiler
     n.Router = router.NewRouter(n.Cluster.GetEndpointManager())
     n.Profiler = profiler.NewRegistry()
     n.PluginMgr = plugins.NewPluginManager()
 
-    // 8. 用户钩子
+    // 8. 用户钩子（签名改为 func(INodeContext, map[any]any) error）
     for _, hook := range n.hooks {
-        hook(n.extra)
+        if err = hook(n, n.extra); err != nil {
+            return nil, fmt.Errorf("hook: %w", err)
+        }
     }
 
     // 9. 服务层（最后启动 — 依赖以上所有组件）
     n.ServiceMgr = services.NewServiceManager(n)
-    // 注册系统服务（原 sysService init() 逻辑）
     pprofservice.RegisterPprofService(n.ServiceMgr)
     dbservice.RegisterDBService(n.ServiceMgr)
-    // 注册用户服务...
-    n.ServiceMgr.Init()
-    n.ServiceMgr.Start()
+    if err = n.ServiceMgr.Init(); err != nil {
+        return nil, fmt.Errorf("service init: %w", err)
+    }
+    if err = n.ServiceMgr.Start(); err != nil {
+        return nil, fmt.Errorf("service start: %w", err)
+    }
+    cleanups = append(cleanups, func() { n.ServiceMgr.StopAll() })
 
     n.startTime = time.Now()
     return n, nil
@@ -209,33 +288,58 @@ func (n *Node) Start(opts ...StartOption) (*Node, error) {
 
 ```go
 func (n *Node) Stop() {
+    // 幂等保护：防止 signal handler + defer + 手动调用 导致重复执行
+    if !n.stopped.CompareAndSwap(false, true) {
+        return
+    }
+
     defer utils.DeletePID(n.Config.NodeConf.PvPath, n.Config.NodeConf.NodeId, n.Config.NodeConf.NodeType)
 
+    n.Info("==================>>begin stop<<==================")
+
     // 1. 停止所有服务（逆序）
+    n.Info("[1/6] Stopping all services...")
     n.ServiceMgr.StopAll()
+    n.Info("[1/6] All services stopped")
 
     // 2. 关闭集群 & 事件总线
+    n.Info("[2/6] Closing cluster & event bus...")
     n.Cluster.Close()
     n.EventBus.Close()
+    n.Info("[2/6] Cluster & event bus closed")
 
     // 3. 停止 RPC 监控
+    n.Info("[3/6] Stopping RPC monitor...")
     n.RpcMonitor.Stop()
+    n.Info("[3/6] RPC monitor stopped")
 
     // 4. 关闭 RPC 连接
+    n.Info("[4/6] Closing RPC connections...")
     n.SenderMgr.Close()
     n.PoolManager.Close()
+    n.Info("[4/6] RPC connections closed")
 
     // 5. 停止基础设施
+    n.Info("[5/6] Stopping timing wheel, dedup & releasing pool...")
+    n.DeDuplicator.Close()
     n.TimingWheel.Stop()
     n.AntsPool.Release()
+    n.Info("[5/6] Infrastructure stopped")
 
     // 6. 关闭日志（最后关闭 — 确保以上步骤的日志都能输出）
+    n.Info("[6/6] Node stopped, closing logger...")
     n.Logger.Close()
+
+    // 7. 优雅退出标题
+    title.GracefulExit(time.Since(n.startTime), n.version)
 }
 ```
 
 > **关键对比**: 改造前所有 `Stop()` 调用的是包级函数（如 `services.StopAll()`、`cluster.Close()`），
 > 改造后全部变为 Node 实例方法调用。每个 Node 的 Stop 只影响自己的组件，不会波及其他 Node。
+>
+> **启动失败回滚**: `Start()` 中任一步骤返回 error，`defer` 中的 `cleanups` 栈会逆序执行所有已注册的清理函数，
+> 确保不会出现"日志已打开但时间轮未关闭"之类的半初始化泄漏。
 
 ---
 
@@ -688,15 +792,51 @@ func GetDeDuplicator() inf.IDeDuplicator {
 
 **新增**:
 ```go
-func NewDeDuplicator(conf *config.DeDuplicatorConf) inf.IDeDuplicator {
-    return newDeDuplicator(conf.DeDuplicatorType, option)
+func NewDeDuplicator(conf *config.DeDuplicatorConf) (inf.IDeDuplicator, error) {
+    return newDeDuplicator(conf.DeDuplicatorType, option), nil
 }
 
 // Node 中
-n.DeDuplicator = dedup.NewDeDuplicator(n.Config.NodeConf.DeDuplicatorConf)
+n.DeDuplicator, err = dedup.NewDeDuplicator(n.Config.NodeConf.DeDuplicatorConf)
 ```
 
-**影响范围**: `core/rpc` 中 `CheckDuplicate` 调用。所有 `dedup.GetDeDuplicator()` 改为通过 `NodeContext` 获取。
+**IDeDuplicator 接口增加 `Close()` 方法**:
+
+```go
+// interfaces/IDeduplicator.go
+type IDeDuplicator interface {
+    Seen(serviceUid string, id uint64) bool
+    Close()   // 释放内部资源（如 go-cache 的 janitor goroutine）
+}
+```
+
+**各实现补充 `Close()`**:
+
+```go
+// TTLDeDuplicator — go-cache 内部会启动 janitor goroutine 做定期清理，
+// 必须显式 Flush + 置 nil 让 GC 回收 janitor
+func (d *TTLDeDuplicator) Close() {
+    if d.reqCache != nil {
+        d.reqCache.Flush()
+        d.reqCache = nil
+    }
+}
+
+// LRUDeDuplicator — gcache 无后台 goroutine，Purge 清空即可
+func (d *LRUDeDuplicator) Close() {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+    if d.cache != nil {
+        d.cache.Purge()
+    }
+}
+```
+
+> **为什么需要 `Close()`**: `go-cache` 的 `cache.New(ttl, cleanTTL)` 在 cleanTTL > 0 时会启动一个后台
+> janitor goroutine。如果不释放，Node 停止后该 goroutine 仍会持续运行，造成 goroutine 泄漏。
+> `Start()` 中注册 cleanup、`Stop()` 中显式调用 `Close()` 可确保零残留。
+
+**影响范围**: `core/rpc` 中 `CheckDuplicate` 调用、`interfaces/IDeduplicator.go`。所有 `dedup.GetDeDuplicator()` 改为通过 `NodeContext` 获取。
 
 **建议优先级**: ⭐⭐⭐
 
@@ -994,24 +1134,58 @@ var Daemon = &daemon{}
 
 #### 改进方案
 
-**删除清单**:
-- `var lock sync.RWMutex` — 删除
-- `var serviceMap map[string]func() inf.IService` — 删除
-- `var runServices []inf.IService` — 删除
-- `var Daemon = &daemon{}` — 删除
-- `func init()` — 删除
-- `func SetService(...)` — 删除
-- `func Init()` — 删除
-- `func Start()` — 删除
-- `func StopAll()` — 删除
+**保留清单（全局共享工厂注册表）**:
+- `var lock sync.RWMutex` — **保留**（保护 serviceMap 的并发安全）
+- `var serviceMap map[string]func() inf.IService` — **保留**（全局服务工厂注册表，通过 `import` + `init()` 注册，所有 Node 共享。运行时只读 — 注册发生在 `init()` 阶段，Start() 之后不会再写入）
+- `func init()` — **保留**（初始化 serviceMap）
+- `func SetService(...)` — **保留**（供 `init()` 阶段注册服务工厂）
+- `func GetServiceFactory(name string) func() inf.IService` — **新增**（供 `ServiceManager` 查询已注册的工厂函数）
 
-**步骤 1**: 引入 `ServiceManager` 结构体，收归所有状态
+**删除清单（运行时可变状态）**:
+- `var runServices []inf.IService` — 删除（迁入 ServiceManager）
+- `var Daemon = &daemon{}` — 删除（迁入 ServiceManager）
+- `func Init()` — 删除（改为 ServiceManager.Init()）
+- `func Start()` — 删除（改为 ServiceManager.Start()）
+- `func StopAll()` — 删除（改为 ServiceManager.StopAll()）
+
+> **关键决策**: `serviceMap` + `SetService()` 保留为全局，因为服务工厂注册通过 `import` + `init()` 完成（编译期决定），
+> 而实际启动哪些服务由各 Node 的配置文件决定。这与 `discovery/etcd` 的工厂注册模式一致：**注册工厂函数是全局的，创建实例是 per-Node 的**。
+
+**步骤 1**: 保留全局工厂注册表，引入 `ServiceManager` 收归运行时状态
 
 ```go
+// ===== 全局工厂注册表（保留为包级变量） =====
+var (
+    lock       sync.RWMutex
+    serviceMap = make(map[string]func() inf.IService)
+)
+
+func SetService(name string, builder func() inf.IService) {
+    lock.Lock()
+    serviceMap[name] = builder
+    lock.Unlock()
+}
+
+func GetServiceFactory(name string) func() inf.IService {
+    lock.RLock()
+    defer lock.RUnlock()
+    return serviceMap[name]
+}
+
+func GetAllServiceFactories() map[string]func() inf.IService {
+    lock.RLock()
+    defer lock.RUnlock()
+    cp := make(map[string]func() inf.IService, len(serviceMap))
+    for k, v := range serviceMap {
+        cp[k] = v
+    }
+    return cp
+}
+
+// ===== 运行时状态（per-Node） =====
 type ServiceManager struct {
     *log.Logger                                      // 嵌入 Logger
     lock        sync.RWMutex
-    serviceMap  map[string]func() inf.IService
     runServices []inf.IService
     daemon      *daemon
     nodeCtx     INodeContext
@@ -1019,16 +1193,26 @@ type ServiceManager struct {
 
 func NewServiceManager(ctx INodeContext) *ServiceManager {
     return &ServiceManager{
-        Logger:     ctx.Logger(),
-        serviceMap: make(map[string]func() inf.IService),
-        daemon:     newDaemon(),
-        nodeCtx:    ctx,
+        Logger:  ctx.Logger(),
+        daemon:  newDaemon(),
+        nodeCtx: ctx,
     }
 }
 
-func (m *ServiceManager) SetService(name string, builder func() inf.IService) { ... }
-func (m *ServiceManager) Init() { ... }
-func (m *ServiceManager) Start() { ... }
+// Init 根据 Node 配置，从全局工厂注册表中查找并实例化需要启动的服务
+func (m *ServiceManager) Init() error {
+    factories := GetAllServiceFactories()
+    for _, svcName := range m.nodeCtx.Config().NodeConf.Services {
+        factory := factories[svcName]
+        if factory == nil {
+            return fmt.Errorf("service %q not registered", svcName)
+        }
+        // 实例化并初始化...
+    }
+    return nil
+}
+
+func (m *ServiceManager) Start() error { ... }
 func (m *ServiceManager) StopAll() { ... }
 ```
 
@@ -1552,6 +1736,70 @@ var sysCtlJobPool               // sync.Once
 
 ---
 
+### 3.21.1 rpc/message/msgbus — MessageBus 对象池
+
+#### 当前全局状态
+
+```go
+// rpc/message/msgbus/bus.go
+var busPool pool.IPool[*MessageBus]
+var busPoolOnce sync.Once
+
+func getBusPool() pool.IPool[*MessageBus] {
+    busPoolOnce.Do(func() {
+        busPool = pool.NewPerPPoolWrapper(
+            config.Conf.NodeConf.BusPoolSize,   // ← 从全局 config 读取
+            func() *MessageBus { return &MessageBus{} },
+            pool.NewStatsRecorder("busPool"),
+            // ...
+        )
+    })
+    return busPool
+}
+```
+
+#### 问题
+
+- `busPool` 是 `PerPPoolWrapper`（带容量上限的对象池），不同于 §3.13 中的 `sync.Pool` 包装器
+- `sync.Once` 内读取 `config.Conf.NodeConf.BusPoolSize`，改造后全局 `config.Conf` 被删除
+- 即使改为 per-Node config，`sync.Once` 只会使用**第一个 Node** 的 `BusPoolSize`，后续 Node 的配置被忽略
+- 与 `sync.Pool` 不同，`PerPPoolWrapper` 有固定容量，不同 Node 可能需要不同的池大小
+
+#### 改进方案
+
+**方案 A（推荐）: 改为延迟初始化 + 传参**
+
+将 `getBusPool()` 改为接收 poolSize 参数，由使用方（Node 上下文）传入：
+
+```go
+// msgbus/bus.go — 不再使用包级 sync.Once
+func newBusPool(poolSize int) pool.IPool[*MessageBus] {
+    return pool.NewPerPPoolWrapper(
+        poolSize,
+        func() *MessageBus { return &MessageBus{} },
+        pool.NewStatsRecorder("busPool"),
+        // ...
+    )
+}
+```
+
+`busPool` 实例由 Node 持有（可放在 `ServiceManager` 或 `Node` 中），通过 `INodeContext` 传递给需要 `MessageBus` 的组件。
+
+**方案 B: 允许全局共享，但使用固定默认值**
+
+如果所有 Node 的 `BusPoolSize` 相同，可保留全局但**不再从 config 读取**，改为构造时传入或使用合理默认值。
+
+**删除清单**:
+- `var busPool pool.IPool[*MessageBus]` — 删除
+- `var busPoolOnce sync.Once` — 删除
+- `func getBusPool()` — 删除（改为实例方法或工厂函数）
+
+**影响范围**: `msgbus.NewMessageBus()` / `msgbus.Put()` 等所有使用 `getBusPool()` 的地方。
+
+**建议优先级**: ⭐⭐⭐⭐（高 — `config.Conf` 删除后必须改造，否则编译报错）
+
+---
+
 ### 3.22 utils/memdbx — 内存数据库
 
 #### 当前全局状态
@@ -1756,6 +2004,8 @@ func init() {
 2. `validator.Validate` 本身是并发安全的（官方文档保证）
 3. 验证规则与 Node 无关，不需要隔离
 
+> **注意**: 当前代码中 `Validator` 为**导出变量**（`var Validator *validator.Validate`），外部可 `validate.Validator = xxx` 覆盖。建议改为非导出 + getter 函数，或在白名单中注明「导出但约定只读」。
+
 **建议优先级**: ⭐（无需改动 — 加入白名单）
 
 ---
@@ -1953,6 +2203,7 @@ type INodeContext interface {
     Router() *router.Router
     Profiler() *profiler.Registry
     PluginMgr() *plugins.PluginManager
+    PoolStats() *pool.PoolStats
     
     // 节点信息
     NodeId() int32
@@ -2090,7 +2341,7 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | 1.2 | `log` | `NewLogger()` 工厂函数 | 中 |
 | 1.3 | `asynclib` | `Pool` 结构体 + `NewPool()` | 小 |
 | 1.4 | `timingwheel` | 去掉全局函数，暴露实例方法 | 小 |
-| 1.5 | `dedup` | `NewDeDuplicator()` 工厂函数 | 小 |
+| 1.5 | `dedup` | `NewDeDuplicator()` 工厂函数 + `IDeDuplicator.Close()` | 小 |
 
 ### Phase 2: 核心组件层
 
@@ -2111,6 +2362,7 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | 3.2 | `rpc/client` | `SenderManager` 结构体 | 中 |
 | 3.3 | `rpc/remote/pool` | 工厂模式 | 小 |
 | 3.4 | `core/rpc` | `MethodIndex` 结构体 | 中 |
+| 3.5 | `rpc/message/msgbus` | `busPool` 去掉 `sync.Once` + `config.Conf` 依赖（§3.21.1） | 小 |
 
 ### Phase 4: 辅助组件层
 
@@ -2151,8 +2403,8 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | `actor/mailbox/jobs` | `msgJobPool`, `eventBusJobPool`, `timerJobPool`, `concurrentCallbackJobPool`, `sysCtlJobPool` | sync.Pool 包装器 |
 | `actor/mailbox/jobs` | `jobFactory` | init() 后只读的注册表 |
 | `actor/mailbox/strategy.go` | `builderMap` | syncx.Map，策略注册表启动时写入，并发安全 |
-| `actor/mailbox` | `ErrCircuitBreakerOpen`, `ErrRateLimitExceeded`, `ErrMailboxStopped`, `ErrRWDisableTimeout` | 不可变错误哨兵值 |
-| `actor/mailbox/mailbox.go` | `sentinelInitOnce`, `sentinelInitErr` | sync.Once 保护的一次性初始化 |
+| `actor/mailbox` | `ErrCircuitBreakerOpen`, `ErrRateLimitExceeded`, `ErrMailboxStopped`, `ErrRWDisableTimeout`, `ErrSentinelBlocked` | 不可变错误哨兵值 |
+| `actor/mailbox/sentinel_middleware.go` | `sentinelInitOnce`, `sentinelInitErr` | sync.Once 保护的一次性初始化（Sentinel 基础设施全局一次性加载；如需完全隔离 Sentinel 实例则需改造） |
 | `monitor/callstate.go` | `callStatePool`, `callStatePoolOnce` | sync.Pool 包装器 |
 | `log/bufferpool.go` | `bufferPool`, `once` | sync.Pool 包装器（内部实现） |
 | `log/errors.go` | `ErrUnsupported`, `ErrConfMissing` | 不可变错误哨兵值 |
@@ -2162,6 +2414,10 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | `utils/codec` | `codecs`, `typeUrlCache/Mu`, `anyPool` | init() 后只读注册表 + 带锁缓存 + sync.Pool |
 | `utils/codec/protobuf.go` | `protoDeterministic*` | sync.Once 一次性初始化 |
 | `utils/serializer` | `serializeType`, `serializers` | init() 后只读 |
+| `log/zap_core.go` | `moduleNameOnce`, `moduleName` | sync.Once 读取 go.mod 模块名，同进程不变 |
+| `log/zap_core.go` | `stdoutWriteSyncerFactory` | 函数变量，测试可替换，生产环境不变 |
+| `profiler/profiler.go` | `DefaultMaxOvertime`, `DefaultOvertime`, `DefaultMaxRecordNum` | 导出默认值常量（建议改为 const 或收入 Config） |
+| `utils/network/http_server.go` | `DefaultMaxHeaderBytes` | 导出默认值（建议改为 const 或收入 Config） |
 | `utils/emberctx` | `emberHeaderKey`, `traceSeq` | 不可变 key + 原子计数器 |
 | `utils/pid` | (无全局变量) | 纯函数 |
 | `utils/version` | `Version` | 不可变常量 |
@@ -2169,6 +2425,7 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | `utils/diag` | `enabledOnce`, `enabledCached` | sync.Once 一次性初始化 |
 | `utils/network` | `pbPackPool` | sync.Pool |
 | `utils/title` | `titleBase`, `bakUrl` | 不可变字符串 |
+| `services` | `serviceMap`, `lock` | 全局服务工厂注册表（`init()` 阶段写入，`Start()` 后只读），有 `sync.RWMutex` 保护。与 `discoveryFactory`/`remoteFactory` 同属"注册工厂函数"模式 |
 | `utils/timingwheel` | `cronParser`, spec 解析常量 | 只读解析器 |
 | `def/error.go` | `Err*` 系列 | 不可变 `errors.New()` |
 | `def/consts.go` | 常量 | 不可变 |
@@ -2205,6 +2462,7 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
 - `var *Factory = map[string]func()...` — 无状态工厂注册表（如 `discoveryFactory`, `remoteFactory`）
 - `var codecs = map[int32]inf.ICodec{}` — init() 后只读的注册表
 - `var serializers []Serializer` — init() 后只读
+- `var serviceMap map[string]func() inf.IService` — 全局服务工厂注册表（init 阶段写入，Start 后只读）
 - `var validate *validator.Validate` — init() 后只读，并发安全
 - `var cronParser Parser` — 只读解析器
 - `var traceSeq atomic.Uint64` — 原子计数器，线程安全
@@ -2218,13 +2476,14 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
 **必须清除的包级变量**（黑名单）:
 - 所有 `sync.Once` + 单例指针对（`rpcMonitor`, `bus`, `globalPoolManager`, `SysLogger` 等）
 - 所有 `GetXxx()` 全局 getter（`GetCluster()`, `GetEndpointManager()`, `GetRpcMonitor()` 等）
-- 所有可变 `map`/`slice`/`struct` 全局变量（`serviceMap`, `runServices`, `senderHandlerMap`, `poolStates` 等）
+- 所有可变 `map`/`slice`/`struct` 全局变量（`runServices`, `senderHandlerMap`, `poolStates` 等）
 - 所有包级 `sync.RWMutex`/`sync.Mutex`（伴随可变状态的）
 - `var memDB *gorm.DB` — 全局 DB 连接
 - `var jwtSecret []byte` — 硬编码密钥
 - `var timeOffset time.Duration` — 可变时间偏移
 - `var Conf = new(conf)` — 全局配置
 - `var remoteMap = map[string]inf.IRemoteServer{...}` — 实例 map（改为工厂 map）
+- `var busPool` / `var busPoolOnce` — PerPPool + sync.Once 内读取 config.Conf（见 §3.21.1）
 
 ### 7.3 init() 函数处理
 
@@ -2232,7 +2491,7 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
 
 | 包 | 文件 | 当前 init() 作用 | 改造方式 |
 |----|------|-----------------|----------|
-| `services` | `services.go` | 初始化 `serviceMap` | 删除，改为 `NewServiceManager()` |
+| `services` | `services.go` | 初始化 `serviceMap` | **保留**（全局工厂注册表，`SetService()` 仍为包级函数。仅删除运行时状态 `runServices`/`Daemon` 等） |
 | `sysService/pprofservice` | `pprof.go` | 注册 PprofService + ServiceConf | 删除，改为 `RegisterPprofService()` |
 | `sysService/dbservice` | `db.go` | 注册 DBService + ServiceConf | 删除，改为 `RegisterDBService()` |
 | `profiler` | `profiler.go` | 初始化 `mapProfiler` | 删除，改为 `NewRegistry()` |
@@ -2246,16 +2505,106 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
 | `actor/mailbox/jobs` | `factory.go` | 初始化 `jobFactory` map | 保留（init 后只读） |
 | `utils/translate` | `*.go` | 注册翻译器 | 保留（只读数据） |
 
-> **关键区分**: 注册**实例**的 `init()` 必须删除（如 `sysService`、`services`），
-> 注册**无状态工厂函数或只读数据**的 `init()` 可以保留（如 `discovery/etcd` 改造后、`codec`、`translate`）。
+> **关键区分**: 注册**实例**的 `init()` 必须删除（如 `sysService`），
+> 注册**无状态工厂函数或只读数据**的 `init()` 可以保留（如 `services`（工厂注册表）、`discovery/etcd` 改造后、`codec`、`translate`）。
 
-### 7.4 性能考量
+### 7.4 错误处理模型改造（panic/fatal → error 透传）
+
+#### 7.4.1 现状
+
+当前包级初始化函数在遇到错误时，普遍采用 **直接终止进程** 的策略：
+
+```go
+// 典型模式 1: panic
+func Init(...) {
+    if err != nil {
+        panic("xxx init failed: " + err.Error())
+    }
+}
+
+// 典型模式 2: log.Fatal (内部调用 os.Exit(1))
+func Start(...) {
+    conn, err := connect(addr)
+    if err != nil {
+        log.Fatal("connect failed", err)
+    }
+}
+```
+
+在单 Node/单进程模型下这样做尚可接受——初始化失败意味着整个进程无法工作。但在多 Node 改造后，**一个 Node 的初始化失败不应终止整个进程（其他 Node 可能正常运行）**。
+
+#### 7.4.2 改造规则
+
+| 规则 | 说明 |
+|------|------|
+| **R1: 所有 `New*()`/`Init()`/`Start()` 必须返回 `error`** | 不再使用 `panic` 或 `log.Fatal`。唯一允许 panic 的场景是程序员错误（如 nil 接口断言），不是运行时/配置错误 |
+| **R2: `Node.Start()` 统一决策** | 收到 error 后可选择：(a) 立即 return 并回滚已初始化组件；(b) 降级启动（跳过非关键组件并记录 warning） |
+| **R3: 组件内部捕获 panic** | `ServiceManager.Init()` / `Start()` 在调用用户 `IService.OnInit()` 等回调时，用 `defer recover()` 包裹，将 panic 转为 error 返回 |
+| **R4: 错误包装** | 每一层用 `fmt.Errorf("模块名: %w", err)` 包装，保证最终 error 链可通过 `errors.Is/As` 定位根因 |
+| **R5: Close/Stop 不返回 error** | 关闭操作仅记录日志（best-effort），不返回 error，避免关闭链路中断 |
+
+#### 7.4.3 需要改造签名的组件清单
+
+| 组件 | 原签名 | 新签名 |
+|------|--------|--------|
+| `config` | `func Init(confPath string)` | `func (c *Config) Load(confPath string) error` |
+| `log` | `func Init(conf, isDebug)` | `func NewLogger(conf, isDebug) (*Logger, error)` |
+| `asynclib` | `func InitAntsPool(size int)` | `func NewPool(size int) (*Pool, error)` |
+| `timingwheel` | `func Start(interval, size, logger)` | `func NewTimingWheel(interval, size, logger) (*TimingWheel, error)` |
+| `dedup` | `func Init(conf)` (无返回值，无 Close) | `func NewDeDuplicator(conf) (IDeDuplicator, error)` + `IDeDuplicator.Close()` |
+| `monitor` | `func (rm *RpcMonitor) Init(conf, tw)` | `func (rm *RpcMonitor) Init(conf, tw, logger) error` |
+| `event` | `func (b *Bus) Init(conf)` | `func (b *Bus) Init(conf) error` |
+| `cluster` | `func (c *Cluster) Init(ctx)` | `func (c *Cluster) Init(ctx) error` |
+| `cluster` | `func (c *Cluster) Start()` | `func (c *Cluster) Start() error` |
+| `services` | `func Init()` / `func Start()` | `func (m *ServiceManager) Init() error` / `Start() error` |
+| `client` | `func NewSenderManager(pm, logger)` 无 error | `func NewSenderManager(pm, logger) (*SenderManager, error)` |
+| `memdbx` | `func Start(models)` | `func NewMemDB(models) (*MemDB, error)` |
+| `HookFun` | `func(extra map[any]any)` | `func(ctx INodeContext, extra map[any]any) error` |
+
+> **小结**: 所有从 `init()` / 包级函数迁移到实例方法的场景，签名一律加 `error` 返回值。
+> 这与 §2.2 原则 5 和 §2.3 `Start()` 中的 `cleanups` 回滚机制配套。
+
+#### 7.4.4 用户 Service 回调的防护
+
+用户实现的 `IService.OnInit()` / `OnStart()` 等回调可能 panic。`ServiceManager` 在调用时统一包裹：
+
+```go
+func (m *ServiceManager) safeCall(name string, fn func() error) (err error) {
+    defer func() {
+        if r := recover(); r != nil {
+            err = fmt.Errorf("service %q panic: %v\n%s", name, r, debug.Stack())
+        }
+    }()
+    return fn()
+}
+
+// 调用示例
+if err := m.safeCall(svc.Name(), func() error { return svc.OnInit() }); err != nil {
+    return fmt.Errorf("service init %q: %w", svc.Name(), err)
+}
+```
+
+#### 7.4.5 panic 仅保留场景（白名单）
+
+| 场景 | 理由 |
+|------|------|
+| 接口断言失败 (`v.(Type)`) | 编码错误，应立刻暴露 |
+| `must*` 辅助函数（如 `regexp.MustCompile`） | 编译期常量，不可能运行时失败 |
+| 检测到不可恢复的内部状态不一致 | 继续运行会导致数据损坏 |
+
+> 除白名单以外，所有 `panic()`/`log.Fatal()`/`os.Exit()` 调用必须在改造中移除。
+> 改造完成后可用以下命令扫描残留：
+> ```bash
+> grep -rn 'panic(\|log\.Fatal\|os\.Exit' engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".pb.go" | grep -v "must"
+> ```
+
+### 7.5 性能考量
 
 - 多个 Node 各自持有独立的时间轮、协程池等，内存开销会增加
 - 对象池（sync.Pool）继续共享，避免重复分配
 - 每个 Node 的协程池大小可以适当调小，总量不超过原来的全局池大小
 
-### 7.5 测试策略
+### 7.6 测试策略
 
 - 每个 Phase 完成后运行 `go build ./...` 和 `go vet ./...` 确保编译通过
 - Phase 5 需要新增多 Node 集成测试：
@@ -2277,7 +2626,7 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
   }
   ```
 
-### 7.6 example/ 目录更新
+### 7.7 example/ 目录更新
 
 所有示例代码需要同步更新：
 
@@ -2295,23 +2644,25 @@ func main() {
 }
 
 // 改后
+// 服务工厂注册仍通过包级 init() / import 完成（全局共享注册表，
+// 实际启动哪些服务由各 Node 的配置文件决定）
+func init() {
+    services.SetService("Service1", func() inf.IService { return &comm.Service1{} })
+    services.SetService("Service2", func() inf.IService { return &comm.Service2{} })
+}
+
 func main() {
-    n := node.New()
-    n, err := n.Start(
+    n, err := node.New().Start(
         node.WithConfPath("configs/node_local"),
         node.WithVersion("1.0.0"),
     )
     if err != nil { panic(err) }
-    
-    // 服务注册改为通过 ServiceMgr
-    n.ServiceMgr.SetService("Service1", func() inf.IService { return &comm.Service1{} })
-    n.ServiceMgr.SetService("Service2", func() inf.IService { return &comm.Service2{} })
-    
-    // 或在 Start() 之前通过 Option 注册
-    // ...
-    
     defer n.Stop()
+    
     // 等待信号...
+    sig := make(chan os.Signal, 1)
+    signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+    <-sig
 }
 ```
 
