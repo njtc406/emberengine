@@ -87,6 +87,9 @@ type IMessageInvoker interface {
 	GetServiceName() string
 	ExecuteJob(ctx context.Context, job IMailboxJob) error
 	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
+	// OnJobDiscarded 当 Job 在 Drain 阶段被丢弃时回调，业务层可用于审计或释放关联资源。
+	// reason 描述丢弃原因（例如 def.ErrMailboxNotRunning）。
+	OnJobDiscarded(job IMailboxJob, reason error)
 }
 
 type IListener interface {

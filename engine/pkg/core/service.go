@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
@@ -413,7 +412,7 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	j := job.NewConcurrentCallbackJob()
 	j.SetContext(ctx)
 	j.SetPriority(def.PriorityNormal)
-	j.SetDispatcherKey(uuid.NewString())
+	j.SetDispatcherKey(evt.GetName())
 	j.SetPayload(evt)
 	// 显式标记为 Write：并发回调通常伴随状态更新（如写缓存、修改字段），必须独占执行。
 	j.SetRWMode(def.RWModeWrite)
@@ -433,7 +432,7 @@ func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) e
 	j := job.NewTimerJob()
 	j.SetContext(ctx)
 	j.SetPriority(def.PriorityNormal)
-	j.SetDispatcherKey(uuid.NewString())
+	j.SetDispatcherKey(t.GetName())
 	j.SetPayload(t)
 	// 显式标记为 Write：定时器回调通常伴随状态更新，必须独占执行。
 	j.SetRWMode(def.RWModeWrite)
@@ -544,6 +543,10 @@ func (s *Service) GetRpcHandler() inf.IRpcHandler {
 
 func (s *Service) EscalateFailure(ctx context.Context, reason interface{}, j inf.IMailboxJob) {
 	s.WithContext(ctx).Errorf("job[%d] EscalateFailure: %v", j.GetType(), reason)
+}
+
+func (s *Service) OnJobDiscarded(job inf.IMailboxJob, reason error) {
+	s.Warnf("job[%d] discarded: %v", job.GetType(), reason)
 }
 
 func (s *Service) IsPrivate() bool {

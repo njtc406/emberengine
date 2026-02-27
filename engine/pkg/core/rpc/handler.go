@@ -24,21 +24,28 @@ import (
 
 var emptyError = reflect.TypeOf((*error)(nil))
 
+// methodEntry 方法条目，合并函数指针与只读标记，消除双 map 查询
+type methodEntry struct {
+	fn       def.MethodCallFunc
+	readOnly bool
+}
+
 // MethodMgr 管理所有注册的方法
+// 方法表在启动阶段（registerMethod / MarkReadOnly）写入完成后即为只读，
+// 运行期 GetMethodFunc / IsReadOnly 无需加锁（static table）。
+// mu 仅保护启动阶段和 RemoveMethods 的并发安全。
 type MethodMgr struct {
-	mu          sync.RWMutex
-	rpcCnt      int
-	methodMap   map[string]def.MethodCallFunc
-	readOnlyMap map[string]bool // 方法名 → 是否只读
-	enableRW    *atomic.Bool    // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
-	logger      log.ILoggerX
+	mu       sync.RWMutex
+	rpcCnt   int
+	methods  map[string]*methodEntry // 方法名 → 条目
+	enableRW *atomic.Bool            // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
+	logger   log.ILoggerX
 }
 
 func NewMethodMgr(logger log.ILoggerX) inf.IMethodMgr {
 	return &MethodMgr{
-		methodMap:   make(map[string]def.MethodCallFunc),
-		readOnlyMap: make(map[string]bool),
-		logger:      logger,
+		methods: make(map[string]*methodEntry),
+		logger:  logger,
 	}
 }
 
@@ -53,7 +60,8 @@ func (m *MethodMgr) IsPrivate() bool {
 	return m.rpcCnt == 0
 }
 
-func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
+// AddMethod 注册方法（三参数版本，完整控制 readOnly 标记）
+func (m *MethodMgr) AddMethod(name string, fn def.MethodCallFunc, readOnly bool) {
 	if name == "" {
 		m.logger.Debugf("method[%s] register failed", name)
 		return
@@ -64,14 +72,20 @@ func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
 	if hasRpcReadOnlyPrefix(name) || hasRpcPrefix(name) {
 		m.rpcCnt++
 	}
-	m.methodMap[name] = fn
+	m.methods[name] = &methodEntry{fn: fn, readOnly: readOnly}
 }
 
+func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
+	m.AddMethod(name, fn, false)
+}
+
+// GetMethodFunc 查询方法（运行期无锁，方法表在启动阶段写入后不再变更）
 func (m *MethodMgr) GetMethodFunc(name string) (def.MethodCallFunc, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	info, ok := m.methodMap[name]
-	return info, ok
+	e, ok := m.methods[name]
+	if !ok {
+		return nil, false
+	}
+	return e.fn, true
 }
 
 func (m *MethodMgr) RemoveMethods(names []string) bool {
@@ -88,11 +102,10 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 	defer m.mu.Unlock()
 	oldRpcCnt := m.rpcCnt
 	for _, name := range names {
-		if _, ok := m.methodMap[name]; !ok {
+		if _, ok := m.methods[name]; !ok {
 			continue
 		}
-		delete(m.methodMap, name)
-		delete(m.readOnlyMap, name)
+		delete(m.methods, name)
 		// RpcRo/RPCRo 前缀是 Rpc/RPC 的超集，与 AddMethodFunc 保持一致（仅 Rpc 前缀计入 rpcCnt）
 		if hasRpcReadOnlyPrefix(name) || hasRpcPrefix(name) {
 			m.rpcCnt--
@@ -110,17 +123,19 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 // 实现 IReadOnlyMethodMgr 接口
 func (m *MethodMgr) MarkReadOnly(name string) {
 	m.mu.Lock()
-	m.readOnlyMap[name] = true
+	if e, ok := m.methods[name]; ok {
+		e.readOnly = true
+	}
 	m.mu.Unlock()
 }
 
-// IsReadOnly 查询方法是否为只读
+// IsReadOnly 查询方法是否为只读（运行期无锁，方法表在启动阶段写入后不再变更）
 // 实现 IReadOnlyMethodMgr 接口
 func (m *MethodMgr) IsReadOnly(name string) bool {
-	m.mu.RLock()
-	v := m.readOnlyMap[name]
-	m.mu.RUnlock()
-	return v
+	if e, ok := m.methods[name]; ok {
+		return e.readOnly
+	}
+	return false
 }
 
 // Handler 用于处理 RPC 调用

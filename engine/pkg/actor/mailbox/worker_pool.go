@@ -71,6 +71,12 @@ type WorkerPool struct {
 	readSem        chan struct{} // 全 Service 读并发信号量（nil = 不限制）
 	stopTimeout    time.Duration // Stop 时等待 in-flight 读 goroutine 的最大时间
 
+	// ---- RW 可观测性指标（§10.7） ----
+	rwReadTotal         atomic.Int64  // 累计读操作数
+	rwWriteTotal        atomic.Int64  // 累计写操作数
+	rwDrainDiscardTotal atomic.Int64  // StopTimeout 导致的 Job 丢弃数
+	maxJobExecTime      time.Duration // Job 执行硬超时看门狗阈值（0=禁用）
+
 	// Debug-only dispatch distribution stats.
 	statsEnabled  bool // 是否开启统计（仅在 Debug 模式下）
 	statsInterval time.Duration
@@ -109,6 +115,10 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	}
 	if pool.enableRW.Load() && pool.stopTimeout <= 0 {
 		pool.stopTimeout = 10 * time.Second
+	}
+	// watchdog 执行时长阈值
+	if conf.MaxJobExecutionTime > 0 {
+		pool.maxJobExecTime = conf.MaxJobExecutionTime
 	}
 
 	return pool
@@ -568,10 +578,58 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 		if conf.StopTimeout <= 0 {
 			conf.StopTimeout = 10 * time.Second
 		}
+		// MaxJobExecutionTime 默认 30s
+		if conf.MaxJobExecutionTime <= 0 {
+			conf.MaxJobExecutionTime = 30 * time.Second
+		}
 	} else {
 		// 未启用 RW 时忽略相关配置
 		conf.MaxConcurrentReads = 0
 	}
 
 	return conf
+}
+
+// ---- RW 可观测性指标查询 ----
+
+// RWMetrics RW 模式可观测性快照
+type RWMetrics struct {
+	ReadTotal         int64         // 累计读操作数
+	WriteTotal        int64         // 累计写操作数
+	DrainDiscardTotal int64         // Drain 阶段丢弃 Job 数
+	InflightReads     int64         // 当前 in-flight 读 goroutine 数
+	AvgReadDuration   time.Duration // 平均读执行耗时
+	AvgWriteWait      time.Duration // 平均写锁等待耗时
+}
+
+// GetRWMetrics 返回当前 RW 可观测性指标快照（无锁聚合，允许微小误差）
+func (p *WorkerPool) GetRWMetrics() RWMetrics {
+	m := RWMetrics{
+		ReadTotal:         p.rwReadTotal.Load(),
+		WriteTotal:        p.rwWriteTotal.Load(),
+		DrainDiscardTotal: p.rwDrainDiscardTotal.Load(),
+	}
+
+	// 聚合各 Worker 的 per-Worker 指标
+	p.mu.RLock()
+	var totalReadDur, totalReadCnt int64
+	var totalWriteWait, totalWriteCnt int64
+	for _, w := range p.workers {
+		if mw, ok := w.(*Worker); ok {
+			m.InflightReads += mw.inflightReadCnt.Load()
+			totalReadDur += mw.rwReadDurationSum.Load()
+			totalReadCnt += mw.rwReadCount.Load()
+			totalWriteWait += mw.rwWriteWaitSum.Load()
+			totalWriteCnt += mw.rwWriteWaitCount.Load()
+		}
+	}
+	p.mu.RUnlock()
+
+	if totalReadCnt > 0 {
+		m.AvgReadDuration = time.Duration(totalReadDur / totalReadCnt)
+	}
+	if totalWriteCnt > 0 {
+		m.AvgWriteWait = time.Duration(totalWriteWait / totalWriteCnt)
+	}
+	return m
 }
