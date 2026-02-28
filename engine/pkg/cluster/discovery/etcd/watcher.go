@@ -47,6 +47,13 @@ type watcher struct {
 	watchMasterWg     sync.WaitGroup
 }
 
+func (w *watcher) getLogger() log.ILoggerX {
+	if w.svc != nil {
+		return w.svc.GetLogger()
+	}
+	return nil
+}
+
 func newWatcher(svc inf.IService, d *EtcdDiscovery) *watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &watcher{svc: svc, d: d, ctx: ctx, cancel: cancel}
@@ -127,7 +134,9 @@ func (w *watcher) Restart() {
 			// 检查是否应该退出
 			select {
 			case <-w.ctx.Done():
-				log.SysLogger.Infof("watcher[%s] restart cancelled", w.svc.GetPid().GetServiceUid())
+				if l := w.getLogger(); l != nil {
+					l.Infof("watcher[%s] restart cancelled", w.svc.GetPid().GetServiceUid())
+				}
 				return
 			default:
 			}
@@ -136,7 +145,9 @@ func (w *watcher) Restart() {
 			err := w.Start()
 			if err == nil {
 				if retryCount > 0 {
-					log.SysLogger.Infof("watcher[%s] reconnected successfully after %d retries", w.svc.GetPid().GetServiceUid(), retryCount)
+					if l := w.getLogger(); l != nil {
+						l.Infof("watcher[%s] reconnected successfully after %d retries", w.svc.GetPid().GetServiceUid(), retryCount)
+					}
 				}
 				return
 			}
@@ -146,14 +157,18 @@ func (w *watcher) Restart() {
 
 			// 控制日志频率：前 verboseLogCount 次每次都打印，之后每 logInterval 次打印一次
 			if retryCount <= verboseLogCount || retryCount%logInterval == 0 {
-				log.SysLogger.Warnf("watcher[%s] start failed (retry #%d), next attempt in %v: %v",
-					w.svc.GetPid().GetServiceUid(), retryCount, delay, err)
+				if l := w.getLogger(); l != nil {
+					l.Warnf("watcher[%s] start failed (retry #%d), next attempt in %v: %v",
+						w.svc.GetPid().GetServiceUid(), retryCount, delay, err)
+				}
 			}
 
 			// 带超时的等待，支持提前退出
 			select {
 			case <-w.ctx.Done():
-				log.SysLogger.Infof("watcher[%s] restart cancelled during backoff", w.svc.GetPid().GetServiceUid())
+				if l := w.getLogger(); l != nil {
+					l.Infof("watcher[%s] restart cancelled during backoff", w.svc.GetPid().GetServiceUid())
+				}
 				return
 			case <-time.After(delay):
 				// 继续重试
@@ -195,7 +210,9 @@ func (w *watcher) keepaliveLoop() {
 	for {
 		select {
 		case <-w.ctx.Done():
-			log.SysLogger.Debugf("watcher[%s] exit", w.svc.GetPid().GetServiceUid())
+			if l := w.getLogger(); l != nil {
+				l.Debugf("watcher[%s] exit", w.svc.GetPid().GetServiceUid())
+			}
 			return
 		default:
 			// 执行 keepalive，内部会阻塞直到 lease 过期或出错
@@ -208,7 +225,9 @@ func (w *watcher) keepaliveLoop() {
 
 			// 尝试重新初始化 lease
 			if err := w.initLease(); err != nil {
-				log.SysLogger.Warnf("init pid[%s] lease error: %v", w.svc.GetPid().GetServiceUid(), err)
+				if l := w.getLogger(); l != nil {
+					l.Warnf("init pid[%s] lease error: %v", w.svc.GetPid().GetServiceUid(), err)
+				}
 				delay := backoff.NextDelay()
 
 				// 带超时的等待，支持提前退出
@@ -223,7 +242,9 @@ func (w *watcher) keepaliveLoop() {
 			// lease 初始化成功，重置退避计数器并重新选举
 			backoff.Reset()
 			if err := w.electMaster(); err != nil {
-				log.SysLogger.Errorf("elect master error: %v", err)
+				if l := w.getLogger(); l != nil {
+					l.Errorf("elect master error: %v", err)
+				}
 			}
 		}
 	}
@@ -237,7 +258,9 @@ func (w *watcher) keepalive() {
 		return
 	}
 	if err := w.d.leaseMgr.KeepAliveLoop(w.ctx, w.leaseRef); err != nil {
-		log.SysLogger.Errorf("etcd keepalive failed: %v", err)
+		if l := w.getLogger(); l != nil {
+			l.Errorf("etcd keepalive failed: %v", err)
+		}
 		// If we were master, step down immediately to minimize overlapping work windows.
 		if w.IsMaster() {
 			pid := w.svc.GetPid()
@@ -257,7 +280,9 @@ func (w *watcher) electMaster() (err error) {
 		w.masterEpoch.Store(0)
 		w.svc.GetPid().SetMaster(true)
 		if err = w.registerService(); err != nil {
-			log.SysLogger.Errorf("register service to etcd failed: %v\n stack:%s", err, debug.Stack())
+			if l := w.getLogger(); l != nil {
+				l.Errorf("register service to etcd failed: %v\n stack:%s", err, debug.Stack())
+			}
 			return err
 		}
 		return
@@ -278,12 +303,16 @@ func (w *watcher) electMaster() (err error) {
 	}
 	defer func() {
 		if err = w.registerService(); err != nil {
-			log.SysLogger.Errorf("register service to etcd failed: %v", err)
+			if l := w.getLogger(); l != nil {
+				l.Errorf("register service to etcd failed: %v", err)
+			}
 		}
 	}()
 	succeeded, epoch, respErr := w.d.election.TryAcquireMaster(w.ctx, masterKey, pid.GetPrimarySecondaryKey(), w.leaseRef)
 	if respErr != nil {
-		log.SysLogger.Errorf("master election txn error: %v", respErr)
+		if l := w.getLogger(); l != nil {
+			l.Errorf("master election txn error: %v", respErr)
+		}
 		goto Slave
 	}
 	if succeeded {
@@ -322,7 +351,9 @@ func (w *watcher) notifyService(evtType def.EventType, oldStateIsMaster bool, pr
 
 	dataAny, err := codec.EncodeToAny(data)
 	if err != nil {
-		log.SysLogger.Errorf("encode data to any error: %v", err)
+		if l := w.getLogger(); l != nil {
+			l.Errorf("encode data to any error: %v", err)
+		}
 		return
 	}
 	evt.Payload = dataAny
@@ -332,7 +363,9 @@ func (w *watcher) notifyService(evtType def.EventType, oldStateIsMaster bool, pr
 	j.SetPayload(evt)
 
 	if err = w.svc.PostJob(j); err != nil {
-		log.SysLogger.Errorf("post job error: %v", err)
+		if l := w.getLogger(); l != nil {
+			l.Errorf("post job error: %v", err)
+		}
 		j.Release()
 		return
 	}
@@ -360,20 +393,28 @@ func (w *watcher) startWatchMaster(masterKey string) {
 			return
 		case resp := <-watchChan:
 			if resp.Err() != nil {
-				log.SysLogger.Errorf("watch master error: %v", resp.Err())
+				if l := w.getLogger(); l != nil {
+					l.Errorf("watch master error: %v", resp.Err())
+				}
 				go func() {
 					if err := w.electMaster(); err != nil {
-						log.SysLogger.Errorf("elect master error: %v", err)
+						if l := w.getLogger(); l != nil {
+							l.Errorf("elect master error: %v", err)
+						}
 					}
 				}()
 				return
 			}
 			for _, ev := range resp.Events {
 				if ev.Type == clientv3.EventTypeDelete {
-					log.SysLogger.Debugf("master node lost, re-electing")
+					if l := w.getLogger(); l != nil {
+						l.Debugf("master node lost, re-electing")
+					}
 					go func() {
 						if err := w.electMaster(); err != nil {
-							log.SysLogger.Errorf("elect master error: %v", err)
+							if l := w.getLogger(); l != nil {
+								l.Errorf("elect master error: %v", err)
+							}
 						}
 					}()
 					return

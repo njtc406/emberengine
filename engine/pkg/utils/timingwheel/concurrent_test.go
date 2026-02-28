@@ -16,10 +16,14 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	Start(time.Millisecond, 20, logger)
-	defer Stop()
+	tw := NewTimingWheel(time.Millisecond, 20, log.NewLoggerX(logger, log.Fields{"pkg": "test"}))
+	tw.Start()
+	defer tw.Stop()
 
-	scheduler := NewJobScheduler("concurrent test", 1000, 10, GetTimingWheel(), log.NewLoggerX(logger, log.Fields{"pkg": "concurrent test"}))
+	scheduler, err := NewJobScheduler("concurrent test", 1000, 10, tw, log.NewLoggerX(logger, log.Fields{"pkg": "concurrent test"}))
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	var executedCount atomic.Int32
 	var stoppedCount atomic.Int32
 

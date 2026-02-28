@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
@@ -35,9 +36,7 @@ type ITimerScheduler interface {
 	GetTimerCbChannel() chan ITimer
 }
 
-var (
-	defaultSeed uint64 = 10000
-)
+const defaultSeed uint64 = 10000
 
 // timerBucket 定时器桶，用于存储和管理定时器任务
 type timerBucket struct {
@@ -79,25 +78,29 @@ type jobScheduler struct {
 // NewJobScheduler 创建一个新的任务调度器
 // chanSize: 回调通道大小
 // bucketSize: 桶数量，用于分片存储任务以提高并发性能
-func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, logger log.ILoggerX) ITimerScheduler {
-	if logger == nil {
-		l, err := log.NewDefaultLogger(nil)
-		if err != nil {
-			panic(fmt.Sprintf("create logger failed: %v", err))
-		}
-		logger = log.NewLoggerX(l, log.Fields{"name": jobName})
-	}
+func NewJobScheduler(jobName string, chanSize, bucketSize int, tw inf.INodeTimingWheel, logger log.ILoggerX) (ITimerScheduler, error) {
 	if chanSize <= 0 {
 		chanSize = 100000
 	}
 	if bucketSize <= 0 {
 		bucketSize = 10
 	}
-	if tw == nil {
-		tw = globTW
+	var wheel *TimingWheel
+	if tw != nil {
+		if w, ok := tw.(*TimingWheel); ok {
+			wheel = w
+		} else {
+			if logger != nil {
+				logger.Errorf("timing wheel type invalid: %T", tw)
+			}
+			return nil, fmt.Errorf("timing wheel type invalid for scheduler[%s]: %T", jobName, tw)
+		}
 	}
-	if tw == nil {
-		logger.Panic("timing wheel is nil")
+	if wheel == nil {
+		if logger != nil {
+			logger.Errorf("timing wheel is nil, scheduler[%s] requires node-injected timing wheel", jobName)
+		}
+		return nil, fmt.Errorf("timing wheel is nil for scheduler[%s]", jobName)
 	}
 	shards := make([]*timerBucket, bucketSize)
 	for i := range shards {
@@ -108,9 +111,9 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, 
 	return &jobScheduler{
 		shards: shards,
 		c:      make(chan ITimer, chanSize),
-		tw:     tw,
+		tw:     wheel,
 		logger: logger,
-	}
+	}, nil
 }
 
 func (scheduler *jobScheduler) getShard(timerId uint64) *timerBucket {

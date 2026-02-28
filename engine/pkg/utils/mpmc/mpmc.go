@@ -43,8 +43,8 @@ type Queue[T any] struct {
 
 // NewQueue 创建一个新的 Queue，capacity 会向上取整为 2 的幂次方
 func NewQueue[T any](capacity int64) *Queue[T] {
-	if capacity == 0 {
-		panic("capacity must be > 0")
+	if capacity <= 0 {
+		capacity = 1
 	}
 	if capacity&(capacity-1) != 0 {
 		capacity = util.RoundUpToPowerOfTwoInt64(capacity)

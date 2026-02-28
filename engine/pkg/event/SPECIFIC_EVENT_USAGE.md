@@ -321,7 +321,7 @@ eventBus.Init(eventBusConf)
 
 1. 启用日志查看事件流转:
 ```go
-log.SysLogger.Debug("subscribe specific event, eventType:", eventType, "serviceUid:", serviceUid)
+s.GetLogger().Debug("subscribe specific event, eventType:", eventType, "serviceUid:", serviceUid)
 ```
 
 2. 查看订阅信息:

@@ -3,14 +3,13 @@ package monitor
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
@@ -51,6 +50,11 @@ type CallState struct {
 
 var callStatePool pool.IPool[*CallState]
 var callStatePoolOnce sync.Once
+var runtimeDebug atomic.Bool
+
+func SetDebug(enabled bool) {
+	runtimeDebug.Store(enabled)
+}
 
 func getCallStatePool() pool.IPool[*CallState] {
 	callStatePoolOnce.Do(func() {
@@ -59,7 +63,7 @@ func getCallStatePool() pool.IPool[*CallState] {
 				return &CallState{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if runtimeDebug.Load() {
 					return pool.NewStatsRecorder("rpcCallStatePool")
 				} else {
 					return pool.NewNoStatsRecorder()
@@ -163,7 +167,6 @@ func (s *CallState) Complete() {
 		rpcJob.SetContext(s.ctx)
 		rpcJob.SetPayload(envelopeResp)
 		if err := s.dispatcher.PostJob(rpcJob); err != nil {
-			log.SysLogger.Errorf("call Service3.RPCTest2 failed, err:%v", err)
 			rpcJob.Release()
 		}
 

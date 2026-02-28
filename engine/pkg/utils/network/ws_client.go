@@ -1,9 +1,10 @@
 package network
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/gorilla/websocket"
 )
@@ -11,6 +12,7 @@ import (
 type WSClient struct {
 	sync.Mutex
 	Addr             string
+	Logger           log.ILoggerX
 	ConnNum          int
 	ConnectInterval  time.Duration
 	PendingWriteNum  int
@@ -26,7 +28,9 @@ type WSClient struct {
 }
 
 func (client *WSClient) Start() {
-	client.init()
+	if !client.init() {
+		return
+	}
 
 	for i := 0; i < client.ConnNum; i++ {
 		client.wg.Add(1)
@@ -34,35 +38,52 @@ func (client *WSClient) Start() {
 	}
 }
 
-func (client *WSClient) init() {
+func (client *WSClient) init() bool {
 	client.Lock()
 	defer client.Unlock()
+	logger := client.Logger
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.SysLogger.Debugf("invalid ConnNum reset: %d", client.ConnNum)
+		if logger != nil {
+			logger.Debugf("invalid ConnNum reset: %d", client.ConnNum)
+		}
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.SysLogger.Debugf("invalid ConnectInterval reset: %d", client.ConnectInterval)
+		if logger != nil {
+			logger.Debugf("invalid ConnectInterval reset: %d", client.ConnectInterval)
+		}
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 100
-		log.SysLogger.Debugf("invalid PendingWriteNum reset: %d", client.PendingWriteNum)
+		if logger != nil {
+			logger.Debugf("invalid PendingWriteNum reset: %d", client.PendingWriteNum)
+		}
 	}
 	if client.MaxMsgLen <= 0 {
 		client.MaxMsgLen = 4096
-		log.SysLogger.Debugf("invalid MaxMsgLen reset: %d", client.MaxMsgLen)
+		if logger != nil {
+			logger.Debugf("invalid MaxMsgLen reset: %d", client.MaxMsgLen)
+		}
 	}
 	if client.HandshakeTimeout <= 0 {
 		client.HandshakeTimeout = 10 * time.Second
-		log.SysLogger.Debugf("invalid HandshakeTimeout reset: %d", client.HandshakeTimeout)
+		if logger != nil {
+			logger.Debugf("invalid HandshakeTimeout reset: %d", client.HandshakeTimeout)
+		}
 	}
 	if client.NewAgent == nil {
-		log.SysLogger.Fatal("NewAgent must not be nil")
+		if logger != nil {
+			logger.Error("WSClient NewAgent must not be nil")
+		}
+		return false
 	}
 	if client.cons != nil {
-		log.SysLogger.Fatal("client is running")
+		if logger != nil {
+			logger.Error("WSClient client is running")
+		}
+		return false
 	}
 
 	if client.MessageType == 0 {
@@ -74,6 +95,7 @@ func (client *WSClient) init() {
 	client.dialer = websocket.Dialer{
 		HandshakeTimeout: client.HandshakeTimeout,
 	}
+	return true
 }
 
 func (client *WSClient) dial() *websocket.Conn {
@@ -83,7 +105,9 @@ func (client *WSClient) dial() *websocket.Conn {
 			return conn
 		}
 
-		log.SysLogger.Debugf("connect fail, addr: %s, error: %v", client.Addr, err)
+		if client.Logger != nil {
+			client.Logger.Debugf("connect fail, addr: %s, error: %v", client.Addr, err)
+		}
 		time.Sleep(client.ConnectInterval)
 		continue
 	}
@@ -108,7 +132,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	wsConn := NewWSConn(conn, client.PendingWriteNum, client.MaxMsgLen, client.MessageType)
+	wsConn := NewWSConn(conn, client.PendingWriteNum, client.MaxMsgLen, client.MessageType, client.Logger)
 	agent := client.NewAgent(wsConn)
 	agent.Run()
 

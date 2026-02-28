@@ -15,7 +15,10 @@ func TestTimeAdjustment(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 
@@ -95,7 +98,10 @@ func TestTimeAdjustmentWithMultipleTimers(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 
@@ -165,7 +171,10 @@ func TestTimeAdjustmentWithTickerTimer(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 
@@ -227,7 +236,11 @@ func TestTimeAdjustmentBackward(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
+	defer scheduler.Stop()
 
 	var executionCount atomic.Int32
 
@@ -274,7 +287,10 @@ func TestCronTimerAdjustment(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 
@@ -329,7 +345,10 @@ func TestCronTimerAdjustmentMultipleTriggers(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 
@@ -386,7 +405,10 @@ func TestCronTimerDailyCrossDay(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 
@@ -445,7 +467,10 @@ func TestCronTimerBackwardCrossDay(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("time adjust test", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("NewJobScheduler failed: %v", err)
+	}
 	defer scheduler.Stop()
 	ctx := context.Background()
 

@@ -59,7 +59,7 @@ package wsmodule
 //	for {
 //		msg, err := c.conn.ReadMsg()
 //		if err != nil {
-//			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
+//			logger.Errorf("c.conn.ReadMsg err %v", err)
 //			c.mgr.TriggerEvent(&event.Event{
 //				Type: event.SysEventWebSocket,
 //				Data: &WSPack{
@@ -74,7 +74,7 @@ package wsmodule
 //		// 消息解析(这里只是最外层的解析)
 //		info, err := c.mgr.Unmarshal(msg)
 //		if err != nil {
-//			log.SysLogger.Errorf("Client receive msg error: %s", err)
+//			logger.Errorf("Client receive msg error: %s", err)
 //			c.mgr.TriggerEvent(&event.Event{
 //				Type: event.SysEventWebSocket,
 //				Data: &WSPack{
@@ -99,7 +99,7 @@ package wsmodule
 //		ctx.AddHeader(def.DefaultDispatcherKey, c.roleId)
 //
 //		if err := c.mgr.IRawProcessor.MsgRoute(ctx, c.sessionId, c.roleId, pack.Data); err != nil {
-//			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
+//			logger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
 //		}
 //	}
 //}

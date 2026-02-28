@@ -7,6 +7,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,9 +20,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
-
-var rpcMonitor *RpcMonitor
-var monitorOnce sync.Once
 
 type waitBucket struct {
 	mu sync.RWMutex
@@ -65,15 +63,23 @@ func (w *waitBucket) Clear() {
 }
 
 type RpcMonitor struct {
-	closed     atomic.Bool
-	ctx        context.Context
-	cancel     context.CancelFunc
-	epoch      uint64 // 启动纳秒时间戳左移44位，作为ID高位前缀（周期约1ms，不可能重启冲突）
-	seq        uint64 // 自增序列号（低44位，支持约339天@60万QPS）
-	buckets    []*waitBucket
-	bucketMask uint64
-	sd         timingwheel.ITimerScheduler
-	wg         sync.WaitGroup
+	log.ILoggerX // 持有 ILoggerX
+	closed       atomic.Bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	epoch        uint64 // 启动纳秒时间戳左移44位，作为ID高位前缀（周期约1ms，不可能重启冲突）
+	seq          uint64 // 自增序列号（低44位，支持约339天@60万QPS）
+	buckets      []*waitBucket
+	bucketMask   uint64
+	sd           timingwheel.ITimerScheduler
+	wg           sync.WaitGroup
+	pool         *asynclib.Pool // 用于异步回调投递
+}
+
+// NewRpcMonitor 创建新的 RpcMonitor 实例。
+// 每个 Node 持有独立的 RpcMonitor，互不干扰。
+func NewRpcMonitor() *RpcMonitor {
+	return &RpcMonitor{}
 }
 
 func (rm *RpcMonitor) bucketIndex(seqId uint64) int {
@@ -102,14 +108,9 @@ func (rm *RpcMonitor) initBuckets(bucketCount int, initCap int) {
 	rm.bucketMask = uint64(bucketCount - 1)
 }
 
-func GetRpcMonitor() *RpcMonitor {
-	monitorOnce.Do(func() {
-		rpcMonitor = &RpcMonitor{}
-	})
-	return rpcMonitor
-}
-
-func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf) *RpcMonitor {
+func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf, logger log.ILoggerX, tw *timingwheel.TimingWheel, pool *asynclib.Pool) *RpcMonitor {
+	rm.ILoggerX = logger
+	rm.pool = pool
 	ctx, cancel := context.WithCancel(context.Background())
 	rm.ctx = ctx
 	rm.cancel = cancel
@@ -139,21 +140,41 @@ func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf) *RpcMonitor {
 		}
 	}
 	rm.initBuckets(bucketCount, initCap)
-	rm.sd = timingwheel.NewJobScheduler("rpc_monitor", config.Conf.NodeConf.RpcMonitorConf.MonitorTimerSize,
-		config.Conf.NodeConf.RpcMonitorConf.MonitorBucketSize,
-		nil, log.NewLoggerX(log.SysLogger, log.Fields{"component": "rpc monitor"}))
+	timerSize := 10000
+	bucketSize := 20
+	if conf != nil {
+		if conf.MonitorTimerSize > 0 {
+			timerSize = conf.MonitorTimerSize
+		}
+		if conf.MonitorBucketSize > 0 {
+			bucketSize = conf.MonitorBucketSize
+		}
+	}
+	var schedulerLogger log.ILoggerX
+	if rm.ILoggerX != nil {
+		schedulerLogger = rm.ILoggerX.WithField("component", "rpc monitor")
+	}
+	var schedulerErr error
+	rm.sd, schedulerErr = timingwheel.NewJobScheduler("rpc_monitor", timerSize, bucketSize,
+		tw, schedulerLogger)
+	if schedulerErr != nil {
+		if rm.ILoggerX != nil {
+			rm.Errorf("rpc monitor create scheduler failed: %v", schedulerErr)
+		}
+	}
 	return rm
 }
 
-func (rm *RpcMonitor) Start() {
+func (rm *RpcMonitor) Start() error {
 	if rm.closed.Load() {
-		return
+		return nil
 	}
 	if rm.sd == nil {
-		log.SysLogger.Panic("rpc monitor is not initialized")
+		return fmt.Errorf("rpc monitor is not initialized")
 	}
 	rm.wg.Add(1)
 	go rm.listen()
+	return nil
 }
 
 func (rm *RpcMonitor) Stop() {
@@ -164,8 +185,8 @@ func (rm *RpcMonitor) Stop() {
 	rm.cancel()
 	if rm.sd != nil {
 		rm.sd.Stop()
-		rm.sd = nil
 	}
+	rm.wg.Wait()
 	// 清空 buckets，释放 CallState
 	for _, bucket := range rm.buckets {
 		bucket.Clear()
@@ -174,14 +195,18 @@ func (rm *RpcMonitor) Stop() {
 
 func (rm *RpcMonitor) listen() {
 	defer rm.wg.Done()
+	if rm.sd == nil {
+		return
+	}
+	ch := rm.sd.GetTimerCbChannel()
 	wg := sync.WaitGroup{}
 	defer func() {
-		log.SysLogger.Infof("rpc monitor listen stop")
+		rm.Infof("rpc monitor listen stop")
 	}()
 	defer wg.Wait() // 等待所有回调执行完成
 	for {
 		select {
-		case t, ok := <-rm.sd.GetTimerCbChannel():
+		case t, ok := <-ch:
 			if !ok {
 				return
 			}
@@ -190,14 +215,14 @@ func (rm *RpcMonitor) listen() {
 			}
 			name := t.GetName()
 			wg.Add(1)
-			if err := asynclib.Go(func() {
+			if err := rm.pool.Go(func() {
 				defer wg.Done()
 				if err := t.Do(rm.ctx); err != nil {
-					log.SysLogger.Errorf("rpc monitor: %s callback failed,error:%s", name, err)
+					rm.Errorf("rpc monitor: %s callback failed,error:%s", name, err)
 				}
 			}); err != nil {
-				wg.Done() // asynclib.Go 失败时也要 Done，避免 wg 泄漏
-				log.SysLogger.Errorf("rpc monitor execute timeout callback failed,error:%s", err)
+				wg.Done() // pool.Go 失败时也要 Done，避免 wg 泄漏
+				rm.Errorf("rpc monitor execute timeout callback failed,error:%s", err)
 			}
 		case <-rm.ctx.Done():
 			return
@@ -234,8 +259,8 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	// TODO 这里可以直接使用异步timer,但是需要评估性能,因为现在使用的是线程池
 	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(_ context.Context, tm *timingwheel.Timer, args ...interface{}) error {
 		defer func() {
-			if log.SysLogger != nil {
-				log.SysLogger.WithContext(state.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
+			if rm.ILoggerX != nil {
+				rm.WithContext(state.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
 					timeout.Milliseconds(), method)
 			}
 		}()
@@ -251,8 +276,8 @@ func (rm *RpcMonitor) Add(state *CallState) {
 		return nil
 	}, reqId)
 	if err != nil {
-		if log.SysLogger != nil {
-			log.SysLogger.WithContext(state.ctx).Errorf("add monitor failed,error:%s", err)
+		if rm.ILoggerX != nil {
+			rm.WithContext(state.ctx).Errorf("add monitor failed,error:%s", err)
 		}
 		// 无法加入 monitor：避免 Call 永久阻塞 / AsyncCall 永远不回调。
 		state.SetResult(nil, err)

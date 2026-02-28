@@ -6,9 +6,12 @@
 package remote
 
 import (
+	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/pool"
 )
 
@@ -17,25 +20,47 @@ func NewRemote() *Remote {
 }
 
 type Remote struct {
-	conf *config.RPCServer
-	svr  inf.IRemoteServer
+	log.ILoggerX // 持有 ILoggerX
+	conf         *config.RPCServer
+	svr          inf.IRemoteServer
 }
 
-func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory) *Remote {
+type loggerAwareRemoteServer interface {
+	SetLogger(logger log.ILoggerX)
+}
+
+type handlerAwareRemoteServer interface {
+	SetHandler(h *handler.Handler)
+}
+
+type natsConfAwareRemoteServer interface {
+	SetNatsConf(conf *config.NatsConf)
+}
+
+func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, logger log.ILoggerX, rpcHandler *handler.Handler, natsConf *config.NatsConf) (*Remote, error) {
+	r.ILoggerX = logger
 	r.conf = conf
-	r.svr = pool.GetServer(conf.Type)
+	r.svr = pool.CreateServer(conf.Type)
 	if r.svr == nil {
-		log.SysLogger.Panicf("rpc server type %s not support", conf.Type)
-		return nil
+		return nil, fmt.Errorf("rpc server type %s not support", conf.Type)
+	}
+	if aware, ok := r.svr.(loggerAwareRemoteServer); ok {
+		aware.SetLogger(logger)
+	}
+	if aware, ok := r.svr.(handlerAwareRemoteServer); ok {
+		aware.SetHandler(rpcHandler)
+	}
+	if aware, ok := r.svr.(natsConfAwareRemoteServer); ok {
+		aware.SetNatsConf(natsConf)
 	}
 	r.svr.Init(cliFactory)
-	return r
+	return r, nil
 }
 
 func (r *Remote) Serve(nodeUid string) {
 	go func() {
 		if err := r.svr.Serve(r.conf, nodeUid); err != nil {
-			log.SysLogger.Warnf("rpc serve stop: %v", err)
+			r.Warnf("rpc serve stop: %v", err)
 		}
 	}()
 }

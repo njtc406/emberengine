@@ -63,7 +63,7 @@ type GinServer struct {
 	server  *http.Server
 	router  *router_center.GroupHandlerPool
 	conf    *Conf
-	logger  *log.Logger
+	logger  log.ILoggerX
 
 	middleware     []gin.HandlerFunc
 	beforeServHook []func()
@@ -80,7 +80,7 @@ func NewGinServer() *GinServer {
 	}
 }
 
-func (gs *GinServer) Init(logger *log.Logger, systemMod string, conf *Conf) error {
+func (gs *GinServer) Init(logger log.ILoggerX, systemMod string, conf *Conf) error {
 	gs.conf = conf
 	gs.logger = logger
 	// 运行模式

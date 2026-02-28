@@ -133,7 +133,6 @@ func (t *Timer) Next(tm time.Time) time.Time {
 	if t.spec != "" {
 		sd, err := cronParser.Parse(t.spec)
 		if err != nil {
-			//log.SysLogger.Errorf("task %d parse cron [%s] failed: %v", t.timerId, t.spec, err)
 			return time.Time{}
 		}
 		return sd.Next(tm)

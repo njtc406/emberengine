@@ -17,11 +17,12 @@ import (
 
 // localSender 本地服务的Client
 type localSender struct {
-	closed int32
+	closed     int32
+	rpcMonitor *monitor.RpcMonitor
 }
 
-func newLClient(_ string) inf.IRpcSender {
-	return &localSender{}
+func newLClient(_ string, rm *monitor.RpcMonitor) inf.IRpcSender {
+	return &localSender{rpcMonitor: rm}
 }
 
 func (lc *localSender) Close() {
@@ -68,7 +69,12 @@ func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcD
 	}
 
 	// 移除 monitor 监听
-	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
+	rm := lc.rpcMonitor
+	if rm == nil {
+		envelope.Release()
+		return nil
+	}
+	state := rm.Remove(meta.GetReqId())
 	if state != nil {
 		if state.NeedCallback() {
 			// 异步回调：将 callback 信息写入 envelope meta，投递到调用方 mailbox 执行

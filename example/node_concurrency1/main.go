@@ -6,16 +6,21 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
-	_ "github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
+	"github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
 	"github.com/njtc406/emberengine/example/comm"
 )
 
 func init() {
+	pprofservice.RegisterPprofService()
+
 	services.SetService("ConcurrencyTest1", func() inf.IService {
 		return &comm.ConcurrencyTest1{}
 	})
@@ -35,5 +40,13 @@ func main() {
 
 	// REMOTE_HOST 由 example/configs/**/.env 或启动前环境变量提供。
 	// 不要在这里设置默认值，否则会覆盖 .env（.env 在 node.Start 内部才加载）。
-	node.Start(node.WithConfPath("./example/configs/node_concurrency1"))
+	n, err := node.New().Start(node.WithConfPath("./example/configs/node_concurrency1"))
+	if err != nil {
+		panic(err)
+	}
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+	<-exitCh
+	fmt.Println("exit signal received")
+	n.Stop()
 }

@@ -17,6 +17,8 @@ import (
 
 type NatsListener struct {
 	cliFactory inf.IRpcSenderFactory
+	logger     log.ILoggerX
+	handler    *handler.Handler
 }
 
 func (n *NatsListener) Handle(msg *nats.Msg) {
@@ -24,11 +26,18 @@ func (n *NatsListener) Handle(msg *nats.Msg) {
 	defer msgenvelope.ReleaseMessage(req)
 	err := codec.Decode(def.ProtoBuf, msg.Data, req)
 	if err != nil {
-		log.SysLogger.Errorf("unmarshal nats message error: %v", err)
+		if n.logger != nil {
+			n.logger.Errorf("unmarshal nats message error: %v", err)
+		}
 		return
 	}
 
-	if err = handler.RpcMessageHandler(n.cliFactory, req); err != nil {
-		log.SysLogger.Errorf("handle nats message error: %v  req:%+v", err, req)
+	if n.handler == nil {
+		return
+	}
+	if err = n.handler.RpcMessageHandler(n.cliFactory, req); err != nil {
+		if n.logger != nil {
+			n.logger.Errorf("handle nats message error: %v  req:%+v", err, req)
+		}
 	}
 }

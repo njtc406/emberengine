@@ -6,14 +6,12 @@
 package plugins
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/config"
 )
 
 // TODO 这个文件后面再做,现在还没有什么好的思路
-
-var pluginMap = make(map[string]*PluginInfo)
-var lock sync.Mutex
 
 type PluginInfo struct {
 	Path string
@@ -21,18 +19,27 @@ type PluginInfo struct {
 	Conf *config.ServiceConfig
 }
 
-func Register(name string, path string) {
-	lock.Lock()
-	defer lock.Unlock()
-	pluginMap[name] = &PluginInfo{Path: path, Name: name}
+type PluginManager struct {
+	lock      sync.Mutex
+	pluginMap map[string]*PluginInfo
 }
 
-func LoadAll() {
-	lock.Lock()
-	for _, v := range pluginMap {
+func NewPluginManager() *PluginManager {
+	return &PluginManager{pluginMap: make(map[string]*PluginInfo)}
+}
+
+func (pm *PluginManager) Register(name string, path string) {
+	pm.lock.Lock()
+	defer pm.lock.Unlock()
+	pm.pluginMap[name] = &PluginInfo{Path: path, Name: name}
+}
+
+func (pm *PluginManager) LoadAll() {
+	pm.lock.Lock()
+	for _, v := range pm.pluginMap {
 		load(v)
 	}
-	lock.Unlock()
+	pm.lock.Unlock()
 }
 
 func load(plugin *PluginInfo) {

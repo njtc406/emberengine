@@ -38,13 +38,18 @@ type MethodMgr struct {
 	mu       sync.RWMutex
 	rpcCnt   int
 	methods  map[string]*methodEntry // 方法名 → 条目
-	enableRW *atomic.Bool            // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
+	index    inf.INodeMethodIndex
+	enableRW *atomic.Bool // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
 	logger   log.ILoggerX
 }
 
-func NewMethodMgr(logger log.ILoggerX) inf.IMethodMgr {
+func NewMethodMgr(logger log.ILoggerX, index inf.INodeMethodIndex) inf.IMethodMgr {
+	if index == nil {
+		index = NewMethodIndex()
+	}
 	return &MethodMgr{
 		methods: make(map[string]*methodEntry),
+		index:   index,
 		logger:  logger,
 	}
 }
@@ -69,7 +74,7 @@ func (m *MethodMgr) AddMethod(name string, fn def.MethodCallFunc, readOnly bool)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// RpcRo/RPCRo 前缀是 Rpc/RPC 的超集，先检查 ReadOnly 前缀，短路防重复计数
-	if hasRpcReadOnlyPrefix(name) || hasRpcPrefix(name) {
+	if m.index.HasRpcReadOnlyPrefix(name) || m.index.HasRpcPrefix(name) {
 		m.rpcCnt++
 	}
 	m.methods[name] = &methodEntry{fn: fn, readOnly: readOnly}
@@ -107,7 +112,7 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 		}
 		delete(m.methods, name)
 		// RpcRo/RPCRo 前缀是 Rpc/RPC 的超集，与 AddMethodFunc 保持一致（仅 Rpc 前缀计入 rpcCnt）
-		if hasRpcReadOnlyPrefix(name) || hasRpcPrefix(name) {
+		if m.index.HasRpcReadOnlyPrefix(name) || m.index.HasRpcPrefix(name) {
 			m.rpcCnt--
 		}
 		if m.rpcCnt < 0 {
@@ -141,8 +146,9 @@ func (m *MethodMgr) IsReadOnly(name string) bool {
 // Handler 用于处理 RPC 调用
 type Handler struct {
 	inf.IModule
-	mgr     inf.IMethodMgr
-	methods []string
+	mgr       inf.IMethodMgr
+	methods   []string
+	methodIdx inf.INodeMethodIndex
 }
 
 func NewHandler(owner inf.IModule) *Handler {
@@ -151,18 +157,26 @@ func NewHandler(owner inf.IModule) *Handler {
 	}
 }
 
-func (h *Handler) Init(hd inf.IMethodMgr) inf.IRpcHandler {
+func (h *Handler) Init(hd inf.IMethodMgr) (inf.IRpcHandler, error) {
 	h.mgr = hd
-	h.registerMethod()
-	return h
+	if mm, ok := hd.(*MethodMgr); ok {
+		h.methodIdx = mm.index
+	}
+	if h.methodIdx == nil {
+		h.methodIdx = NewMethodIndex() // fallback: 默认空索引
+	}
+	if err := h.registerMethod(); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
-func (h *Handler) registerMethod() {
+func (h *Handler) registerMethod() error {
 	typ := reflect.TypeOf(h.IModule)
 	for m := 0; m < typ.NumMethod(); m++ {
 		err := h.suitableMethods(typ.Method(m))
 		if err != nil {
-			h.Panic(err)
+			return fmt.Errorf("register method %s failed: %w", typ.Method(m).Name, err)
 		}
 	}
 
@@ -172,8 +186,8 @@ func (h *Handler) registerMethod() {
 			for _, name := range declarer.ReadOnlyMethods() {
 				// 冲突检测：如果方法前缀不是 ReadOnly（如 Rpc/Api 前缀，无 Ro），
 				// 但 IReadOnlyDeclarer 却将其声明为 ReadOnly，输出警告
-				if !hasRpcReadOnlyPrefix(name) && !hasApiReadOnlyPrefix(name) &&
-					(hasRpcPrefix(name) || hasApiPrefix(name)) {
+				if !h.methodIdx.HasRpcReadOnlyPrefix(name) && !h.methodIdx.HasApiReadOnlyPrefix(name) &&
+					(h.methodIdx.HasRpcPrefix(name) || h.methodIdx.HasApiPrefix(name)) {
 					h.Warnf("Method '%s' has a write-style prefix (Rpc/Api) but is declared "+
 						"as ReadOnly by IReadOnlyDeclarer. Please verify this is intentional. "+
 						"If this method modifies state, it should NOT be in ReadOnlyMethods().", name)
@@ -182,6 +196,8 @@ func (h *Handler) registerMethod() {
 			}
 		}
 	}
+
+	return nil
 }
 
 func isExported(name string) bool {
@@ -208,8 +224,8 @@ func (h *Handler) isExportedOrBuiltinType(t reflect.Type) bool {
 
 func (h *Handler) suitableMethods(method reflect.Method) error {
 	// ReadOnly 前缀是普通前缀的超集（RpcRo 包含 Rpc，ApiRo 包含 Api），先检查 ReadOnly
-	isReadOnly := hasApiReadOnlyPrefix(method.Name) || hasRpcReadOnlyPrefix(method.Name)
-	if !isReadOnly && !hasApiPrefix(method.Name) && !hasRpcPrefix(method.Name) {
+	isReadOnly := h.methodIdx.HasApiReadOnlyPrefix(method.Name) || h.methodIdx.HasRpcReadOnlyPrefix(method.Name)
+	if !isReadOnly && !h.methodIdx.HasApiPrefix(method.Name) && !h.methodIdx.HasRpcPrefix(method.Name) {
 		return nil
 	}
 

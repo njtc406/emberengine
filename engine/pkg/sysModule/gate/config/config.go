@@ -20,7 +20,8 @@ type GateService struct {
 
 type WSServerConf struct {
 	Router       string `binding:"required"`
-	LittleEndian bool   //是否小端序
+	JWTSecret    string
+	LittleEndian bool //是否小端序
 	HttpConf     *httpx.Conf
 }
 
@@ -38,6 +39,7 @@ func SetChatServiceConfDefault(parser *viper.Viper) {
 	parser.SetDefault("Type", "ws") // 默认使用websocket
 	parser.SetDefault("WSServerConf", &WSServerConf{
 		Router:       "/ws",
+		JWTSecret:    "",
 		LittleEndian: false,
 		HttpConf: &httpx.Conf{
 			Addr: ":8080",

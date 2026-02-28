@@ -143,6 +143,7 @@ func fixConf(conf *LoggerConf) *LoggerConf {
 type Logger struct {
 	shared *loggerShared
 	z      *zap.Logger
+	root   *zap.Logger
 }
 
 type loggerShared struct {
@@ -184,7 +185,18 @@ func NewDefaultLogger(conf *LoggerConf) (*Logger, error) {
 	return &Logger{
 		shared: &loggerShared{closers: closers},
 		z:      zl,
+		root:   zl,
 	}, nil
+}
+
+func (l *Logger) rootLogger() *zap.Logger {
+	if l == nil {
+		return nil
+	}
+	if l.root != nil {
+		return l.root
+	}
+	return l.z
 }
 
 func Release(logger *Logger) {
@@ -257,14 +269,14 @@ func (l *Logger) WithContext(ctx context.Context) ILoggerX {
 	if len(fields) == 0 {
 		return l
 	}
-	return &Logger{shared: l.shared, z: l.z.With(fields...)}
+	return &Logger{shared: l.shared, z: l.z.With(fields...), root: l.rootLogger()}
 }
 
 func (l *Logger) WithField(key string, value interface{}) ILoggerX {
 	if l == nil {
 		return nil
 	}
-	return &Logger{shared: l.shared, z: l.z.With(zap.Any(key, value))}
+	return &Logger{shared: l.shared, z: l.z.With(zap.Any(key, value)), root: l.rootLogger()}
 }
 
 func (l *Logger) WithFields(fields map[string]interface{}) ILoggerX {
@@ -278,7 +290,25 @@ func (l *Logger) WithFields(fields map[string]interface{}) ILoggerX {
 	for k, v := range fields {
 		zfs = append(zfs, zap.Any(k, v))
 	}
-	return &Logger{shared: l.shared, z: l.z.With(zfs...)}
+	return &Logger{shared: l.shared, z: l.z.With(zfs...), root: l.rootLogger()}
+}
+
+func (l *Logger) WithFreshFields(fields map[string]interface{}) ILoggerX {
+	if l == nil {
+		return nil
+	}
+	base := l.rootLogger()
+	if base == nil {
+		return nil
+	}
+	if len(fields) == 0 {
+		return &Logger{shared: l.shared, z: base, root: base}
+	}
+	zfs := make([]zap.Field, 0, len(fields))
+	for k, v := range fields {
+		zfs = append(zfs, zap.Any(k, v))
+	}
+	return &Logger{shared: l.shared, z: base.With(zfs...), root: base}
 }
 
 func (l *Logger) Slow() ILoggerX   { return l.WithField("tag", "SLOW") }

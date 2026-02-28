@@ -14,7 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
@@ -25,7 +24,7 @@ var metaPool = pool.NewSyncPoolWrapper(
 		return &Meta{}
 	},
 	func() pool.IStatsRecorder {
-		if config.IsDebug() {
+		if isDebug() {
 			return pool.NewStatsRecorder("metaPool")
 		}
 		return pool.NewNoStatsRecorder()
@@ -72,7 +71,7 @@ var metaLeakTrackEnabledCached bool
 func metaLeakTrackEnabled() bool {
 	// Stack capture is extremely expensive (especially on Windows). Keep it strictly opt-in.
 	// IMPORTANT: Avoid calling os.Getenv per message; on Windows it can be a cgocall hotspot.
-	if !config.IsDebug() {
+	if !isDebug() {
 		return false
 	}
 	metaLeakTrackEnabledOnce.Do(func() {

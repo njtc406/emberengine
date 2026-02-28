@@ -80,7 +80,9 @@ func TestMpscQueueConsistency(t *testing.T) {
 			_, present := seen[s]
 			if present {
 				log.Printf("item have already been seen %v", s)
-				t.FailNow()
+				t.Errorf("item have already been seen %v", s)
+				wg.Done()
+				return
 			}
 			seen[s] = s
 			if i == cmax*c {

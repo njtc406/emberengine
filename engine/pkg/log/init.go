@@ -1,29 +1,9 @@
 package log
 
-var SysLogger *Logger
-
-func Init(conf *LoggerConf, isDebug bool) {
-	if SysLogger != nil {
-		return
-	}
+// NewLogger 创建一个新的 Logger 实例（工厂函数）。
+// 每个 Node 持有独立的 Logger，互不干扰。
+func NewLogger(conf *LoggerConf, isDebug bool) (*Logger, error) {
 	conf = fixConf(conf)
 	conf.Stdout = conf.Stdout || isDebug
-	logger, err := NewDefaultLogger(
-		conf,
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	SysLogger = logger
-
-	SysLogger.Info("-------->system log init ok<---------")
-}
-
-func Close() {
-	if SysLogger != nil {
-		SysLogger.Info("-------->system log release<---------")
-		Release(SysLogger)
-		SysLogger = nil
-	}
+	return NewDefaultLogger(conf)
 }

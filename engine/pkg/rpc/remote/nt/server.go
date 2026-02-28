@@ -15,37 +15,56 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 )
 
 type natsServer struct {
 	listener                    *NatsListener
 	server                      *nats.Conn
 	subscription                *nats.Subscription
+	logger                      log.ILoggerX
+	natsConf                    *config.NatsConf
+	handler                     *handler.Handler
 	lastSlowConsumerLogUnixNano atomic.Int64
 	slowConsumerSuppressed      atomic.Uint64
-}
-
-func getGlobalNatsConf() *config.NatsConf {
-	if config.Conf == nil || config.Conf.NodeConf == nil || config.Conf.NodeConf.EventBusConf == nil {
-		return nil
-	}
-	return config.Conf.NodeConf.EventBusConf.NatsConf
 }
 
 func NewNatsServer() inf.IRemoteServer {
 	return &natsServer{}
 }
 
+func (s *natsServer) SetLogger(logger log.ILoggerX) {
+	if logger != nil {
+		s.logger = logger
+		if s.listener != nil {
+			s.listener.logger = logger
+		}
+	}
+}
+
+func (s *natsServer) SetNatsConf(conf *config.NatsConf) {
+	s.natsConf = conf
+}
+
+func (s *natsServer) SetHandler(h *handler.Handler) {
+	s.handler = h
+	if s.listener != nil {
+		s.listener.handler = h
+	}
+}
+
 func (s *natsServer) Init(sf inf.IRpcSenderFactory) {
 	s.listener = &NatsListener{
 		cliFactory: sf,
+		logger:     s.logger,
+		handler:    s.handler,
 	}
 }
 
 func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
-	log.SysLogger.Infof("nats server listening at: %s", conf.Addr)
+	s.logger.Infof("nats server listening at: %s", conf.Addr)
 
-	natsConf := getGlobalNatsConf()
+	natsConf := s.natsConf
 
 	var opts []nats.Option
 	maxReconnects := def.NatsDefaultMaxReconnects
@@ -112,32 +131,32 @@ func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
 				suppressed := s.slowConsumerSuppressed.Swap(0)
 				if sub != nil {
 					if suppressed > 0 {
-						log.SysLogger.Errorf("nats async error: subject=%s err=%v (suppressed=%d in last second)", sub.Subject, err, suppressed)
+						s.logger.Errorf("nats async error: subject=%s err=%v (suppressed=%d in last second)", sub.Subject, err, suppressed)
 					} else {
-						log.SysLogger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
+						s.logger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
 					}
 					return
 				}
 				if suppressed > 0 {
-					log.SysLogger.Errorf("nats async error: err=%v (suppressed=%d in last second)", err, suppressed)
+					s.logger.Errorf("nats async error: err=%v (suppressed=%d in last second)", err, suppressed)
 					return
 				}
 			}
 		}
 		if sub != nil {
-			log.SysLogger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
+			s.logger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
 			return
 		}
-		log.SysLogger.Errorf("nats async error: err=%v", err)
+		s.logger.Errorf("nats async error: err=%v", err)
 	}))
 	opts = append(opts, nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-		log.SysLogger.Errorf("nats disconnected: %v", err)
+		s.logger.Errorf("nats disconnected: %v", err)
 	}))
 	opts = append(opts, nats.ReconnectHandler(func(_ *nats.Conn) {
-		log.SysLogger.Infof("nats reconnected")
+		s.logger.Infof("nats reconnected")
 	}))
 	opts = append(opts, nats.ClosedHandler(func(_ *nats.Conn) {
-		log.SysLogger.Infof("nats connection closed")
+		s.logger.Infof("nats connection closed")
 	}))
 
 	if conf.CAs != "" {
@@ -150,14 +169,14 @@ func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
 
 	conn, err := nats.Connect(conf.Addr, opts...)
 	if err != nil {
-		log.SysLogger.Errorf("nats server connect error: %s", err)
+		s.logger.Errorf("nats server connect error: %s", err)
 		return err
 	}
 	s.server = conn
 
 	subscription, err := s.server.Subscribe(def.NatsDefaultTopic+nodeUid, s.listener.Handle)
 	if err != nil {
-		log.SysLogger.Errorf("nats server subscribe error: %s", err)
+		s.logger.Errorf("nats server subscribe error: %s", err)
 		return err
 	}
 	// 提升异步订阅在高突发场景下的缓冲能力，减少 slow consumer 丢消息风险。

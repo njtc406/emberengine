@@ -7,7 +7,6 @@ package comm
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/core"
@@ -43,7 +42,7 @@ func (s *Service2) OnStart() error {
 	//	svc1.Init(svc1, nil, nil)
 	//	svc1.OnInit()
 	//	if err := svc1.Start(); err != nil {
-	//		log.SysLogger.Errorf("start Service1 failed, err:%v", err)
+	//		s.GetLogger().Errorf("start Service1 failed, err:%v", err)
 	//	}
 	//	return true
 	//}, nil)
@@ -101,7 +100,6 @@ func (s *Service2) APIWithFixedAndIndefiniteParams(ctx context.Context, a, b int
 
 func (s *Service2) APIWithMultiResults() (int, int, error) {
 	return 1, 2, nil
-	return 1, 2, fmt.Errorf("test")
 }
 
 func (s *Service2) APIWithoutParams(ctx context.Context) int {

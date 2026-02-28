@@ -9,7 +9,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
 )
 
 // IService 服务接口
@@ -19,14 +18,14 @@ type IService interface {
 	IIdentifiable
 	IServiceHandler
 	IMailboxChannel
-	IProfiler
+	IServiceProfiler
 	ILogger
 	IRpcHandler
 }
 
 // ILifecycle 服务生命周期
 type ILifecycle interface {
-	Init(src interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{})
+	Init(src interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{}) error
 	Start() error
 	Stop()
 	OnInit() error
@@ -41,6 +40,8 @@ type IServiceHandler interface {
 	IsPrivate() bool
 	IsPrimarySecondaryMode() bool
 	GetRpcHandler() IRpcHandler
+	GetNodeContext() INodeContext
+	GetRouter() INodeRouter
 }
 
 type IIdentifiable interface {
@@ -49,9 +50,9 @@ type IIdentifiable interface {
 	IsClosed() bool // 服务是否已经关闭
 }
 
-type IProfiler interface {
+type IServiceProfiler interface {
 	OpenProfiler()
-	GetProfiler() *profiler.Profiler // TODO 需要将这个做成interface
+	GetProfiler() IProfiler
 }
 
 type INamed interface {
@@ -72,6 +73,5 @@ type IActor interface {
 
 type ILogger interface {
 	// GetLogger 获取日志记录器
-	GetLogger() *log.Logger
-	GetLoggerX() log.ILoggerX
+	GetLogger() log.ILoggerX
 }

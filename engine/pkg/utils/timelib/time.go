@@ -1,33 +1,83 @@
 package timelib
 
-import "time"
+import (
+	"sync/atomic"
+	"time"
+)
 
 // Tips: 服务器的所有时间函数都是用time.Local作为时间源,如果需要用到utc或者其他特殊时区,请自行处理并备注清除
 // 不要直接使用time.Parse解析时间字符串,请使用time.ParseInLocation解析时间字符串,明确指出使用的时区
 
-var timeOffset time.Duration // 服务器时间偏移量
+type Clock struct {
+	offsetNanos atomic.Int64
+}
+
+func NewClock() *Clock {
+	return &Clock{}
+}
+
+func (c *Clock) SetOffset(offset time.Duration) {
+	c.offsetNanos.Store(offset.Nanoseconds())
+}
+
+func (c *Clock) Offset() time.Duration {
+	return time.Duration(c.offsetNanos.Load())
+}
+
+func (c *Clock) Now() time.Time {
+	return time.Now().Add(c.Offset())
+}
+
+func (c *Clock) Unix() int64 {
+	return c.Now().Unix()
+}
+
+func (c *Clock) UnixMilli() int64 {
+	return c.Now().UnixMilli()
+}
+
+func (c *Clock) UnixMicro() int64 {
+	return c.Now().UnixMicro()
+}
+
+var defaultClock = NewClock()
 
 // Now 获取服务器当前时间
 func Now() time.Time {
-	return time.Now().Add(timeOffset)
+	return defaultClock.Now()
 }
 
 // GetTimeUnix 获取服务器时间戳
 func GetTimeUnix() int64 {
-	return time.Now().Add(timeOffset).Unix()
+	return defaultClock.Unix()
 }
 
 func GetTimeMilli() int64 {
-	return time.Now().Add(timeOffset).UnixMilli()
+	return defaultClock.UnixMilli()
 }
 
 func GetTimeMicro() int64 {
-	return time.Now().Add(timeOffset).UnixMicro()
+	return defaultClock.UnixMicro()
 }
 
 // SetTimeOffset 设置服务器时间偏移量
 func SetTimeOffset(offset time.Duration) {
-	timeOffset = offset
+	defaultClock.SetOffset(offset)
+}
+
+func GetTimeOffset() time.Duration {
+	return defaultClock.Offset()
+}
+
+func SetDefaultClock(c *Clock) {
+	if c == nil {
+		return
+	}
+	defaultClock = c
+}
+
+func GetDefaultClock() *Clock {
+	return defaultClock
 }
 
 func Since(t time.Time) time.Duration {

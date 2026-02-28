@@ -11,6 +11,7 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
@@ -24,6 +25,7 @@ type tmpInfo struct {
 }
 
 type Repository struct {
+	busFactory     *msgbus.MessageBusFactory
 	keyMap         sync.Map
 	mapPID         sync.Map // 服务 [serviceUid]interfaces.IRpcDispatcher
 	tmpMapPid      sync.Map // 临时服务 [serviceUid]tmpInfo
@@ -38,8 +40,9 @@ type Repository struct {
 	// TODO 之后可以加入tag索引表,每种service自定义自己的tag,这样可以更高效的查询指定服务
 }
 
-func NewRepository() *Repository {
+func NewRepository(busFactory *msgbus.MessageBusFactory) *Repository {
 	return &Repository{
+		busFactory:           busFactory,
 		ticker:               time.NewTicker(time.Second * 10),
 		mapNodeLock:          shardedlock.NewShardedRWLock(64), // 之后改为配置表
 		mapSvcBySNameAndSUid: make(map[string]map[string]struct{}),
@@ -118,7 +121,6 @@ func (r *Repository) AddTmp(dispatcher inf.IRpcDispatcher) inf.IRpcDispatcher {
 		latest:     timelib.Now(),
 	}
 	r.tmpMapPid.Store(dispatcher.GetPid().GetServiceUid(), tmp)
-	//log.SysLogger.Infof("add tmp service: %s", dispatcher.GetPid().GetServiceUid())
 	return dispatcher
 }
 

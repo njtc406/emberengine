@@ -13,26 +13,40 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
 var benchOnce sync.Once
+var benchMonitor *RpcMonitor
+var benchTW *timingwheel.TimingWheel
+var benchPool *asynclib.Pool
+
+func newBenchLogger() log.ILoggerX {
+	l, err := log.NewLogger(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
 
 func benchInitMonitor() {
 	benchOnce.Do(func() {
-		if log.SysLogger == nil {
-			log.Init(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
-		}
-		if config.Conf.NodeConf == nil {
-			config.Conf.NodeConf = &config.NodeConf{}
-		}
-		if config.Conf.NodeConf.RpcMonitorConf == nil {
-			config.Conf.NodeConf.RpcMonitorConf = &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
-		}
-		timingwheel.Start(time.Millisecond, 64, log.SysLogger)
+		logger := newBenchLogger()
+		benchTW = timingwheel.NewTimingWheel(time.Millisecond, 64, logger)
+		benchTW.Start()
 
-		rm := GetRpcMonitor()
-		rm.Start()
+		var err error
+		benchPool, err = asynclib.NewPool(128)
+		if err != nil {
+			panic(err)
+		}
+
+		conf := &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
+		benchMonitor = NewRpcMonitor().Init(conf, logger, benchTW, benchPool)
+		if err = benchMonitor.Start(); err != nil {
+			panic(err)
+		}
 	})
 }
 
@@ -101,7 +115,7 @@ func BenchmarkRpcMonitor_AddRemove(b *testing.B) {
 	benchInitMonitor()
 	b.ReportAllocs()
 
-	rm := GetRpcMonitor()
+	rm := benchMonitor
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		seq := rm.GenSeq()
@@ -119,7 +133,7 @@ func BenchmarkRpcMonitor_Cancel(b *testing.B) {
 	benchInitMonitor()
 	b.ReportAllocs()
 
-	rm := GetRpcMonitor()
+	rm := benchMonitor
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		seq := rm.GenSeq()
@@ -190,6 +204,14 @@ func (d *fakeDispatcher) PostJob(j inf.IMailboxJob) error {
 }
 
 func (d *fakeDispatcher) Deliver(ctx context.Context, _ inf.IEnvelope) error { return nil }
+
+func (d *fakeDispatcher) DeliverRequest(ctx context.Context, env inf.IEnvelope) error {
+	return d.Deliver(ctx, env)
+}
+
+func (d *fakeDispatcher) DeliverResponse(ctx context.Context, env inf.IEnvelope) error {
+	return d.Deliver(ctx, env)
+}
 
 func (d *fakeDispatcher) Close()         {}
 func (d *fakeDispatcher) IsClosed() bool { return false }

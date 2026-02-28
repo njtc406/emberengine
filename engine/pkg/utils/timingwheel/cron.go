@@ -50,7 +50,7 @@ type Parser struct {
 
 // NewParser 使用自定义选项创建一个 Parser。
 //
-// 如果指定了超过一个可选字段（Optional），函数会 panic，因为无法通用地推断哪个可选字段被提供或省略。
+// 如果指定了超过一个可选字段（Optional），不会 panic，具体错误会在 Parse 时返回。
 //
 // 示例：
 //
@@ -66,16 +66,6 @@ type Parser struct {
 //	subsParser := NewParser(Dom | Month | DowOptional)
 //	sched, err := specParser.Parse("15 */3")
 func NewParser(options ParseOption) Parser {
-	optionals := 0
-	if options&DowOptional > 0 {
-		optionals++
-	}
-	if options&SecondOptional > 0 {
-		optionals++
-	}
-	if optionals > 1 {
-		panic("multiple optionals may not be configured")
-	}
 	return Parser{options}
 }
 

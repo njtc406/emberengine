@@ -2,9 +2,10 @@ package network
 
 import (
 	"errors"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"net"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/gorilla/websocket"
 )
@@ -16,14 +17,16 @@ type WSConn struct {
 	conn      *websocket.Conn
 	writeChan chan []byte
 	maxMsgLen uint32
+	logger    log.ILoggerX
 	closeFlag bool
 }
 
-func NewWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, messageType int) *WSConn {
+func NewWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, messageType int, logger log.ILoggerX) *WSConn {
 	wsConn := new(WSConn)
 	wsConn.conn = conn
 	wsConn.writeChan = make(chan []byte, pendingWriteNum)
 	wsConn.maxMsgLen = maxMsgLen
+	wsConn.logger = logger
 
 	go func() {
 		for b := range wsConn.writeChan {
@@ -77,7 +80,9 @@ func (wsConn *WSConn) Close() {
 
 func (wsConn *WSConn) doWrite(b []byte) {
 	if len(wsConn.writeChan) == cap(wsConn.writeChan) {
-		log.SysLogger.Debug("close conn: channel full")
+		if wsConn.logger != nil {
+			wsConn.logger.Debug("close conn: channel full")
+		}
 		wsConn.doDestroy()
 		return
 	}

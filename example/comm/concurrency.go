@@ -20,7 +20,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/diag"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -56,7 +55,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 				//return s.Select(rpc.WithName(ServiceName2)).Send(nil, "RpcEmptyFun", nil)
 			}, func(ctx context.Context, err error) {
 				count.Add(1)
-				//log.SysLogger.Debugf("call ConcurrencyTest1.APISum cost:%d ms, count:%d", timelib.Now().Sub(startTime), count.Load())
+				// s.GetLogger().Debugf("call ConcurrencyTest1.APISum cost:%d ms, count:%d", timelib.Now().Sub(startTime), count.Load())
 				wg.Done()
 			})
 		}
@@ -66,7 +65,7 @@ func (s *ConcurrencyTest) OnInit1() error {
 	go func() {
 		wg.Wait()
 		if diag.Enabled() {
-			log.SysLogger.Debugf("call ConcurrencyTest1.APISum cost:%d ms, count:%d", timelib.Now().Sub(startTime).Milliseconds(), count.Load())
+			s.GetLogger().Debugf("call ConcurrencyTest1.APISum cost:%d ms, count:%d", timelib.Now().Sub(startTime).Milliseconds(), count.Load())
 		}
 		// send 大约耗时 440ms 100000次
 		// call 大约耗时 1350ms 100000次
@@ -161,7 +160,7 @@ func (s *ConcurrencyTest) OnInit() error {
 		}
 		startTime = timelib.Now()
 		if diag.Enabled() {
-			log.SysLogger.WithFields(map[string]interface{}{
+			s.GetLogger().WithFields(map[string]interface{}{
 				"benchMode":                  benchMode,
 				"testType":                   testType,
 				"total":                      total,
@@ -225,7 +224,7 @@ func (s *ConcurrencyTest) OnInit() error {
 							err := s.Select(rpc.WithName(ServiceName2)).Send(ctxx, "abc", nil)
 							if err != nil {
 								errCount.Add(1)
-								log.SysLogger.Errorf("call error: %v", err)
+								s.GetLogger().Errorf("call error: %v", err)
 							} else {
 								if trackSuccessTs {
 									updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -250,7 +249,7 @@ func (s *ConcurrencyTest) OnInit() error {
 
 									if cbErr != nil {
 										errCount.Add(1)
-										log.SysLogger.Errorf("call error: %v", cbErr)
+										s.GetLogger().Errorf("call error: %v", cbErr)
 									} else {
 										if trackSuccessTs {
 											updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -267,7 +266,7 @@ func (s *ConcurrencyTest) OnInit() error {
 							if err != nil {
 								defer cancel()
 								errCount.Add(1)
-								log.SysLogger.Errorf("call error: %v", err)
+								s.GetLogger().Errorf("call error: %v", err)
 								count.Add(1)
 								wg.Done()
 							}
@@ -283,7 +282,7 @@ func (s *ConcurrencyTest) OnInit() error {
 							cancel()
 							if err != nil {
 								errCount.Add(1)
-								log.SysLogger.Errorf("call error: %v", err)
+								s.GetLogger().Errorf("call error: %v", err)
 							} else {
 								if trackSuccessTs {
 									updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -307,7 +306,7 @@ func (s *ConcurrencyTest) OnInit() error {
 							cancel()
 							if err != nil {
 								errCount.Add(1)
-								log.SysLogger.Errorf("call error: %v", err)
+								s.GetLogger().Errorf("call error: %v", err)
 							} else {
 								if trackSuccessTs {
 									updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -326,7 +325,7 @@ func (s *ConcurrencyTest) OnInit() error {
 							cancel()
 							if err != nil {
 								errCount.Add(1)
-								log.SysLogger.Errorf("call error: %v", err)
+								s.GetLogger().Errorf("call error: %v", err)
 							} else {
 								if trackSuccessTs {
 									updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -369,7 +368,7 @@ func (s *ConcurrencyTest) OnInit() error {
 						err := s.Select(rpc.WithName(ServiceName2)).Send(ctx, "abc", nil)
 						if err != nil {
 							errCount.Add(1)
-							log.SysLogger.Errorf("call error: %v", err)
+							s.GetLogger().Errorf("call error: %v", err)
 						} else {
 							if trackSuccessTs {
 								updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -397,7 +396,7 @@ func (s *ConcurrencyTest) OnInit() error {
 
 								if cbErr != nil {
 									errCount.Add(1)
-									log.SysLogger.Errorf("call error: %v", cbErr)
+									s.GetLogger().Errorf("call error: %v", cbErr)
 								} else {
 									if trackSuccessTs {
 										updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -414,7 +413,7 @@ func (s *ConcurrencyTest) OnInit() error {
 						if err != nil {
 							defer cancel()
 							errCount.Add(1)
-							log.SysLogger.Errorf("call error: %v", err)
+							s.GetLogger().Errorf("call error: %v", err)
 							count.Add(1)
 							return
 						}
@@ -427,7 +426,7 @@ func (s *ConcurrencyTest) OnInit() error {
 						cancel()
 						if err != nil {
 							errCount.Add(1)
-							log.SysLogger.Errorf("call error: %v", err)
+							s.GetLogger().Errorf("call error: %v", err)
 						} else {
 							if trackSuccessTs {
 								updateMaxInt64(&lastSuccessUnixNano, time.Now().UnixNano())
@@ -577,12 +576,12 @@ type ConcurrencyTest1Module struct {
 }
 
 func (s *ConcurrencyTest1Module) RpcSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
-	//log.SysLogger.Debugf(">>>>>>>>>>> call %s func RpcSum, a:%d, b:%d", s.GetModuleName(), a, b)
+	// s.GetLogger().Debugf(">>>>>>>>>>> call %s func RpcSum, a:%d, b:%d", s.GetModuleName(), a, b)
 	return &msg.Msg_Test_Resp{Ret: req.A * req.B}
 }
 
 func (s *ConcurrencyTest1Module) ApiSum(a, b int) int {
-	//log.SysLogger.Debugf(">>>>>>>>>>> call %s func ApiSum, a:%d, b:%d", s.GetModuleName(), a, b)
+	// s.GetLogger().Debugf(">>>>>>>>>>> call %s func ApiSum, a:%d, b:%d", s.GetModuleName(), a, b)
 	return a + b
 }
 
@@ -656,7 +655,7 @@ func (s *ConcurrencyTest1) OnInit() error {
 
 func (s *ConcurrencyTest1) EmptyFun() {
 	if diag.Enabled() {
-		log.SysLogger.Debugf("EmptyFun")
+		s.GetLogger().Debugf("EmptyFun")
 	}
 }
 

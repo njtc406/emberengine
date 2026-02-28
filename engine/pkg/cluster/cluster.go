@@ -7,6 +7,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
@@ -15,15 +16,19 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 )
 
-var cluster Cluster
-
-func GetCluster() *Cluster {
-	return &cluster
+// NewCluster 创建新的 Cluster 实例（Phase 2 per-Node 模式推荐使用）。
+func NewCluster() *Cluster {
+	return &Cluster{}
 }
 
 type Cluster struct {
+	log.ILoggerX // 持有 ILoggerX，避免对 *log.Logger 的具体依赖
+
 	closed chan struct{}
 
 	// 服务发现
@@ -43,31 +48,50 @@ type ctxEvent struct {
 	ev  inf.IEvent
 }
 
-func (c *Cluster) Init() {
+func (c *Cluster) Init(clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager, rpcHandler *remotehandler.Handler, natsConf *config.NatsConf, busFactory *msgbus.MessageBusFactory) error {
+	c.ILoggerX = logger
+	if c.ILoggerX == nil {
+		return fmt.Errorf("cluster init requires logger")
+	}
 	c.closed = make(chan struct{})
-	c.eventChannel = make(chan inf.IEvent, 1024)
+	eventChannelSize := 1024
+	if clusterConf != nil && clusterConf.EventChannelSize > 0 {
+		eventChannelSize = clusterConf.EventChannelSize
+	}
+	c.eventChannel = make(chan inf.IEvent, eventChannelSize)
 	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(nil)
 
-	c.endpoints = endpoints.GetEndpointManager().Init(c.eventProcessor)
+	var err error
+	c.endpoints, err = endpoints.NewEndpointManager().InitWithDeps(c.eventProcessor, clusterConf, c.ILoggerX, senderMgr, rpcHandler, natsConf, busFactory)
+	if err != nil {
+		return fmt.Errorf("init endpoints error: %w", err)
+	}
 
-	c.discovery = discovery.CreateDiscovery(config.Conf.ClusterConf.DiscoveryType)
+	c.discovery = discovery.CreateDiscovery(clusterConf.DiscoveryType)
 	if c.discovery != nil {
-		if err := c.discovery.Init(config.Conf.ClusterConf, c.eventProcessor, c); err != nil {
-			log.SysLogger.Fatalf("init discovery error: %v, conf: %+v", err, config.Conf.ClusterConf)
+		if loggerAware, ok := c.discovery.(interface{ SetLogger(log.ILoggerX) }); ok {
+			loggerAware.SetLogger(c.ILoggerX)
+		}
+		if err = c.discovery.Init(clusterConf, c.eventProcessor, c); err != nil {
+			return fmt.Errorf("init discovery error: %w, conf: %+v", err, clusterConf)
 		}
 	}
 
 	c.endpoints.SetClusterMode(c.IsClusterMode())
+	return nil
 }
 
-func (c *Cluster) Start() {
+func (c *Cluster) Start() error {
 	if c.discovery != nil {
 		c.discovery.Start()
 	}
 
-	c.endpoints.Start()
+	if err := c.endpoints.Start(); err != nil {
+		return err
+	}
 	go c.run()
+	return nil
 }
 
 func (c *Cluster) Close() {
@@ -98,12 +122,12 @@ func (c *Cluster) run() {
 		select {
 		case evt, ok := <-c.eventChannel:
 			if !ok {
-				log.SysLogger.Error("cluster event channel closed")
+				c.Error("cluster event channel closed")
 				return
 			}
 			c.eventProcessor.Trigger(evt.GetContext(), evt.GetEventType(), evt.GetData())
 		case <-c.closed:
-			log.SysLogger.Info("cluster closed")
+			c.Info("cluster closed")
 			return
 		}
 	}
@@ -111,4 +135,8 @@ func (c *Cluster) run() {
 
 func (c *Cluster) IsClusterMode() bool {
 	return c.discovery != nil
+}
+
+func (c *Cluster) GetEndpointManager() *endpoints.EndpointManager {
+	return c.endpoints
 }

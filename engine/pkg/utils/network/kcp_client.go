@@ -1,10 +1,11 @@
 package network
 
 import (
-	"github.com/xtaci/kcp-go"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/xtaci/kcp-go"
 )
 
 type KCPClient struct {
@@ -59,10 +60,10 @@ func (client *KCPClient) init() {
 		//log.Info("invalid WriteDeadline", log.Int64("reset", int64(client.WriteDeadline.Seconds())))
 	}
 	if client.NewAgent == nil {
-		//log.Fatal("NewAgent must not be nil")
+		// NewAgent 必须由调用方提供
 	}
 	if client.cons != nil {
-		//log.Fatal("client is running")
+		// client 已经在运行
 	}
 
 	if client.MinMsgLen == 0 {
@@ -72,6 +73,9 @@ func (client *KCPClient) init() {
 		client.MaxMsgLen = Default_MaxMsgLen
 	}
 	if client.LenMsgLen == 0 {
+		client.LenMsgLen = Default_LenMsgLen
+	}
+	if client.LenMsgLen != 1 && client.LenMsgLen != 2 && client.LenMsgLen != 4 {
 		client.LenMsgLen = Default_LenMsgLen
 	}
 	maxMsgLen := client.MsgParser.getMaxMsgLen()

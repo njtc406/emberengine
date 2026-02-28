@@ -7,17 +7,24 @@ package rx
 
 import (
 	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 )
 
 type RpcxListener struct {
 	cliFactory inf.IRpcSenderFactory
+	logger     log.ILoggerX
+	handler    *handler.Handler
 }
 
 func (rm *RpcxListener) RPCCall(_ context.Context, req *actor.Message, _ *dto.RPCResponse) error {
-	//log.SysLogger.Debugf("rpcx call: %+v", req)
-	return handler.RpcMessageHandler(rm.cliFactory, req)
+	// rm.logger.Debugf("rpcx call: %+v", req)
+	if rm.handler == nil {
+		return nil
+	}
+	return rm.handler.RpcMessageHandler(rm.cliFactory, req)
 }

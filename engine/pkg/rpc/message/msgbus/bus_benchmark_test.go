@@ -15,26 +15,38 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
 var benchInitOnce sync.Once
+var benchSenderMgr *client.SenderManager
+var benchBusFactory *MessageBusFactory
+var benchLogger *log.Logger
 
 func benchInitRPC() {
 	benchInitOnce.Do(func() {
-		if log.SysLogger == nil {
-			log.Init(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
+		if benchLogger == nil {
+			l, err := log.NewLogger(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
+			if err != nil {
+				panic(err)
+			}
+			benchLogger = l
 		}
-		if config.Conf.NodeConf == nil {
-			config.Conf.NodeConf = &config.NodeConf{}
+		rpcMonitorConf := &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
+		tw := timingwheel.NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(benchLogger, log.Fields{"pkg": "bench"}))
+		tw.Start()
+		p, err := asynclib.NewPool(128)
+		if err != nil {
+			panic(err)
 		}
-		if config.Conf.NodeConf.RpcMonitorConf == nil {
-			config.Conf.NodeConf.RpcMonitorConf = &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
-		}
-		timingwheel.Start(time.Millisecond, 64, log.SysLogger)
 
-		rm := monitor.GetRpcMonitor()
+		rm := monitor.NewRpcMonitor().Init(rpcMonitorConf, benchLogger, tw, p)
 		rm.Start()
+		benchBusFactory = NewMessageBusFactory(10000, benchLogger, rm, def.DefaultRpcTimeout)
+
+		benchSenderMgr = client.NewSenderManager(pool.NewPoolManager(benchLogger), benchLogger, rm, nil, 0)
 	})
 }
 
@@ -142,13 +154,13 @@ func newBenchRPCPair() benchRPCPair {
 		}
 	}
 
-	sender := client.NewDispatcher(clientPid, clientBox)
-	receiver := client.NewDispatcher(serverPid, serverBox)
+	sender := client.NewDispatcher(benchSenderMgr, clientPid, clientBox)
+	receiver := client.NewDispatcher(benchSenderMgr, serverPid, serverBox)
 
 	// Keep counters referenced to avoid compiler eliminating work.
-	_ = callCount
-	_ = asyncCount
-	_ = sendCount
+	_ = &callCount
+	_ = &asyncCount
+	_ = &sendCount
 
 	return benchRPCPair{sender: sender, receiver: receiver}
 }
@@ -159,7 +171,7 @@ func BenchmarkMsgBus_Send_Local_NoPayload(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_ = mb.Send(nil, "Noop", nil)
 	}
 }
@@ -171,7 +183,7 @@ func BenchmarkMsgBus_Send_Local_Parallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			mb := NewMessageBus(pair.sender, pair.receiver, nil)
+			mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 			_ = mb.Send(nil, "Noop", nil)
 		}
 	})
@@ -183,7 +195,7 @@ func BenchmarkMsgBus_Call_Local_NoOut(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_ = mb.Call(nil, "RpcSum", nil, nil)
 	}
 }
@@ -195,7 +207,7 @@ func BenchmarkMsgBus_Call_Local_IntOut(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		var out int
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_ = mb.Call(nil, "RpcSum", nil, &out)
 		_ = out
 	}
@@ -208,7 +220,7 @@ func BenchmarkMsgBus_Call_Local_Parallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			mb := NewMessageBus(pair.sender, pair.receiver, nil)
+			mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 			_ = mb.Call(nil, "RpcSum", nil, nil)
 		}
 	})
@@ -220,7 +232,7 @@ func BenchmarkMsgBus_AsyncCall_Local_Callback1(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_, _ = mb.AsyncCall(context.Background(), "RpcSum", nil, nil, func(ctx context.Context, data interface{}, err error, params ...interface{}) {
 			_ = ctx
 			_ = data
@@ -237,7 +249,7 @@ func BenchmarkMsgBus_AsyncCall_Local_Callback1_Parallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			mb := NewMessageBus(pair.sender, pair.receiver, nil)
+			mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 			_, _ = mb.AsyncCall(context.Background(), "RpcSum", nil, nil, func(ctx context.Context, data interface{}, err error, params ...interface{}) {
 				_ = ctx
 				_ = data

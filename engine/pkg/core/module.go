@@ -7,11 +7,11 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
@@ -27,6 +27,12 @@ var (
 	_ inf.IModuleIdentity  = (*Module)(nil)
 	_ inf.IModuleHierarchy = (*Module)(nil)
 )
+
+// coreModuleCarrier 是 core 包内部桥接接口。
+// 外部仍然使用 IModule，不改变对用户自定义模块类型的暴露。
+type coreModuleCarrier interface {
+	CoreModule() *Module
+}
 
 type Module struct {
 	//interfaces.IRpcHandler
@@ -52,8 +58,30 @@ type Module struct {
 
 	// 独立日志
 	enableLogging bool
-	logger        *log.Logger
+	logger        log.ILoggerX
 	log.ILoggerX  // 需要在服务init阶段之后才能使用
+}
+
+func asCoreModule(module inf.IModule) (*Module, bool) {
+	if module == nil {
+		return nil, false
+	}
+	carrier, ok := module.(coreModuleCarrier)
+	if !ok {
+		return nil, false
+	}
+	coreModule := carrier.CoreModule()
+	if coreModule == nil {
+		return nil, false
+	}
+	return coreModule, true
+}
+
+func (m *Module) rootCoreModule() (*Module, bool) {
+	if m == nil || m.root == nil {
+		return nil, false
+	}
+	return asCoreModule(m.root)
 }
 
 func (m *Module) AddModule(module inf.IModule) (uint32, error) {
@@ -61,10 +89,20 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 		return 0, def.ErrModuleNotInitialized
 	}
 
-	pModule := module.GetBaseModule().(*Module)
+	pModule, ok := asCoreModule(module)
+	if !ok {
+		return 0, fmt.Errorf("module %T does not embed core.Module", module)
+	}
+	rootModule, ok := m.rootCoreModule()
+	if !ok {
+		return 0, def.ErrModuleNotInitialized
+	}
 
 	if pModule.GetModuleID() == 0 {
 		pModule.moduleId = m.newModuleID()
+		if pModule.moduleId == 0 {
+			return 0, def.ErrModuleNotInitialized
+		}
 	}
 
 	if m.children == nil {
@@ -77,10 +115,10 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 
 	pModule.self = module
 	pModule.parent = m.self
-	pModule.ITimerScheduler = m.GetRoot().GetBaseModule().(*Module).ITimerScheduler
+	pModule.ITimerScheduler = rootModule.ITimerScheduler
 	pModule.root = m.root
 	pModule.logger = m.GetService().GetLogger()
-	pModule.ILoggerX = m.GetService().GetLoggerX()
+	pModule.ILoggerX = m.GetService().GetLogger()
 	pModule.ILoggerX = pModule.ILoggerX.WithFields(log.Fields{
 		"mId":   pModule.GetModuleID(),
 		"mName": pModule.GetModuleName(),
@@ -89,12 +127,19 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	pModule.eventHandler = event.NewTriggerHandler()
 	pModule.eventHandler.Init(m.eventHandler.GetProcessor().(*event.Processor))
 	pModule.IConcurrent = m.IConcurrent
-	pModule.IRpcHandler = rpc.NewHandler(pModule.self).Init(m.root.GetMethodMgr())
+	rpcHandler, err := rpc.NewHandler(pModule.self).Init(m.root.GetMethodMgr())
+	if err != nil {
+		return 0, err
+	}
+	pModule.IRpcHandler = rpcHandler
 	if err := module.OnInit(); err != nil {
 		return 0, err
 	}
 	m.children[pModule.GetModuleID()] = module
-	m.GetRoot().GetBaseModule().(*Module).rootContains[pModule.GetModuleID()] = module
+	if rootModule.rootContains == nil {
+		rootModule.rootContains = make(map[uint32]inf.IModule)
+	}
+	rootModule.rootContains[pModule.GetModuleID()] = module
 
 	//m.Debugf("add module [%s] completed", pModule.GetModuleName())
 
@@ -102,9 +147,14 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 }
 
 func (m *Module) ReleaseModule(moduleId uint32) {
-	pModule := m.GetModule(moduleId).GetBaseModule().(*Module)
-	if pModule == nil {
+	module := m.GetModule(moduleId)
+	if module == nil {
 		m.Errorf("module %d not found", moduleId)
+		return
+	}
+	pModule, ok := asCoreModule(module)
+	if !ok {
+		m.Errorf("module %d base type is not *core.Module", moduleId)
 		return
 	}
 
@@ -119,11 +169,17 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 	pModule.GetEventHandler().Destroy()
 	//m.Debugf("Release module %s", pModule.GetModuleName())
 	delete(m.children, moduleId)
-	delete(m.GetRoot().GetBaseModule().(*Module).rootContains, moduleId)
+	if rootModule, ok := m.rootCoreModule(); ok && rootModule.rootContains != nil {
+		delete(rootModule.rootContains, moduleId)
+	}
 	// 从methodmgr中移除模块api(service那层的api是不会移除的)
 	if m.root.GetMethodMgr().RemoveMethods(m.GetMethods()) {
 		// 表示所有的rpc接口都已经注销,服务变为一个节点的私有服务了,通知cluster从远程监听中移除
-		endpoints.GetEndpointManager().ToPrivateService(m.GetService())
+		if nodeCtx := m.GetService().GetNodeContext(); nodeCtx != nil {
+			if em := nodeCtx.GetEndpointManager(); em != nil {
+				em.ToPrivateService(m.GetService())
+			}
+		}
 	}
 
 	//清理被删除的Module
@@ -137,7 +193,11 @@ func (m *Module) OnInit() error {
 func (m *Module) OnRelease() {}
 
 func (m *Module) newModuleID() uint32 {
-	return atomic.AddUint32(&m.root.GetBaseModule().(*Module).moduleIdSeed, 1)
+	rootModule, ok := m.rootCoreModule()
+	if !ok {
+		return 0
+	}
+	return atomic.AddUint32(&rootModule.moduleIdSeed, 1)
 }
 
 func (m *Module) NewModuleID() uint32 {
@@ -169,7 +229,11 @@ func (m *Module) GetModuleName() string {
 }
 
 func (m *Module) GetModule(moduleId uint32) inf.IModule {
-	iModule, ok := m.GetRoot().GetBaseModule().(*Module).rootContains[moduleId]
+	rootModule, ok := m.rootCoreModule()
+	if !ok || rootModule.rootContains == nil {
+		return nil
+	}
+	iModule, ok := rootModule.rootContains[moduleId]
 	if !ok {
 		return nil
 	}
@@ -185,6 +249,10 @@ func (m *Module) GetParent() inf.IModule {
 }
 
 func (m *Module) GetBaseModule() inf.IModule {
+	return m
+}
+
+func (m *Module) CoreModule() *Module {
 	return m
 }
 
@@ -237,10 +305,6 @@ func (m *Module) TriggerEvent(ctx context.Context, tp def.EventType, ev inf.IEve
 	m.eventHandler.Trigger(ctx, tp, ev)
 }
 
-func (m *Module) GetLogger() *log.Logger {
+func (m *Module) GetLogger() log.ILoggerX {
 	return m.logger
-}
-
-func (m *Module) GetLoggerX() log.ILoggerX {
-	return m.ILoggerX
 }

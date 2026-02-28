@@ -9,11 +9,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -26,29 +24,67 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
-var busPool pool.IPool[*MessageBus]
-var busPoolOnce sync.Once
+type MessageBusFactory struct {
+	pool       pool.IPool[*MessageBus]
+	logger     log.ILoggerX
+	rpcMonitor *monitor.RpcMonitor
+	rpcTimeout time.Duration
+}
 
-func getBusPool() pool.IPool[*MessageBus] {
-	busPoolOnce.Do(func() {
-		busPool = pool.NewPerPPoolWrapper(
-			config.Conf.NodeConf.BusPoolSize,
-			func() *MessageBus {
-				return &MessageBus{}
-			},
-			pool.NewStatsRecorder("busPool"),
-			pool.WithPRef(func(t *MessageBus) {
-				t.Ref()
-			}),
-			pool.WithPUnref(func(t *MessageBus) bool {
-				return t.UnRef()
-			}),
-			pool.WithPReset(func(mb *MessageBus) {
-				mb.Reset()
-			}),
-		)
-	})
-	return busPool
+func NewMessageBusFactory(poolSize int, logger log.ILoggerX, rm *monitor.RpcMonitor, timeout time.Duration) *MessageBusFactory {
+	if poolSize <= 0 {
+		poolSize = 10000
+	}
+	if timeout <= 0 {
+		timeout = def.DefaultRpcTimeout
+	}
+	f := &MessageBusFactory{
+		logger:     logger,
+		rpcMonitor: rm,
+		rpcTimeout: timeout,
+	}
+	f.pool = newBusPoolWithFactory(poolSize, f)
+	return f
+}
+
+func (f *MessageBusFactory) New(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
+	mb := f.pool.Get()
+	mb.factory = f
+	mb.sender = sender
+	mb.receiver = receiver
+	mb.err = err
+	return mb
+}
+
+func (f *MessageBusFactory) Put(mb *MessageBus) {
+	if mb == nil {
+		return
+	}
+	f.pool.Put(mb)
+}
+
+// newBusPool 创建 MessageBus 对象池实例
+func newBusPool(poolSize int) pool.IPool[*MessageBus] {
+	return newBusPoolWithFactory(poolSize, nil)
+}
+
+func newBusPoolWithFactory(poolSize int, factory *MessageBusFactory) pool.IPool[*MessageBus] {
+	return pool.NewPerPPoolWrapper(
+		poolSize,
+		func() *MessageBus {
+			return &MessageBus{factory: factory}
+		},
+		pool.NewStatsRecorder("busPool"),
+		pool.WithPRef(func(t *MessageBus) {
+			t.Ref()
+		}),
+		pool.WithPUnref(func(t *MessageBus) bool {
+			return t.UnRef()
+		}),
+		pool.WithPReset(func(mb *MessageBus) {
+			mb.Reset()
+		}),
+	)
 }
 
 type MessageBus struct {
@@ -56,6 +92,7 @@ type MessageBus struct {
 	sender   inf.IRpcDispatcher
 	receiver inf.IRpcDispatcher
 	err      error
+	factory  *MessageBusFactory
 }
 
 func (mb *MessageBus) Reset() {
@@ -68,19 +105,123 @@ func (mb *MessageBus) Reset() {
 //
 // tips: 非常重要! 请勿跨协程传递,否则会导致pool错误,具体参考NewPerPPoolWrapper注释
 func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
-	mb := getBusPool().Get()
-	mb.sender = sender
-	mb.receiver = receiver
-	mb.err = err
-	return mb
+	return &MessageBus{sender: sender, receiver: receiver, err: err}
 }
 
 func ReleaseMessageBus(mb *MessageBus) {
-	getBusPool().Put(mb)
+	if mb != nil && mb.factory != nil {
+		mb.factory.Put(mb)
+	}
+}
+
+func (mb *MessageBus) getLogger() log.ILoggerX {
+	if mb != nil && mb.factory != nil && mb.factory.logger != nil {
+		return mb.factory.logger
+	}
+	return nil
+}
+
+func (mb *MessageBus) logErrorf(ctx context.Context, format string, args ...interface{}) {
+	if l := mb.getLogger(); l != nil {
+		l.WithContext(ctx).Errorf(format, args...)
+	}
+}
+
+func (mb *MessageBus) logWarnf(ctx context.Context, format string, args ...interface{}) {
+	if l := mb.getLogger(); l != nil {
+		l.WithContext(ctx).Warnf(format, args...)
+	}
+}
+
+func (mb *MessageBus) getRpcTimeout() time.Duration {
+	if mb != nil && mb.factory != nil && mb.factory.rpcTimeout > 0 {
+		return mb.factory.rpcTimeout
+	}
+	return def.DefaultRpcTimeout
+}
+
+func (mb *MessageBus) requireRpcMonitor(ctx context.Context) (*monitor.RpcMonitor, error) {
+	if mb != nil && mb.factory != nil && mb.factory.rpcMonitor != nil {
+		return mb.factory.rpcMonitor, nil
+	}
+	err := fmt.Errorf("msgbus rpc monitor not initialized")
+	if l := mb.getLogger(); l != nil {
+		l.WithContext(ctx).Error(err.Error())
+	}
+	return nil, err
 }
 
 func (mb *MessageBus) GetReceiverPid() *actor.PID {
 	return mb.receiver.GetPid()
+}
+
+func validateSingleOutParam(out interface{}) (reflect.Value, reflect.Type, error) {
+	outVal := reflect.ValueOf(out)
+	if !outVal.IsValid() || outVal.Kind() != reflect.Ptr || outVal.IsNil() {
+		return reflect.Value{}, nil, fmt.Errorf("single out call: out param must be non-nil pointer, but got %T", out)
+	}
+	outElem := outVal.Elem()
+	return outElem, outElem.Type(), nil
+}
+
+func validateMultiOutParams(outs []interface{}) error {
+	for idx := range outs {
+		if _, _, err := validateSingleOutParam(outs[idx]); err != nil {
+			return fmt.Errorf("multi out call: invalid out param at index %d: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+func assignSingleOutCached(outElem reflect.Value, outType reflect.Type, resp interface{}) error {
+	respVal := reflect.ValueOf(resp)
+	if !respVal.IsValid() {
+		outElem.Set(reflect.Zero(outType))
+		return nil
+	}
+
+	if respVal.Kind() == reflect.Ptr {
+		if respVal.IsNil() {
+			outElem.Set(reflect.Zero(outType))
+			return nil
+		}
+		respVal = respVal.Elem()
+	}
+
+	if outType != respVal.Type() {
+		return fmt.Errorf("call: type not match3, expected %v but got %v", respVal.Type(), outType)
+	}
+
+	outElem.Set(respVal)
+	return nil
+}
+
+func assignSingleOut(out interface{}, resp interface{}) error {
+	outElem, outType, err := validateSingleOutParam(out)
+	if err != nil {
+		return err
+	}
+	return assignSingleOutCached(outElem, outType, resp)
+}
+
+func assignCallResponse(out interface{}, resp interface{}, isMulti bool, multiOuts []interface{}, singleOutElem reflect.Value, singleOutType reflect.Type) error {
+	if isMulti {
+		respList, ok := resp.([]interface{})
+		if !ok {
+			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(resp), reflect.TypeOf(out))
+		}
+		if len(multiOuts) != len(respList) {
+			return fmt.Errorf("call: multi out count not match, expected %d but got %d", len(respList), len(multiOuts))
+		}
+		for idx := range multiOuts {
+			if err := assignSingleOut(multiOuts[idx], respList[idx]); err != nil {
+				return fmt.Errorf("multi out call: invalid out param at index %d: %w", idx, err)
+			}
+		}
+		return nil
+	}
+
+	return assignSingleOutCached(singleOutElem, singleOutType, resp)
 }
 
 func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, out interface{}) error {
@@ -95,25 +236,24 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		return fmt.Errorf("receiver is nil")
 	}
 
+	var (
+		isMulti       bool
+		multiOuts     []interface{}
+		singleOutElem reflect.Value
+		singleOutType reflect.Type
+		err           error
+	)
 	if out != nil {
-		switch out.(type) {
-		case []interface{}:
-			// 远程调用都是固定的proto消息,不会出现这个类型的参数
-			// 本地调用,接收多参数返回值,那么所有的接收参数都必须是指针或者引用类型
-			for i, v := range out.([]interface{}) {
-				kd := reflect.TypeOf(v).Kind()
-				if kd != reflect.Ptr && kd != reflect.Interface &&
-					kd != reflect.Func && kd != reflect.Map &&
-					kd != reflect.Slice && kd != reflect.Chan {
-					return fmt.Errorf("multi out call: all out params must be pointer, but the %v one got %v", i, kd)
-				}
+		if outs, ok := out.([]interface{}); ok {
+			isMulti = true
+			multiOuts = outs
+			if err = validateMultiOutParams(multiOuts); err != nil {
+				return err
 			}
-		default:
-			kd := reflect.TypeOf(out).Kind()
-			if kd != reflect.Ptr && kd != reflect.Interface &&
-				kd != reflect.Func && kd != reflect.Map &&
-				kd != reflect.Slice && kd != reflect.Chan {
-				return fmt.Errorf("single out call: out param must be pointer, but got:%v", kd)
+		} else {
+			singleOutElem, singleOutType, err = validateSingleOutParam(out)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -121,22 +261,26 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	var timeout time.Duration
 	var deadline time.Time
 	var ok bool
+	rpcTimeoutValue := mb.getRpcTimeout()
 	if ctx != nil {
 		deadline, ok = ctx.Deadline()
 		if ok {
 			timeout = time.Until(deadline)
 		} else {
-			deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+			deadline = timelib.Now().Add(rpcTimeoutValue)
 		}
 	}
 
 	if timeout <= 0 {
-		timeout = def.DefaultRpcTimeout
+		timeout = rpcTimeoutValue
 	}
 
 	newCtx := xcontext.NewWithCloneCtx(ctx)
 
-	mt := monitor.GetRpcMonitor()
+	mt, err := mb.requireRpcMonitor(newCtx)
+	if err != nil {
+		return err
+	}
 	reqId := mt.GenSeq()
 	state := monitor.NewCallState(newCtx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
 
@@ -154,7 +298,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	meta.SetDeadline(deadline.UnixNano())
 	envelope.SetMeta(meta)
 
-	//log.SysLogger.Debugf("call envelope: %+v", envelope)
+	// getLogger().WithContext(newCtx).Debugf("call envelope: %+v", envelope)
 
 	// 加入等待队列
 	mt.Add(state)
@@ -164,7 +308,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(newCtx).Errorf(
+		mb.logErrorf(newCtx,
 			"service[%s] send message[%s] request to client failed, error: %v",
 			mb.sender.GetPid().GetName(),
 			data.GetMethod(),
@@ -189,61 +333,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		return nil
 	}
 
-	// 有返回值
-	// 先判断是否时多返回值
-	switch resp.(type) {
-	case []interface{}:
-		respList := resp.([]interface{})
-		// 多返回值,那么接收者也必须时多返回值
-		if outs, ok := out.([]interface{}); !ok {
-			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(resp), reflect.TypeOf(out))
-		} else {
-			for idx, v := range outs {
-				respType := reflect.TypeOf(respList[idx])
-				respKd := respType.Kind()
-				if respKd == reflect.Ptr {
-					respType = respType.Elem()
-				}
-				outType := reflect.TypeOf(v)
-				outKd := outType.Kind()
-				if outKd == reflect.Ptr {
-					outType = outType.Elem()
-				}
-				if outType != respType {
-					return fmt.Errorf("call: type not match2, expected %v but got %v", respType, outType)
-				}
-				respVal := reflect.ValueOf(respList[idx])
-				if respVal.Kind() == reflect.Ptr {
-					respVal = respVal.Elem()
-				}
-
-				reflect.ValueOf(v).Elem().Set(respVal)
-			}
-		}
-	default:
-		// 单返回值,那么接收者也必须是单返回值
-		respType := reflect.TypeOf(resp)
-		respKd := respType.Kind()
-		if respKd == reflect.Ptr {
-			respType = respType.Elem()
-		}
-		outType := reflect.TypeOf(out)
-		outKd := outType.Kind()
-		if outKd == reflect.Ptr {
-			outType = outType.Elem()
-		}
-		if outType != respType {
-			return fmt.Errorf("call: type not match3, expected %v but got %v", respType, outType)
-		}
-		respVal := reflect.ValueOf(resp)
-		if respVal.Kind() == reflect.Ptr {
-			respVal = respVal.Elem()
-		}
-
-		reflect.ValueOf(out).Elem().Set(respVal)
-	}
-
-	return nil
+	return assignCallResponse(out, resp, isMulti, multiOuts, singleOutElem, singleOutType)
 }
 
 // Call 同步调用服务
@@ -298,23 +388,27 @@ func (mb *MessageBus) callInternal(ctx context.Context, method string, in, out i
 func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64,
 	error) {
 	var timeout time.Duration
+	rpcTimeoutValue := mb.getRpcTimeout()
 	if ctx != nil {
 		deadline, ok := ctx.Deadline()
 		if ok {
 			timeout = time.Until(deadline)
 		} else {
-			deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+			deadline = timelib.Now().Add(rpcTimeoutValue)
 		}
 	}
 
 	if timeout <= 0 {
-		timeout = config.GetDefaultRpcTimeout()
+		timeout = rpcTimeoutValue
 	}
 
 	// 处理ctx，只保留携带信息
 	newCtx := xcontext.NewWithCloneCtx(ctx)
 
-	mt := monitor.GetRpcMonitor()
+	mt, err := mb.requireRpcMonitor(newCtx)
+	if err != nil {
+		return 0, err
+	}
 	reqId := mt.GenSeq()
 	var cbParams []interface{}
 	if param != nil {
@@ -336,7 +430,7 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 
 	envelope.SetMeta(meta)
 
-	//log.SysLogger.Debugf("call envelope: %+v", envelope)
+	// getLogger().WithContext(newCtx).Debugf("call envelope: %+v", envelope)
 
 	// 加入等待队列（仅保存 CallState）
 	mt.Add(state)
@@ -346,14 +440,9 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(newCtx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
+		mb.logErrorf(newCtx, "service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
 		return 0, def.ErrRPCCallFailed
 	}
-
-	go func() {
-		state.Wait()
-
-	}()
 
 	return reqId, nil
 }
@@ -381,7 +470,11 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 	if err != nil {
 		return dto.EmptyCancelRpc, err
 	}
-	return monitor.GetRpcMonitor().NewCancel(reqId), nil
+	mt, monitorErr := mb.requireRpcMonitor(ctx)
+	if monitorErr != nil {
+		return dto.EmptyCancelRpc, monitorErr
+	}
+	return mt.NewCancel(reqId), nil
 }
 
 func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
@@ -410,7 +503,11 @@ func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptio
 	if err != nil {
 		return dto.EmptyCancelRpc, err
 	}
-	return monitor.GetRpcMonitor().NewCancel(reqId), nil
+	mt, monitorErr := mb.requireRpcMonitor(option.Ctx)
+	if monitorErr != nil {
+		return dto.EmptyCancelRpc, monitorErr
+	}
+	return mt.NewCancel(reqId), nil
 }
 
 // asyncCallInternal 供MultiBus使用的内部方法，recycle参数控制是否释放Bus
@@ -441,11 +538,14 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	}
 
 	var deadline time.Time
-	deadlineTime, ok := ctx.Deadline()
+	deadlineTime, ok := timelib.Now(), false
+	if ctx != nil {
+		deadlineTime, ok = ctx.Deadline()
+	}
 	if ok {
 		deadline = deadlineTime
 	} else {
-		deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+		deadline = timelib.Now().Add(mb.getRpcTimeout())
 	}
 
 	// 创建请求
@@ -461,7 +561,12 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	envelope.SetDispatchKey(dispatchKey)
 
 	meta := msgenvelope.NewMeta()
-	meta.SetReqId(monitor.GetRpcMonitor().GenSeq()) // 必须创建reqId，否则会导致重复调用
+	mt, err := mb.requireRpcMonitor(ctx)
+	if err != nil {
+		envelope.Release()
+		return err
+	}
+	meta.SetReqId(mt.GenSeq()) // 必须创建reqId，否则会导致重复调用
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	meta.SetDeadline(deadline.UnixNano())
@@ -519,9 +624,47 @@ type internalBus interface {
 // MultiBus 多节点调用
 type MultiBus []internalBus
 
+func (m MultiBus) firstMessageBus() *MessageBus {
+	if len(m) == 0 {
+		return nil
+	}
+	if bus, ok := m[0].(*MessageBus); ok {
+		return bus
+	}
+	return nil
+}
+
+func (m MultiBus) getLogger() log.ILoggerX {
+	if mb := m.firstMessageBus(); mb != nil {
+		return mb.getLogger()
+	}
+	return nil
+}
+
+func (m MultiBus) logWarnf(ctx context.Context, format string, args ...interface{}) {
+	if l := m.getLogger(); l != nil {
+		l.WithContext(ctx).Warnf(format, args...)
+	}
+}
+
+func (m MultiBus) logErrorf(ctx context.Context, format string, args ...interface{}) {
+	if l := m.getLogger(); l != nil {
+		l.WithContext(ctx).Errorf(format, args...)
+	}
+}
+
+func (m MultiBus) requireRpcMonitor(ctx context.Context) (*monitor.RpcMonitor, error) {
+	if mb := m.firstMessageBus(); mb != nil {
+		return mb.requireRpcMonitor(ctx)
+	}
+	err := fmt.Errorf("msgbus rpc monitor not initialized")
+	m.logErrorf(ctx, err.Error())
+	return nil, err
+}
+
 func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", method)
+		m.logWarnf(ctx, "===========select empty service to call %s", method)
 		return def.ErrSelectEmptyResult
 	}
 
@@ -542,7 +685,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 	option := dto.NewBusOption(opts...)
 	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", option.Method)
+		m.logWarnf(ctx, "===========select empty service to call %s", option.Method)
 		return def.ErrSelectEmptyResult
 	}
 
@@ -561,7 +704,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 		}
 		// 返回组合错误，即使所有调用都成功，也让调用者知道有多少个成功
 		if len(errs) > 0 {
-			log.SysLogger.WithContext(ctx).Warnf("call %s with CallModeAll: %d/%d succeeded", option.Method, successCount, len(m))
+			m.logWarnf(ctx, "call %s with CallModeAll: %d/%d succeeded", option.Method, successCount, len(m))
 		}
 		return errorlib.CombineErr(errs...)
 
@@ -582,7 +725,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", method)
+		m.logWarnf(ctx, "===========select empty service to async call %s", method)
 		return nil, def.ErrSelectEmptyResult
 	}
 	data := msgenvelope.NewData()
@@ -600,14 +743,18 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 			reqIds = append(reqIds, reqId)
 		}
 	}
-	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+	mt, monitorErr := m.requireRpcMonitor(ctx)
+	if monitorErr != nil {
+		return dto.EmptyCancelRpc, errorlib.CombineErr(append(errs, monitorErr)...)
+	}
+	return mt.NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
 
 func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
 	option := dto.NewBusOption(opts...)
 	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", option.Method)
+		m.logWarnf(ctx, "===========select empty service to async call %s", option.Method)
 		return dto.EmptyCancelRpc, def.ErrSelectEmptyResult
 	}
 	data := msgenvelope.NewData()
@@ -634,18 +781,22 @@ func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBui
 	}
 
 	if len(errs) > 0 {
-		log.SysLogger.WithContext(ctx).Warnf("async call %s: %d/%d nodes sent successfully", option.Method, len(reqIds), len(m))
+		m.logWarnf(ctx, "async call %s: %d/%d nodes sent successfully", option.Method, len(reqIds), len(m))
 	}
 
 	// 返回 MultiCancel,可以取消所有节点的回调
-	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+	mt, monitorErr := m.requireRpcMonitor(option.Ctx)
+	if monitorErr != nil {
+		return dto.EmptyCancelRpc, errorlib.CombineErr(append(errs, monitorErr)...)
+	}
+	return mt.NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
 
 // TODO send这里需要考虑一下所有的都公用一个ctx会不会有什么问题
 
 func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", method)
+		m.logWarnf(ctx, "===========select empty service to send %s", method)
 		return nil
 		//return def.ErrSelectEmptyResult
 	}
@@ -668,7 +819,7 @@ func (m MultiBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 	option := dto.NewBusOption(opts...)
 	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", option.Method)
+		m.logWarnf(ctx, "===========select empty service to send %s", option.Method)
 		return nil
 		//return def.ErrSelectEmptyResult
 	}

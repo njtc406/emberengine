@@ -6,46 +6,100 @@
 package memdbx
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"fmt"
+	"sync"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	syslog "log"
-	"time"
 )
 
-var memDB *gorm.DB
+type MemDB struct {
+	db *gorm.DB
+}
 
-func Start() {
-	slowLogger := logger.New(
-		syslog.New(log.SysLogger.GetOutput(), "\n", syslog.LstdFlags),
-		logger.Config{
-			// 设定慢查询时间阈值为 默认值：1 * time.Millisecond
-			SlowThreshold: 1 * time.Millisecond,
-			// 设置日志级别
-			LogLevel: logger.Warn,
-			Colorful: true,
-		},
-	)
+func NewMemDB() (*MemDB, error) {
+	slowLogger := logger.Default.LogMode(logger.Warn)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 		Logger:                 slowLogger,
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {
-		log.SysLogger.Panicf("memdb init failed, err:%v", err)
+		return nil, err
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.SysLogger.Panicf("memdb get DB failed, err:%v", err)
+		return nil, err
 	}
 
-	sqlDB.SetMaxOpenConns(1) // 限制为单连接,防止出现问题,如果需要多连接,需要设置 sqlite.Open("file::memory:?cache=shared")
+	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 
-	memDB = db
+	return &MemDB{db: db}, nil
+}
+
+func (m *MemDB) GetDB() *gorm.DB {
+	if m == nil {
+		return nil
+	}
+	return m.db
+}
+
+func (m *MemDB) Close() error {
+	if m == nil || m.db == nil {
+		return nil
+	}
+	sqlDB, err := m.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+var (
+	defaultMemDB *MemDB
+	defaultMu    sync.RWMutex
+)
+
+// Start 启动默认内存 DB（兼容旧接口）。
+func Start() {
+	if err := StartWithError(); err != nil {
+		fmt.Printf("memdb init failed: %v\n", err)
+	}
+}
+
+// StartWithError 启动默认内存 DB，并返回初始化错误。
+func StartWithError() error {
+	m, err := NewMemDB()
+	if err != nil {
+		return fmt.Errorf("memdb init failed: %w", err)
+	}
+	defaultMu.Lock()
+	defaultMemDB = m
+	defaultMu.Unlock()
+	return nil
 }
 
 func GetDB() *gorm.DB {
-	return memDB
+	defaultMu.RLock()
+	m := defaultMemDB
+	defaultMu.RUnlock()
+	if m == nil {
+		return nil
+	}
+	return m.GetDB()
+}
+
+func SetDefaultMemDB(m *MemDB) {
+	defaultMu.Lock()
+	defaultMemDB = m
+	defaultMu.Unlock()
+}
+
+func GetDefaultMemDB() *MemDB {
+	defaultMu.RLock()
+	m := defaultMemDB
+	defaultMu.RUnlock()
+	return m
 }

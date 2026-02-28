@@ -8,7 +8,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -41,10 +40,6 @@ func (m *mockProvider) GetPrefix(ctx context.Context, key string) (*clientv3.Get
 }
 
 func TestWatchLoopPushesEvents(t *testing.T) {
-	if log.SysLogger == nil {
-		log.Init(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "debug"}, true)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

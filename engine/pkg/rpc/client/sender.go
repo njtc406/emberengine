@@ -10,94 +10,127 @@ import (
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
 )
 
+// ── 默认创建器注册表（返回副本，避免全局可变 map） ──
+
+func defaultSenderMap(logger log.ILoggerX, natsConf *config.NatsConf, grpcConnNum int) map[string]SenderCreator {
+	return map[string]SenderCreator{
+		def.RpcTypeRpcx: func(addr string) inf.IRpcSender {
+			return newRpcxClient(addr, logger)
+		},
+		def.RpcTypeGrpc: func(addr string) inf.IRpcSender {
+			return newGrpcClient(addr, logger, grpcConnNum)
+		},
+		def.RpcTypeNats: func(addr string) inf.IRpcSender {
+			return newNatsClient(addr, logger, natsConf)
+		},
+	}
+}
+
 type SenderCreator func(addr string) inf.IRpcSender
 
-var senderMap = map[string]SenderCreator{
-	def.RpcTypeLocal: newLClient,
-	def.RpcTypeRpcx:  newRpcxClient,
-	def.RpcTypeGrpc:  newGrpcClient,
-	def.RpcTypeNats:  newNatsClient,
+// ── SenderManager 结构体 ──
+
+// SenderManager 管理所有 RPC sender 的创建和缓存。
+// 取代原来的包级 senderMap / senderHandlerMap / lock / init() / Close()。
+type SenderManager struct {
+	log.ILoggerX // 持有 ILoggerX
+
+	poolMgr     *pool.PoolManager
+	rpcMonitor  *monitor.RpcMonitor
+	natsConf    *config.NatsConf
+	grpcConnNum int
+	senderMap   map[string]SenderCreator             // 协议 → 创建器（初始化后只读）
+	handlerMap  map[string]map[string]inf.IRpcSender // map[addr][tp]sender
+	handlerLock sync.RWMutex
 }
 
-// Register 注册消息发送器(目前由于都是在启动阶段注册,没有动态注册,所以就没有给锁,后面有需求再改)
-func Register(tp string, creator SenderCreator) {
-	senderMap[tp] = creator
+// NewSenderManager 创建 SenderManager 并向 PoolManager 注册远程创建器。
+func NewSenderManager(poolMgr *pool.PoolManager, logger log.ILoggerX, rpcMonitor *monitor.RpcMonitor, natsConf *config.NatsConf, grpcConnNum int) *SenderManager {
+	mgr := &SenderManager{
+		ILoggerX:    logger,
+		poolMgr:     poolMgr,
+		rpcMonitor:  rpcMonitor,
+		natsConf:    natsConf,
+		grpcConnNum: grpcConnNum,
+		senderMap:   defaultSenderMap(logger, natsConf, grpcConnNum),
+		handlerMap:  make(map[string]map[string]inf.IRpcSender),
+	}
+	mgr.registerCreators()
+	return mgr
 }
 
-var lock sync.RWMutex
-
-// TODO 可以给这个池子建立一个淘汰机制?比如某些很久才使用一次的连接,可以不用一直维护
-// map[addr][tp]inf.IRpcSender
-var senderHandlerMap map[string]map[string]inf.IRpcSender
-
-func init() {
-	senderHandlerMap = make(map[string]map[string]inf.IRpcSender)
-
-	// 初始化连接池管理器
-	poolMgr := pool.GetGlobalPoolManager()
-
-	// 注册RPC创建器到连接池管理器
-	for rpcType, creator := range senderMap {
-		if rpcType != def.RpcTypeLocal { // 本地类型不需要连接池
-			poolMgr.RegisterCreator(rpcType, pool.SenderCreator(creator))
+// registerCreators 将非本地创建器注册到 PoolManager。
+func (sm *SenderManager) registerCreators() {
+	for rpcType, creator := range sm.senderMap {
+		if rpcType != def.RpcTypeLocal {
+			sm.poolMgr.RegisterCreator(rpcType, pool.SenderCreator(creator))
 		}
 	}
 }
 
-func getSenderHandler(addr string, tp string) inf.IRpcSender {
-	lock.RLock()
-	if tps, ok := senderHandlerMap[addr]; ok {
-		if handler, ok := tps[tp]; ok {
-			lock.RUnlock()
-			return handler
-		}
-		// 不存在该类型的连接,则创建一个
-		lock.RUnlock()
-		return addSenderHandler(addr, tp)
-	}
-	lock.RUnlock()
-
-	return addSenderHandler(addr, tp)
+// Register 注册自定义消息发送器
+func (sm *SenderManager) Register(tp string, creator SenderCreator) {
+	sm.senderMap[tp] = creator
 }
 
-func addSenderHandler(addr, tp string) inf.IRpcSender {
-	lock.Lock()
-	defer lock.Unlock()
+func (sm *SenderManager) getSenderHandler(addr string, tp string) inf.IRpcSender {
+	sm.handlerLock.RLock()
+	if tps, ok := sm.handlerMap[addr]; ok {
+		if handler, ok := tps[tp]; ok {
+			sm.handlerLock.RUnlock()
+			return handler
+		}
+		sm.handlerLock.RUnlock()
+		return sm.addSenderHandler(addr, tp)
+	}
+	sm.handlerLock.RUnlock()
+	return sm.addSenderHandler(addr, tp)
+}
 
-	// 检查地址是否已存在
-	if tps, ok := senderHandlerMap[addr]; ok {
-		// 检查类型是否已存在
+func (sm *SenderManager) addSenderHandler(addr, tp string) inf.IRpcSender {
+	sm.handlerLock.Lock()
+	defer sm.handlerLock.Unlock()
+
+	if tps, ok := sm.handlerMap[addr]; ok {
 		if handler, ok := tps[tp]; ok {
 			return handler
 		}
-		// 类型不存在，创建新handler
-		handler := senderMap[tp](addr)
+		handler := sm.senderMap[tp](addr)
 		tps[tp] = handler
 		return handler
 	}
 
-	// 地址不存在，初始化并创建handler
-	handler := senderMap[tp](addr)
-	senderHandlerMap[addr] = map[string]inf.IRpcSender{tp: handler}
+	handler := sm.senderMap[tp](addr)
+	sm.handlerMap[addr] = map[string]inf.IRpcSender{tp: handler}
 	return handler
 }
 
-func Close() {
-	for _, tps := range senderHandlerMap {
+// Close 关闭所有 sender
+func (sm *SenderManager) Close() {
+	sm.handlerLock.Lock()
+	defer sm.handlerLock.Unlock()
+	for _, tps := range sm.handlerMap {
 		for _, handler := range tps {
 			handler.Close()
 		}
 	}
+	sm.handlerMap = make(map[string]map[string]inf.IRpcSender)
 }
+
+// ── Dispatcher ──
 
 type Dispatcher struct {
 	tmp bool // 是否是临时客户端
 	pid *actor.PID
+	sm  *SenderManager
 
 	inf.IMailboxChannel
 	localHandler inf.IRpcSender
@@ -120,41 +153,55 @@ func (c *Dispatcher) IsClosed() bool {
 }
 
 func (c *Dispatcher) getSender() inf.IRpcSender {
+	sm := c.sm
+	if sm == nil {
+		return nil
+	}
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = senderMap[def.RpcTypeLocal]("")
+			c.localHandler = newLClient("", sm.rpcMonitor)
 		}
 		return c.localHandler
 	}
-	return getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType())
+	return sm.getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType())
 }
 
 func (c *Dispatcher) DeliverRequest(ctx context.Context, envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ErrServiceNotFound
 	}
-	return c.getSender().DeliverRequest(ctx, c, envelope)
+	sender := c.getSender()
+	if sender == nil {
+		return def.ErrRPCHadClosed
+	}
+	return sender.DeliverRequest(ctx, c, envelope)
 }
 
 func (c *Dispatcher) DeliverResponse(ctx context.Context, envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ErrServiceNotFound
 	}
-	return c.getSender().DeliverResponse(ctx, c, envelope)
+	sender := c.getSender()
+	if sender == nil {
+		return def.ErrRPCHadClosed
+	}
+	return sender.DeliverResponse(ctx, c, envelope)
 }
 
-func NewDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
+func NewDispatcher(sm *SenderManager, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
 	return &Dispatcher{
 		pid:             pid,
+		sm:              sm,
 		IMailboxChannel: mailbox,
 	}
 }
 
-func NewTmpDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
+func NewTmpDispatcher(sm *SenderManager, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
 	return &Dispatcher{
 		tmp:             true,
 		pid:             pid,
+		sm:              sm,
 		IMailboxChannel: mailbox,
 	}
 }

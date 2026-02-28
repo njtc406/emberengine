@@ -25,6 +25,7 @@ type ILoggerX interface {
 	WithContext(ctx context.Context) ILoggerX
 	WithField(key string, value interface{}) ILoggerX
 	WithFields(fields map[string]interface{}) ILoggerX
+	WithFreshFields(fields map[string]interface{}) ILoggerX
 
 	// Project-specific tagged variants.
 	Slow() ILoggerX

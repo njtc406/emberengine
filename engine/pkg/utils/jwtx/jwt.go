@@ -6,36 +6,62 @@
 package jwtx
 
 import (
+	"errors"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"time"
 )
 
-var jwtSecret = []byte("ember-secret-pwd-xxyyzz") // 和 Auth 里的保持一致
+var ErrJWTSecretNotConfigured = errors.New("jwt secret not configured")
+
+type Provider struct {
+	secret []byte
+}
+
+func NewProvider(secret string) *Provider {
+	return &Provider{secret: []byte(secret)}
+}
+
+func (p *Provider) Secret() []byte {
+	if p == nil {
+		return nil
+	}
+	return p.secret
+}
 
 type EmberClaims struct {
 	jwt.RegisteredClaims
 	UserID int64 `json:"uid"`
 }
 
-// CreateJwtToken 生成一个jwt token
-func CreateJwtToken(uid int64, expireTime time.Duration) (string, error) {
+func (p *Provider) CreateJwtToken(uid int64, expireTime time.Duration) (string, error) {
+	secret := p.Secret()
+	if len(secret) == 0 {
+		return "", ErrJWTSecretNotConfigured
+	}
 	jtc := jwt.NewWithClaims(jwt.SigningMethodHS256, EmberClaims{
 		UserID: uid,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expireTime)), // 过期时间
-			IssuedAt:  jwt.NewNumericDate(time.Now()),                 // 签发时间
-			NotBefore: jwt.NewNumericDate(time.Now()),                 // 生效时间
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expireTime)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
 		},
 	})
 
-	return jtc.SignedString(jwtSecret)
+	return jtc.SignedString(secret)
 }
 
-func ParseJwtToken(tokenStr string) (*EmberClaims, error) {
+func (p *Provider) ParseJwtToken(tokenStr string) (*EmberClaims, error) {
+	secret := p.Secret()
+	if len(secret) == 0 {
+		return nil, ErrJWTSecretNotConfigured
+	}
 	claims := &EmberClaims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
+		return secret, nil
 	})
 	if err != nil {
 		return nil, err
@@ -44,4 +70,52 @@ func ParseJwtToken(tokenStr string) (*EmberClaims, error) {
 		return nil, def.ErrTokenInvalid
 	}
 	return claims, nil
+}
+
+var (
+	defaultProvider *Provider
+	providerLock    sync.RWMutex
+)
+
+func init() {
+	defaultProvider = NewProvider(os.Getenv("EMBER_JWT_SECRET"))
+}
+
+func SetDefaultSecret(secret string) {
+	providerLock.Lock()
+	defaultProvider = NewProvider(secret)
+	providerLock.Unlock()
+}
+
+func SetDefaultProvider(p *Provider) {
+	if p == nil {
+		return
+	}
+	providerLock.Lock()
+	defaultProvider = p
+	providerLock.Unlock()
+}
+
+func GetDefaultProvider() *Provider {
+	providerLock.RLock()
+	p := defaultProvider
+	providerLock.RUnlock()
+	return p
+}
+
+// CreateJwtToken 生成一个jwt token
+func CreateJwtToken(uid int64, expireTime time.Duration) (string, error) {
+	return GetDefaultProvider().CreateJwtToken(uid, expireTime)
+}
+
+func CreateJwtTokenWithSecret(secret string, uid int64, expireTime time.Duration) (string, error) {
+	return NewProvider(secret).CreateJwtToken(uid, expireTime)
+}
+
+func ParseJwtToken(tokenStr string) (*EmberClaims, error) {
+	return GetDefaultProvider().ParseJwtToken(tokenStr)
+}
+
+func ParseJwtTokenWithSecret(secret, tokenStr string) (*EmberClaims, error) {
+	return NewProvider(secret).ParseJwtToken(tokenStr)
 }

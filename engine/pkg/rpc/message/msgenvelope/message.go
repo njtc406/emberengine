@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
@@ -25,7 +24,7 @@ func getMsgPool() pool.IPool[*actor.Message] {
 				return &actor.Message{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if isDebug() {
 					return pool.NewStatsRecorder("rpcMsgPool-syncPool")
 				} else {
 					return pool.NewNoStatsRecorder()

@@ -8,6 +8,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"sort"
 	"sync"
@@ -89,7 +90,7 @@ func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
 
 func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
 	if invoker == nil {
-		logger.Fatal("invoker is nil")
+		panic("invoker is nil")
 	}
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -124,12 +125,13 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	return pool
 }
 
-func (p *WorkerPool) Start() {
+func (p *WorkerPool) Start() error {
 	p.mu.Lock()
 	for i := int32(0); i < p.conf.SchedulePolicy.InitialWorkerNum; i++ {
 		worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
 		if worker == nil {
-			p.logger.Fatalf("service[%s] Failed to create worker, conf:%v", p.invoker.GetServiceName(), p.conf)
+			p.mu.Unlock()
+			return fmt.Errorf("service[%s] failed to create worker, conf:%v", p.invoker.GetServiceName(), p.conf)
 		}
 		p.workers[i] = worker
 		worker.Start()
@@ -156,6 +158,7 @@ func (p *WorkerPool) Start() {
 	}
 
 	p.logger.Debugf("Started service[%s] mailbox workers:%d", p.invoker.GetServiceName(), p.conf.SchedulePolicy.InitialWorkerNum)
+	return nil
 }
 
 // BeginStop 发起停止（非阻塞）：停止后台协程并通知 workers 退出，但不等待。
@@ -477,7 +480,8 @@ func (p *WorkerPool) autoScaleWorkers() {
 	if p.autoScaler == nil {
 		strategy, err := BuildStrategy(p.conf.SchedulePolicy.ScalingStrategy)
 		if err != nil {
-			p.logger.Panic(err)
+			p.logger.Errorf("build scaling strategy failed: %v", err)
+			return
 		}
 		p.autoScaler = &AutoScaler{
 			conf:     p.conf.SchedulePolicy.ScalingStrategy,

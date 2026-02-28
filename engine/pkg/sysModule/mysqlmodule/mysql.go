@@ -7,11 +7,13 @@ package mysqlmodule
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	syslog "log"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"gorm.io/driver/mysql"
@@ -42,10 +44,15 @@ type MysqlModule struct {
 
 	conf   *Conf
 	client *gorm.DB
+	logger log.ILoggerX
 }
 
 func NewMysqlModule() *MysqlModule {
 	return &MysqlModule{}
+}
+
+func (m *MysqlModule) SetLogger(logger log.ILoggerX) {
+	m.logger = logger
 }
 
 func (m *MysqlModule) GetClient() *gorm.DB {
@@ -62,8 +69,12 @@ func (m *MysqlModule) OnInit() error {
 }
 
 func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
+	baseLogger := m.logger
+	if baseLogger == nil {
+		baseLogger = m.GetLogger()
+	}
 	slowLogger := logger.New(
-		syslog.New(log.SysLogger.GetOutput(), "\n", syslog.LstdFlags),
+		syslog.New(os.Stdout, "\n", syslog.LstdFlags),
 		logger.Config{
 			// 设定慢查询时间阈值为 默认值：200 * time.Millisecond
 			SlowThreshold: 200 * time.Millisecond,
@@ -91,7 +102,9 @@ func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
 		)
 	}
 
-	log.SysLogger.Infof("mysql connect : %s", dsn)
+	if baseLogger != nil {
+		baseLogger.Infof("mysql connect : %s", dsn)
+	}
 
 	return gorm.Open(mysql.New(mysql.Config{
 		DSN:                     dsn,
@@ -106,12 +119,12 @@ func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
 }
 
 // Init 初始化连接
-func (m *MysqlModule) Init(conf *Conf) {
+func (m *MysqlModule) Init(conf *Conf) error {
 	m.conf = conf
 
 	client, err := m.initConn(nil)
 	if err != nil {
-		log.SysLogger.Panic(err)
+		return fmt.Errorf("init mysql conn failed: %w", err)
 	}
 
 	sqlDB, _ := client.DB()
@@ -132,12 +145,15 @@ func (m *MysqlModule) Init(conf *Conf) {
 	sqlDB.SetMaxOpenConns(runtime.NumCPU() * openRate)
 
 	m.client = client
+	return nil
 }
 
 func (m *MysqlModule) ApiMysqlExecuteFun(f Callback, args ...interface{}) (interface{}, error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.Errorf("mysql execute function panic: %v\ntrace:%s", r, debug.Stack())
+			if m.logger != nil {
+				m.logger.Errorf("mysql execute function panic: %v\ntrace:%s", r, debug.Stack())
+			}
 		}
 	}()
 	return f(m.client, args...)
@@ -176,7 +192,7 @@ func (m *MysqlModule) initDatabase(db *gorm.DB, database string) error {
 func (m *MysqlModule) ApiInitTables(database string, tables ...interface{}) error {
 	db, err := m.initConn(&database)
 	if err != nil {
-		log.SysLogger.Panic(err)
+		return fmt.Errorf("init mysql conn failed: %w", err)
 	}
 
 	if err = m.initDatabase(db, database); err != nil {

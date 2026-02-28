@@ -23,13 +23,17 @@ type grpcSender struct {
 	conns      []*grpc.ClientConn
 	rpcClients []actor.GrpcListenerClient
 	i          atomic.Int64
+	logger     log.ILoggerX
 }
 
-func newGrpcClient(addr string) inf.IRpcSender {
+func newGrpcClient(addr string, logger log.ILoggerX, grpcConnNum int) inf.IRpcSender {
 	var clients []actor.GrpcListenerClient
 	var conns []*grpc.ClientConn
-	cpuNum := runtime.NumCPU()
-	connNum := cpuNum / 2
+	connNum := grpcConnNum
+	if connNum <= 0 {
+		cpuNum := runtime.NumCPU()
+		connNum = cpuNum / 2
+	}
 	if connNum < 1 {
 		connNum = 1
 	}
@@ -37,7 +41,13 @@ func newGrpcClient(addr string) inf.IRpcSender {
 	for i := 0; i < connNum; i++ {
 		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			log.SysLogger.Panicf("grpcxSender newGrpcClient error: %v", err)
+			if logger != nil {
+				logger.Errorf("grpcSender newGrpcClient error: %v", err)
+			}
+			for _, opened := range conns {
+				_ = opened.Close()
+			}
+			return nil
 		}
 		conns = append(conns, conn)
 		clients = append(clients, actor.NewGrpcListenerClient(conn))
@@ -46,6 +56,7 @@ func newGrpcClient(addr string) inf.IRpcSender {
 	return &grpcSender{
 		conns:      conns,
 		rpcClients: clients,
+		logger:     logger,
 	}
 }
 
@@ -65,7 +76,9 @@ func (rc *grpcSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	// 构建发送消息
 	msg, err := envelope.ToProtoMsg(ctx)
 	if err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		if rc.logger != nil {
+			rc.logger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		}
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg)
@@ -73,12 +86,14 @@ func (rc *grpcSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	rpcClient := rc.rpcClients[rc.i.Add(1)%int64(len(rc.rpcClients))]
 
 	if _, err := rpcClient.RPCCall(ctx, msg); err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope,
-			envelope.GetMeta().GetReceiverPid().GetServiceUid(), err)
+		if rc.logger != nil {
+			rc.logger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope,
+				envelope.GetMeta().GetReceiverPid().GetServiceUid(), err)
+		}
 		return def.ErrRPCCallFailed
 	}
 
-	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, envelope.GetReceiverPid().GetServiceUid())
+	// getClientLogger().WithContext(ctx).Infof("send message[%+v] to %s success", envelope, envelope.GetReceiverPid().GetServiceUid())
 	// 这里仅仅代表消息发送成功(不代表对方已经处理完成,处理全是异步的,会在回复消息中通知处理结果)
 	return nil
 }
@@ -94,5 +109,5 @@ func (rc *grpcSender) DeliverResponse(ctx context.Context, _ inf.IRpcDispatcher,
 }
 
 func (rc *grpcSender) IsClosed() bool {
-	return rc.rpcClients == nil || len(rc.rpcClients) == 0
+	return len(rc.rpcClients) == 0
 }
