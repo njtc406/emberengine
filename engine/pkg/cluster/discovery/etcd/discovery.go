@@ -53,7 +53,11 @@ type EtcdDiscovery struct {
 
 func NewEtcdDiscovery() *EtcdDiscovery { return &EtcdDiscovery{} }
 
-func init() { disc.Register("etcd", NewEtcdDiscovery()) }
+func init() {
+	disc.Register("etcd", func() inf.IDiscovery {
+		return NewEtcdDiscovery()
+	})
+}
 
 func (e *EtcdDiscovery) Init(conf *config.ClusterConf, eventProcessor inf.IEventProcessor, evtCh inf.IEventChannel) error {
 	if len(conf.ETCDConf.Endpoints) == 0 {

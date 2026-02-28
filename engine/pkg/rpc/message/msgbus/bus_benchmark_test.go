@@ -25,13 +25,18 @@ func benchInitRPC() {
 		if log.SysLogger == nil {
 			log.Init(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
 		}
+		if config.Conf == nil {
+			config.SetConf(config.NewConfig())
+		}
 		if config.Conf.NodeConf == nil {
 			config.Conf.NodeConf = &config.NodeConf{}
 		}
 		if config.Conf.NodeConf.RpcMonitorConf == nil {
 			config.Conf.NodeConf.RpcMonitorConf = &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
 		}
-		timingwheel.Start(time.Millisecond, 64, log.SysLogger)
+		tw := timingwheel.NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(log.SysLogger, log.Fields{"pkg": "bench"}))
+		tw.Start()
+		timingwheel.SetDefaultTimingWheel(tw)
 
 		rm := monitor.GetRpcMonitor()
 		rm.Start()

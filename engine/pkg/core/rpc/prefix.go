@@ -51,47 +51,119 @@ func (idx *prefixBucketIndex) has(s string) bool {
 	return false
 }
 
-var (
-	apiPrefixIndex   = newPrefixBucketIndex([]string{"Api", "API"})     // 只允许node内部调用的方法
-	rpcPrefixIndex   = newPrefixBucketIndex([]string{"Rpc", "RPC"})     // 允许rpc调用的方法
-	apiRoPrefixIndex = newPrefixBucketIndex([]string{"ApiRo", "APIRo"}) // API 只读前缀
-	rpcRoPrefixIndex = newPrefixBucketIndex([]string{"RpcRo", "RPCRo"}) // RPC 只读前缀
-)
+// ── MethodIndex 结构体：持有前缀索引的独立实例 ──
 
-// SetApiPrefix 设置自定义api前缀
-func SetApiPrefix(prefix ...string) {
-	apiPrefixIndex.add(prefix...)
+// MethodIndex 管理 API/RPC 方法前缀索引。
+// 每个 Node 应持有独立的 MethodIndex 实例。
+type MethodIndex struct {
+	ApiPrefixIndex   *prefixBucketIndex // 只允许 node 内部调用的方法
+	RpcPrefixIndex   *prefixBucketIndex // 允许 rpc 调用的方法
+	ApiRoPrefixIndex *prefixBucketIndex // API 只读前缀
+	RpcRoPrefixIndex *prefixBucketIndex // RPC 只读前缀
 }
 
-// SetRpcPrefix 设置自定义rpc前缀
-func SetRpcPrefix(prefix ...string) {
-	rpcPrefixIndex.add(prefix...)
+// NewMethodIndex 创建带有默认前缀的 MethodIndex 实例
+func NewMethodIndex() *MethodIndex {
+	return &MethodIndex{
+		ApiPrefixIndex:   newPrefixBucketIndex([]string{"Api", "API"}),
+		RpcPrefixIndex:   newPrefixBucketIndex([]string{"Rpc", "RPC"}),
+		ApiRoPrefixIndex: newPrefixBucketIndex([]string{"ApiRo", "APIRo"}),
+		RpcRoPrefixIndex: newPrefixBucketIndex([]string{"RpcRo", "RPCRo"}),
+	}
+}
+
+// SetApiPrefix 设置自定义 api 前缀
+func (mi *MethodIndex) SetApiPrefix(prefix ...string) {
+	mi.ApiPrefixIndex.add(prefix...)
+}
+
+// SetRpcPrefix 设置自定义 rpc 前缀
+func (mi *MethodIndex) SetRpcPrefix(prefix ...string) {
+	mi.RpcPrefixIndex.add(prefix...)
 }
 
 // SetApiReadOnlyPrefix 设置自定义的 API 只读前缀
-func SetApiReadOnlyPrefix(prefix ...string) {
-	apiRoPrefixIndex.add(prefix...)
+func (mi *MethodIndex) SetApiReadOnlyPrefix(prefix ...string) {
+	mi.ApiRoPrefixIndex.add(prefix...)
 }
 
 // SetRpcReadOnlyPrefix 设置自定义的 RPC 只读前缀
+func (mi *MethodIndex) SetRpcReadOnlyPrefix(prefix ...string) {
+	mi.RpcRoPrefixIndex.add(prefix...)
+}
+
+func (mi *MethodIndex) HasApiPrefix(s string) bool {
+	return mi.ApiPrefixIndex.has(s)
+}
+
+func (mi *MethodIndex) HasRpcPrefix(s string) bool {
+	return mi.RpcPrefixIndex.has(s)
+}
+
+func (mi *MethodIndex) HasApiReadOnlyPrefix(s string) bool {
+	return mi.ApiRoPrefixIndex.has(s)
+}
+
+func (mi *MethodIndex) HasRpcReadOnlyPrefix(s string) bool {
+	return mi.RpcRoPrefixIndex.has(s)
+}
+
+// ── 全局兼容（Deprecated） ──
+
+var globalMethodIndex = NewMethodIndex()
+
+// GetMethodIndex 获取全局 MethodIndex
+// Deprecated: 兼容旧代码，新代码请使用 Node 实例上的 MethodIndex
+func GetMethodIndex() *MethodIndex {
+	return globalMethodIndex
+}
+
+// SetMethodIndex 设置全局 MethodIndex（由 Node.Start 调用）
+// Deprecated: 仅用于过渡期全局兼容
+func SetMethodIndex(mi *MethodIndex) {
+	globalMethodIndex = mi
+}
+
+// ── 以下包级函数委托给全局 MethodIndex，供 handler.go 使用（过渡期） ──
+
+// SetApiPrefix 设置自定义api前缀
+// Deprecated: 请使用 MethodIndex.SetApiPrefix()
+func SetApiPrefix(prefix ...string) {
+	globalMethodIndex.SetApiPrefix(prefix...)
+}
+
+// SetRpcPrefix 设置自定义rpc前缀
+// Deprecated: 请使用 MethodIndex.SetRpcPrefix()
+func SetRpcPrefix(prefix ...string) {
+	globalMethodIndex.SetRpcPrefix(prefix...)
+}
+
+// SetApiReadOnlyPrefix 设置自定义的 API 只读前缀
+// Deprecated: 请使用 MethodIndex.SetApiReadOnlyPrefix()
+func SetApiReadOnlyPrefix(prefix ...string) {
+	globalMethodIndex.SetApiReadOnlyPrefix(prefix...)
+}
+
+// SetRpcReadOnlyPrefix 设置自定义的 RPC 只读前缀
+// Deprecated: 请使用 MethodIndex.SetRpcReadOnlyPrefix()
 func SetRpcReadOnlyPrefix(prefix ...string) {
-	rpcRoPrefixIndex.add(prefix...)
+	globalMethodIndex.SetRpcReadOnlyPrefix(prefix...)
 }
 
 func hasApiPrefix(s string) bool {
-	return apiPrefixIndex.has(s)
+	return globalMethodIndex.HasApiPrefix(s)
 }
 
 func hasRpcPrefix(s string) bool {
-	return rpcPrefixIndex.has(s)
+	return globalMethodIndex.HasRpcPrefix(s)
 }
 
 // hasApiReadOnlyPrefix 检查方法名是否有 API 只读前缀（ApiRo/APIRo）
 func hasApiReadOnlyPrefix(s string) bool {
-	return apiRoPrefixIndex.has(s)
+	return globalMethodIndex.HasApiReadOnlyPrefix(s)
 }
 
 // hasRpcReadOnlyPrefix 检查方法名是否有 RPC 只读前缀（RpcRo/RPCRo）
 func hasRpcReadOnlyPrefix(s string) bool {
-	return rpcRoPrefixIndex.has(s)
+	return globalMethodIndex.HasRpcReadOnlyPrefix(s)
 }

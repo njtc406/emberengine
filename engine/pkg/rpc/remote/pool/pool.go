@@ -15,24 +15,29 @@ import (
 
 type ListenerCreator func(cliFactory inf.IRpcSenderFactory) interface{}
 
-type creator struct {
-	listenerCreator ListenerCreator
-	server          inf.IRemoteServer
+// remoteFactory 存储无状态工厂函数（非实例），每次调用创建新实例。
+// 属于 init() 后只读的注册表，多 Node 安全共享。
+var remoteFactory = map[string]func() inf.IRemoteServer{
+	def.RpcTypeRpcx: func() inf.IRemoteServer { return rx.NewRpcxServer() },
+	def.RpcTypeGrpc: func() inf.IRemoteServer { return gr.NewGrpcServer() },
+	def.RpcTypeNats: func() inf.IRemoteServer { return nt.NewNatsServer() },
 }
 
-var remoteMap = map[string]inf.IRemoteServer{
-	def.RpcTypeRpcx: rx.NewRpcxServer(),
-	def.RpcTypeGrpc: gr.NewGrpcServer(),
-	def.RpcTypeNats: nt.NewNatsServer(),
+// Register 注册远程服务器工厂函数
+func Register(tp string, factory func() inf.IRemoteServer) {
+	remoteFactory[tp] = factory
 }
 
-func Register(tp string, server inf.IRemoteServer) {
-	remoteMap[tp] = server
-}
-
-func GetServer(tp string) inf.IRemoteServer {
-	if srv, ok := remoteMap[tp]; ok {
-		return srv
+// CreateServer 创建新的远程服务器实例（每次调用返回新实例）
+func CreateServer(tp string) inf.IRemoteServer {
+	if f, ok := remoteFactory[tp]; ok {
+		return f()
 	}
 	return nil
+}
+
+// GetServer 获取远程服务器实例
+// Deprecated: 请使用 CreateServer()，每次创建新实例
+func GetServer(tp string) inf.IRemoteServer {
+	return CreateServer(tp)
 }

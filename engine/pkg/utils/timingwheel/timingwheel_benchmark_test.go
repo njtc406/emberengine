@@ -28,14 +28,15 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create logger: %v", err)
 	}
-	timingwheel.Start(time.Millisecond, 200, logger)
-	defer timingwheel.Stop()
+	tw := timingwheel.NewTimingWheel(time.Millisecond, 200, log.NewLoggerX(logger, log.Fields{"pkg": "tw"}))
+	tw.Start()
+	defer tw.Stop()
 
 	dp = timingwheel.NewJobScheduler(
 		"benchmark test",
 		10000000,
 		10,
-		timingwheel.GetTimingWheel(),
+		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_benchmark"}),
 	)
 

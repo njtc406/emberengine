@@ -44,6 +44,8 @@ var bus *Bus
 var busOnce sync.Once
 
 type Bus struct {
+	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
+
 	nc     *nats.Conn // TODO 目前只支持nats,后续再看要不要扩展吧
 	enable atomic.Int32
 
@@ -79,6 +81,19 @@ type Bus struct {
 	metrics         *EventMetrics                 // 事件指标
 }
 
+// NewEventBus 创建新的事件总线实例（Phase 2 per-Node 模式推荐使用）。
+func NewEventBus() *Bus {
+	return &Bus{}
+}
+
+// SetEventBus 设置全局 Bus（向后兼容）。
+// Deprecated: 请通过 NodeContext 获取。
+func SetEventBus(b *Bus) {
+	bus = b
+}
+
+// GetEventBus 返回全局 Bus（向后兼容）。
+// Deprecated: 请通过 NodeContext 获取。
 func GetEventBus() *Bus {
 	busOnce.Do(func() {
 		bus = &Bus{}
@@ -138,7 +153,8 @@ func switchOpts(conf *config.NatsConf) []nats.Option {
 	return opts
 }
 
-func (eb *Bus) Init(conf *config.EventBusConf) {
+func (eb *Bus) Init(conf *config.EventBusConf, logger *log.Logger) {
+	eb.Logger = logger
 	// 初始化事件分类和限流系统
 	eb.eventRegistry = NewEventRegistry()
 	eb.throttleManager = NewThrottleManager(eb.eventRegistry)
@@ -155,8 +171,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 
 		nc, err := nats.Connect(strings.Join(conf.NatsConf.EndPoints, ","), opts...)
 		if err != nil {
-			log.SysLogger.Panic(err)
-			//panic(err)
+			eb.Panic(err)
 		}
 		eb.nc = nc
 		eb.enable.Store(1)
@@ -176,7 +191,7 @@ func (eb *Bus) Init(conf *config.EventBusConf) {
 		if eb.specificPrefix == "" {
 			eb.specificPrefix = def.DefaultSpecificPrefix
 		}
-		log.SysLogger.Debug("==========> nats init success")
+		eb.Debug("==========> nats init success")
 	}
 
 	var shardCount = def.NatsDefaultShardCount
@@ -366,7 +381,7 @@ func (eb *Bus) PublishGlobal(ctx context.Context, eventType def.EventType, data 
 	// 1. 检查限流
 	if !eb.throttleManager.Allow(eventType) {
 		atomic.AddInt64(&eb.metrics.TotalThrottled, 1)
-		log.SysLogger.Warnf("Event type %d throttled", eventType)
+		eb.Warnf("Event type %d throttled", eventType)
 		return fmt.Errorf("event type %d throttled", eventType)
 	}
 
@@ -453,7 +468,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 			j.SetPriority(def.Priority(e.GetPriority()))
 			j.SetDeadline(e.GetDeadline())
 			if err := ch.PostJob(j); err != nil {
-				log.SysLogger.WithContext(ctx).Errorf("push global event error: %v", err)
+				eb.WithContext(ctx).Errorf("push global event error: %v", err)
 				j.Release()
 			}
 		}
@@ -506,7 +521,7 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 				j.SetPriority(def.Priority(e.GetPriority()))
 				j.SetDeadline(e.GetDeadline())
 				if err := ch.PostJob(j); err != nil {
-					log.SysLogger.Errorf("push server event error: %v", err)
+					eb.Errorf("push server event error: %v", err)
 					j.Release()
 				}
 			}
@@ -540,7 +555,7 @@ func (eb *Bus) SubscribeGlobal(eventType def.EventType, svc inf.IListener) {
 				// 解析数据
 				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
-					log.SysLogger.Errorf("unmarshal global event error: %v", err)
+					eb.Errorf("unmarshal global event error: %v", err)
 					return
 				}
 
@@ -549,7 +564,7 @@ func (eb *Bus) SubscribeGlobal(eventType def.EventType, svc inf.IListener) {
 				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
-				log.SysLogger.Errorf("subscribe global event from nats failed, error: %v", err)
+				eb.Errorf("subscribe global event from nats failed, error: %v", err)
 			}
 		}
 	}
@@ -602,7 +617,7 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 				j.SetDeadline(e.GetDeadline())
 
 				if err := ch.PostJob(j); err != nil {
-					log.SysLogger.Errorf("push specific event error: %v", err)
+					eb.Errorf("push specific event error: %v", err)
 					j.Release()
 				}
 			}
@@ -634,7 +649,7 @@ func (eb *Bus) SubscribeSpecific(eventType def.EventType, serviceUid string, svc
 				// 解析数据
 				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
-					log.SysLogger.Errorf("unmarshal specific event error: %v", err)
+					eb.Errorf("unmarshal specific event error: %v", err)
 					return
 				}
 
@@ -643,7 +658,7 @@ func (eb *Bus) SubscribeSpecific(eventType def.EventType, serviceUid string, svc
 				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
-				log.SysLogger.Errorf("subscribe specific event from nats failed, error: %v", err)
+				eb.Errorf("subscribe specific event from nats failed, error: %v", err)
 			}
 		}
 	}
@@ -692,7 +707,7 @@ func (eb *Bus) SubscribeServer(eventType def.EventType, svc inf.IListener) {
 				// 解析数据
 				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
-					log.SysLogger.Errorf("unmarshal partition[%d] event error: %v", svc.GetPartition(), err)
+					eb.Errorf("unmarshal partition[%d] event error: %v", svc.GetPartition(), err)
 					return
 				}
 				eb.publishServer(be.ctx, be.event)
@@ -700,7 +715,7 @@ func (eb *Bus) SubscribeServer(eventType def.EventType, svc inf.IListener) {
 				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
-				log.SysLogger.Errorf("subscribe partition[%d] event error: %v", svc.GetPartition(), err)
+				eb.Errorf("subscribe partition[%d] event error: %v", svc.GetPartition(), err)
 			}
 		}
 	}
@@ -711,7 +726,7 @@ func (eb *Bus) unSubscribe(key string) {
 	if eb.isNatsEnabled() {
 		if subscription, ok := eb.loadAndDelSub(key); ok {
 			if err := subscription.Unsubscribe(); err != nil {
-				log.SysLogger.Errorf("unsubscribe global event error: %v", err)
+				eb.Errorf("unsubscribe global event error: %v", err)
 				//fmt.Println("unsubscribe global event error:", err)
 			}
 		}

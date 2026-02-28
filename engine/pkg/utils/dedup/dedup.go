@@ -12,8 +12,6 @@ import (
 	"github.com/patrickmn/go-cache"
 )
 
-var duplicator inf.IDeDuplicator
-
 type DeDuplicatorOption struct {
 	TTL      time.Duration
 	CleanTTL time.Duration
@@ -40,29 +38,18 @@ func WithSize(size int) Option {
 	}
 }
 
-func Init(conf *config.DeDuplicatorConf) {
-	if duplicator != nil {
-		return
-	}
-
+// NewDeDuplicator 创建一个新的去重器实例。
+// 每个 Node 持有独立的去重器，互不干扰。
+func NewDeDuplicator(conf *config.DeDuplicatorConf) (inf.IDeDuplicator, error) {
 	if conf == nil {
 		conf = &config.DeDuplicatorConf{}
 	}
-
 	option := &DeDuplicatorOption{
 		TTL:      conf.DeDuplicatorTTL,
 		CleanTTL: conf.DeDuplicatorCleanTTL,
 		Size:     conf.DeDuplicatorSize,
 	}
-
-	duplicator = newDeDuplicator(conf.DeDuplicatorType, option)
-}
-
-func GetDeDuplicator() inf.IDeDuplicator {
-	if duplicator == nil {
-		duplicator = newDeDuplicator(def.DeDuplicatorTypeTTL, &DeDuplicatorOption{})
-	}
-	return duplicator
+	return newDeDuplicator(conf.DeDuplicatorType, option), nil
 }
 
 func newDeDuplicator(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
@@ -80,7 +67,6 @@ func newDeDuplicator(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
 }
 
 func reqIdKey(serviceUid string, id uint64) string {
-	//return fmt.Sprintf("rpc_%s_reqid_%d", serviceUid, id)
 	return "rpc_" + serviceUid + "_reqid_" + strconv.FormatUint(id, 10)
 }
 
@@ -114,6 +100,14 @@ func (d *TTLDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	return false
 }
 
+// Close 释放 go-cache 内部 janitor goroutine，防止 goroutine 泄漏。
+func (d *TTLDeDuplicator) Close() {
+	if d.reqCache != nil {
+		d.reqCache.Flush()
+		d.reqCache = nil
+	}
+}
+
 type LRUDeDuplicator struct {
 	mu    sync.Mutex
 	ttl   time.Duration
@@ -134,4 +128,13 @@ func (d *LRUDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	}
 	d.cache.SetWithExpire(key, struct{}{}, d.ttl)
 	return false
+}
+
+// Close 清空 LRU 缓存。gcache 无后台 goroutine，Purge 即可。
+func (d *LRUDeDuplicator) Close() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cache != nil {
+		d.cache.Purge()
+	}
 }

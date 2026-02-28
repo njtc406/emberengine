@@ -13,30 +13,51 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
+// ===== 全局工厂注册表（保留为包级变量，init() 阶段注册，运行时只读） =====
 var (
-	lock        sync.RWMutex
-	serviceMap  map[string]func() inf.IService // 节点上拥有的服务
-	runServices []inf.IService                 // 运行中的服务
+	lock       sync.RWMutex
+	serviceMap = make(map[string]func() inf.IService)
 )
 
-func init() {
-	serviceMap = make(map[string]func() inf.IService)
-}
-
-// SetService 注册主服务
+// SetService 注册服务工厂（供 init() 阶段调用）。
 func SetService(name string, builder func() inf.IService) {
 	lock.Lock()
 	serviceMap[name] = builder
 	lock.Unlock()
 }
 
-func Init() {
+// GetServiceFactory 返回已注册的服务工厂函数（供 ServiceManager 查询）。
+func GetServiceFactory(name string) (func() inf.IService, bool) {
+	lock.RLock()
+	defer lock.RUnlock()
+	f, ok := serviceMap[name]
+	return f, ok
+}
+
+// ===== ServiceManager: per-Node 的运行时服务管理 =====
+
+// ServiceManager 管理单个 Node 的运行时服务实例。
+type ServiceManager struct {
+	*log.Logger // 嵌入 Logger
+	runServices []inf.IService
+	daemon      *daemon
+}
+
+// NewServiceManager 创建 ServiceManager。
+func NewServiceManager(logger *log.Logger) *ServiceManager {
+	return &ServiceManager{
+		Logger: logger,
+	}
+}
+
+// Init 根据配置创建并初始化所有服务。
+func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	for _, initConf := range config.Conf.ServiceConf.StartServices {
+	for _, initConf := range serviceConf.StartServices {
 		if builder, ok := serviceMap[initConf.ClassName]; ok {
-			log.SysLogger.WithField("service", initConf.ClassName).Info("Init Service")
+			sm.WithField("service", initConf.ClassName).Info("Init Service")
 			svc := builder()
 			serviceName := initConf.ClassName
 			if initConf.ServiceName != "" {
@@ -44,35 +65,75 @@ func Init() {
 			}
 			svc.SetName(serviceName)
 			var cfg interface{}
-			if serviceConf, ok := config.Conf.ServiceConf.ServicesConfMap[serviceName]; ok {
+			if serviceConf, ok := serviceConf.ServicesConfMap[serviceName]; ok {
 				cfg = serviceConf.Cfg
 			}
 			svc.Init(svc, initConf, cfg)
-			runServices = append(runServices, svc)
+			sm.runServices = append(sm.runServices, svc)
 		} else {
-			// 包中没有引入这个服务,但是配置中配置了启动这个服务
-			log.SysLogger.WithField("service", initConf.ClassName).Error("Service is configured to start but not imported in the package. Please check service dependencies or remove it from configuration")
+			sm.WithField("service", initConf.ClassName).Error("Service is configured to start but not imported in the package. Please check service dependencies or remove it from configuration")
 		}
 	}
 }
 
-func Start() {
-	lock.RLock()
-	defer lock.RUnlock()
-	for _, svc := range runServices {
-		log.SysLogger.WithField("service", svc.GetName()).Info("Start Service")
+// Start 启动所有已初始化的服务。
+func (sm *ServiceManager) Start() {
+	for _, svc := range sm.runServices {
+		sm.WithField("service", svc.GetName()).Info("Start Service")
 		if err := svc.Start(); err != nil {
-			log.SysLogger.WithField("service", svc.GetName()).Errorf("Start Service failed, err: %s", err)
+			sm.WithField("service", svc.GetName()).Errorf("Start Service failed, err: %s", err)
 		}
 	}
-	log.SysLogger.Info("=============服务启动完成===================")
+	sm.Info("=============服务启动完成===================")
 }
 
+// StopAll 倒序停止所有服务。
+func (sm *ServiceManager) StopAll() {
+	for i := len(sm.runServices) - 1; i >= 0; i-- {
+		sm.WithField("service", sm.runServices[i].GetName()).Info("Stop Service")
+		sm.runServices[i].Stop()
+	}
+}
+
+// GetDaemon 返回守护服务（如果需要）。
+func (sm *ServiceManager) GetDaemon() *daemon {
+	return sm.daemon
+}
+
+// ===== 向后兼容（Deprecated）=====
+
+// svcMgr 全局兼容指针
+var svcMgr *ServiceManager
+
+// SetServiceManager 设置全局 ServiceManager（向后兼容）。
+// Deprecated: 请通过 NodeContext 获取。
+func SetServiceManager(m *ServiceManager) {
+	svcMgr = m
+}
+
+// GetServiceManager 返回全局 ServiceManager（向后兼容）。
+// Deprecated: 请通过 NodeContext 获取。
+func GetServiceManager() *ServiceManager {
+	return svcMgr
+}
+
+// Init 包级兼容（Deprecated）。
+func Init() {
+	if svcMgr != nil {
+		svcMgr.Init(config.Conf.ServiceConf)
+	}
+}
+
+// Start 包级兼容（Deprecated）。
+func Start() {
+	if svcMgr != nil {
+		svcMgr.Start()
+	}
+}
+
+// StopAll 包级兼容（Deprecated）。
 func StopAll() {
-	lock.RLock()
-	defer lock.RUnlock()
-	for i := len(runServices) - 1; i >= 0; i-- {
-		log.SysLogger.WithField("service", runServices[i].GetName()).Info("Stop Service")
-		runServices[i].Stop()
+	if svcMgr != nil {
+		svcMgr.StopAll()
 	}
 }

@@ -1,320 +1,59 @@
 package config
 
 import (
-	"fmt"
 	"os"
-	"path"
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
-	"github.com/njtc406/emberengine/engine/pkg/config/remote"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/validate"
-	"github.com/njtc406/viper"
 )
 
-// TODO 这部分独立出来做成工具,包括node的配置,都注册进来,这样可以支持多种格式配置
+//	以下为临时全局兼容
+//
+// Conf 是临时全局配置指针，仅供尚未完成 Node 化改造的消费方使用。
+// 后续 Phase 中会逐步移除所有对 Conf 的引用。
+// Deprecated: 请通过 NodeContext.GetConfig() 获取。
+var Conf *Config
 
-// TODO gpt给了新的方式,需要修改一下这个文件,把所有的yaml文件做成模版文件,由env来传递具体的配置参数
-// 远程的部分也是一样,相当于把模版文件放在了远程而已,下载下来之后，使用本地的env来初始化配置
+// SetConf 由 Node.Start 调用，设置全局 Conf（临时兼容）。
+// Deprecated: 后续 Phase 删除。
+func SetConf(c *Config) { Conf = c }
 
-var (
-	runtimeViper = viper.New()
-	clusterViper = viper.New()
-	Conf         = new(conf)
-)
+// Init 已废弃。使用 NewConfig().Load(confPath) 替代。
+// Deprecated: 后续 Phase 删除。
+func Init(confPath string) {
+	c := NewConfig()
+	if err := c.Load(confPath); err != nil {
+		panic(err)
+	}
+	Conf = c
+}
+
+//  包级辅助函数（无状态，保留）
 
 const defaultConfPath = "./configs"
 const startServiceConfName = "services.yaml"
 
-// 配置初始化逻辑:
-// 1. 解析节点基础配置
-// 2. 根据服务配置决定使用本地或者远程
-// 3. 读取服务配置
-// 4. 节点会根据服务配置启动对应服务
-
-func Init(confPath string) {
-	fmt.Println("=============开始解析配置===================")
-	// 解析配置
-	parseNodeConfig(confPath)
-	// 初始化目录
-	initDir()
-	fmt.Printf("Conf: %s\n", Conf.String())
-	fmt.Println("=============配置解析完成===================")
-}
-
-// parseNodeConfig 解析本地配置文件
-func parseNodeConfig(confPath string) {
-	// 解析配置路径
-	envConfPath := os.Getenv("EMBER_CONF_PATH")
-	if envConfPath != "" {
-		confPath = envConfPath
-	}
-	if confPath == "" {
-		confPath = defaultConfPath
-	}
-
-	// 1. 加载 .env 文件
-	if err := godotenv.Load(path.Join(confPath, ".env")); err != nil {
-		fmt.Println("No .env file found, fallback to system env")
-		panic(err)
-	}
-
-	// 2. 读取原始配置文件（带 ${VAR}）
-	rawYaml, err := os.ReadFile(path.Join(confPath, "node.yaml"))
-	if err != nil {
-		panic(err)
-	}
-
-	// 3. 使用 os.ExpandEnv 替换变量
-	resolvedYaml := os.ExpandEnv(string(rawYaml))
-
-	runtimeViper.SetConfigType("yaml")
-	//runtimeViper.SetConfigName("node")
-	//runtimeViper.AddConfigPath(confPath)
-
-	// 解析节点配置
-	//parseSystemConfig(runtimeViper, Conf)
-	if err = runtimeViper.ReadConfig(strings.NewReader(resolvedYaml)); err != nil {
-		panic(err)
-	}
-	if err = runtimeViper.Unmarshal(Conf); err != nil {
-		panic(err)
-	}
-
-	// 绑定环境变量(这里需要注意的是,如果在配置中已经配置了,环境变量的优先级是低的一方,即不会覆盖已有配置,所以如果需要使用环境变量配置,就不要配置)
-	runtimeViper.SetEnvPrefix("EMBER_")
-	runtimeViper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	runtimeViper.AutomaticEnv()
-
-	if Conf.ServiceConf.OpenRemote {
-		// 从远程读取启动服务配置
-		// 设置viper的远程配置
-		viper.RemoteConfig = &remote.Config{
-			Endpoints: Conf.ClusterConf.ETCDConf.Endpoints,
-			Username:  Conf.ClusterConf.ETCDConf.UserName,
-			Password:  Conf.ClusterConf.ETCDConf.Password,
-		}
-
-		fmt.Println("=============使用远程配置===================")
-	}
-
-	// 解析启动服务(如果本地没有配置,就从远程读取)
-	parseStartService()
-
-	// 解析服务配置
-	parseServiceConf(confPath)
-
-	// 设置默认值
-	setDefaultValues()
-
-	if err := validate.Struct(Conf); err != nil {
-		panic(validate.TransError(err, validate.ZH))
-	}
-}
-
-// initDir 创建必要的目录
-func initDir() {
-	createDirIfNotExists(Conf.NodeConf.PVPath)
-	createDirIfNotExists(Conf.NodeConf.PVPath)
-	createDirIfNotExists(Conf.SystemLogger.Dir)
-}
-
-// createDirIfNotExists 创建目录
 func createDirIfNotExists(dir string) {
+	if dir == "" {
+		return
+	}
 	if err := os.MkdirAll(dir, 0644); err != nil {
 		panic(err)
 	}
 }
 
-// setDefaultValues 设置默认值
-func setDefaultValues() {
-	// 默认基础配置
-	runtimeViper.SetDefault("NodeConf", &NodeConf{
-		SystemStatus: Debug,
-		PVCPath:      def.DefaultPVCPath,
-		PVPath:       def.DefaultPVPath,
-		AntsPoolSize: def.DefaultAntsPoolSize,
-		RpcMonitorConf: &RpcMonitorConf{
-			MonitorTimerSize:  def.DefaultMonitorTimerSize,
-			MonitorBucketSize: def.DefaultMonitorBucketSize,
-			WaitBucketCount:   256,
-			WaitBucketInitCap: 0,
-		},
-		TimingWheelConf: &TimingWheelConf{
-			Interval:  time.Millisecond * 10,
-			WheelSize: 1000,
-		},
-	})
-
-	// 日志默认配置
-	runtimeViper.SetDefault("SystemLogger", &log.LoggerConf{
-		Dir:        path.Join(def.DefaultPVPath, "logs"),
-		PrefixName: "system",
-		Level:      "error",
-		Stdout:     false,
-		Caller:     true,
-		FullCaller: false,
-		Color:      false,
-		Rotation: &log.RotationConf{
-			MaxAge: 15 * 24 * time.Hour,
-			Every:  24 * time.Hour,
-		},
-		Routing: &log.RoutingConf{
-			AsyncMode: &log.AsyncMode{
-				Enable: true,
-				Config: &log.AsyncWriterConfig{
-					BufferSize:    1024,
-					FlushInterval: time.Second,
-				},
-			},
-			Routes: []log.LevelRoute{
-				{
-					Name:   "info",
-					Levels: log.AllLevelStrs,
-				},
-			},
-		},
-	})
-
-	// 默认集群配置
-	runtimeViper.SetDefault("ClusterConf", &ClusterConf{
-		ETCDConf: &ETCDConf{
-			Endpoints:   []string{"127.0.0.1:2379"},
-			DialTimeout: 3 * time.Second,
-			UserName:    "",
-			Password:    "",
-		},
-		RPCServers: []*RPCServer{
-			{
-				Addr:   "0.0.0.0:6688",
-				Protoc: "tcp",
-				Type:   def.RpcTypeGrpc,
-			},
-		},
-		DiscoveryType:  def.DiscoveryConfUseLocal,
-		RemoteConfPath: "",
-	})
-}
-
-// parseServiceConf 解析服务配置文件
-func parseServiceConf(confPath string) {
-	servicesMap := make(map[string]*ServiceConfig)
-	for name, v := range serviceConfMap {
-		if v.CfgCreator == nil {
-			continue
-		}
-		parser := viper.New()
-		parser.SetConfigType("yaml")
-		var err error
-		if Conf.ServiceConf.OpenRemote {
-			// 使用远程服务配置
-			fileName := fmt.Sprintf("%s.%s", v.ConfName, v.ConfType)
-			if err = parser.AddRemoteProvider("etcd3", Conf.ClusterConf.ETCDConf.Endpoints[0], path.Join(Conf.ServiceConf.RemoteConfPath, fileName)); err != nil {
-				panic(err)
-			}
-			err = parser.ReadRemoteConfig()
-		} else {
-			parser.SetConfigType(v.ConfType)
-			parser.SetConfigName(v.ConfName)
-			parser.AddConfigPath(confPath)
-			err = parser.ReadInConfig()
-		}
-
-		if err != nil {
-			// 没有找到远程或者本地配置
-			fmt.Println("[WARNING] ----->>>没有找到远程或者本地配置:", v.ConfName)
-			continue
-		}
-
-		cfg := v.CfgCreator()
-		if err := parser.Unmarshal(cfg); err != nil {
-			panic(err)
-		}
-
-		executeDefaultSet(parser)
-		cf := *v
-		cf.Cfg = cfg
-		servicesMap[name] = &cf
-	}
-	Conf.ServiceConf.ServicesConfMap = servicesMap
-}
-
-func parseStartService() {
-	if Conf.ServiceConf.OpenRemote {
-		clusterViper.SetConfigType("yaml")
-		err := clusterViper.AddRemoteProvider("etcd3", Conf.ClusterConf.ETCDConf.Endpoints[0], path.Join(Conf.ServiceConf.RemoteConfPath, startServiceConfName))
-		if err != nil {
-			panic(err)
-		}
-
-		if err = clusterViper.ReadRemoteConfig(); err != nil {
-			panic(err)
-		}
-		if err = clusterViper.Unmarshal(&Conf.ServiceConf); err != nil {
-			panic(err)
-		}
-		clusterViper.OnRemoteConfigChange(func() {
-			if err = clusterViper.Unmarshal(&Conf.ServiceConf); err != nil {
-				fmt.Println("clusterViper unmarshal failed:", err)
-			}
-
-			// TODO 执行配置变更函数
-		})
-		if err = clusterViper.WatchRemoteConfigOnChannel(); err != nil {
-			panic(err)
-		}
-	}
-}
-
-// listenConfChange 监听配置文件变更
-//func listenConfChange(parser *viper.Viper, onChangeFun func()) {
-//	parser.WatchConfig()
-//	var callbackTimer *time.Timer
-//	parser.OnConfigChange(func(in fsnotify.Event) {
-//		fmt.Printf("配置文件变更: %s", in.ServiceName)
-//		if callbackTimer != nil {
-//			callbackTimer.Stop()
-//		}
-//		// 由于某些viper的问题,这个事件可能会多次调用,所以这里做一个延迟,避免一次改动调用多次回调
-//		callbackTimer = time.AfterFunc(time.Millisecond*50, func() {
-//			onChangeFun()
-//		})
-//	})
-//}
-
-// executeDefaultSet 执行默认设置函数
-func executeDefaultSet(parser *viper.Viper) {
-	for _, v := range serviceConfMap {
-		if v.DefaultSetFun != nil {
-			v.DefaultSetFun(parser)
-		}
-	}
-}
-
-// parseSystemConfig 解析系统配置
-func parseSystemConfig(parser *viper.Viper, c interface{}) {
-	if err := parser.ReadInConfig(); err != nil {
-		panic(err)
-	}
-	if err := parser.Unmarshal(c); err != nil {
-		panic(err)
-	}
-}
-
-// IsDebug 返回是否为调试模式
+// IsDebug 包级兼容函数。
+// Deprecated: 请使用 Config.IsDebug()。
 func IsDebug() bool {
-	// 注意：很多单元测试不会先调用 config.Init()。
-	// 这里必须做到“未初始化也安全”，否则对象池/监控等在 init/once 中会直接 panic。
 	if Conf == nil || Conf.NodeConf == nil {
 		return false
 	}
 	return Conf.NodeConf.SystemStatus == Debug
 }
 
-// SetStatus 设置系统状态
+// SetStatus 包级兼容函数。
+// Deprecated: 请使用 Config.SetStatus()。
 func SetStatus(status string) {
 	if Conf == nil {
 		return
@@ -329,6 +68,8 @@ func SetStatus(status string) {
 	Conf.NodeConf.SystemStatus = stat
 }
 
+// GetStatus 包级兼容函数。
+// Deprecated: 请使用 Config.GetStatus()。
 func GetStatus() string {
 	if Conf == nil || Conf.NodeConf == nil {
 		return ""
@@ -336,8 +77,8 @@ func GetStatus() string {
 	return Conf.NodeConf.SystemStatus
 }
 
-// GetDefaultRpcTimeout 获取 RPC 调用默认超时时间
-// 优先使用配置文件中的值，未配置则返回默认值（1秒）
+// GetDefaultRpcTimeout 包级兼容函数。
+// Deprecated: 请使用 Config.GetDefaultRpcTimeout()。
 func GetDefaultRpcTimeout() time.Duration {
 	if Conf != nil && Conf.NodeConf != nil && Conf.NodeConf.RpcMonitorConf != nil {
 		if Conf.NodeConf.RpcMonitorConf.DefaultRpcTimeout > 0 {
@@ -347,8 +88,8 @@ func GetDefaultRpcTimeout() time.Duration {
 	return def.DefaultRpcTimeout
 }
 
-// GetCheckTimeoutInterval 获取 RPC 超时检查间隔
-// 优先使用配置文件中的值，未配置则返回默认值（1秒）
+// GetCheckTimeoutInterval 包级兼容函数。
+// Deprecated: 请使用 Config.GetCheckTimeoutInterval()。
 func GetCheckTimeoutInterval() time.Duration {
 	if Conf != nil && Conf.NodeConf != nil && Conf.NodeConf.RpcMonitorConf != nil {
 		if Conf.NodeConf.RpcMonitorConf.CheckTimeoutInterval > 0 {

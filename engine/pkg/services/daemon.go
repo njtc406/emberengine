@@ -14,6 +14,8 @@ import (
 // TODO 节点守护线程
 // 如果之后使用plugin模式,这里就可以做热更
 
+// Daemon 全局守护服务（向后兼容）。
+// Deprecated: 应通过 ServiceManager.GetDaemon() 获取。
 var Daemon = &daemon{}
 
 type daemon struct {

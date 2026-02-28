@@ -136,14 +136,15 @@ func TestJobSchedulerStop_NoSendOnClosedChannelPanic(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 
-	Start(time.Millisecond, 64, logger)
-	defer Stop()
+	tw := NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(logger, log.Fields{"pkg": "test"}))
+	tw.Start()
+	defer tw.Stop()
 
 	scheduler := NewJobScheduler(
 		"closed-send",
 		100,
 		4,
-		GetTimingWheel(),
+		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "closed-send"}),
 	)
 
@@ -177,15 +178,16 @@ func TestJobScheduler_ConcurrentAddAndStop_NoPanic(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 
-	Start(time.Millisecond, 64, logger)
-	defer Stop()
+	tw := NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(logger, log.Fields{"pkg": "test"}))
+	tw.Start()
+	defer tw.Stop()
 
 	for round := 0; round < 10; round++ {
 		scheduler := NewJobScheduler(
 			"concurrent-stop",
 			1000,
 			4,
-			GetTimingWheel(),
+			tw,
 			log.NewLoggerX(logger, log.Fields{"pkg": "concurrent-stop"}),
 		)
 
@@ -243,14 +245,15 @@ func TestJobSchedulerStop_NoDeadlock_WhenCallbackCancelsTimer(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 
-	Start(time.Millisecond, 64, logger)
-	defer Stop()
+	tw := NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(logger, log.Fields{"pkg": "test"}))
+	tw.Start()
+	defer tw.Stop()
 
 	scheduler := NewJobScheduler(
 		"stop-deadlock",
 		1000,
 		4,
-		GetTimingWheel(),
+		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "stop-deadlock"}),
 	)
 
@@ -317,14 +320,15 @@ func TestSetTimeOffset_ConcurrentWithTimers_ExecutesSome(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 
-	Start(time.Millisecond, 64, logger)
-	defer Stop()
+	tw := NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(logger, log.Fields{"pkg": "test"}))
+	tw.Start()
+	defer tw.Stop()
 
 	scheduler := NewJobScheduler(
 		"offset-race",
 		10000,
 		8,
-		GetTimingWheel(),
+		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "offset-race"}),
 	)
 
@@ -361,10 +365,10 @@ func TestSetTimeOffset_ConcurrentWithTimers_ExecutesSome(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 5; i++ {
 			time.Sleep(5 * time.Millisecond)
-			SetTimeOffset(time.Duration(i*10) * time.Millisecond)
+			tw.SetTimeOffset(time.Duration(i*10) * time.Millisecond)
 		}
 		// Reset offset
-		SetTimeOffset(0)
+		tw.SetTimeOffset(0)
 	}()
 
 	wg.Wait()

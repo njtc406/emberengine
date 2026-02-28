@@ -94,10 +94,7 @@ func NewJobScheduler(jobName string, chanSize, bucketSize int, tw *TimingWheel, 
 		bucketSize = 10
 	}
 	if tw == nil {
-		tw = globTW
-	}
-	if tw == nil {
-		logger.Panic("timing wheel is nil")
+		logger.Panic("timing wheel is nil — must provide a non-nil *TimingWheel instance")
 	}
 	shards := make([]*timerBucket, bucketSize)
 	for i := range shards {

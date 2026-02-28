@@ -7,8 +7,9 @@ package pool
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
@@ -18,6 +19,8 @@ type SenderCreator func(addr string) inf.IRpcSender
 
 // PoolManager 连接池管理器
 type PoolManager struct {
+	*log.Logger // 嵌入 Logger，替代 log.SysLogger
+
 	pools       map[string]*ConnectionPool // key: addr_type
 	poolMutex   sync.RWMutex
 	creators    map[string]SenderCreator // RPC类型对应的创建器
@@ -25,8 +28,9 @@ type PoolManager struct {
 }
 
 // NewPoolManager 创建新的连接池管理器
-func NewPoolManager() *PoolManager {
+func NewPoolManager(logger *log.Logger) *PoolManager {
 	return &PoolManager{
+		Logger:      logger,
 		pools:       make(map[string]*ConnectionPool),
 		creators:    make(map[string]SenderCreator),
 		poolConfigs: make(map[string]*PoolConfig),
@@ -101,7 +105,7 @@ func (pm *PoolManager) GetOrCreatePool(address, rpcType string) (*ConnectionPool
 	}
 
 	pm.pools[poolKey] = pool
-	log.SysLogger.Infof("创建新的连接池: %s, 类型: %s", address, rpcType)
+	pm.Infof("创建新的连接池: %s, 类型: %s", address, rpcType)
 
 	return pool, nil
 }
@@ -123,7 +127,7 @@ func (pm *PoolManager) Close() {
 
 	for poolKey, pool := range pm.pools {
 		pool.Stop()
-		log.SysLogger.Infof("关闭连接池: %s", poolKey)
+		pm.Infof("关闭连接池: %s", poolKey)
 	}
 
 	// 清空池映射
@@ -168,7 +172,7 @@ func (pm *PoolManager) RemovePool(address, rpcType string) {
 	if pool, exists := pm.pools[poolKey]; exists {
 		pool.Stop()
 		delete(pm.pools, poolKey)
-		log.SysLogger.Infof("移除连接池: %s", poolKey)
+		pm.Infof("移除连接池: %s", poolKey)
 	}
 }
 
@@ -177,9 +181,17 @@ var globalPoolManager *PoolManager
 var poolManagerOnce sync.Once
 
 // GetGlobalPoolManager 获取全局连接池管理器
+// Deprecated: 兼容旧代码，新代码请使用 Node.PoolManager
 func GetGlobalPoolManager() *PoolManager {
 	poolManagerOnce.Do(func() {
-		globalPoolManager = NewPoolManager()
+		globalPoolManager = NewPoolManager(log.SysLogger)
 	})
 	return globalPoolManager
+}
+
+// SetGlobalPoolManager 设置全局连接池管理器（由 Node.Start 调用）
+// Deprecated: 仅用于过渡期全局兼容
+func SetGlobalPoolManager(pm *PoolManager) {
+	globalPoolManager = pm
+	poolManagerOnce.Do(func() {}) // 标记已初始化，防止再次覆盖
 }

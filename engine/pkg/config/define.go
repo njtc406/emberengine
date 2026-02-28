@@ -16,14 +16,8 @@ const (
 	Release = `release`
 )
 
-type conf struct {
-	NodeConf     *NodeConf       `binding:"required"` // 节点基础配置
-	SystemLogger *log.LoggerConf `binding:"required"` // 系统日志
-	ClusterConf  *ClusterConf    `binding:"required"` // 集群配置
-	ServiceConf  *ServiceConf    `binding:"required"` // 服务配置
-}
-
-func (c *conf) String() string {
+// String 返回 Config 的 JSON 表示
+func (c *Config) String() string {
 	jsonStr, _ := json.MarshalIndent(c, "", "  ")
 	return string(jsonStr)
 }

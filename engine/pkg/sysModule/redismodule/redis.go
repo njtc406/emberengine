@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/core"
@@ -38,10 +39,11 @@ func (rm *RedisModule) Init(conf *redis.Options) {
 	if err := rm.checkConnect(); err != nil {
 		log.SysLogger.Panic(err)
 	}
-	timerId, err := rm.TickerAsyncFunc(time.Second*30, "redis health check", func(args ...interface{}) {
+	timerId, err := rm.TickerAsyncFunc(time.Second*30, "redis health check", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 		if err := rm.checkConnect(); err != nil {
 			rm.reconnect()
 		}
+		return nil
 	})
 	if err != nil {
 		log.SysLogger.Panic(err)

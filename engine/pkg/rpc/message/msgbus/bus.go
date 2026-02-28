@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -26,28 +25,36 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
+// busPool 是 MessageBus 对象池（Deprecated 全局变量，过渡期保留）
 var busPool pool.IPool[*MessageBus]
-var busPoolOnce sync.Once
+
+// newBusPool 创建 MessageBus 对象池实例
+func newBusPool(poolSize int) pool.IPool[*MessageBus] {
+	return pool.NewPerPPoolWrapper(
+		poolSize,
+		func() *MessageBus {
+			return &MessageBus{}
+		},
+		pool.NewStatsRecorder("busPool"),
+		pool.WithPRef(func(t *MessageBus) {
+			t.Ref()
+		}),
+		pool.WithPUnref(func(t *MessageBus) bool {
+			return t.UnRef()
+		}),
+		pool.WithPReset(func(mb *MessageBus) {
+			mb.Reset()
+		}),
+	)
+}
+
+// InitBusPool 初始化全局 busPool（由 Node.Start 调用，替代原来的 sync.Once + config.Conf）
+// Deprecated: 过渡期方案。后续应将 busPool 收归 Node 实例持有。
+func InitBusPool(poolSize int) {
+	busPool = newBusPool(poolSize)
+}
 
 func getBusPool() pool.IPool[*MessageBus] {
-	busPoolOnce.Do(func() {
-		busPool = pool.NewPerPPoolWrapper(
-			config.Conf.NodeConf.BusPoolSize,
-			func() *MessageBus {
-				return &MessageBus{}
-			},
-			pool.NewStatsRecorder("busPool"),
-			pool.WithPRef(func(t *MessageBus) {
-				t.Ref()
-			}),
-			pool.WithPUnref(func(t *MessageBus) bool {
-				return t.UnRef()
-			}),
-			pool.WithPReset(func(mb *MessageBus) {
-				mb.Reset()
-			}),
-		)
-	})
 	return busPool
 }
 

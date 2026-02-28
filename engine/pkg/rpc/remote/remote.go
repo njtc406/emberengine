@@ -17,15 +17,17 @@ func NewRemote() *Remote {
 }
 
 type Remote struct {
-	conf *config.RPCServer
-	svr  inf.IRemoteServer
+	*log.Logger // 嵌入 Logger，替代 log.SysLogger
+	conf        *config.RPCServer
+	svr         inf.IRemoteServer
 }
 
-func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory) *Remote {
+func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, logger *log.Logger) *Remote {
+	r.Logger = logger
 	r.conf = conf
-	r.svr = pool.GetServer(conf.Type)
+	r.svr = pool.CreateServer(conf.Type)
 	if r.svr == nil {
-		log.SysLogger.Panicf("rpc server type %s not support", conf.Type)
+		r.Panicf("rpc server type %s not support", conf.Type)
 		return nil
 	}
 	r.svr.Init(cliFactory)
@@ -35,7 +37,7 @@ func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory) 
 func (r *Remote) Serve(nodeUid string) {
 	go func() {
 		if err := r.svr.Serve(r.conf, nodeUid); err != nil {
-			log.SysLogger.Warnf("rpc serve stop: %v", err)
+			r.Warnf("rpc serve stop: %v", err)
 		}
 	}()
 }

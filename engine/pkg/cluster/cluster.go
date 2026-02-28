@@ -19,11 +19,26 @@ import (
 
 var cluster Cluster
 
+// NewCluster 创建新的 Cluster 实例（Phase 2 per-Node 模式推荐使用）。
+func NewCluster() *Cluster {
+	return &Cluster{}
+}
+
+// SetCluster 设置全局 Cluster（向后兼容）。
+// Deprecated: 请通过 NodeContext 获取。
+func SetCluster(c *Cluster) {
+	cluster = *c
+}
+
+// GetCluster 返回全局 Cluster 指针（向后兼容）。
+// Deprecated: 请通过 NodeContext 获取。
 func GetCluster() *Cluster {
 	return &cluster
 }
 
 type Cluster struct {
+	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
+
 	closed chan struct{}
 
 	// 服务发现
@@ -43,18 +58,21 @@ type ctxEvent struct {
 	ev  inf.IEvent
 }
 
-func (c *Cluster) Init() {
+func (c *Cluster) Init(clusterConf *config.ClusterConf, logger *log.Logger) {
+	c.Logger = logger
 	c.closed = make(chan struct{})
 	c.eventChannel = make(chan inf.IEvent, 1024)
 	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(nil)
 
-	c.endpoints = endpoints.GetEndpointManager().Init(c.eventProcessor)
+	c.endpoints = endpoints.NewEndpointManager().Init(c.eventProcessor, clusterConf, logger)
+	// 临时全局兼容
+	endpoints.SetEndpointManager(c.endpoints)
 
-	c.discovery = discovery.CreateDiscovery(config.Conf.ClusterConf.DiscoveryType)
+	c.discovery = discovery.CreateDiscovery(clusterConf.DiscoveryType)
 	if c.discovery != nil {
-		if err := c.discovery.Init(config.Conf.ClusterConf, c.eventProcessor, c); err != nil {
-			log.SysLogger.Fatalf("init discovery error: %v, conf: %+v", err, config.Conf.ClusterConf)
+		if err := c.discovery.Init(clusterConf, c.eventProcessor, c); err != nil {
+			c.Fatalf("init discovery error: %v, conf: %+v", err, clusterConf)
 		}
 	}
 
@@ -98,12 +116,12 @@ func (c *Cluster) run() {
 		select {
 		case evt, ok := <-c.eventChannel:
 			if !ok {
-				log.SysLogger.Error("cluster event channel closed")
+				c.Error("cluster event channel closed")
 				return
 			}
 			c.eventProcessor.Trigger(evt.GetContext(), evt.GetEventType(), evt.GetData())
 		case <-c.closed:
-			log.SysLogger.Info("cluster closed")
+			c.Info("cluster closed")
 			return
 		}
 	}

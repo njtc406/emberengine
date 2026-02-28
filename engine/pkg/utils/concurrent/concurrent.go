@@ -10,7 +10,6 @@ import (
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/panjf2000/ants/v2"
 	"golang.org/x/net/context"
 )
@@ -37,7 +36,12 @@ func NewTaskScheduler(logger log.ILoggerX) IConcurrent {
 // OpenConcurrent 初始化并发调度器 第一个参数为线程池大小, 第二个参数为回调函数的通道大小
 func (s *TaskScheduler) OpenConcurrent(poolSize, callbackChannelSize int) {
 	if s.pool == nil {
-		s.pool = asynclib.NewAntsPool(poolSize)
+		p, err := ants.NewPool(poolSize, ants.WithPreAlloc(true))
+		if err != nil {
+			s.logger.Errorf("concurrent: create pool failed: %v", err)
+			return
+		}
+		s.pool = p
 	}
 	if s.c == nil {
 		s.c = make(chan inf.IConcurrentCallback, callbackChannelSize)

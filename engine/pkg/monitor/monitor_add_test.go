@@ -20,19 +20,19 @@ type errScheduler struct{}
 func (s *errScheduler) AfterFunc(_ time.Duration, _ string, _ timingwheel.TimerCallback, _ ...interface{}) (uint64, error) {
 	return 0, errors.New("boom")
 }
-func (s *errScheduler) AfterAsyncFunc(_ time.Duration, _ string, _ func(...interface{}), _ ...interface{}) (uint64, error) {
+func (s *errScheduler) AfterAsyncFunc(_ time.Duration, _ string, _ timingwheel.TimerCallback, _ ...interface{}) (uint64, error) {
 	return 0, errors.New("boom")
 }
 func (s *errScheduler) TickerFunc(_ time.Duration, _ string, _ timingwheel.TimerCallback, _ ...interface{}) (uint64, error) {
 	return 0, errors.New("boom")
 }
-func (s *errScheduler) TickerAsyncFunc(_ time.Duration, _ string, _ func(...interface{}), _ ...interface{}) (uint64, error) {
+func (s *errScheduler) TickerAsyncFunc(_ time.Duration, _ string, _ timingwheel.TimerCallback, _ ...interface{}) (uint64, error) {
 	return 0, errors.New("boom")
 }
 func (s *errScheduler) CronFunc(_ string, _ string, _ timingwheel.TimerCallback, _ ...interface{}) (uint64, error) {
 	return 0, errors.New("boom")
 }
-func (s *errScheduler) CronAsyncFunc(_ string, _ string, _ func(...interface{}), _ ...interface{}) (uint64, error) {
+func (s *errScheduler) CronAsyncFunc(_ string, _ string, _ timingwheel.TimerCallback, _ ...interface{}) (uint64, error) {
 	return 0, errors.New("boom")
 }
 func (s *errScheduler) CancelTimer(_ uint64) {}
