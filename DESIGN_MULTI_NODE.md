@@ -579,10 +579,12 @@ type Pool struct {
     inner *ants.Pool
 }
 
-func NewPool(size int) *Pool {
-    return &Pool{
-        inner: NewAntsPool(size, ants.WithPreAlloc(true)),
+func NewPool(size int) (*Pool, error) {
+    p, err := NewAntsPool(size, ants.WithPreAlloc(true))
+    if err != nil {
+        return nil, err
     }
+    return &Pool{inner: p}, nil
 }
 
 func (p *Pool) Go(f func()) error {
@@ -899,11 +901,12 @@ n.Cluster.Start()
 **步骤 3**: Cluster 内部创建独立的 EndpointManager
 
 ```go
-func (c *Cluster) Init(ctx INodeContext) {
+func (c *Cluster) Init(ctx INodeContext) error {
     c.Logger = ctx.Logger()
     c.endpoints = endpoints.NewEndpointManager()
     c.discovery = discovery.CreateDiscovery(ctx.Config().ClusterConf.DiscoveryType)
     // ...
+    return nil
 }
 ```
 
@@ -1628,12 +1631,17 @@ func NewMethodIndex() *MethodIndex {
 
 ```go
 // utils/translate/translate.go
-var language LanguageType = Chinese
-var translator *ut.UniversalTranslator
+var languageConf = ZH_CN            // 当前语言配置
+var transMap [LANGUAGE_MAX]map[string]string  // 按语言索引的翻译表
 
-// init() in translate.go, zh.go, en.go
+// utils/translate/zh_cn.go / en_us.go
+var zhCnMap = map[string]string{ ... }
+var enUsMap = map[string]string{ ... }
+
+// init() in translate.go
 func init() {
-    translator = ut.New(zh.New(), en.New())
+    transMap[ZH_CN] = zhCnMap
+    transMap[EN_US] = enUsMap
 }
 ```
 
@@ -1808,14 +1816,17 @@ func newBusPool(poolSize int) pool.IPool[*MessageBus] {
 // utils/memdbx/memdbx.go
 var memDB *gorm.DB
 
-func Start(models []interface{}) {
-    db, _ := gorm.Open(sqlite.Open("file::memory:?cache=shared"), ...)
-    db.AutoMigrate(models...)
+func Start() {   // 注意: 实际无参数
+    db, _ := gorm.Open(sqlite.Open(":memory:"), ...)  // 实际 DSN 为 ":memory:"
     memDB = db
 }
 
 func GetDB() *gorm.DB { return memDB }
 ```
+
+> **事实备注**: 经全库搜索，`memdbx` 包当前在项目中**零引用**（无任何 import）。该包存在但未被任何 Node 或 Service 使用，因此：
+> 1. 不需要加入 Node 生命周期（§2.1 Node struct / §4.1 INodeContext / §2.3 Start()）
+> 2. 如未来启用，再按下方方案改造即可
 
 #### 问题
 
@@ -1827,7 +1838,7 @@ func GetDB() *gorm.DB { return memDB }
 
 **删除清单**:
 - `var memDB *gorm.DB` — 删除
-- `func Start(models []interface{})` — 删除
+- `func Start()` — 删除
 - `func GetDB() *gorm.DB` — 删除
 
 **新增**:
@@ -1836,10 +1847,9 @@ type MemDB struct {
     db *gorm.DB
 }
 
-func NewMemDB(models []interface{}) (*MemDB, error) {
-    db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), ...)
+func NewMemDB() (*MemDB, error) {
+    db, err := gorm.Open(sqlite.Open(":memory:"), ...)
     if err != nil { return nil, err }
-    db.AutoMigrate(models...)
     return &MemDB{db: db}, nil
 }
 
@@ -1847,9 +1857,9 @@ func (m *MemDB) GetDB() *gorm.DB { return m.db }
 func (m *MemDB) Close() error { /* ... */ }
 ```
 
-**影响范围**: 所有调用 `memdbx.GetDB()` 的模块。
+**影响范围**: 当前无影响（零引用）。若未来启用，所有调用 `memdbx.GetDB()` 的模块需改为通过实例访问。
 
-**建议优先级**: ⭐⭐⭐（高风险 — 全局 DB 连接多 Node 冲突）
+**建议优先级**: ⭐（最低 — 当前无引用，可延后处理）
 
 ---
 
@@ -1980,19 +1990,26 @@ var typeUrlCacheMu sync.RWMutex
 #### 当前全局状态
 
 ```go
-// utils/validate/validate.go
-var validate *validator.Validate
-var transZh ut.Translator
-var transEn ut.Translator
+// utils/validate/engin.go  （注意: 实际文件名为 engin.go，非 validate.go）
+var zhT   ut.Translator
+var enT   ut.Translator
 var translator *ut.UniversalTranslator
+var Validator  *validator.Validate      // 导出
 
 func init() {
-    validate = validator.New()
+    Validator = validator.New()
     translator = ut.New(zh.New(), en.New())
-    transZh, _ = translator.GetTranslator("zh")
-    transEn, _ = translator.GetTranslator("en")
+    zhT, _ = translator.GetTranslator("zh")
+    enT, _ = translator.GetTranslator("en")
     // 注册翻译...
 }
+
+// utils/validate/custom.go
+var (
+    reAlphaNumChinese *regexp.Regexp   // 正则校验规则
+    reAlphaNumChineseHyphen *regexp.Regexp
+    reKeyboardStr *regexp.Regexp
+)
 ```
 
 #### 评估
@@ -2118,7 +2135,7 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 
 ```go
 // utils/serializer/serializer.go
-var serializeType int32
+var DefaultSerializerID int32         // 默认序列化器 ID
 var serializers []Serializer
 
 func init() {
@@ -2503,7 +2520,7 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
 | `profiler` | `profiler.go` | 初始化 `mapProfiler` | 删除，改为 `NewRegistry()` |
 | `rpc/client` | `sender.go` | 初始化 sender map + 注册到 pool | 删除，改为 `NewSenderManager()` |
 | `utils/codec` | `codec.go` | 注册 JSON/Protobuf codec | 保留（init 后只读，无状态注册表） |
-| `utils/validate` | `validate.go` | 创建 validator + 注册翻译 | 保留（init 后只读，并发安全） |
+| `utils/validate` | `engin.go` | 创建 validator + 注册翻译 | 保留（init 后只读，并发安全） |
 | `utils/serializer` | `serializer.go` | 注册序列化器 | 保留（init 后只读） |
 | `utils/timingwheel` | `init.go` | 初始化 `cronParser` | 保留（只读解析器） |
 | `discovery/etcd` | `init.go` | 注册 etcd discovery **实例** | 改为注册**工厂函数**（可保留 init） |
