@@ -2407,13 +2407,16 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | `actor/mailbox/sentinel_middleware.go` | `sentinelInitOnce`, `sentinelInitErr` | sync.Once 保护的一次性初始化（Sentinel 基础设施全局一次性加载；如需完全隔离 Sentinel 实例则需改造） |
 | `monitor/callstate.go` | `callStatePool`, `callStatePoolOnce` | sync.Pool 包装器 |
 | `log/bufferpool.go` | `bufferPool`, `once` | sync.Pool 包装器（内部实现） |
-| `log/errors.go` | `ErrUnsupported`, `ErrConfMissing` | 不可变错误哨兵值 |
-| `log/define.go` | `levelToZapLevel`, `levelToStr` | 不可变映射表 |
-| `utils/translate` | `language`, `translator`, `transMap` | 只读数据，启动时注册 |
-| `utils/validate` | `validate`, `transZh`, `transEn`, `translator` | init() 后只读，validator 并发安全 |
+| `log/errors.go` | `ErrRotationTime`, `ErrLevel` | 不可变错误哨兵值 |
+| `log/log.go` | `levelMap`, `AllLevelStrs` | 不可变映射表 / 只读 slice |
+| `utils/translate` | `languageConf`, `transMap`, `zhCnMap`, `enUsMap` | 只读数据，启动时注册 |
+| `utils/validate/engin.go` | `zhT`, `enT`, `translator`, `Validator` | init() 后只读，validator 并发安全 |
+| `utils/validate/custom.go` | `phoneReg`, `sm3Reg`, `usernameReg`, `pwdReg` | 不可变编译期正则（`regexp.MustCompile`） |
+| `utils/validate/custom.go` | `locales` | 只读 slice |
 | `utils/codec` | `codecs`, `typeUrlCache/Mu`, `anyPool` | init() 后只读注册表 + 带锁缓存 + sync.Pool |
+| `utils/codec/pool.go` | `bytePoolMgr` | sync.Pool 管理器 |
 | `utils/codec/protobuf.go` | `protoDeterministic*` | sync.Once 一次性初始化 |
-| `utils/serializer` | `serializeType`, `serializers` | init() 后只读 |
+| `utils/serializer` | `DefaultSerializerID`, `serializers` | init() 后只读 |
 | `log/zap_core.go` | `moduleNameOnce`, `moduleName` | sync.Once 读取 go.mod 模块名，同进程不变 |
 | `log/zap_core.go` | `stdoutWriteSyncerFactory` | 函数变量，测试可替换，生产环境不变 |
 | `profiler/profiler.go` | `DefaultMaxOvertime`, `DefaultOvertime`, `DefaultMaxRecordNum` | 导出默认值常量（建议改为 const 或收入 Config） |
@@ -2424,12 +2427,15 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | `utils/bytespool` | `memAreaPoolList` | sync.Pool 包装 |
 | `utils/diag` | `enabledOnce`, `enabledCached` | sync.Once 一次性初始化 |
 | `utils/network` | `pbPackPool` | sync.Pool |
+| `sysModule/gate/ws/processor.go` | `pbPackPool` | sync.Pool 包装器（ws 协议适配器内部） |
 | `utils/title` | `titleBase`, `bakUrl` | 不可变字符串 |
 | `services` | `serviceMap`, `lock` | 全局服务工厂注册表（`init()` 阶段写入，`Start()` 后只读），有 `sync.RWMutex` 保护。与 `discoveryFactory`/`remoteFactory` 同属"注册工厂函数"模式 |
 | `utils/timingwheel` | `cronParser`, spec 解析常量 | 只读解析器 |
+| `utils/timingwheel/cron.go` | `places`, `defaults`, `standardParser` | cron 解析只读数据 |
+| `utils/timingwheel/task_scheduler.go` | `defaultSeed` | 初始值常量（建议改为 `const`） |
 | `def/error.go` | `Err*` 系列 | 不可变 `errors.New()` |
 | `def/consts.go` | 常量 | 不可变 |
-| `def/method.go` | `RWModeContextKey`, `RWSourceServiceKey` | 不可变 context key |
+| `def/mailbox.go` | `RWModeContextKey`, `RWSourceServiceKey` | 不可变 context key |
 | `event/category.go` | `defaultClassifications` | 只读 map（init 后不修改） |
 | `core/rpc/handler.go` | `emptyError` | 不可变 reflect.Type |
 | `discovery` | `discoveryFactory` (改造后) | 无状态工厂函数注册表 |
@@ -2463,7 +2469,7 @@ grep -rn "^var " engine/pkg/ --include="*.go" | grep -v "_test.go" | grep -v ".p
 - `var codecs = map[int32]inf.ICodec{}` — init() 后只读的注册表
 - `var serializers []Serializer` — init() 后只读
 - `var serviceMap map[string]func() inf.IService` — 全局服务工厂注册表（init 阶段写入，Start 后只读）
-- `var validate *validator.Validate` — init() 后只读，并发安全
+- `var Validator *validator.Validate` — init() 后只读，并发安全
 - `var cronParser Parser` — 只读解析器
 - `var traceSeq atomic.Uint64` — 原子计数器，线程安全
 - `var Version string` — 不可变常量
