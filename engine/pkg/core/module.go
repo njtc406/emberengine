@@ -123,7 +123,13 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 	// 从methodmgr中移除模块api(service那层的api是不会移除的)
 	if m.root.GetMethodMgr().RemoveMethods(m.GetMethods()) {
 		// 表示所有的rpc接口都已经注销,服务变为一个节点的私有服务了,通知cluster从远程监听中移除
-		endpoints.GetEndpointManager().ToPrivateService(m.GetService())
+		if svcWithEndpoints, ok := m.GetService().(interface {
+			GetEndpointManager() *endpoints.EndpointManager
+		}); ok {
+			if em := svcWithEndpoints.GetEndpointManager(); em != nil {
+				em.ToPrivateService(m.GetService())
+			}
+		}
 	}
 
 	//清理被删除的Module

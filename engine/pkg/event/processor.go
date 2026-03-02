@@ -7,6 +7,7 @@ package event
 
 import (
 	"context"
+	"fmt"
 	"runtime/debug"
 	"sync"
 
@@ -36,6 +37,8 @@ type specificKey struct {
 type Processor struct {
 	mu       sync.RWMutex
 	listener inf.IListener
+	bus      *Bus
+	logger   *log.Logger
 
 	// 结构：map[事件类型]map[所属handler]map[回调名]entry
 	// 这样既能支持同一 module(handler) 多个 name 的注册，也能按 handler+name 精准解绑。
@@ -68,6 +71,15 @@ func (t *Processor) Init(listener inf.IListener) {
 	t.specificSubCnt = make(map[specificKey]int)
 
 	t.listener = listener
+	if loggerProvider, ok := listener.(interface{ GetLogger() *log.Logger }); ok {
+		t.logger = loggerProvider.GetLogger()
+	}
+}
+
+func (t *Processor) SetEventBus(bus *Bus) {
+	t.mu.Lock()
+	t.bus = bus
+	t.mu.Unlock()
 }
 
 func (t *Processor) HasHandler(eventType def.EventType) bool {
@@ -106,20 +118,20 @@ func (t *Processor) Clear() {
 	defer t.mu.Unlock()
 
 	// 尽量取消订阅
-	if t.listener != nil {
+	if t.listener != nil && t.bus != nil {
 		for et, cnt := range t.globalSubCnt {
 			if cnt > 0 {
-				GetEventBus().UnSubscribeGlobal(et, t.listener)
+				t.bus.UnSubscribeGlobal(et, t.listener)
 			}
 		}
 		for et, cnt := range t.serverSubCnt {
 			if cnt > 0 {
-				GetEventBus().UnSubscribeServer(et, t.listener)
+				t.bus.UnSubscribeServer(et, t.listener)
 			}
 		}
 		for k, cnt := range t.specificSubCnt {
 			if cnt > 0 {
-				GetEventBus().UnSubscribeSpecific(k.eventType, k.serviceUid, t.listener)
+				t.bus.UnSubscribeSpecific(k.eventType, k.serviceUid, t.listener)
 			}
 		}
 	}
@@ -236,9 +248,9 @@ func (t *Processor) BindGlobalHandler(eventType def.EventType, name string, hand
 	_, existed := byName[name]
 	byName[name] = callback
 
-	if t.listener != nil && !existed {
+	if t.listener != nil && t.bus != nil && !existed {
 		if t.globalSubCnt[eventType] == 0 {
-			GetEventBus().SubscribeGlobal(eventType, t.listener)
+			t.bus.SubscribeGlobal(eventType, t.listener)
 		}
 		t.globalSubCnt[eventType]++
 	}
@@ -265,11 +277,11 @@ func (t *Processor) UnbindGlobalHandler(eventType def.EventType, name string, ha
 	if len(byHandler) == 0 {
 		delete(t.global, eventType)
 	}
-	if t.listener != nil {
+	if t.listener != nil && t.bus != nil {
 		t.globalSubCnt[eventType]--
 		if t.globalSubCnt[eventType] <= 0 {
 			delete(t.globalSubCnt, eventType)
-			GetEventBus().UnSubscribeGlobal(eventType, t.listener)
+			t.bus.UnSubscribeGlobal(eventType, t.listener)
 		}
 	}
 }
@@ -290,9 +302,9 @@ func (t *Processor) BindServerHandler(eventType def.EventType, name string, hand
 	_, existed := byName[name]
 	byName[name] = callback
 
-	if t.listener != nil && !existed {
+	if t.listener != nil && t.bus != nil && !existed {
 		if t.serverSubCnt[eventType] == 0 {
-			GetEventBus().SubscribeServer(eventType, t.listener)
+			t.bus.SubscribeServer(eventType, t.listener)
 		}
 		t.serverSubCnt[eventType]++
 	}
@@ -319,11 +331,11 @@ func (t *Processor) UnbindServerHandler(eventType def.EventType, name string, ha
 	if len(byHandler) == 0 {
 		delete(t.server, eventType)
 	}
-	if t.listener != nil {
+	if t.listener != nil && t.bus != nil {
 		t.serverSubCnt[eventType]--
 		if t.serverSubCnt[eventType] <= 0 {
 			delete(t.serverSubCnt, eventType)
-			GetEventBus().UnSubscribeServer(eventType, t.listener)
+			t.bus.UnSubscribeServer(eventType, t.listener)
 		}
 	}
 }
@@ -346,9 +358,9 @@ func (t *Processor) BindSpecificHandler(eventType def.EventType, serviceUid stri
 	_, existed := byName[name]
 	byName[name] = callback
 
-	if t.listener != nil && !existed {
+	if t.listener != nil && t.bus != nil && !existed {
 		if t.specificSubCnt[k] == 0 {
-			GetEventBus().SubscribeSpecific(eventType, serviceUid, t.listener)
+			t.bus.SubscribeSpecific(eventType, serviceUid, t.listener)
 		}
 		t.specificSubCnt[k]++
 	}
@@ -377,11 +389,11 @@ func (t *Processor) UnbindSpecificHandler(eventType def.EventType, serviceUid st
 	if len(byHandler) == 0 {
 		delete(t.specific, k)
 	}
-	if t.listener != nil {
+	if t.listener != nil && t.bus != nil {
 		t.specificSubCnt[k]--
 		if t.specificSubCnt[k] <= 0 {
 			delete(t.specificSubCnt, k)
-			GetEventBus().UnSubscribeSpecific(eventType, serviceUid, t.listener)
+			t.bus.UnSubscribeSpecific(eventType, serviceUid, t.listener)
 		}
 	}
 }
@@ -391,7 +403,9 @@ func (t *Processor) Trigger(ctx context.Context, eventType def.EventType, data a
 	entries := t.snapshotLocal(eventType)
 	for _, e := range entries {
 		if err := t.safeExec(e, ctx, eventType, data); err != nil {
-			log.SysLogger.WithContext(ctx).WithField("eventType", eventType).Errorf("trigger handler failed: %v", err)
+			if t.logger != nil {
+				t.logger.WithContext(ctx).WithField("eventType", eventType).Errorf("trigger handler failed: %v", err)
+			}
 		}
 	}
 }
@@ -411,32 +425,52 @@ func (t *Processor) EventHandler(ctx context.Context, ev *actor.Event) {
 	payload := ev.GetPayload()
 	data, err := codec.DecodeFromAny(payload)
 	if err != nil {
-		log.SysLogger.WithContext(ctx).WithField("eventType", et).Errorf("unmarshal event payload failed: %v", err)
+		if t.logger != nil {
+			t.logger.WithContext(ctx).WithField("eventType", et).Errorf("unmarshal event payload failed: %v", err)
+		}
 		return
 	}
 	for _, e := range entries {
 		if err := t.safeExec(e, ctx, et, data); err != nil {
-			log.SysLogger.WithContext(ctx).WithField("eventType", et).Errorf("trigger handler failed: %v", err)
+			if t.logger != nil {
+				t.logger.WithContext(ctx).WithField("eventType", et).Errorf("trigger handler failed: %v", err)
+			}
 		}
 	}
 }
 
 func (t *Processor) PublishGlobal(ctx context.Context, eventType def.EventType, data proto.Message) error {
-	return GetEventBus().PublishGlobal(ctx, eventType, data)
+	t.mu.RLock()
+	bus := t.bus
+	t.mu.RUnlock()
+	if bus == nil {
+		return fmt.Errorf("event bus is nil")
+	}
+	return bus.PublishGlobal(ctx, eventType, data)
 }
 
 func (t *Processor) PublishServer(ctx context.Context, eventType def.EventType, data proto.Message) error {
 	t.mu.RLock()
 	listener := t.listener
+	bus := t.bus
 	t.mu.RUnlock()
-	if listener == nil {
-		return GetEventBus().PublishServer(ctx, eventType, 0, data)
+	if bus == nil {
+		return fmt.Errorf("event bus is nil")
 	}
-	return GetEventBus().PublishServer(ctx, eventType, listener.GetPartition(), data)
+	if listener == nil {
+		return bus.PublishServer(ctx, eventType, 0, data)
+	}
+	return bus.PublishServer(ctx, eventType, listener.GetPartition(), data)
 }
 
 func (t *Processor) PublishSpecific(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error {
-	return GetEventBus().PublishSpecific(ctx, eventType, serviceUid, data)
+	t.mu.RLock()
+	bus := t.bus
+	t.mu.RUnlock()
+	if bus == nil {
+		return fmt.Errorf("event bus is nil")
+	}
+	return bus.PublishSpecific(ctx, eventType, serviceUid, data)
 }
 
 func (t *Processor) snapshotLocal(eventType def.EventType) []callbackEntry {
@@ -484,7 +518,9 @@ func (t *Processor) snapshotCluster(eventType def.EventType, targetServiceUid st
 func (t *Processor) safeExec(entry callbackEntry, ctx context.Context, eventType def.EventType, data any) error {
 	defer func() {
 		if err := recover(); err != nil {
-			log.SysLogger.Errorf("trigger handler panic: eventType=%d, name=%s, err=%v\nstack=%s", eventType, entry.name, err, string(debug.Stack()))
+			if t.logger != nil {
+				t.logger.Errorf("trigger handler panic: eventType=%d, name=%s, err=%v\nstack=%s", eventType, entry.name, err, string(debug.Stack()))
+			}
 		}
 	}()
 	return entry.cb(ctx, data)

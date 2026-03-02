@@ -6,8 +6,9 @@
 package gr
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"net"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -18,10 +19,17 @@ import (
 type grpcServer struct {
 	listener *GrpcListener
 	server   *grpc.Server
+	logger   *log.Logger
 }
 
 func NewGrpcServer() inf.IRemoteServer {
 	return &grpcServer{}
+}
+
+func (s *grpcServer) SetLogger(logger *log.Logger) {
+	if logger != nil {
+		s.logger = logger
+	}
 }
 
 func (s *grpcServer) Init(sf inf.IRpcSenderFactory) {
@@ -32,7 +40,9 @@ func (s *grpcServer) Init(sf inf.IRpcSenderFactory) {
 }
 
 func (s *grpcServer) Serve(conf *config.RPCServer, nodeUid string) error {
-	log.SysLogger.Infof("grpc server listening at: %s", conf.Addr)
+	if s.logger != nil {
+		s.logger.Infof("grpc server listening at: %s", conf.Addr)
+	}
 	lis, err := net.Listen(conf.Protoc, conf.Addr)
 	if err != nil {
 		return err

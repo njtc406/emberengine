@@ -40,9 +40,6 @@ type EventMetrics struct {
 	LastEventTime    int64 `json:"last_event_time"`
 }
 
-var bus *Bus
-var busOnce sync.Once
-
 type Bus struct {
 	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
 
@@ -84,21 +81,6 @@ type Bus struct {
 // NewEventBus 创建新的事件总线实例（Phase 2 per-Node 模式推荐使用）。
 func NewEventBus() *Bus {
 	return &Bus{}
-}
-
-// SetEventBus 设置全局 Bus（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func SetEventBus(b *Bus) {
-	bus = b
-}
-
-// GetEventBus 返回全局 Bus（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func GetEventBus() *Bus {
-	busOnce.Do(func() {
-		bus = &Bus{}
-	})
-	return bus
 }
 
 func switchOpts(conf *config.NatsConf) []nats.Option {
@@ -153,7 +135,7 @@ func switchOpts(conf *config.NatsConf) []nats.Option {
 	return opts
 }
 
-func (eb *Bus) Init(conf *config.EventBusConf, logger *log.Logger) {
+func (eb *Bus) Init(conf *config.EventBusConf, logger *log.Logger) error {
 	eb.Logger = logger
 	// 初始化事件分类和限流系统
 	eb.eventRegistry = NewEventRegistry()
@@ -171,7 +153,7 @@ func (eb *Bus) Init(conf *config.EventBusConf, logger *log.Logger) {
 
 		nc, err := nats.Connect(strings.Join(conf.NatsConf.EndPoints, ","), opts...)
 		if err != nil {
-			eb.Panic(err)
+			return fmt.Errorf("nats connect failed: %w", err)
 		}
 		eb.nc = nc
 		eb.enable.Store(1)
@@ -205,6 +187,7 @@ func (eb *Bus) Init(conf *config.EventBusConf, logger *log.Logger) {
 	eb.serverSubscribers = make(map[def.EventType]map[int32]map[string]inf.IListener)
 	eb.specificLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.specificSubscribers = make(map[def.EventType]map[string]map[string]inf.IListener)
+	return nil
 }
 
 func (eb *Bus) applySubPendingLimits(subscription *nats.Subscription) {

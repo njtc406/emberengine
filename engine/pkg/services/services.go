@@ -8,9 +8,13 @@ package services
 import (
 	"sync"
 
+	"github.com/njtc406/emberengine/engine/pkg/cluster"
+	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/engine/pkg/router"
 )
 
 // ===== 全局工厂注册表（保留为包级变量，init() 阶段注册，运行时只读） =====
@@ -41,6 +45,19 @@ type ServiceManager struct {
 	*log.Logger // 嵌入 Logger
 	runServices []inf.IService
 	daemon      *daemon
+	cluster     *cluster.Cluster
+	endpoints   *endpoints.EndpointManager
+	profilerReg *profiler.Registry
+	router      *router.Router
+	nodeCtx     inf.INodeContext
+}
+
+type runtimeDepsAware interface {
+	SetRuntimeDeps(c *cluster.Cluster, em *endpoints.EndpointManager, pr *profiler.Registry, rt *router.Router)
+}
+
+type nodeContextAware interface {
+	SetNodeContext(ctx inf.INodeContext)
 }
 
 // NewServiceManager 创建 ServiceManager。
@@ -48,6 +65,17 @@ func NewServiceManager(logger *log.Logger) *ServiceManager {
 	return &ServiceManager{
 		Logger: logger,
 	}
+}
+
+func (sm *ServiceManager) SetRuntimeDeps(c *cluster.Cluster, em *endpoints.EndpointManager, pr *profiler.Registry, rt *router.Router) {
+	sm.cluster = c
+	sm.endpoints = em
+	sm.profilerReg = pr
+	sm.router = rt
+}
+
+func (sm *ServiceManager) SetNodeContext(ctx inf.INodeContext) {
+	sm.nodeCtx = ctx
 }
 
 // Init 根据配置创建并初始化所有服务。
@@ -67,6 +95,12 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) {
 			var cfg interface{}
 			if serviceConf, ok := serviceConf.ServicesConfMap[serviceName]; ok {
 				cfg = serviceConf.Cfg
+			}
+			if depAware, ok := svc.(runtimeDepsAware); ok {
+				depAware.SetRuntimeDeps(sm.cluster, sm.endpoints, sm.profilerReg, sm.router)
+			}
+			if ctxAware, ok := svc.(nodeContextAware); ok {
+				ctxAware.SetNodeContext(sm.nodeCtx)
 			}
 			svc.Init(svc, initConf, cfg)
 			sm.runServices = append(sm.runServices, svc)
@@ -98,42 +132,4 @@ func (sm *ServiceManager) StopAll() {
 // GetDaemon 返回守护服务（如果需要）。
 func (sm *ServiceManager) GetDaemon() *daemon {
 	return sm.daemon
-}
-
-// ===== 向后兼容（Deprecated）=====
-
-// svcMgr 全局兼容指针
-var svcMgr *ServiceManager
-
-// SetServiceManager 设置全局 ServiceManager（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func SetServiceManager(m *ServiceManager) {
-	svcMgr = m
-}
-
-// GetServiceManager 返回全局 ServiceManager（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func GetServiceManager() *ServiceManager {
-	return svcMgr
-}
-
-// Init 包级兼容（Deprecated）。
-func Init() {
-	if svcMgr != nil {
-		svcMgr.Init(config.Conf.ServiceConf)
-	}
-}
-
-// Start 包级兼容（Deprecated）。
-func Start() {
-	if svcMgr != nil {
-		svcMgr.Start()
-	}
-}
-
-// StopAll 包级兼容（Deprecated）。
-func StopAll() {
-	if svcMgr != nil {
-		svcMgr.StopAll()
-	}
 }

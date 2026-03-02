@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -57,7 +56,7 @@ func newRpcxClient(addr string) inf.IRpcSender {
 		rpcClients: clients,
 	}
 
-	log.SysLogger.Debugf("create remote client success : %s", addr)
+	getClientLogger().Debugf("create remote client success : %s", addr)
 	return remoteClient
 }
 
@@ -82,7 +81,7 @@ func (rc *rpcxSender) send(ctx context.Context, dispatcher inf.IRpcDispatcher, e
 	// 构建发送消息
 	msg, err := envelope.ToProtoMsg(ctx)
 	if err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		getClientLogger().WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg) // 发送后立即释放
@@ -92,17 +91,17 @@ func (rc *rpcxSender) send(ctx context.Context, dispatcher inf.IRpcDispatcher, e
 
 	call, err := rpcClient.Go(ctx, "RPCCall", msg, nil, make(chan *client.Call, 1))
 	if err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
+		getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
 		return def.ErrRPCCallFailed
 	}
 	select {
 	case <-call.Done:
 		if call.Error != nil {
-			log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), call.Error)
+			getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), call.Error)
 			return def.ErrRPCCallFailed
 		}
 	case <-ctx.Done():
-		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is timeout", envelope, dispatcher.GetPid().GetServiceUid())
+		getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is timeout", envelope, dispatcher.GetPid().GetServiceUid())
 		return def.ErrRPCCallFailed
 	}
 

@@ -17,25 +17,59 @@ import (
 const cacheLineSize = 64
 
 var (
-	_ IPool[any] = (*SyncPoolWrapper[any])(nil)
-	// 统计记录器
-	poolStates = make(map[string]IStatsRecorder)
+	_                    IPool[any] = (*SyncPoolWrapper[any])(nil)
+	defaultStatsRegistry            = NewPoolStatsRegistry()
 )
 
-func GetPoolStats() string {
-	var stats []string
-	// 根据名称排个序
-	var names []string
-	for name := range poolStates {
+type PoolStatsRegistry struct {
+	mu     sync.RWMutex
+	states map[string]IStatsRecorder
+}
+
+func NewPoolStatsRegistry() *PoolStatsRegistry {
+	return &PoolStatsRegistry{states: make(map[string]IStatsRecorder)}
+}
+
+func (r *PoolStatsRegistry) Register(name string, recorder IStatsRecorder) {
+	if r == nil || recorder == nil || name == "" {
+		return
+	}
+	r.mu.Lock()
+	r.states[name] = recorder
+	r.mu.Unlock()
+}
+
+func (r *PoolStatsRegistry) GetStats() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.RLock()
+	names := make([]string, 0, len(r.states))
+	for name := range r.states {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-
+	stats := make([]string, 0, len(names))
 	for _, name := range names {
-		recorder := poolStates[name]
-		stats = append(stats, recorder.String())
+		stats = append(stats, r.states[name].String())
 	}
+	r.mu.RUnlock()
 	return fmt.Sprintf("%s", strings.Join(stats, "\n"))
+}
+
+func SetDefaultPoolStatsRegistry(r *PoolStatsRegistry) {
+	if r == nil {
+		return
+	}
+	defaultStatsRegistry = r
+}
+
+func GetDefaultPoolStatsRegistry() *PoolStatsRegistry {
+	return defaultStatsRegistry
+}
+
+func GetPoolStats() string {
+	return defaultStatsRegistry.GetStats()
 }
 
 type SyncPoolWrapper[T any] struct {
@@ -89,7 +123,7 @@ func NewSyncPoolWrapper[T any](newFunc func() T, recorder IStatsRecorder, opts .
 	}
 
 	// 注册统计记录器
-	poolStates[p.recorder.stats().Name] = p.recorder
+	defaultStatsRegistry.Register(p.recorder.stats().Name, p.recorder)
 
 	return p
 }
@@ -226,7 +260,7 @@ func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecord
 	}
 
 	// 注册统计记录器
-	poolStates[p.recorder.stats().Name] = p.recorder
+	defaultStatsRegistry.Register(p.recorder.stats().Name, p.recorder)
 	return p
 }
 

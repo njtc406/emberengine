@@ -25,6 +25,7 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/engine/pkg/router"
 	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -54,6 +55,12 @@ type Service struct {
 	eventProcessor *event.Processor // 事件管理器
 
 	profiler *profiler.Profiler // 性能监控
+	nodeCtx  inf.INodeContext
+
+	cluster          *cluster.Cluster
+	endpointManager  *endpoints.EndpointManager
+	profilerRegistry *profiler.Registry
+	router           *router.Router
 
 	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用) TODO 这个实际上已经在mailbox中做了,这里暂时废弃
 
@@ -65,6 +72,52 @@ type Service struct {
 
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
+	initErr          error
+}
+
+func (s *Service) SetRuntimeDeps(c *cluster.Cluster, em *endpoints.EndpointManager, pr *profiler.Registry, rt *router.Router) {
+	s.cluster = c
+	s.endpointManager = em
+	s.profilerRegistry = pr
+	s.router = rt
+}
+
+func (s *Service) SetNodeContext(ctx inf.INodeContext) {
+	s.nodeCtx = ctx
+}
+
+func (s *Service) GetNodeContext() inf.INodeContext {
+	return s.nodeCtx
+}
+
+func (s *Service) GetEndpointManager() *endpoints.EndpointManager {
+	if s.endpointManager != nil {
+		return s.endpointManager
+	}
+	if s.nodeCtx != nil {
+		if nodeLike, ok := s.nodeCtx.(interface{ GetCluster() *cluster.Cluster }); ok {
+			if c := nodeLike.GetCluster(); c != nil {
+				if em := c.GetEndpointManager(); em != nil {
+					return em
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) GetRouter() *router.Router {
+	if s.router != nil {
+		return s.router
+	}
+	if s.nodeCtx != nil {
+		if nodeLike, ok := s.nodeCtx.(interface{ GetRouter() *router.Router }); ok {
+			if rt := nodeLike.GetRouter(); rt != nil {
+				return rt
+			}
+		}
+	}
+	return nil
 }
 
 func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
@@ -112,8 +165,19 @@ func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 }
 
 func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{}) {
+	s.initErr = nil
+	var baseLogger *log.Logger
+	if s.nodeCtx != nil {
+		baseLogger = s.nodeCtx.GetLogger()
+	}
+	if baseLogger == nil {
+		s.initErr = fmt.Errorf("service init requires node context logger")
+		return
+	}
+
 	if svc == nil {
-		log.SysLogger.Fatalf("service impl is nil, trace: %s", debug.Stack())
+		s.initErr = fmt.Errorf("service impl is nil")
+		baseLogger.Errorf("service impl is nil, trace: %s", debug.Stack())
 		return
 	}
 	if !atomic.CompareAndSwapInt32(&s.status, def.SvcStatusUnknown, def.SvcStatusInit) {
@@ -126,11 +190,12 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	// 整理配置参数
 	if serviceInitConf == nil {
-		log.SysLogger.WithField("sName", s.GetName()).Fatal("service init conf is nil")
+		s.initErr = fmt.Errorf("service init conf is nil")
+		baseLogger.WithField("sName", s.GetName()).Error("service init conf is nil")
 		return
 	}
 	serviceInitConf = fixConf(serviceInitConf)
-	//log.SysLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
+	//baseLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
 	// 初始化服务数据
 	s.src = svc.(inf.IService)
 	s.cfg = cfg
@@ -145,11 +210,13 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		}
 		l, err := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
 		if err != nil {
-			log.SysLogger.Panicf("service[%s] create logger error: %s", s.GetName(), err)
+			s.initErr = fmt.Errorf("service[%s] create logger error: %w", s.GetName(), err)
+			baseLogger.Errorf("service[%s] create logger error: %s", s.GetName(), err)
+			return
 		}
 		s.logger = l
 	} else {
-		s.logger = log.SysLogger
+		s.logger = baseLogger
 	}
 	s.ILoggerX = log.NewLoggerX(s.logger, log.Fields{
 		"sName":     s.GetName(),
@@ -169,11 +236,22 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	s.stopGraceTimeout = stopGraceTimeout
 
 	// 创建定时器调度器
+	twAny := s.nodeCtx.GetTimingWheel()
+	tw, ok := twAny.(*timingwheel.TimingWheel)
+	if !ok || tw == nil {
+		s.initErr = fmt.Errorf("service[%s] timing wheel is nil", s.GetName())
+		s.Errorf("service[%s] timing wheel is nil", s.GetName())
+		return
+	}
 	s.ITimerScheduler = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize,
-		timingwheel.GetTimingWheel(), s.ILoggerX)
+		tw, s.ILoggerX)
 
 	// 根据配置创建中间件，并与用户自定义中间件合并
-	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.ILoggerX, config.IsDebug())
+	isDebug := false
+	if s.nodeCtx != nil && s.nodeCtx.GetConfig() != nil {
+		isDebug = s.nodeCtx.GetConfig().IsDebug()
+	}
+	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.ILoggerX, isDebug)
 	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
 
 	// 创建邮箱（将停机 drain 策略下发给 mailbox/workerPool）
@@ -189,6 +267,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 创建事件处理器
 	s.eventProcessor = event.NewTrigger()
 	s.eventProcessor.Init(s)
+	if provider, ok := s.nodeCtx.(interface{ GetEventBus() *event.Bus }); ok {
+		s.eventProcessor.SetEventBus(provider.GetEventBus())
+	}
 	// 注册事件管理器
 	s.eventHandler = event.NewTriggerHandler()
 	s.eventHandler.Init(s.eventProcessor)
@@ -198,9 +279,16 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 注册 Job 处理函数
 	s.initJobHandlers()
 
-	s.pid = endpoints.GetEndpointManager().CreatePid(serviceInitConf.Partition, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
+	em := s.GetEndpointManager()
+	if em == nil {
+		s.initErr = fmt.Errorf("service[%s] endpoint manager is nil", s.GetName())
+		s.Errorf("service[%s] endpoint manager is nil", s.GetName())
+		return
+	}
+	s.pid = em.CreatePid(serviceInitConf.Partition, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
 	if s.pid == nil {
-		s.logger.Panicf("service[%s] create pid error", s.GetName())
+		s.initErr = fmt.Errorf("service[%s] create pid error", s.GetName())
+		s.logger.Errorf("service[%s] create pid error", s.GetName())
 		return
 	}
 	s.ILoggerX = s.ILoggerX.WithFields(log.Fields{
@@ -209,7 +297,11 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	})
 
 	// 初始化根节点rpc处理器
-	s.methodMgr = rpc.NewMethodMgr(s.ILoggerX)
+	var methodIdx *rpc.MethodIndex
+	if provider, ok := s.nodeCtx.(interface{ GetMethodIndex() *rpc.MethodIndex }); ok {
+		methodIdx = provider.GetMethodIndex()
+	}
+	s.methodMgr = rpc.NewMethodMgr(s.ILoggerX, methodIdx)
 	// 将 WorkerPool 的 enableRW 引用传递给 MethodMgr，用于 RemoveMethods 防御性校验
 	if rwMgr, ok := s.methodMgr.(*rpc.MethodMgr); ok {
 		rwMgr.SetEnableRW(s.mailbox.GetEnableRWPtr())
@@ -218,12 +310,17 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 
 	if s.src != nil {
 		if err := s.src.OnInit(); err != nil {
-			s.Panicf("service[%s] onInit error: %s", s.GetName(), err)
+			s.initErr = fmt.Errorf("service[%s] onInit error: %w", s.GetName(), err)
+			s.Errorf("service[%s] onInit error: %s", s.GetName(), err)
+			return
 		}
 	}
 }
 
 func (s *Service) Start() error {
+	if s.initErr != nil {
+		return fmt.Errorf("service[%s] init failed: %w", s.GetName(), s.initErr)
+	}
 	if !atomic.CompareAndSwapInt32(&s.status, def.SvcStatusInit, def.SvcStatusStarting) {
 		return fmt.Errorf("service[%s] status[%d] has inited", s.GetName(), s.status)
 	}
@@ -241,13 +338,23 @@ func (s *Service) Start() error {
 		}
 	}
 
-	if !s.isPrimarySecondaryMode || s.IsPrivate() || !cluster.GetCluster().IsClusterMode() {
+	clusterIns := s.cluster
+	if clusterIns == nil && s.nodeCtx != nil {
+		if nodeLike, ok := s.nodeCtx.(interface{ GetCluster() *cluster.Cluster }); ok {
+			clusterIns = nodeLike.GetCluster()
+		}
+	}
+	if !s.isPrimarySecondaryMode || s.IsPrivate() || clusterIns == nil || !clusterIns.IsClusterMode() {
 		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
 		s.pid.SetMaster(true)
 	}
 
 	// 所有服务都注册到服务列表
-	endpoints.GetEndpointManager().AddService(s)
+	em := s.GetEndpointManager()
+	if em == nil {
+		return fmt.Errorf("service[%s] endpoint manager is nil", s.GetName())
+	}
+	em.AddService(s)
 	//s.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
 	s.setStatus(def.SvcStatusRunning) // 到这里服务已经准备启动完成,可以正常处理请求了
@@ -340,7 +447,9 @@ func (s *Service) release() {
 	s.closeProfiler()
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
-	endpoints.GetEndpointManager().RemoveService(s)
+	if em := s.GetEndpointManager(); em != nil {
+		em.RemoveService(s)
+	}
 }
 
 func (s *Service) PostJob(j inf.IMailboxJob) error {
@@ -421,7 +530,7 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	// 2. 已显式设置 RWMode，无需经过 setJobRWMode 推断；
 	// 3. 避免框架内部投递承担 PostJob 中面向用户的检查开销。
 	if err := s.mailbox.PostJob(j); err != nil {
-		log.SysLogger.Errorf("post job error: %v", err)
+		s.Errorf("post job error: %v", err)
 		j.Release()
 		return err
 	}
@@ -438,7 +547,7 @@ func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) e
 	j.SetRWMode(def.RWModeWrite)
 	// 框架内部投递，直接调用 mailbox.PostJob（理由同 pushConcurrentCallback）
 	if err := s.mailbox.PostJob(j); err != nil {
-		log.SysLogger.Errorf("post job error: %v", err)
+		s.Errorf("post job error: %v", err)
 		j.Release()
 		return err
 	}
@@ -488,9 +597,20 @@ func (s *Service) IsClosed() bool {
 }
 
 func (s *Service) OpenProfiler() {
-	s.profiler = profiler.RegProfiler(s.pid.GetServiceUid(), s.ILoggerX)
+	reg := s.profilerRegistry
+	if reg == nil && s.nodeCtx != nil {
+		if nodeLike, ok := s.nodeCtx.(interface{ GetProfilerRegistry() *profiler.Registry }); ok {
+			reg = nodeLike.GetProfilerRegistry()
+		}
+	}
+	if reg == nil {
+		s.Error("profiler registry is nil")
+		return
+	}
+	s.profiler = reg.RegProfiler(s.pid.GetServiceUid(), s.ILoggerX)
 	if s.profiler == nil {
-		s.Fatal("profiler reg fail")
+		s.Error("profiler reg fail")
+		return
 	}
 }
 
@@ -500,7 +620,15 @@ func (s *Service) GetProfiler() *profiler.Profiler {
 
 func (s *Service) closeProfiler() {
 	if s.profiler != nil {
-		profiler.UnRegProfiler(s.pid.GetServiceUid())
+		reg := s.profilerRegistry
+		if reg == nil && s.nodeCtx != nil {
+			if nodeLike, ok := s.nodeCtx.(interface{ GetProfilerRegistry() *profiler.Registry }); ok {
+				reg = nodeLike.GetProfilerRegistry()
+			}
+		}
+		if reg != nil {
+			reg.UnRegProfiler(s.pid.GetServiceUid())
+		}
 		s.profiler = nil
 	}
 }

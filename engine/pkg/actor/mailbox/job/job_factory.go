@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
+
+var runtimeDebug bool
+
+func SetDebug(enabled bool) {
+	runtimeDebug = enabled
+}
 
 type Creator func() inf.IMailboxJob
 type Getter func(inf.IMailboxJob) any
@@ -98,7 +103,7 @@ func getMsgJobPool() pool.IPool[*RpcJob] {
 				return &RpcJob{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if runtimeDebug {
 					return pool.NewStatsRecorder("MsgJobPool")
 				} else {
 					return pool.NewNoStatsRecorder()
@@ -128,7 +133,7 @@ func getEventBusJobPool() pool.IPool[*EventBusJob] {
 				return &EventBusJob{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if runtimeDebug {
 					return pool.NewStatsRecorder("EventBusJobPool")
 				} else {
 					return pool.NewNoStatsRecorder()
@@ -158,7 +163,7 @@ func getTimerJobPool() pool.IPool[*TimerJob] {
 				return &TimerJob{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if runtimeDebug {
 					return pool.NewStatsRecorder("TimerJobPool")
 				} else {
 					return pool.NewNoStatsRecorder()
@@ -188,7 +193,7 @@ func getConcurrentCallbackJobPool() pool.IPool[*ConcurrentCallbackJob] {
 				return &ConcurrentCallbackJob{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if runtimeDebug {
 					return pool.NewStatsRecorder("ConcurrentCallbackJobPool")
 				} else {
 					return pool.NewNoStatsRecorder()
@@ -218,7 +223,7 @@ func getSysCtlJobPool() pool.IPool[*SysCtlJob] {
 				return &SysCtlJob{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if runtimeDebug {
 					return pool.NewStatsRecorder("SysCtlJobPool")
 				} else {
 					return pool.NewNoStatsRecorder()

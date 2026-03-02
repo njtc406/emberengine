@@ -14,18 +14,27 @@ import (
 // TODO 节点守护线程
 // 如果之后使用plugin模式,这里就可以做热更
 
-// Daemon 全局守护服务（向后兼容）。
-// Deprecated: 应通过 ServiceManager.GetDaemon() 获取。
-var Daemon = &daemon{}
-
 type daemon struct {
 	core.Service
 }
 
 func (d *daemon) OnInit() error {
+	var bus *event.Bus
+	if ctx := d.GetNodeContext(); ctx != nil {
+		if provider, ok := ctx.(interface{ GetEventBus() *event.Bus }); ok {
+			if b := provider.GetEventBus(); b != nil {
+				bus = b
+			}
+		}
+	}
+	if bus == nil {
+		d.Warn("daemon init: event bus is nil, skip global subscriptions")
+		return nil
+	}
+
 	// TODO 注册服务事件
-	event.GetEventBus().SubscribeGlobal(event.ServiceNew, d)
-	event.GetEventBus().SubscribeGlobal(event.ServiceClose, d)
+	bus.SubscribeGlobal(event.ServiceNew, d)
+	bus.SubscribeGlobal(event.ServiceClose, d)
 
 	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
 	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)

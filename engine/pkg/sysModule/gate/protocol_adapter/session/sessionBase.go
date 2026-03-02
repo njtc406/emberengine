@@ -6,17 +6,19 @@
 package session
 
 import (
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
 
 type BaseSession struct {
 	id           uint64
 	conn         inf.IConn
+	logger       *log.Logger
 	closed       atomic.Bool
 	uid          int64
 	wg           sync.WaitGroup
@@ -53,7 +55,9 @@ func (s *BaseSession) StartSender() {
 				data, ok := s.msgCh.Pop()
 				if ok {
 					if err := s.conn.Send(data); err != nil {
-						log.SysLogger.Errorf("user[%d] conn[%d] send client pkg error: %v", s.uid, s.id, err)
+						if s.logger != nil {
+							s.logger.Errorf("user[%d] conn[%d] send client pkg error: %v", s.uid, s.id, err)
+						}
 						break // 如果已经断开了,则直接退出(需不需要对比一下error?)
 					}
 				}
@@ -69,7 +73,9 @@ func (s *BaseSession) StartSender() {
 					// TODO 批量发送
 				} else {
 					if err := s.conn.Send(data); err != nil {
-						log.SysLogger.Errorf("user[%d] conn[%d] send client pkg error: %v", s.uid, s.id, err)
+						if s.logger != nil {
+							s.logger.Errorf("user[%d] conn[%d] send client pkg error: %v", s.uid, s.id, err)
+						}
 						// TODO 要不要踢连接,可以考虑做成hook函数,由业务来决定
 					}
 				}

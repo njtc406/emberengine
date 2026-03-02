@@ -7,6 +7,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,9 +20,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
-
-var rpcMonitor *RpcMonitor
-var monitorOnce sync.Once
 
 type waitBucket struct {
 	mu sync.RWMutex
@@ -110,22 +108,6 @@ func (rm *RpcMonitor) initBuckets(bucketCount int, initCap int) {
 	rm.bucketMask = uint64(bucketCount - 1)
 }
 
-// GetRpcMonitor 返回全局 RpcMonitor 单例。
-// Deprecated: 后续 Phase 删除。请通过 NodeContext 获取。
-func GetRpcMonitor() *RpcMonitor {
-	monitorOnce.Do(func() {
-		rpcMonitor = &RpcMonitor{}
-	})
-	return rpcMonitor
-}
-
-// SetRpcMonitor 由 Node.Start 调用，设置全局 RpcMonitor（临时兼容）。
-// Deprecated: 后续 Phase 删除。
-func SetRpcMonitor(rm *RpcMonitor) {
-	monitorOnce.Do(func() {}) // 确保 once 已执行
-	rpcMonitor = rm
-}
-
 func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf, logger *log.Logger, tw *timingwheel.TimingWheel, pool *asynclib.Pool) *RpcMonitor {
 	rm.Logger = logger
 	rm.pool = pool
@@ -173,15 +155,16 @@ func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf, logger *log.Logger, tw *
 	return rm
 }
 
-func (rm *RpcMonitor) Start() {
+func (rm *RpcMonitor) Start() error {
 	if rm.closed.Load() {
-		return
+		return nil
 	}
 	if rm.sd == nil {
-		rm.Panic("rpc monitor is not initialized")
+		return fmt.Errorf("rpc monitor is not initialized")
 	}
 	rm.wg.Add(1)
 	go rm.listen()
+	return nil
 }
 
 func (rm *RpcMonitor) Stop() {

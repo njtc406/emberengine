@@ -35,9 +35,3 @@ func CreateServer(tp string) inf.IRemoteServer {
 	}
 	return nil
 }
-
-// GetServer 获取远程服务器实例
-// Deprecated: 请使用 CreateServer()，每次创建新实例
-func GetServer(tp string) inf.IRemoteServer {
-	return CreateServer(tp)
-}

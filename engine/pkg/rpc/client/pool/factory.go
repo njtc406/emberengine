@@ -29,6 +29,7 @@ type PoolManager struct {
 
 // NewPoolManager 创建新的连接池管理器
 func NewPoolManager(logger *log.Logger) *PoolManager {
+	setPoolLogger(logger)
 	return &PoolManager{
 		Logger:      logger,
 		pools:       make(map[string]*ConnectionPool),
@@ -174,24 +175,4 @@ func (pm *PoolManager) RemovePool(address, rpcType string) {
 		delete(pm.pools, poolKey)
 		pm.Infof("移除连接池: %s", poolKey)
 	}
-}
-
-// 全局连接池管理器实例
-var globalPoolManager *PoolManager
-var poolManagerOnce sync.Once
-
-// GetGlobalPoolManager 获取全局连接池管理器
-// Deprecated: 兼容旧代码，新代码请使用 Node.PoolManager
-func GetGlobalPoolManager() *PoolManager {
-	poolManagerOnce.Do(func() {
-		globalPoolManager = NewPoolManager(log.SysLogger)
-	})
-	return globalPoolManager
-}
-
-// SetGlobalPoolManager 设置全局连接池管理器（由 Node.Start 调用）
-// Deprecated: 仅用于过渡期全局兼容
-func SetGlobalPoolManager(pm *PoolManager) {
-	globalPoolManager = pm
-	poolManagerOnce.Do(func() {}) // 标记已初始化，防止再次覆盖
 }

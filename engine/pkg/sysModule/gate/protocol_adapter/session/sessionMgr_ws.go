@@ -6,11 +6,12 @@
 package session
 
 import (
+	"sync/atomic"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
 	"github.com/njtc406/emberengine/engine/pkg/utils/syncx"
-	"sync/atomic"
 )
 
 type WebSocketManager struct {
@@ -48,7 +49,11 @@ func (m *WebSocketManager) Bind(uid int64, conn inf.IConn) {
 	}
 
 	sessionId := m.genSessionID()
-	session := NewWSSession(sessionId, conn, uid)
+	var logger *log.Logger
+	if provider, ok := m.handler.(interface{ GetLogger() *log.Logger }); ok {
+		logger = provider.GetLogger()
+	}
+	session := NewWSSession(sessionId, conn, uid, logger)
 
 	m.sessions.Store(sessionId, session)
 	m.uidMap.Store(uid, sessionId)
@@ -83,7 +88,11 @@ func (m *WebSocketManager) closeSession(session inf.ISession, reason string) {
 	session.Close()
 	_ = session.GetConn().Close()
 
-	log.SysLogger.Debugf("user[%d] session %d closed, reason: %s", uid, sessionId, reason)
+	if provider, ok := m.handler.(interface{ GetLogger() *log.Logger }); ok {
+		if logger := provider.GetLogger(); logger != nil {
+			logger.Debugf("user[%d] session %d closed, reason: %s", uid, sessionId, reason)
+		}
+	}
 }
 
 func (m *WebSocketManager) listen(session inf.ISession) {

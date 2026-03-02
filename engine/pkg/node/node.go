@@ -2,24 +2,29 @@ package node
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
 	"sync/atomic"
-	"syscall"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
+	etcddiscovery "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/engine/pkg/plugins"
+	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/engine/pkg/router"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
+	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
+	remotent "github.com/njtc406/emberengine/engine/pkg/rpc/remote/nt"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pid"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
@@ -34,7 +39,7 @@ import (
 // Phase 1: Node 持有 config、log、asynclib、timingwheel、dedup 的独立实例。
 // Phase 2: Node 持有 monitor、event、cluster、services 的独立实例。
 // Phase 3: Node 持有 PoolManager、SenderManager、MethodIndex 的独立实例。
-// 全局兼容：各组件的 SetXxx/GetXxx 仍可用，但 Deprecated。
+// 所有运行时组件均由 Node 持有，不使用全局兼容入口。
 type Node struct {
 	// 基本信息
 	version   string
@@ -45,7 +50,7 @@ type Node struct {
 
 	// ====== Phase 1: 从全局收归的组件 ======
 
-	// 配置（原 config.Conf）
+	// 配置（由 Node 独立持有）
 	Config *config.Config
 
 	// 日志（原 log.SysLogger）— Node 嵌入 Logger，可直接 n.Info(...)
@@ -85,6 +90,17 @@ type Node struct {
 	// 方法前缀索引（原 core/rpc 包级 apiPrefixIndex 等）
 	MethodIndex *rpc.MethodIndex
 
+	// ====== Phase 4: 辅助组件 ======
+
+	// Profiler 注册中心（原 profiler 包级 mapProfiler）
+	ProfilerRegistry *profiler.Registry
+
+	// 插件管理器（原 plugins 包级 pluginMap）
+	PluginManager *plugins.PluginManager
+
+	// 路由器（原 router 直接依赖 endpoints.GetEndpointManager）
+	Router *router.Router
+
 	// 停止标志（防止 Stop() 重复调用）
 	stopped atomic.Bool
 }
@@ -102,6 +118,26 @@ func (n *Node) GetTimingWheel() any                { return n.TimingWheel }
 func (n *Node) GetDeDuplicator() inf.IDeDuplicator { return n.DeDuplicator }
 func (n *Node) GetNodeId() string                  { return n.Config.NodeConf.NodeId }
 func (n *Node) GetNodeType() string                { return n.Config.NodeConf.NodeType }
+
+func (n *Node) GetCluster() *cluster.Cluster {
+	return n.Cluster
+}
+
+func (n *Node) GetProfilerRegistry() *profiler.Registry {
+	return n.ProfilerRegistry
+}
+
+func (n *Node) GetRouter() *router.Router {
+	return n.Router
+}
+
+func (n *Node) GetMethodIndex() *rpc.MethodIndex {
+	return n.MethodIndex
+}
+
+func (n *Node) GetEventBus() *event.Bus {
+	return n.EventBus
+}
 
 // 编译期检查：确保 Node 实现了 INodeContext
 var _ inf.INodeContext = (*Node)(nil)
@@ -149,8 +185,6 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if err := n.Config.Load(n.confPath); err != nil {
 		return nil, fmt.Errorf("config load: %w", err)
 	}
-	// 临时全局兼容：设置 config.Conf 供尚未改造的包使用
-	config.SetConf(n.Config)
 
 	// ==============================
 	// 2. 日志（第二个初始化 — 后续组件需要日志）
@@ -161,21 +195,23 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 		return nil, fmt.Errorf("logger init: %w", err)
 	}
 	cleanups = append(cleanups, func() { n.Logger.Close() })
-	// 临时全局兼容：设置 log.SysLogger
-	log.SetSysLogger(n.Logger)
 
 	n.Info("-------->system log init ok<---------")
 
 	// ==============================
 	// 3. 基础设施层
 	// ==============================
+	job.SetDebug(n.Config.IsDebug())
+	codec.SetDebug(n.Config.IsDebug())
+	msgenvelope.SetDebug(n.Config.IsDebug())
+	monitor.SetDebug(n.Config.IsDebug())
+	etcddiscovery.SetDebug(n.Config.IsDebug())
+
 	n.AntsPool, err = asynclib.NewPool(n.Config.NodeConf.AntsPoolSize)
 	if err != nil {
 		return nil, fmt.Errorf("ants pool: %w", err)
 	}
 	cleanups = append(cleanups, func() { n.AntsPool.Release() })
-	// 临时全局兼容
-	asynclib.SetDefaultPool(n.AntsPool)
 
 	twConf := n.Config.NodeConf.TimingWheelConf
 	interval := twConf.Interval
@@ -189,16 +225,12 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	)
 	n.TimingWheel.Start()
 	cleanups = append(cleanups, func() { n.TimingWheel.Stop() })
-	// 临时全局兼容
-	timingwheel.SetDefaultTimingWheel(n.TimingWheel)
 
 	n.DeDuplicator, err = dedup.NewDeDuplicator(n.Config.NodeConf.DeDuplicatorConf)
 	if err != nil {
 		return nil, fmt.Errorf("dedup: %w", err)
 	}
 	cleanups = append(cleanups, func() { n.DeDuplicator.Close() })
-	// 临时全局兼容
-	dedup.SetDefaultDeDuplicator(n.DeDuplicator)
 
 	// ==============================
 	// 4. RPC 监控
@@ -209,8 +241,6 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 		n.TimingWheel,
 		n.AntsPool,
 	)
-	// 临时全局兼容
-	monitor.SetRpcMonitor(n.RpcMonitor)
 
 	// 记录 PID
 	pid.RecordPID(n.Config.NodeConf.PVPath, n.Config.NodeConf.NodeId, n.Config.NodeConf.NodeType)
@@ -219,7 +249,9 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	})
 
 	// 启动 RPC 监控
-	n.RpcMonitor.Start()
+	if err := n.RpcMonitor.Start(); err != nil {
+		return nil, fmt.Errorf("rpc monitor start: %w", err)
+	}
 	cleanups = append(cleanups, func() { n.RpcMonitor.Stop() })
 
 	// ==============================
@@ -228,38 +260,54 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 
 	// 连接池管理器
 	n.PoolManager = pool.NewPoolManager(n.Logger)
-	// 临时全局兼容
-	pool.SetGlobalPoolManager(n.PoolManager)
 	cleanups = append(cleanups, func() { n.PoolManager.Close() })
 
 	// Sender 管理器
 	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger)
-	// 临时全局兼容
-	client.SetSenderManager(n.SenderMgr)
+	if n.Config != nil && n.Config.NodeConf != nil && n.Config.NodeConf.EventBusConf != nil {
+		client.SetNatsConf(n.Config.NodeConf.EventBusConf.NatsConf)
+		remotent.SetNatsConf(n.Config.NodeConf.EventBusConf.NatsConf)
+	}
+	client.SetRpcMonitor(n.RpcMonitor)
+	remotehandler.SetRpcMonitor(n.RpcMonitor)
+	remotehandler.SetLogger(n.Logger)
+	remotehandler.SetDeDuplicator(n.DeDuplicator)
 	cleanups = append(cleanups, func() { n.SenderMgr.Close() })
 
 	// 方法前缀索引
 	n.MethodIndex = rpc.NewMethodIndex()
-	// 临时全局兼容
-	rpc.SetMethodIndex(n.MethodIndex)
 
-	// MessageBus 对象池
-	msgbus.InitBusPool(n.Config.NodeConf.BusPoolSize)
+	// MessageBus 对象池配置（按需惰性初始化）
+	msgbus.SetPoolSize(n.Config.NodeConf.BusPoolSize)
+	msgbus.SetLogger(n.Logger)
+	msgbus.SetRpcMonitor(n.RpcMonitor)
+	msgbus.SetDefaultRPCTimeout(n.Config.GetDefaultRpcTimeout())
+
+	// ==============================
+	// 4.6 辅助组件（Phase 4）
+	// ==============================
+
+	n.ProfilerRegistry = profiler.NewRegistry()
+
+	n.PluginManager = plugins.NewPluginManager()
 
 	// ==============================
 	// 5. 集群 & 事件总线
 	// ==============================
 	n.Cluster = cluster.NewCluster()
-	n.Cluster.Init(n.Config.ClusterConf, n.Logger)
-	// 临时全局兼容
-	cluster.SetCluster(n.Cluster)
-	n.Cluster.Start()
+	if err := n.Cluster.Init(n.Config.ClusterConf, n.Logger, n.SenderMgr); err != nil {
+		return nil, fmt.Errorf("cluster init: %w", err)
+	}
+	n.Router = router.NewRouter(n.Cluster.GetEndpointManager())
+	if err := n.Cluster.Start(); err != nil {
+		return nil, fmt.Errorf("cluster start: %w", err)
+	}
 	cleanups = append(cleanups, func() { n.Cluster.Close() })
 
 	n.EventBus = event.NewEventBus()
-	n.EventBus.Init(n.Config.NodeConf.EventBusConf, n.Logger)
-	// 临时全局兼容
-	event.SetEventBus(n.EventBus)
+	if err := n.EventBus.Init(n.Config.NodeConf.EventBusConf, n.Logger); err != nil {
+		return nil, fmt.Errorf("event bus init: %w", err)
+	}
 	cleanups = append(cleanups, func() { n.EventBus.Stop() })
 
 	// ==============================
@@ -273,9 +321,9 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	// 7. 服务（最后启动 — 依赖以上所有组件）
 	// ==============================
 	n.ServiceMgr = services.NewServiceManager(n.Logger)
+	n.ServiceMgr.SetRuntimeDeps(n.Cluster, n.Cluster.GetEndpointManager(), n.ProfilerRegistry, n.Router)
+	n.ServiceMgr.SetNodeContext(n)
 	n.ServiceMgr.Init(n.Config.ServiceConf)
-	// 临时全局兼容
-	services.SetServiceManager(n.ServiceMgr)
 	n.ServiceMgr.Start()
 	cleanups = append(cleanups, func() { n.ServiceMgr.StopAll() })
 
@@ -348,18 +396,4 @@ func (n *Node) Stop() {
 
 	// 优雅退出
 	title.GracefulExit(time.Since(n.startTime), n.version)
-}
-
-// Start 是包级便捷函数：创建 Node → 启动 → 等待退出信号 → 停止。
-// 适用于 main() 中一行式调用（向后兼容老示例）。
-// Deprecated: 新代码请使用 node.New().Start(...) + 手动信号处理。
-func Start(opts ...StartOption) {
-	n, err := New().Start(opts...)
-	if err != nil {
-		panic(fmt.Sprintf("node start failed: %v", err))
-	}
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	n.Stop()
 }

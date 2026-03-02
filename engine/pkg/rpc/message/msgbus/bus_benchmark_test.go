@@ -15,31 +15,38 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
 var benchInitOnce sync.Once
+var benchSenderMgr *client.SenderManager
+var benchLogger *log.Logger
 
 func benchInitRPC() {
 	benchInitOnce.Do(func() {
-		if log.SysLogger == nil {
-			log.Init(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
+		if benchLogger == nil {
+			l, err := log.NewLogger(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
+			if err != nil {
+				panic(err)
+			}
+			benchLogger = l
 		}
-		if config.Conf == nil {
-			config.SetConf(config.NewConfig())
-		}
-		if config.Conf.NodeConf == nil {
-			config.Conf.NodeConf = &config.NodeConf{}
-		}
-		if config.Conf.NodeConf.RpcMonitorConf == nil {
-			config.Conf.NodeConf.RpcMonitorConf = &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
-		}
-		tw := timingwheel.NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(log.SysLogger, log.Fields{"pkg": "bench"}))
+		rpcMonitorConf := &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
+		tw := timingwheel.NewTimingWheel(time.Millisecond, 64, log.NewLoggerX(benchLogger, log.Fields{"pkg": "bench"}))
 		tw.Start()
-		timingwheel.SetDefaultTimingWheel(tw)
+		p, err := asynclib.NewPool(128)
+		if err != nil {
+			panic(err)
+		}
 
-		rm := monitor.GetRpcMonitor()
+		rm := monitor.NewRpcMonitor().Init(rpcMonitorConf, benchLogger, tw, p)
+		SetLogger(benchLogger)
+		SetRpcMonitor(rm)
 		rm.Start()
+
+		benchSenderMgr = client.NewSenderManager(pool.NewPoolManager(benchLogger), benchLogger)
 	})
 }
 
@@ -147,8 +154,8 @@ func newBenchRPCPair() benchRPCPair {
 		}
 	}
 
-	sender := client.NewDispatcher(clientPid, clientBox)
-	receiver := client.NewDispatcher(serverPid, serverBox)
+	sender := client.NewDispatcher(benchSenderMgr, clientPid, clientBox)
+	receiver := client.NewDispatcher(benchSenderMgr, serverPid, serverBox)
 
 	// Keep counters referenced to avoid compiler eliminating work.
 	_ = callCount

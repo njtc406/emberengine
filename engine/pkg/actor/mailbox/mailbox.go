@@ -125,7 +125,9 @@ func (m *Mailbox) Resume() bool {
 }
 
 func (m *Mailbox) Start() {
-	m.workerPool.Start()
+	if err := m.workerPool.Start(); err != nil {
+		m.logger.Errorf("mailbox start failed: %v", err)
+	}
 }
 
 func (m *Mailbox) BeginStop() {

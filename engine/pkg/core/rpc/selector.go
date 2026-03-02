@@ -36,32 +36,65 @@ func WithIsSlaver(isSlaver bool) inf.SelectParamBuilder {
 	}
 }
 
+func (h *Handler) getRouter() *router.Router {
+	if svcWithRouter, ok := h.GetService().(interface{ GetRouter() *router.Router }); ok {
+		if rt := svcWithRouter.GetRouter(); rt != nil {
+			return rt
+		}
+	}
+	return nil
+}
+
 // Select 选择相同Partition服务
 func (h *Handler) Select(options ...inf.SelectParamBuilder) inf.IBus {
 	//log.SysLogger.Debugf("pid:%s", h.GetPid().String())
 	pid := h.GetPid()
 	options = append(options, WithPartition(pid.GetPartition()))
-	return router.Select(pid, options...)
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.Select(pid, options...)
 }
 
 // SelectByOpt 选择服务
 func (h *Handler) SelectByOpt(options ...inf.SelectParamBuilder) inf.IBus {
-	return router.Select(h.GetPid(), options...)
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.Select(h.GetPid(), options...)
 }
 
 func (h *Handler) SelectByPid(receiver *actor.PID) inf.IBus {
-	return router.SelectByPid(h.GetPid(), receiver)
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.SelectByPid(h.GetPid(), receiver)
 }
 
 // SelectByRule 根据自定义规则选择服务
 func (h *Handler) SelectByRule(rule func(pid *actor.PID) bool) inf.IBus {
-	return router.SelectByRule(h.GetPid(), rule)
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.SelectByRule(h.GetPid(), rule)
 }
 
 func (h *Handler) SelectSlavers(options ...inf.SelectParamBuilder) inf.IBus {
-	return router.Select(h.GetPid(), append(options, WithIsSlaver(true))...)
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.Select(h.GetPid(), append(options, WithIsSlaver(true))...)
 }
 
 func (h *Handler) SelectByServiceUid(receiverServiceUid string) inf.IBus {
-	return router.SelectByServiceUid(h.GetPid(), receiverServiceUid)
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.SelectByServiceUid(h.GetPid(), receiverServiceUid)
 }

@@ -6,7 +6,6 @@
 package pool
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -99,7 +98,7 @@ func (cb *CircuitBreaker) CanCall() bool {
 				cb.metrics.HalfOpenCalls = 0
 				cb.metrics.StateChanges++
 				cb.metrics.LastStateChange = time.Now()
-				log.SysLogger.Info("Circuit breaker entering half-open state")
+				getPoolLogger().Info("Circuit breaker entering half-open state")
 			}
 			cb.mutex.Unlock()
 			cb.mutex.RLock()
@@ -129,7 +128,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.state = CircuitClosed
 			cb.metrics.StateChanges++
 			cb.metrics.LastStateChange = time.Now()
-			log.SysLogger.Info("Circuit breaker closing after successful recovery")
+			getPoolLogger().Info("Circuit breaker closing after successful recovery")
 		}
 	}
 }
@@ -149,7 +148,7 @@ func (cb *CircuitBreaker) RecordFailure() {
 		cb.state = CircuitOpen
 		cb.metrics.StateChanges++
 		cb.metrics.LastStateChange = time.Now()
-		log.SysLogger.Warn("Circuit breaker opening due to failure in half-open state")
+		getPoolLogger().Warn("Circuit breaker opening due to failure in half-open state")
 		return
 	}
 
@@ -197,7 +196,7 @@ func (cb *CircuitBreaker) tripCircuit() {
 		cb.state = CircuitOpen
 		cb.metrics.StateChanges++
 		cb.metrics.LastStateChange = time.Now()
-		log.SysLogger.Warnf("Circuit breaker opened due to high failure rate: %d failures out of %d requests",
+		getPoolLogger().Warnf("Circuit breaker opened due to high failure rate: %d failures out of %d requests",
 			cb.metrics.FailedRequests, cb.metrics.TotalRequests)
 	}
 }
@@ -235,7 +234,7 @@ func (cb *CircuitBreaker) Reset() {
 	cb.state = CircuitClosed
 	cb.metrics = &CircuitBreakerMetrics{}
 	cb.windowStart = time.Now()
-	log.SysLogger.Info("Circuit breaker reset to closed state")
+	getPoolLogger().Info("Circuit breaker reset to closed state")
 }
 
 // String 返回熔断器状态字符串

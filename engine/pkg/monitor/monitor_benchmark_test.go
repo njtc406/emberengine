@@ -8,7 +8,6 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -21,13 +20,11 @@ var benchOnce sync.Once
 func benchInitMonitor() {
 	benchOnce.Do(func() {
 		if log.SysLogger == nil {
-			log.Init(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
-		}
-		if config.Conf.NodeConf == nil {
-			config.Conf.NodeConf = &config.NodeConf{}
-		}
-		if config.Conf.NodeConf.RpcMonitorConf == nil {
-			config.Conf.NodeConf.RpcMonitorConf = &config.RpcMonitorConf{MonitorTimerSize: 10000, MonitorBucketSize: 20}
+			l, err := log.NewLogger(&log.LoggerConf{Stdout: false, Caller: false, Color: false, Level: "error"}, true)
+			if err != nil {
+				panic(err)
+			}
+			log.SysLogger = l
 		}
 		timingwheel.Start(time.Millisecond, 64, log.SysLogger)
 

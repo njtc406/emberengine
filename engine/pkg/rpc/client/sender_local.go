@@ -15,6 +15,16 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 )
 
+var rpcMonitorProvider *monitor.RpcMonitor
+
+func SetRpcMonitor(rm *monitor.RpcMonitor) {
+	rpcMonitorProvider = rm
+}
+
+func getRpcMonitor() *monitor.RpcMonitor {
+	return rpcMonitorProvider
+}
+
 // localSender 本地服务的Client
 type localSender struct {
 	closed int32
@@ -68,7 +78,12 @@ func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcD
 	}
 
 	// 移除 monitor 监听
-	state := monitor.GetRpcMonitor().Remove(meta.GetReqId())
+	rm := getRpcMonitor()
+	if rm == nil {
+		envelope.Release()
+		return nil
+	}
+	state := rm.Remove(meta.GetReqId())
 	if state != nil {
 		if state.NeedCallback() {
 			// 异步回调：将 callback 信息写入 envelope meta，投递到调用方 mailbox 执行

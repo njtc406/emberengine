@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -50,6 +51,7 @@ func NewSenderManager(poolMgr *pool.PoolManager, logger *log.Logger) *SenderMana
 		senderMap:  defaultSenderMap(),
 		handlerMap: make(map[string]map[string]inf.IRpcSender),
 	}
+	setClientLogger(logger)
 	mgr.registerCreators()
 	return mgr
 }
@@ -112,28 +114,30 @@ func (sm *SenderManager) Close() {
 	sm.handlerMap = make(map[string]map[string]inf.IRpcSender)
 }
 
-// ── 全局兼容（Deprecated） ──
+// ── 包内 provider（用于 sender 子实现日志） ──
 
-var globalSenderMgr *SenderManager
+var clientLogger *log.Logger
+var clientNatsConf *config.NatsConf
 
-// GetSenderManager 获取全局 SenderManager
-// Deprecated: 兼容旧代码，新代码请使用 Node 实例上的 SenderManager
-func GetSenderManager() *SenderManager {
-	return globalSenderMgr
-}
-
-// SetSenderManager 设置全局 SenderManager（由 Node.Start 调用）
-// Deprecated: 仅用于过渡期全局兼容
-func SetSenderManager(sm *SenderManager) {
-	globalSenderMgr = sm
-}
-
-// Register 包级兼容
-// Deprecated: 请使用 SenderManager.Register()
-func Register(tp string, creator SenderCreator) {
-	if globalSenderMgr != nil {
-		globalSenderMgr.Register(tp, creator)
+func setClientLogger(logger *log.Logger) {
+	if logger != nil {
+		clientLogger = logger
 	}
+}
+
+func getClientLogger() *log.Logger {
+	if clientLogger == nil {
+		panic("rpc client logger not initialized")
+	}
+	return clientLogger
+}
+
+func SetNatsConf(conf *config.NatsConf) {
+	clientNatsConf = conf
+}
+
+func getNatsConf() *config.NatsConf {
+	return clientNatsConf
 }
 
 // ── Dispatcher ──
@@ -141,6 +145,7 @@ func Register(tp string, creator SenderCreator) {
 type Dispatcher struct {
 	tmp bool // 是否是临时客户端
 	pid *actor.PID
+	sm  *SenderManager
 
 	inf.IMailboxChannel
 	localHandler inf.IRpcSender
@@ -163,7 +168,10 @@ func (c *Dispatcher) IsClosed() bool {
 }
 
 func (c *Dispatcher) getSender() inf.IRpcSender {
-	sm := GetSenderManager()
+	sm := c.sm
+	if sm == nil {
+		return nil
+	}
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
@@ -178,27 +186,37 @@ func (c *Dispatcher) DeliverRequest(ctx context.Context, envelope inf.IEnvelope)
 	if c.pid == nil {
 		return def.ErrServiceNotFound
 	}
-	return c.getSender().DeliverRequest(ctx, c, envelope)
+	sender := c.getSender()
+	if sender == nil {
+		return def.ErrRPCHadClosed
+	}
+	return sender.DeliverRequest(ctx, c, envelope)
 }
 
 func (c *Dispatcher) DeliverResponse(ctx context.Context, envelope inf.IEnvelope) error {
 	if c.pid == nil {
 		return def.ErrServiceNotFound
 	}
-	return c.getSender().DeliverResponse(ctx, c, envelope)
+	sender := c.getSender()
+	if sender == nil {
+		return def.ErrRPCHadClosed
+	}
+	return sender.DeliverResponse(ctx, c, envelope)
 }
 
-func NewDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
+func NewDispatcher(sm *SenderManager, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
 	return &Dispatcher{
 		pid:             pid,
+		sm:              sm,
 		IMailboxChannel: mailbox,
 	}
 }
 
-func NewTmpDispatcher(pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
+func NewTmpDispatcher(sm *SenderManager, pid *actor.PID, mailbox inf.IMailboxChannel) inf.IRpcDispatcher {
 	return &Dispatcher{
 		tmp:             true,
 		pid:             pid,
+		sm:              sm,
 		IMailboxChannel: mailbox,
 	}
 }

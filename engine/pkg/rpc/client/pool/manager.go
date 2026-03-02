@@ -8,10 +8,11 @@ package pool
 import (
 	"context"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
@@ -25,6 +26,21 @@ const (
 	StateUnhealthy
 	StateClosed
 )
+
+var poolLogger *log.Logger
+
+func setPoolLogger(logger *log.Logger) {
+	if logger != nil {
+		poolLogger = logger
+	}
+}
+
+func getPoolLogger() *log.Logger {
+	if poolLogger == nil {
+		panic("rpc pool logger not initialized")
+	}
+	return poolLogger
+}
 
 // ConnectionMetrics 连接指标
 type ConnectionMetrics struct {
@@ -243,7 +259,7 @@ func (cp *ConnectionPool) Start() error {
 	// 创建初始连接
 	for i := 0; i < cp.config.InitialConnections; i++ {
 		if err := cp.createConnection(); err != nil {
-			log.SysLogger.Errorf("Failed to create initial connection %d: %v", i, err)
+			getPoolLogger().Errorf("Failed to create initial connection %d: %v", i, err)
 			// 继续创建其他连接
 		}
 	}
@@ -258,7 +274,7 @@ func (cp *ConnectionPool) Start() error {
 	cp.wg.Add(1)
 	go cp.cleanupLoop()
 
-	log.SysLogger.Infof("Connection pool started for %s:%s with %d initial connections",
+	getPoolLogger().Infof("Connection pool started for %s:%s with %d initial connections",
 		cp.address, cp.rpcType, len(cp.connections))
 
 	return nil
@@ -288,7 +304,7 @@ func (cp *ConnectionPool) Stop() {
 	cp.connections = make(map[string]*PoolConnection)
 	cp.connMutex.Unlock()
 
-	log.SysLogger.Infof("Connection pool stopped for %s:%s", cp.address, cp.rpcType)
+	getPoolLogger().Infof("Connection pool stopped for %s:%s", cp.address, cp.rpcType)
 }
 
 // GetConnection 获取连接
@@ -347,7 +363,7 @@ func (cp *ConnectionPool) createConnection() error {
 	atomic.AddInt32(&cp.metrics.TotalConnections, 1)
 	atomic.AddInt32(&cp.metrics.IdleConnections, 1)
 
-	log.SysLogger.Debugf("Created new connection %s for %s:%s", connID, cp.address, cp.rpcType)
+	getPoolLogger().Debugf("Created new connection %s for %s:%s", connID, cp.address, cp.rpcType)
 	return nil
 }
 
@@ -426,7 +442,7 @@ func (cp *ConnectionPool) checkAndScale() {
 			cp.lastScaleUp = now
 			atomic.AddInt64(&cp.metrics.ScaleOperations, 1)
 			cp.metrics.LastScaleTime = now
-			log.SysLogger.Infof("Scaled up connection pool for %s:%s by %d connections (load: %.2f)",
+			getPoolLogger().Infof("Scaled up connection pool for %s:%s by %d connections (load: %.2f)",
 				cp.address, cp.rpcType, scaleCount, loadRate)
 		}
 	}
@@ -441,7 +457,7 @@ func (cp *ConnectionPool) checkAndScale() {
 			cp.lastScaleDown = now
 			atomic.AddInt64(&cp.metrics.ScaleOperations, 1)
 			cp.metrics.LastScaleTime = now
-			log.SysLogger.Infof("Scaled down connection pool for %s:%s by %d connections (load: %.2f)",
+			getPoolLogger().Infof("Scaled down connection pool for %s:%s by %d connections (load: %.2f)",
 				cp.address, cp.rpcType, scaleCount, loadRate)
 		}
 	}
@@ -547,7 +563,7 @@ func (cp *ConnectionPool) healthCheckConnection(conn *PoolConnection) {
 	// 检查连续失败次数
 	if atomic.LoadInt64(&conn.Metrics.ConsecutiveFails) > cp.config.MaxConsecutiveFails {
 		conn.State = StateUnhealthy
-		log.SysLogger.Warnf("Connection %s marked as unhealthy due to consecutive failures: %d",
+		getPoolLogger().Warnf("Connection %s marked as unhealthy due to consecutive failures: %d",
 			conn.ID, conn.Metrics.ConsecutiveFails)
 		return
 	}
@@ -561,7 +577,7 @@ func (cp *ConnectionPool) healthCheckConnection(conn *PoolConnection) {
 
 	// 检查连接年龄
 	if time.Since(conn.Metrics.CreateTime) > cp.config.MaxConnectionAge {
-		log.SysLogger.Infof("Connection %s exceeded max age, marking for replacement", conn.ID)
+		getPoolLogger().Infof("Connection %s exceeded max age, marking for replacement", conn.ID)
 		// 可以在这里实现连接替换逻辑
 	}
 }
@@ -600,7 +616,7 @@ func (cp *ConnectionPool) cleanupConnections() {
 		conn.Sender.Close()
 		delete(cp.connections, id)
 		atomic.AddInt32(&cp.metrics.TotalConnections, -1)
-		log.SysLogger.Debugf("Cleaned up connection %s", id)
+		getPoolLogger().Debugf("Cleaned up connection %s", id)
 	}
 
 	// 确保最小连接数
@@ -608,7 +624,7 @@ func (cp *ConnectionPool) cleanupConnections() {
 		needed := cp.config.MinConnections - len(cp.connections)
 		for i := 0; i < needed; i++ {
 			if err := cp.createConnection(); err != nil {
-				log.SysLogger.Errorf("Failed to create replacement connection: %v", err)
+				getPoolLogger().Errorf("Failed to create replacement connection: %v", err)
 				break
 			}
 		}

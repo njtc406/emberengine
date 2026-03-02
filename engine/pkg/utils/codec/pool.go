@@ -8,11 +8,16 @@ package codec
 import (
 	"fmt"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
 const Kib = 1024
+
+var runtimeDebug bool
+
+func SetDebug(enabled bool) {
+	runtimeDebug = enabled
+}
 
 type SerializedData struct {
 	buf []byte
@@ -50,7 +55,7 @@ func NewBytePoolManager(sizes []int) *BytePoolManager {
 	pools := make([]pool.IPool[*SerializedData], len(sizes))
 	for i, sz := range sizes {
 		recorder := pool.NewNoStatsRecorder()
-		if config.IsDebug() {
+		if runtimeDebug {
 			recorder = pool.NewStatsRecorder(fmt.Sprintf("bytePool_%dKB", sz/1024))
 		}
 		pools[i] = pool.NewSyncPoolWrapper(

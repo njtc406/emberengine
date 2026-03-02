@@ -6,6 +6,8 @@
 package remote
 
 import (
+	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -22,16 +24,22 @@ type Remote struct {
 	svr         inf.IRemoteServer
 }
 
-func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, logger *log.Logger) *Remote {
+type loggerAwareRemoteServer interface {
+	SetLogger(logger *log.Logger)
+}
+
+func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, logger *log.Logger) (*Remote, error) {
 	r.Logger = logger
 	r.conf = conf
 	r.svr = pool.CreateServer(conf.Type)
 	if r.svr == nil {
-		r.Panicf("rpc server type %s not support", conf.Type)
-		return nil
+		return nil, fmt.Errorf("rpc server type %s not support", conf.Type)
+	}
+	if aware, ok := r.svr.(loggerAwareRemoteServer); ok {
+		aware.SetLogger(logger)
 	}
 	r.svr.Init(cliFactory)
-	return r
+	return r, nil
 }
 
 func (r *Remote) Serve(nodeUid string) {

@@ -6,17 +6,22 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
-	_ "github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
+	"github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
 	"github.com/njtc406/emberengine/example/comm"
 )
 
 func init() {
+	pprofservice.RegisterPprofService()
+
 	services.SetService("ConcurrencyTest", func() inf.IService {
 		return &comm.ConcurrencyTest{}
 	})
@@ -46,5 +51,13 @@ func main() {
 	if _, ok := os.LookupEnv("BENCH_TRACK_SUCCESS_TS"); !ok {
 		_ = os.Setenv("BENCH_TRACK_SUCCESS_TS", "0")
 	}
-	node.Start(node.WithConfPath("./example/configs/node_concurrency"))
+	n, err := node.New().Start(node.WithConfPath("./example/configs/node_concurrency"))
+	if err != nil {
+		panic(err)
+	}
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+	<-exitCh
+	fmt.Println("exit signal received")
+	n.Stop()
 }

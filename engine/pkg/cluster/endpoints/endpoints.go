@@ -23,8 +23,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-var endMgr = &EndpointManager{}
-
 type EndpointManager struct {
 	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
 
@@ -36,31 +34,24 @@ type EndpointManager struct {
 	remotes       map[string]*remote.Remote // 远程服务监听器
 	stopped       bool                      // 是否已停止
 	repository    *repository.Repository    // 服务存储仓库
+	senderMgr     *client.SenderManager
 }
 
 // NewEndpointManager 创建新的 EndpointManager 实例（Phase 2 per-Node 模式推荐使用）。
 func NewEndpointManager() *EndpointManager {
 	return &EndpointManager{}
 }
-
-// SetEndpointManager 设置全局 EndpointManager（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func SetEndpointManager(em *EndpointManager) {
-	endMgr = em
-}
-
-// GetEndpointManager 返回全局 EndpointManager（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func GetEndpointManager() *EndpointManager {
-	return endMgr
-}
-
-func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger *log.Logger) *EndpointManager {
+func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger *log.Logger, senderMgr *client.SenderManager) (*EndpointManager, error) {
 	em.Logger = logger
+	em.senderMgr = senderMgr
 	em.nodeUid = uuid.NewString()
 	em.remotes = make(map[string]*remote.Remote)
 	for _, cfg := range clusterConf.RPCServers {
-		em.remotes[cfg.Type] = remote.NewRemote().Init(cfg, em, em.Logger)
+		rt, err := remote.NewRemote().Init(cfg, em, em.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("init remote server[%s] failed: %w", cfg.Type, err)
+		}
+		em.remotes[cfg.Type] = rt
 	}
 
 	em.eventProcessor = eventProcessor
@@ -71,10 +62,10 @@ func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *co
 
 	em.repository = repository.NewRepository()
 
-	return em
+	return em, nil
 }
 
-func (em *EndpointManager) Start() {
+func (em *EndpointManager) Start() error {
 	em.repository.Start()
 	// 启动rpc监听服务器
 	for _, rt := range em.remotes {
@@ -83,12 +74,13 @@ func (em *EndpointManager) Start() {
 
 	// 新增、修改服务事件
 	if err := event.RegisterHandler(em.eventHandler, event.SysEventETCDPut, "service_update", em.updateServiceInfo); err != nil {
-		em.Panicf("register service_update error: %v", err)
+		return fmt.Errorf("register service_update error: %w", err)
 	}
 	// 删除服务事件
 	if err := event.RegisterHandler(em.eventHandler, event.SysEventETCDDel, "service_update", em.removeServiceInfo); err != nil {
-		em.Panicf("register service_update error: %v", err)
+		return fmt.Errorf("register service_update error: %w", err)
 	}
+	return nil
 }
 
 func (em *EndpointManager) Stop() {
@@ -97,9 +89,6 @@ func (em *EndpointManager) Stop() {
 		rt.Close()
 	}
 	em.repository.Stop()
-	if sm := client.GetSenderManager(); sm != nil {
-		sm.Close() // 关闭所有连接
-	}
 	em.Debugf("endpoints manager stopped")
 }
 
@@ -126,7 +115,7 @@ func (em *EndpointManager) updateServiceInfo(ctx context.Context, kv *mvccpb.Key
 		return fmt.Errorf("ignore local service")
 	}
 	em.WithContext(ctx).Infof("endpointmgr add remote service: %s, key: %s", pid.String(), string(kv.Key))
-	em.repository.Add(string(kv.Key), client.NewDispatcher(&pid, nil))
+	em.repository.Add(string(kv.Key), client.NewDispatcher(em.senderMgr, &pid, nil))
 	return nil
 }
 
@@ -154,7 +143,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	}()
 
 	// 先加入本地集群
-	em.repository.Add("", client.NewDispatcher(pid, svc.GetMailbox()))
+	em.repository.Add("", client.NewDispatcher(em.senderMgr, pid, svc.GetMailbox()))
 
 	// 私有服务不发布,没有开启集群也不发布
 	if svc.IsPrivate() || !em.isClusterMode {
@@ -196,7 +185,7 @@ func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
 	cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
 	if cli == nil {
 		// 有一种情况下可能是空的,就是调用者是私有服务,那么此时就单独创建一个,放入临时仓库
-		return em.repository.AddTmp(client.NewTmpDispatcher(pid, nil))
+		return em.repository.AddTmp(client.NewTmpDispatcher(em.senderMgr, pid, nil))
 	}
 	return cli
 }

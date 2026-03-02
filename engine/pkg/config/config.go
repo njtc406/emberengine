@@ -49,7 +49,9 @@ func (c *Config) Load(confPath string) error {
 	if err := c.parseNodeConfig(confPath); err != nil {
 		return fmt.Errorf("config.Load: %w", err)
 	}
-	c.initDir()
+	if err := c.initDir(); err != nil {
+		return fmt.Errorf("config.Load: %w", err)
+	}
 	fmt.Printf("Config: %s\n", c.String())
 	fmt.Println("=============配置解析完成===================")
 	return nil
@@ -128,9 +130,14 @@ func (c *Config) parseNodeConfig(confPath string) error {
 }
 
 // initDir 创建必要的目录
-func (c *Config) initDir() {
-	createDirIfNotExists(c.NodeConf.PVPath)
-	createDirIfNotExists(c.SystemLogger.Dir)
+func (c *Config) initDir() error {
+	if err := createDirIfNotExists(c.NodeConf.PVPath); err != nil {
+		return err
+	}
+	if err := createDirIfNotExists(c.SystemLogger.Dir); err != nil {
+		return err
+	}
+	return nil
 }
 
 // parseStartService 解析启动的服务

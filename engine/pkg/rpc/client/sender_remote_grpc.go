@@ -13,7 +13,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -37,7 +36,11 @@ func newGrpcClient(addr string) inf.IRpcSender {
 	for i := 0; i < connNum; i++ {
 		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			log.SysLogger.Panicf("grpcxSender newGrpcClient error: %v", err)
+			getClientLogger().Errorf("grpcSender newGrpcClient error: %v", err)
+			for _, opened := range conns {
+				_ = opened.Close()
+			}
+			return nil
 		}
 		conns = append(conns, conn)
 		clients = append(clients, actor.NewGrpcListenerClient(conn))
@@ -65,7 +68,7 @@ func (rc *grpcSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	// 构建发送消息
 	msg, err := envelope.ToProtoMsg(ctx)
 	if err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		getClientLogger().WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg)
@@ -73,7 +76,7 @@ func (rc *grpcSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	rpcClient := rc.rpcClients[rc.i.Add(1)%int64(len(rc.rpcClients))]
 
 	if _, err := rpcClient.RPCCall(ctx, msg); err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope,
+		getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope,
 			envelope.GetMeta().GetReceiverPid().GetServiceUid(), err)
 		return def.ErrRPCCallFailed
 	}

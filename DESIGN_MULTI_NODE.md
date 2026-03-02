@@ -7,6 +7,81 @@
 > 2. **单进程多 Node**: 同一进程可启动多个独立 `Node` 实例（如模拟分布式集群、跑集成测试），各 Node 的资源、生命周期、服务路由完全隔离。
 > 3. **干净的生命周期**: `Node.Start()` 创建一切，`Node.Stop()` 销毁一切。启动失败自动回滚，停止后零残留（无泄漏的 goroutine、连接、文件句柄）。
 
+---
+
+## 0. 改造进度标注（持续更新）
+
+> 规则（强制执行）:
+> 1. 每次代码修改后，必须同步更新本节状态。
+> 2. 状态仅使用：`✅ 已完成` / `⏳ 未完成`。
+> 3. 仅在 `go build ./...` 通过后，才能将条目标记为 `✅ 已完成`。
+
+### 0.1 当前进度（截至 2026-03-02）
+
+| 条目 | 状态 | 说明 |
+|------|------|------|
+| Node 启动入口迁移（`node.New().Start(...)`） | ✅ 已完成 | 示例入口已迁移，不再使用包级 `node.Start(...)` |
+| `config` 包级兼容函数移除（`Init/IsDebug/GetStatus...`） | ✅ 已完成 | 已删除旧包级兼容 API |
+| 全局 `config.Conf` 移除 | ✅ 已完成 | 已删除变量并清理运行时与测试侧引用 |
+| `config/confMap` 包级 getter/发现注册兼容入口收敛 | ✅ 已完成 | 仅保留服务配置预注册必需路径 |
+| `msgbus.InitBusPool` 过渡 API 移除 | ✅ 已完成 | 改为 `SetPoolSize + 惰性初始化` |
+| `monitor/timer.go` 废弃实现清理 | ✅ 已完成 | 已删除旧实现文件 |
+| `rpc/remote` 运行时 `log.SysLogger` 回退移除 | ✅ 已完成 | `gr/nt/rx` server/listener 已改为注入 logger |
+| `cluster/discovery/etcd/watcher.go` 全局日志依赖移除 | ✅ 已完成 | 已改为 `w.svc.GetLogger()` |
+| `core/service.go` 初始化日志来源改为 `NodeContext` | ✅ 已完成 | 不再回退 `log.SysLogger` |
+| `event/processor.go` 全局日志依赖移除 | ✅ 已完成 | 已改为 Processor 实例 logger（由 listener 注入） |
+| `monitor/call_state.go` 全局日志依赖移除 | ✅ 已完成 | 已移除 `log.SysLogger` 运行时调用 |
+| `profiler/profiler.go` 全局日志依赖移除 | ✅ 已完成 | 默认报告函数不再使用 `log.SysLogger` |
+| `sysModule/mysqlmodule` 全局日志依赖移除 | ✅ 已完成 | 已改为由 `DBService` 注入模块 logger |
+| `sysModule/redismodule` 全局日志依赖移除 | ✅ 已完成 | 已改为由 `DBService` 注入模块 logger |
+| `sysModule/gate/protocol_adapter/session` 全局日志依赖移除 | ✅ 已完成 | 已改为通过 handler 注入 session logger |
+| `cluster/discovery/etcd/discovery_test.go` 测试全局日志依赖移除 | ✅ 已完成 | 已移除测试中 `log.SysLogger` 初始化逻辑 |
+| `utils/network` WebSocket 组件全局日志依赖移除 | ✅ 已完成 | `ws_server/ws_client/ws_conn` 已改为实例 logger 注入 |
+| `utils/memdbx` 全局日志依赖移除 | ✅ 已完成 | `memdb` 初始化与默认启动路径不再依赖 `log.SysLogger` |
+| `log.SysLogger` 在运行时代码中彻底移除 | ✅ 已完成 | 运行时代码已移除，当前仅剩注释/测试代码命中 |
+| `sysService/pprofservice` `panic -> error` 透传 | ✅ 已完成 | `OnStart()` 失败改为 `return err`，不再触发 panic |
+| `rpc/client/sender_remote_grpc` `panic -> error` 透传 | ✅ 已完成 | gRPC 客户端创建失败改为返回 `nil`，由连接池返回错误 |
+| `cluster/discovery/etcd` `panic -> error` 透传 | ✅ 已完成 | `Init()` 中事件注册失败改为 `error` 返回，交由上层处理 |
+| `node/cluster/monitor` 启动链 `panic/fatal -> error` 透传 | ✅ 已完成 | `RpcMonitor.Start`、`EndpointManager.Start`、`Cluster.Init/Start` 改为错误返回并由 `node` 上抛 |
+| `rpc/remote` 不支持类型故障从 `panic` 降级为错误返回 | ✅ 已完成 | `Remote.Init` 遇到不支持 `rpcType` 改为记录错误并返回 `nil` |
+| `rpc/remote -> endpoints -> cluster` 初始化错误链路透传 | ✅ 已完成 | `Remote.Init/EndpointManager.Init/Cluster.Init` 全链路改为返回 `error`，避免空指针启动崩溃 |
+| `sysModule/mysqlmodule` 表初始化 `panic -> error` 透传 | ✅ 已完成 | `ApiInitTables()` 初始化连接失败改为直接返回 `error` |
+| `core/service` profiler `fatal` 清理 | ✅ 已完成 | `OpenProfiler()` 中 `Fatal` 改为错误日志并提前返回 |
+| `event/eventBus` 初始化 `panic -> error` 透传 | ✅ 已完成 | `Bus.Init()` 中 NATS 连接失败改为返回 `error`，由 `node` 启动上抛 |
+| `actor/mailbox/worker_pool` 启动 `fatal/panic` 清理 | ✅ 已完成 | `WorkerPool.Start/autoScaleWorkers` 不再 `Fatalf/Panic`；构造器已去除 `Fatal` 调用 |
+| `core/service` 初始化阶段 `panic/fatal` 清理 | ✅ 已完成 | `Init()` 失败转为 `initErr`，`Start()` 统一错误返回，避免半初始化启动 |
+| `dbservice/mysql/redis` 初始化 `panic -> error` 透传 | ✅ 已完成 | `MysqlModule.Init/RedisModule.Init` 改为返回 `error`，由 `DBService.OnInit()` 上抛 |
+| `config` 目录初始化 `panic -> error` 透传 | ✅ 已完成 | `createDirIfNotExists/initDir/Load` 全链路改为返回 `error`，并修正目录权限为 `0755` |
+| `utils/network` WebSocket 启动阶段 panic 清理 | ✅ 已完成 | `ws_server/ws_client` 启动参数与证书错误改为记录日志并安全返回 |
+| panic/fatal 全面改造为 error 透传（按 §7.4） | ⏳ 未完成 | 仍存在历史 panic/fatal 路径待分批清理 |
+| `INodeContext` 覆盖面与全组件注入一致性 | ⏳ 未完成 | 需继续对照第 4 章逐项核对 |
+
+### 0.2 本次更新记录
+
+- 2026-03-02：新增本节“进度标注机制”，后续每次改动后在此同步更新完成/未完成状态。
+- 2026-03-02：完成 `event/processor.go` 与 `monitor/call_state.go` 的 `log.SysLogger` 运行时依赖清理；`go build ./...` 已通过。
+- 2026-03-02：完成 `profiler/profiler.go` 的 `log.SysLogger` 清理；`go build ./...` 已通过。
+- 2026-03-02：完成 `sysModule/mysqlmodule` 与 `sysModule/redismodule` 的 `log.SysLogger` 清理（改为模块 logger 注入）；`go build ./...` 已通过。
+- 2026-03-02：完成 `sysModule/gate/protocol_adapter/session` 与 `cluster/discovery/etcd/discovery_test.go` 的 `log.SysLogger` 清理；`go build ./...` 已通过。
+- 2026-03-02：完成 `utils/network` WebSocket 组件（`ws_server/ws_client/ws_conn`）的 `log.SysLogger` 清理；`go build ./...` 已通过。
+- 2026-03-02：完成 `utils/memdbx` 的 `log.SysLogger` 清理；`go build ./...` 已通过。
+- 2026-03-02：移除 `node` 中 `log.SysLogger` 兼容桥接赋值，运行时代码中 `log.SysLogger` 调用已清零（仅剩注释/测试命中）；`go build ./...` 已通过。
+- 2026-03-02：完成 `sysService/pprofservice` 的 `panic -> error` 透传改造（`OnStart()`）；`go build ./...` 已通过。
+- 2026-03-02：完成 `rpc/client/sender_remote_grpc` 的 `panic -> error` 透传改造（连接创建失败走错误透传）；`go build ./...` 已通过。
+- 2026-03-02：完成 `cluster/discovery/etcd` 的 `panic -> error` 透传改造（`Init()` 事件注册失败改为错误返回）；`go build ./...` 已通过。
+- 2026-03-02：完成 `node/cluster/monitor` 启动链 `panic/fatal -> error` 透传改造（`RpcMonitor.Start`、`EndpointManager.Start`、`Cluster.Init/Start`、`node` 启动上抛）；`go build ./...` 已通过。
+- 2026-03-02：完成 `rpc/remote` 不支持类型故障的降级处理（`Remote.Init` 从 `panic` 改为错误日志+返回 `nil`）；`go build ./...` 已通过。
+- 2026-03-02：完成 `rpc/remote -> endpoints -> cluster` 初始化错误链路透传改造（`Remote.Init/EndpointManager.Init/Cluster.Init`）；`go build ./...` 已通过。
+- 2026-03-02：完成 `sysModule/mysqlmodule` 的 `ApiInitTables()` `panic -> error` 透传改造；`go build ./...` 已通过。
+- 2026-03-02：完成 `core/service` `OpenProfiler()` 的 `fatal` 清理（改为错误日志+返回）；`go build ./...` 已通过。
+- 2026-03-02：完成 `event/eventBus` 初始化 `panic -> error` 透传改造（`Bus.Init()` 与 `node` 启动链上抛）；`go build ./...` 已通过。
+- 2026-03-02：完成 `actor/mailbox/worker_pool` 启动路径 `fatal/panic` 清理（保持 `IMailbox.Start()` 兼容签名）；`go build ./...` 已通过。
+- 2026-03-02：完成 `core/service` 初始化阶段 `panic/fatal` 清理（失败写入 `initErr` 并在 `Start()` 统一返回）；`go build ./...` 已通过。
+- 2026-03-02：完成 `dbservice/mysql/redis` 初始化 `panic -> error` 透传（`MysqlModule.Init/RedisModule.Init/DBService.OnInit`）；`go build ./...` 已通过。
+- 2026-03-02：完成 `actor/mailbox/worker_pool` 构造器 `Fatal` 清理（`invoker=nil` 改为程序员错误 `panic`）；`go build ./...` 已通过。
+- 2026-03-02：完成 `config` 目录初始化链路 `panic -> error` 透传（`createDirIfNotExists/initDir/Load`）；`go build ./...` 已通过。
+- 2026-03-02：完成 `utils/network` WebSocket 启动阶段 panic 清理（`ws_server/ws_client` 改为错误日志+安全返回）；`go build ./...` 已通过。
+
 ## 一、现状分析
 
 ### 1.1 当前 Node 结构体

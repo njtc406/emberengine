@@ -7,6 +7,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
@@ -15,25 +16,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
 )
-
-var cluster Cluster
 
 // NewCluster 创建新的 Cluster 实例（Phase 2 per-Node 模式推荐使用）。
 func NewCluster() *Cluster {
 	return &Cluster{}
-}
-
-// SetCluster 设置全局 Cluster（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func SetCluster(c *Cluster) {
-	cluster = *c
-}
-
-// GetCluster 返回全局 Cluster 指针（向后兼容）。
-// Deprecated: 请通过 NodeContext 获取。
-func GetCluster() *Cluster {
-	return &cluster
 }
 
 type Cluster struct {
@@ -58,34 +46,43 @@ type ctxEvent struct {
 	ev  inf.IEvent
 }
 
-func (c *Cluster) Init(clusterConf *config.ClusterConf, logger *log.Logger) {
+func (c *Cluster) Init(clusterConf *config.ClusterConf, logger *log.Logger, senderMgr *client.SenderManager) error {
 	c.Logger = logger
 	c.closed = make(chan struct{})
 	c.eventChannel = make(chan inf.IEvent, 1024)
 	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(nil)
 
-	c.endpoints = endpoints.NewEndpointManager().Init(c.eventProcessor, clusterConf, logger)
-	// 临时全局兼容
-	endpoints.SetEndpointManager(c.endpoints)
+	var err error
+	c.endpoints, err = endpoints.NewEndpointManager().Init(c.eventProcessor, clusterConf, logger, senderMgr)
+	if err != nil {
+		return fmt.Errorf("init endpoints error: %w", err)
+	}
 
 	c.discovery = discovery.CreateDiscovery(clusterConf.DiscoveryType)
 	if c.discovery != nil {
-		if err := c.discovery.Init(clusterConf, c.eventProcessor, c); err != nil {
-			c.Fatalf("init discovery error: %v, conf: %+v", err, clusterConf)
+		if loggerAware, ok := c.discovery.(interface{ SetLogger(*log.Logger) }); ok {
+			loggerAware.SetLogger(c.Logger)
+		}
+		if err = c.discovery.Init(clusterConf, c.eventProcessor, c); err != nil {
+			return fmt.Errorf("init discovery error: %w, conf: %+v", err, clusterConf)
 		}
 	}
 
 	c.endpoints.SetClusterMode(c.IsClusterMode())
+	return nil
 }
 
-func (c *Cluster) Start() {
+func (c *Cluster) Start() error {
 	if c.discovery != nil {
 		c.discovery.Start()
 	}
 
-	c.endpoints.Start()
+	if err := c.endpoints.Start(); err != nil {
+		return err
+	}
 	go c.run()
+	return nil
 }
 
 func (c *Cluster) Close() {
@@ -129,4 +126,8 @@ func (c *Cluster) run() {
 
 func (c *Cluster) IsClusterMode() bool {
 	return c.discovery != nil
+}
+
+func (c *Cluster) GetEndpointManager() *endpoints.EndpointManager {
+	return c.endpoints
 }

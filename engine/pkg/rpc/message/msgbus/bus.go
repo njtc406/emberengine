@@ -9,10 +9,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -27,6 +27,48 @@ import (
 
 // busPool 是 MessageBus 对象池（Deprecated 全局变量，过渡期保留）
 var busPool pool.IPool[*MessageBus]
+var busPoolOnce sync.Once
+var busPoolSize = 10000
+
+var (
+	busLogger  *log.Logger
+	rpcMonitor *monitor.RpcMonitor
+	rpcTimeout = def.DefaultRpcTimeout
+)
+
+func SetLogger(logger *log.Logger) {
+	busLogger = logger
+}
+
+func SetPoolSize(size int) {
+	if size > 0 {
+		busPoolSize = size
+	}
+}
+
+func SetRpcMonitor(rm *monitor.RpcMonitor) {
+	rpcMonitor = rm
+}
+
+func SetDefaultRPCTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		rpcTimeout = timeout
+	}
+}
+
+func getLogger() *log.Logger {
+	if busLogger != nil {
+		return busLogger
+	}
+	panic("msgbus logger not initialized")
+}
+
+func getRpcMonitor() *monitor.RpcMonitor {
+	if rpcMonitor != nil {
+		return rpcMonitor
+	}
+	panic("msgbus rpc monitor not initialized")
+}
 
 // newBusPool 创建 MessageBus 对象池实例
 func newBusPool(poolSize int) pool.IPool[*MessageBus] {
@@ -48,13 +90,10 @@ func newBusPool(poolSize int) pool.IPool[*MessageBus] {
 	)
 }
 
-// InitBusPool 初始化全局 busPool（由 Node.Start 调用，替代原来的 sync.Once + config.Conf）
-// Deprecated: 过渡期方案。后续应将 busPool 收归 Node 实例持有。
-func InitBusPool(poolSize int) {
-	busPool = newBusPool(poolSize)
-}
-
 func getBusPool() pool.IPool[*MessageBus] {
+	busPoolOnce.Do(func() {
+		busPool = newBusPool(busPoolSize)
+	})
 	return busPool
 }
 
@@ -133,7 +172,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		if ok {
 			timeout = time.Until(deadline)
 		} else {
-			deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+			deadline = timelib.Now().Add(rpcTimeout)
 		}
 	}
 
@@ -143,7 +182,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 
 	newCtx := xcontext.NewWithCloneCtx(ctx)
 
-	mt := monitor.GetRpcMonitor()
+	mt := getRpcMonitor()
 	reqId := mt.GenSeq()
 	state := monitor.NewCallState(newCtx, reqId, data.GetMethod(), timeout, mb.sender, nil, nil)
 
@@ -171,7 +210,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(newCtx).Errorf(
+		getLogger().WithContext(newCtx).Errorf(
 			"service[%s] send message[%s] request to client failed, error: %v",
 			mb.sender.GetPid().GetName(),
 			data.GetMethod(),
@@ -310,18 +349,18 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 		if ok {
 			timeout = time.Until(deadline)
 		} else {
-			deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+			deadline = timelib.Now().Add(rpcTimeout)
 		}
 	}
 
 	if timeout <= 0 {
-		timeout = config.GetDefaultRpcTimeout()
+		timeout = rpcTimeout
 	}
 
 	// 处理ctx，只保留携带信息
 	newCtx := xcontext.NewWithCloneCtx(ctx)
 
-	mt := monitor.GetRpcMonitor()
+	mt := getRpcMonitor()
 	reqId := mt.GenSeq()
 	var cbParams []interface{}
 	if param != nil {
@@ -353,7 +392,7 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 		_ = mt.Remove(reqId)
 		state.Release()
 		envelope.Release()
-		log.SysLogger.WithContext(newCtx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
+		getLogger().WithContext(newCtx).Errorf("service[%s] send message[%s] request to client failed, error: %v", mb.sender.GetPid().GetName(), data.GetMethod(), err)
 		return 0, def.ErrRPCCallFailed
 	}
 
@@ -388,7 +427,7 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 	if err != nil {
 		return dto.EmptyCancelRpc, err
 	}
-	return monitor.GetRpcMonitor().NewCancel(reqId), nil
+	return getRpcMonitor().NewCancel(reqId), nil
 }
 
 func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
@@ -417,7 +456,7 @@ func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptio
 	if err != nil {
 		return dto.EmptyCancelRpc, err
 	}
-	return monitor.GetRpcMonitor().NewCancel(reqId), nil
+	return getRpcMonitor().NewCancel(reqId), nil
 }
 
 // asyncCallInternal 供MultiBus使用的内部方法，recycle参数控制是否释放Bus
@@ -452,7 +491,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	if ok {
 		deadline = deadlineTime
 	} else {
-		deadline = timelib.Now().Add(config.GetDefaultRpcTimeout())
+		deadline = timelib.Now().Add(rpcTimeout)
 	}
 
 	// 创建请求
@@ -468,7 +507,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	envelope.SetDispatchKey(dispatchKey)
 
 	meta := msgenvelope.NewMeta()
-	meta.SetReqId(monitor.GetRpcMonitor().GenSeq()) // 必须创建reqId，否则会导致重复调用
+	meta.SetReqId(getRpcMonitor().GenSeq()) // 必须创建reqId，否则会导致重复调用
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	meta.SetDeadline(deadline.UnixNano())
@@ -528,7 +567,7 @@ type MultiBus []internalBus
 
 func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", method)
+		getLogger().WithContext(ctx).Warnf("===========select empty service to call %s", method)
 		return def.ErrSelectEmptyResult
 	}
 
@@ -549,7 +588,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 	option := dto.NewBusOption(opts...)
 	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to call %s", option.Method)
+		getLogger().WithContext(ctx).Warnf("===========select empty service to call %s", option.Method)
 		return def.ErrSelectEmptyResult
 	}
 
@@ -568,7 +607,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 		}
 		// 返回组合错误，即使所有调用都成功，也让调用者知道有多少个成功
 		if len(errs) > 0 {
-			log.SysLogger.WithContext(ctx).Warnf("call %s with CallModeAll: %d/%d succeeded", option.Method, successCount, len(m))
+			getLogger().WithContext(ctx).Warnf("call %s with CallModeAll: %d/%d succeeded", option.Method, successCount, len(m))
 		}
 		return errorlib.CombineErr(errs...)
 
@@ -589,7 +628,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 
 func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", method)
+		getLogger().WithContext(ctx).Warnf("===========select empty service to async call %s", method)
 		return nil, def.ErrSelectEmptyResult
 	}
 	data := msgenvelope.NewData()
@@ -607,14 +646,14 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 			reqIds = append(reqIds, reqId)
 		}
 	}
-	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+	return getRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
 
 func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
 	option := dto.NewBusOption(opts...)
 	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to async call %s", option.Method)
+		getLogger().WithContext(ctx).Warnf("===========select empty service to async call %s", option.Method)
 		return dto.EmptyCancelRpc, def.ErrSelectEmptyResult
 	}
 	data := msgenvelope.NewData()
@@ -641,18 +680,18 @@ func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBui
 	}
 
 	if len(errs) > 0 {
-		log.SysLogger.WithContext(ctx).Warnf("async call %s: %d/%d nodes sent successfully", option.Method, len(reqIds), len(m))
+		getLogger().WithContext(ctx).Warnf("async call %s: %d/%d nodes sent successfully", option.Method, len(reqIds), len(m))
 	}
 
 	// 返回 MultiCancel,可以取消所有节点的回调
-	return monitor.GetRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+	return getRpcMonitor().NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
 }
 
 // TODO send这里需要考虑一下所有的都公用一个ctx会不会有什么问题
 
 func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error {
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", method)
+		getLogger().WithContext(ctx).Warnf("===========select empty service to send %s", method)
 		return nil
 		//return def.ErrSelectEmptyResult
 	}
@@ -675,7 +714,7 @@ func (m MultiBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 	option := dto.NewBusOption(opts...)
 	option.Ctx = ctx
 	if len(m) == 0 {
-		log.SysLogger.WithContext(ctx).Warnf("===========select empty service to send %s", option.Method)
+		getLogger().WithContext(ctx).Warnf("===========select empty service to send %s", option.Method)
 		return nil
 		//return def.ErrSelectEmptyResult
 	}

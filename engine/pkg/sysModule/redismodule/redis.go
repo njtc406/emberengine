@@ -8,9 +8,11 @@ package redismodule
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/redis/go-redis/v9"
@@ -21,6 +23,7 @@ type RedisModule struct {
 
 	conf   *redis.Options
 	client *redis.Client
+	logger *log.Logger
 	// TODO redis需要支持集群模式
 	clusterClient *redis.ClusterClient
 	timerId       uint64
@@ -32,12 +35,18 @@ func NewRedisModule() *RedisModule {
 	return &RedisModule{}
 }
 
-func (rm *RedisModule) Init(conf *redis.Options) {
-	log.SysLogger.Debugf("redis init conf: %+v", conf)
+func (rm *RedisModule) SetLogger(logger *log.Logger) {
+	rm.logger = logger
+}
+
+func (rm *RedisModule) Init(conf *redis.Options) error {
+	if rm.logger != nil {
+		rm.logger.Debugf("redis init conf: %+v", conf)
+	}
 	rm.conf = conf
 	rm.client = redis.NewClient(conf)
 	if err := rm.checkConnect(); err != nil {
-		log.SysLogger.Panic(err)
+		return fmt.Errorf("redis check connect failed: %w", err)
 	}
 	timerId, err := rm.TickerAsyncFunc(time.Second*30, "redis health check", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 		if err := rm.checkConnect(); err != nil {
@@ -46,9 +55,10 @@ func (rm *RedisModule) Init(conf *redis.Options) {
 		return nil
 	})
 	if err != nil {
-		log.SysLogger.Panic(err)
+		return fmt.Errorf("redis health-check timer init failed: %w", err)
 	}
 	rm.timerId = timerId
+	return nil
 }
 
 func (rm *RedisModule) OnRelease() {

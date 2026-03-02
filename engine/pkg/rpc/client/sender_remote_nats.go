@@ -12,21 +12,12 @@ import (
 	"sync/atomic"
 
 	"github.com/nats-io/nats.go"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/diag"
 )
-
-func getGlobalNatsConf() *config.NatsConf {
-	if config.Conf == nil || config.Conf.NodeConf == nil || config.Conf.NodeConf.EventBusConf == nil {
-		return nil
-	}
-	return config.Conf.NodeConf.EventBusConf.NatsConf
-}
 
 type natsSender struct {
 	conns []*nats.Conn
@@ -34,7 +25,8 @@ type natsSender struct {
 }
 
 func newNatsClient(addr string) inf.IRpcSender {
-	natsConf := getGlobalNatsConf()
+	logger := getClientLogger()
+	natsConf := getNatsConf()
 	maxReconnects := def.NatsDefaultMaxReconnects
 	if natsConf != nil && natsConf.MaxReconnects > 0 {
 		maxReconnects = natsConf.MaxReconnects
@@ -74,19 +66,19 @@ func newNatsClient(addr string) inf.IRpcSender {
 		nats.Timeout(timeout),
 		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
 			if sub != nil {
-				log.SysLogger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
+				logger.Errorf("nats async error: subject=%s err=%v", sub.Subject, err)
 				return
 			}
-			log.SysLogger.Errorf("nats async error: err=%v", err)
+			logger.Errorf("nats async error: err=%v", err)
 		}),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			log.SysLogger.Errorf("nats disconnected: %v", err)
+			logger.Errorf("nats disconnected: %v", err)
 		}),
 		nats.ReconnectHandler(func(_ *nats.Conn) {
-			log.SysLogger.Infof("nats reconnected")
+			logger.Infof("nats reconnected")
 		}),
 		nats.ClosedHandler(func(_ *nats.Conn) {
-			log.SysLogger.Infof("nats connection closed")
+			logger.Infof("nats connection closed")
 		}),
 		//nats.NoEcho(),
 		//nats.Compression(false),
@@ -112,7 +104,7 @@ func newNatsClient(addr string) inf.IRpcSender {
 	for i := 0; i < poolSize; i++ {
 		conn, err := nats.Connect(addr, opts...)
 		if err != nil {
-			log.SysLogger.Errorf("nats client connect error: %s", err)
+			logger.Errorf("nats client connect error: %s", err)
 			for _, c := range conns {
 				c.Close()
 			}
@@ -124,9 +116,9 @@ func newNatsClient(addr string) inf.IRpcSender {
 	sender := &natsSender{conns: conns}
 	if diag.Enabled() {
 		if poolSize > 1 {
-			log.SysLogger.Infof("nats client connect success:%s (pool=%d)", addr, poolSize)
+			logger.Infof("nats client connect success:%s (pool=%d)", addr, poolSize)
 		} else {
-			log.SysLogger.Debugf("nats client connect success:%s", addr)
+			logger.Debugf("nats client connect success:%s", addr)
 		}
 	}
 	return sender
@@ -178,14 +170,14 @@ func (rc *natsSender) send(ctx context.Context, envelope inf.IEnvelope) error {
 	// 构建发送消息
 	msg, err := envelope.ToProtoMsg(ctx)
 	if err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		getClientLogger().WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg)
 
 	data, err := codec.Encode(def.ProtoBuf, msg)
 	if err != nil {
-		log.SysLogger.WithContext(ctx).Errorf("encode message[%+v] is error: %s", envelope, err)
+		getClientLogger().WithContext(ctx).Errorf("encode message[%+v] is error: %s", envelope, err)
 		return def.ErrMsgSerializeFailed
 	}
 

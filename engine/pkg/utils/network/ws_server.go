@@ -2,17 +2,19 @@ package network
 
 import (
 	"crypto/tls"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/gorilla/websocket"
 )
 
 type WSServer struct {
 	Addr            string
+	Logger          *log.Logger
 	MaxConnNum      int
 	PendingWriteNum int
 	MaxMsgLen       uint32
@@ -26,6 +28,7 @@ type WSServer struct {
 }
 
 type WSHandler struct {
+	logger          *log.Logger
 	maxConnNum      int
 	pendingWriteNum int
 	maxMsgLen       uint32
@@ -44,7 +47,9 @@ func (handler *WSHandler) SetMessageType(messageType int) {
 func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := handler.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.SysLogger.Errorf("upgrade fail, error: %s", err)
+		if handler.logger != nil {
+			handler.logger.Errorf("upgrade fail, error: %s", err)
+		}
 		return
 	}
 	conn.SetReadLimit(int64(handler.maxMsgLen))
@@ -64,7 +69,9 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if handler.maxConnNum > 0 && len(handler.conns) >= handler.maxConnNum {
 		handler.mutexConns.Unlock()
 		conn.Close()
-		log.SysLogger.Warning("too many connections")
+		if handler.logger != nil {
+			handler.logger.Warning("too many connections")
+		}
 		return
 	}
 	handler.conns[conn] = struct{}{}
@@ -72,7 +79,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// TODO 验签
 
-	wsConn := NewWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType)
+	wsConn := NewWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType, handler.logger)
 	agent := handler.newAgent(wsConn)
 	if agent == nil {
 		wsConn.Close()
@@ -99,29 +106,45 @@ func (server *WSServer) SetMessageType(messageType int) {
 }
 
 func (server *WSServer) Start() {
+	logger := server.Logger
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.SysLogger.Fatalf("WSServer Listen fail, error: %s", err)
+		if logger != nil {
+			logger.Errorf("WSServer listen failed: %v", err)
+		}
+		return
 	}
 
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = 100
-		log.SysLogger.Debugf("invalid MaxConnNum, reset: %d", server.MaxConnNum)
+		if logger != nil {
+			logger.Debugf("invalid MaxConnNum, reset: %d", server.MaxConnNum)
+		}
 	}
 	if server.PendingWriteNum <= 0 {
 		server.PendingWriteNum = 100
-		log.SysLogger.Debugf("invalid PendingWriteNum, reset: %d", server.PendingWriteNum)
+		if logger != nil {
+			logger.Debugf("invalid PendingWriteNum, reset: %d", server.PendingWriteNum)
+		}
 	}
 	if server.MaxMsgLen <= 0 {
 		server.MaxMsgLen = 4096
-		log.SysLogger.Debugf("invalid MaxMsgLen, reset: %d", server.MaxMsgLen)
+		if logger != nil {
+			logger.Debugf("invalid MaxMsgLen, reset: %d", server.MaxMsgLen)
+		}
 	}
 	if server.HTTPTimeout <= 0 {
 		server.HTTPTimeout = 60 * time.Second
-		log.SysLogger.Debugf("invalid HTTPTimeout, reset: %d", server.HTTPTimeout)
+		if logger != nil {
+			logger.Debugf("invalid HTTPTimeout, reset: %d", server.HTTPTimeout)
+		}
 	}
 	if server.NewAgent == nil {
-		log.SysLogger.Fatal("NewAgent must not be nil")
+		if logger != nil {
+			logger.Error("WSServer NewAgent must not be nil")
+		}
+		_ = ln.Close()
+		return
 	}
 
 	if server.CertFile != "" || server.KeyFile != "" {
@@ -132,7 +155,11 @@ func (server *WSServer) Start() {
 		config.Certificates = make([]tls.Certificate, 1)
 		config.Certificates[0], err = tls.LoadX509KeyPair(server.CertFile, server.KeyFile)
 		if err != nil {
-			log.SysLogger.Fatalf("LoadX509KeyPair fail, error: %s", err)
+			if logger != nil {
+				logger.Errorf("WSServer load cert failed: %v", err)
+			}
+			_ = ln.Close()
+			return
 		}
 
 		ln = tls.NewListener(ln, config)
@@ -140,6 +167,7 @@ func (server *WSServer) Start() {
 
 	server.ln = ln
 	server.handler = &WSHandler{
+		logger:          logger,
 		maxConnNum:      server.MaxConnNum,
 		pendingWriteNum: server.PendingWriteNum,
 		maxMsgLen:       server.MaxMsgLen,

@@ -8,6 +8,9 @@ package ws
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	glbConfig "github.com/njtc406/emberengine/engine/pkg/config"
@@ -17,14 +20,13 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"github.com/njtc406/emberengine/engine/pkg/utils/jwtx"
-	"net/http"
-	"strings"
 )
 
 type WebSocketAdapter struct {
 	server     *httpx.GinServer
 	md         inf.IModule
 	sessionMgr inf.ISessionManager
+	jwtSecret  string
 }
 
 func NewWebSocketAdapter() *WebSocketAdapter {
@@ -47,8 +49,19 @@ func (w *WebSocketAdapter) ListenAndServe(md inf.IModule, conf interface{}) erro
 	if !ok {
 		return fmt.Errorf("invalid websocket configuration")
 	}
+	w.jwtSecret = cfg.JWTSecret
+	status := glbConfig.Release
+	if service := md.GetService(); service != nil {
+		if provider, ok := service.(interface{ GetNodeContext() inf.INodeContext }); ok {
+			if nodeCtx := provider.GetNodeContext(); nodeCtx != nil {
+				if c := nodeCtx.GetConfig(); c != nil {
+					status = c.GetStatus()
+				}
+			}
+		}
+	}
 
-	if err := w.server.Init(md.GetService().GetLogger(), glbConfig.GetStatus(), cfg.HttpConf); err != nil {
+	if err := w.server.Init(md.GetService().GetLogger(), status, cfg.HttpConf); err != nil {
 		return err
 	}
 	pool := router_center.NewGroupHandlerPool()
@@ -97,7 +110,13 @@ func (w *WebSocketAdapter) Auth(c *gin.Context) {
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	tokenString = strings.TrimSpace(tokenString)
 
-	claims, err := jwtx.ParseJwtToken(tokenString)
+	var claims *jwtx.EmberClaims
+	var err error
+	if w.jwtSecret != "" {
+		claims, err = jwtx.ParseJwtTokenWithSecret(w.jwtSecret, tokenString)
+	} else {
+		claims, err = jwtx.ParseJwtToken(tokenString)
+	}
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

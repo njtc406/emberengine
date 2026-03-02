@@ -19,12 +19,8 @@ var DefaultMaxOvertime time.Duration = 1 * time.Second
 // DefaultOvertime 超过该时间将会提交监控报告
 var DefaultOvertime time.Duration = 10 * time.Millisecond
 var DefaultMaxRecordNum int = 100 //最大记录条数
-var mapLock sync.RWMutex
-var mapProfiler map[string]*Profiler
 
 type ReportFunType func(name string, callNum int, costTime time.Duration, record *list.List)
-
-var reportFunc ReportFunType = DefaultReportFunction
 
 type Element struct {
 	tagName  string
@@ -61,22 +57,13 @@ type Profiler struct {
 	logger       log.ILoggerX
 }
 
-func init() {
-	mapProfiler = map[string]*Profiler{}
-}
-
-func RegProfiler(profilerName string, logger log.ILoggerX) *Profiler {
-	mapLock.Lock()
-	defer mapLock.Unlock()
-	if _, ok := mapProfiler[profilerName]; ok == true {
-		return nil
-	}
-
-	pProfiler := &Profiler{
-		stack:       list.New(),
-		record:      list.New(),
-		maxOverTime: DefaultMaxOvertime,
-		overTime:    DefaultOvertime,
+func NewProfiler(logger log.ILoggerX) *Profiler {
+	return &Profiler{
+		stack:        list.New(),
+		record:       list.New(),
+		maxOverTime:  DefaultMaxOvertime,
+		overTime:     DefaultOvertime,
+		maxRecordNum: DefaultMaxRecordNum,
 		analyzerPool: pool.NewSyncPoolWrapper[*Analyzer](
 			func() *Analyzer {
 				return &Analyzer{}
@@ -88,17 +75,6 @@ func RegProfiler(profilerName string, logger log.ILoggerX) *Profiler {
 		),
 		logger: logger,
 	}
-	mapProfiler[profilerName] = pProfiler
-	return pProfiler
-}
-
-func UnRegProfiler(profilerName string) {
-	mapLock.Lock()
-	defer mapLock.Unlock()
-	if _, ok := mapProfiler[profilerName]; !ok {
-		return
-	}
-	delete(mapProfiler, profilerName)
 }
 
 func (slf *Profiler) SetMaxOverTime(tm time.Duration) {
@@ -187,10 +163,6 @@ func (slf *Analyzer) Pop() {
 	slf.profiler.stack.Remove(slf.elem)
 }
 
-func SetReportFunction(reportFun ReportFunType) {
-	reportFunc = reportFun
-}
-
 func DefaultReportFunction(name string, callNum int, costTime time.Duration, record *list.List) {
 	if record.Len() <= 0 {
 		return
@@ -219,37 +191,5 @@ func DefaultReportFunction(name string, callNum int, costTime time.Duration, rec
 	}
 
 	// TODO 后面在看这个日志写在哪里
-	log.SysLogger.Debugf("report: %s", strReport)
-}
-
-// Report 上报所有Profiler的记录(应该由监控模块调用)
-func Report() {
-	var record *list.List
-	for name, prof := range mapProfiler {
-		prof.stackLocker.RLock()
-
-		//取栈顶，是否存在异常MaxOverTime数据
-		pElem := prof.stack.Back()
-		for pElem != nil {
-			pElement := pElem.Value.(*Element)
-			pExceptionElem, _ := prof.check(pElement)
-			if pExceptionElem != nil {
-				prof.pushRecordLog(pExceptionElem)
-			}
-			pElem = pElem.Prev()
-		}
-
-		if prof.record.Len() == 0 {
-			prof.stackLocker.RUnlock()
-			continue
-		}
-
-		record = prof.record
-		prof.record = list.New()
-		callNum := prof.callNum
-		totalCostTime := prof.totalCostTime
-		prof.stackLocker.RUnlock()
-
-		DefaultReportFunction(name, callNum, totalCostTime, record)
-	}
+	fmt.Printf("report: %s", strReport)
 }

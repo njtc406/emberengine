@@ -16,9 +16,38 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
+
+var (
+	rpcMonitorProvider *monitor.RpcMonitor
+	loggerProvider     *log.Logger
+	dedupProvider      inf.IDeDuplicator
+)
+
+func SetRpcMonitor(rm *monitor.RpcMonitor) {
+	rpcMonitorProvider = rm
+}
+
+func SetLogger(logger *log.Logger) {
+	loggerProvider = logger
+}
+
+func SetDeDuplicator(d inf.IDeDuplicator) {
+	dedupProvider = d
+}
+
+func getRpcMonitor() *monitor.RpcMonitor {
+	return rpcMonitorProvider
+}
+
+func getLogger() *log.Logger {
+	return loggerProvider
+}
+
+func getDeDuplicator() inf.IDeDuplicator {
+	return dedupProvider
+}
 
 func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 	headers := make(map[string]any, len(req.ContextHeaders)+2)
@@ -29,7 +58,11 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 	if req.Reply {
 		// 回复
 		// 需要回复的信息都会加入monitor中,找到对应的信封数据
-		if state := monitor.GetRpcMonitor().Remove(req.ReqId); state != nil {
+		rm := getRpcMonitor()
+		if rm == nil {
+			return nil
+		}
+		if state := rm.Remove(req.ReqId); state != nil {
 			response, err := codec.DecodeFromAny(req.Response)
 			if err == nil && req.Err != "" {
 				err = errors.New(req.Err)
@@ -41,7 +74,9 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		} else {
 			// 已经超时,丢弃返回
 			// 迟到的回复：通常是调用方已超时/取消后的正常现象，避免刷屏按 debug 处理。
-			log.SysLogger.Debugf("rpc call late reply dropped (state not found): %s", req.String())
+			if l := getLogger(); l != nil {
+				l.Debugf("rpc call late reply dropped (state not found): %s", req.String())
+			}
 			return nil
 		}
 	} else {
@@ -50,8 +85,14 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 		if req.ReqId != 0 {
 			senderServiceUid := req.GetSenderPid().GetServiceUid()
 			// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
-			if dedup.GetDeDuplicator().Seen(senderServiceUid, req.ReqId) {
-				log.SysLogger.Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
+			dedupIns := getDeDuplicator()
+			if dedupIns == nil {
+				return errors.New("deduplicator is nil")
+			}
+			if dedupIns.Seen(senderServiceUid, req.ReqId) {
+				if l := getLogger(); l != nil {
+					l.Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
+				}
 				return nil
 			}
 		}

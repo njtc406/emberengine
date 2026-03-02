@@ -15,15 +15,26 @@ import (
 type rpcxServer struct {
 	svr      *server.Server
 	listener *RpcxListener
+	logger   *log.Logger
 }
 
 func NewRpcxServer() inf.IRemoteServer {
 	return &rpcxServer{}
 }
 
+func (rs *rpcxServer) SetLogger(logger *log.Logger) {
+	if logger != nil {
+		rs.logger = logger
+		if rs.listener != nil {
+			rs.listener.logger = logger
+		}
+	}
+}
+
 func (rs *rpcxServer) Init(sf inf.IRpcSenderFactory) {
 	rs.listener = &RpcxListener{
 		cliFactory: sf,
+		logger:     rs.logger,
 	}
 	rs.svr = server.NewServer()
 }
@@ -33,7 +44,7 @@ func (rs *rpcxServer) Serve(conf *config.RPCServer, nodeUid string) error {
 	if err := rs.svr.RegisterName("RpcxListener", rs.listener, ""); err != nil {
 		return err
 	}
-	log.SysLogger.Infof("rpcx server listening at: %s", conf.Addr)
+	rs.logger.Infof("rpcx server listening at: %s", conf.Addr)
 	return rs.svr.Serve(conf.Protoc, conf.Addr)
 }
 

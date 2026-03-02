@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
@@ -31,7 +30,7 @@ func getMsgEnvelopePool() pool.IPool[*MsgEnvelope] {
 				return &MsgEnvelope{}
 			},
 			func() pool.IStatsRecorder {
-				if config.IsDebug() {
+				if isDebug() {
 					return pool.NewStatsRecorder("msgEnvelopePool")
 				} else {
 					return pool.NewNoStatsRecorder()
