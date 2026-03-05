@@ -15,23 +15,14 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 )
 
-var rpcMonitorProvider *monitor.RpcMonitor
-
-func SetRpcMonitor(rm *monitor.RpcMonitor) {
-	rpcMonitorProvider = rm
-}
-
-func getRpcMonitor() *monitor.RpcMonitor {
-	return rpcMonitorProvider
-}
-
 // localSender 本地服务的Client
 type localSender struct {
-	closed int32
+	closed     int32
+	rpcMonitor *monitor.RpcMonitor
 }
 
-func newLClient(_ string) inf.IRpcSender {
-	return &localSender{}
+func newLClient(_ string, rm *monitor.RpcMonitor) inf.IRpcSender {
+	return &localSender{rpcMonitor: rm}
 }
 
 func (lc *localSender) Close() {
@@ -78,7 +69,7 @@ func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcD
 	}
 
 	// 移除 monitor 监听
-	rm := getRpcMonitor()
+	rm := lc.rpcMonitor
 	if rm == nil {
 		envelope.Release()
 		return nil

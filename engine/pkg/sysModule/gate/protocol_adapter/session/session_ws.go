@@ -15,7 +15,7 @@ type WSSession struct {
 	BaseSession
 }
 
-func NewWSSession(id uint64, conn inf.IConn, uid int64, logger *log.Logger) *WSSession {
+func NewWSSession(id uint64, conn inf.IConn, uid int64, logger log.ILoggerX) *WSSession {
 	return &WSSession{
 		BaseSession: BaseSession{
 			id:           id,

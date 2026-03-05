@@ -17,14 +17,16 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote"
+	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type EndpointManager struct {
-	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
+	log.ILoggerX // 持有 ILoggerX
 
 	eventProcessor *event.Processor
 	eventHandler   *event.Handler
@@ -41,13 +43,17 @@ type EndpointManager struct {
 func NewEndpointManager() *EndpointManager {
 	return &EndpointManager{}
 }
-func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger *log.Logger, senderMgr *client.SenderManager) (*EndpointManager, error) {
-	em.Logger = logger
+func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager) (*EndpointManager, error) {
+	return em.InitWithDeps(eventProcessor, clusterConf, logger, senderMgr, nil, nil, nil)
+}
+
+func (em *EndpointManager) InitWithDeps(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager, rpcHandler *remotehandler.Handler, natsConf *config.NatsConf, busFactory *msgbus.MessageBusFactory) (*EndpointManager, error) {
+	em.ILoggerX = logger
 	em.senderMgr = senderMgr
 	em.nodeUid = uuid.NewString()
 	em.remotes = make(map[string]*remote.Remote)
 	for _, cfg := range clusterConf.RPCServers {
-		rt, err := remote.NewRemote().Init(cfg, em, em.Logger)
+		rt, err := remote.NewRemote().Init(cfg, em, em.ILoggerX, rpcHandler, natsConf)
 		if err != nil {
 			return nil, fmt.Errorf("init remote server[%s] failed: %w", cfg.Type, err)
 		}
@@ -60,7 +66,7 @@ func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *co
 	em.eventHandler = event.NewTriggerHandler()
 	em.eventHandler.Init(em.eventProcessor)
 
-	em.repository = repository.NewRepository()
+	em.repository = repository.NewRepository(busFactory)
 
 	return em, nil
 }
@@ -94,6 +100,10 @@ func (em *EndpointManager) Stop() {
 
 func (em *EndpointManager) SetClusterMode(isClusterMode bool) {
 	em.isClusterMode = isClusterMode
+}
+
+func (em *EndpointManager) GetNodeUid() string {
+	return em.nodeUid
 }
 
 // updateServiceInfo 更新远程服务信息事件
@@ -150,7 +160,7 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 		return
 	}
 
-	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
+	// em.Debugf("add service to cluster, pid: %v", pid.String())
 
 	// 这是同步执行的
 	// 将服务信息发布到集群
@@ -167,7 +177,7 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 		return
 	}
 
-	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
+	// em.Debugf("remove service from cluster, pid: %v", pid.String())
 
 	// 通知集群服务下线
 	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())

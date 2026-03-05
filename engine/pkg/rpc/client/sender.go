@@ -14,17 +14,23 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
 )
 
 // ── 默认创建器注册表（返回副本，避免全局可变 map） ──
 
-func defaultSenderMap() map[string]SenderCreator {
+func defaultSenderMap(logger log.ILoggerX, natsConf *config.NatsConf) map[string]SenderCreator {
 	return map[string]SenderCreator{
-		def.RpcTypeLocal: newLClient,
-		def.RpcTypeRpcx:  newRpcxClient,
-		def.RpcTypeGrpc:  newGrpcClient,
-		def.RpcTypeNats:  newNatsClient,
+		def.RpcTypeRpcx: func(addr string) inf.IRpcSender {
+			return newRpcxClient(addr, logger)
+		},
+		def.RpcTypeGrpc: func(addr string) inf.IRpcSender {
+			return newGrpcClient(addr, logger)
+		},
+		def.RpcTypeNats: func(addr string) inf.IRpcSender {
+			return newNatsClient(addr, logger, natsConf)
+		},
 	}
 }
 
@@ -35,23 +41,26 @@ type SenderCreator func(addr string) inf.IRpcSender
 // SenderManager 管理所有 RPC sender 的创建和缓存。
 // 取代原来的包级 senderMap / senderHandlerMap / lock / init() / Close()。
 type SenderManager struct {
-	*log.Logger // 嵌入 Logger，替代 log.SysLogger
+	log.ILoggerX // 持有 ILoggerX
 
 	poolMgr     *pool.PoolManager
+	rpcMonitor  *monitor.RpcMonitor
+	natsConf    *config.NatsConf
 	senderMap   map[string]SenderCreator             // 协议 → 创建器（初始化后只读）
 	handlerMap  map[string]map[string]inf.IRpcSender // map[addr][tp]sender
 	handlerLock sync.RWMutex
 }
 
 // NewSenderManager 创建 SenderManager 并向 PoolManager 注册远程创建器。
-func NewSenderManager(poolMgr *pool.PoolManager, logger *log.Logger) *SenderManager {
+func NewSenderManager(poolMgr *pool.PoolManager, logger log.ILoggerX, rpcMonitor *monitor.RpcMonitor, natsConf *config.NatsConf) *SenderManager {
 	mgr := &SenderManager{
-		Logger:     logger,
+		ILoggerX:   logger,
 		poolMgr:    poolMgr,
-		senderMap:  defaultSenderMap(),
+		rpcMonitor: rpcMonitor,
+		natsConf:   natsConf,
+		senderMap:  defaultSenderMap(logger, natsConf),
 		handlerMap: make(map[string]map[string]inf.IRpcSender),
 	}
-	setClientLogger(logger)
 	mgr.registerCreators()
 	return mgr
 }
@@ -114,32 +123,6 @@ func (sm *SenderManager) Close() {
 	sm.handlerMap = make(map[string]map[string]inf.IRpcSender)
 }
 
-// ── 包内 provider（用于 sender 子实现日志） ──
-
-var clientLogger *log.Logger
-var clientNatsConf *config.NatsConf
-
-func setClientLogger(logger *log.Logger) {
-	if logger != nil {
-		clientLogger = logger
-	}
-}
-
-func getClientLogger() *log.Logger {
-	if clientLogger == nil {
-		panic("rpc client logger not initialized")
-	}
-	return clientLogger
-}
-
-func SetNatsConf(conf *config.NatsConf) {
-	clientNatsConf = conf
-}
-
-func getNatsConf() *config.NatsConf {
-	return clientNatsConf
-}
-
 // ── Dispatcher ──
 
 type Dispatcher struct {
@@ -175,7 +158,7 @@ func (c *Dispatcher) getSender() inf.IRpcSender {
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
 		if c.localHandler == nil {
-			c.localHandler = sm.senderMap[def.RpcTypeLocal]("")
+			c.localHandler = newLClient("", sm.rpcMonitor)
 		}
 		return c.localHandler
 	}

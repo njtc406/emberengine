@@ -7,6 +7,7 @@ package gr
 
 import (
 	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
@@ -15,9 +16,12 @@ import (
 type GrpcListener struct {
 	actor.UnimplementedGrpcListenerServer
 	cliFactory inf.IRpcSenderFactory
+	handler    *handler.Handler
 }
 
 func (g *GrpcListener) RPCCall(_ context.Context, req *actor.Message) (*actor.RpcCallResponse, error) {
-	//log.SysLogger.Debugf("grpc call: %+v", req)
-	return &actor.RpcCallResponse{}, handler.RpcMessageHandler(g.cliFactory, req)
+	if g.handler == nil {
+		return &actor.RpcCallResponse{}, nil
+	}
+	return &actor.RpcCallResponse{}, g.handler.RpcMessageHandler(g.cliFactory, req)
 }

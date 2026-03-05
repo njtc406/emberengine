@@ -27,21 +27,6 @@ const (
 	StateClosed
 )
 
-var poolLogger *log.Logger
-
-func setPoolLogger(logger *log.Logger) {
-	if logger != nil {
-		poolLogger = logger
-	}
-}
-
-func getPoolLogger() *log.Logger {
-	if poolLogger == nil {
-		panic("rpc pool logger not initialized")
-	}
-	return poolLogger
-}
-
 // ConnectionMetrics 连接指标
 type ConnectionMetrics struct {
 	TotalRequests    int64     `json:"total_requests"`
@@ -56,23 +41,25 @@ type ConnectionMetrics struct {
 
 // PoolConnection 增强连接
 type PoolConnection struct {
-	ID             string              `json:"id"`
-	Sender         inf.IRpcSender      `json:"-"`
-	State          ConnectionState     `json:"state"`
-	Metrics        *ConnectionMetrics  `json:"metrics"`
-	LastUsed       time.Time           `json:"last_used"`
-	mu             sync.RWMutex        `json:"-"`
-	circuitState   CircuitBreakerState `json:"circuit_state"`
-	circuitBreaker *CircuitBreaker     `json:"-"`
+	ID             string             `json:"id"`
+	Sender         inf.IRpcSender     `json:"-"`
+	State          ConnectionState    `json:"state"`
+	Metrics        *ConnectionMetrics `json:"metrics"`
+	LastUsed       time.Time          `json:"last_used"`
+	logger         log.ILoggerX       `json:"-"`
+	mu             sync.RWMutex       `json:"-"`
+	circuitState   CircuitBreakerState
+	circuitBreaker *CircuitBreaker `json:"-"`
 }
 
 // NewPoolConnection 创建新连接
-func NewPoolConnection(id string, sender inf.IRpcSender) *PoolConnection {
+func NewPoolConnection(id string, sender inf.IRpcSender, logger log.ILoggerX) *PoolConnection {
 	now := time.Now()
 	return &PoolConnection{
 		ID:     id,
 		Sender: sender,
 		State:  StateIdle,
+		logger: logger,
 		Metrics: &ConnectionMetrics{
 			CreateTime:     now,
 			LastActiveTime: now,
@@ -203,6 +190,7 @@ type ConnectionPool struct {
 	address string
 	rpcType string
 	creator func(addr string) inf.IRpcSender
+	logger  log.ILoggerX
 
 	connections map[string]*PoolConnection
 	connMutex   sync.RWMutex
@@ -231,7 +219,7 @@ type ConnectionPool struct {
 }
 
 // NewConnectionPool 创建新连接池
-func NewConnectionPool(address, rpcType string, creator func(addr string) inf.IRpcSender, config *PoolConfig) *ConnectionPool {
+func NewConnectionPool(address, rpcType string, creator func(addr string) inf.IRpcSender, config *PoolConfig, logger log.ILoggerX) *ConnectionPool {
 	if config == nil {
 		config = DefaultPoolConfig()
 	}
@@ -243,6 +231,7 @@ func NewConnectionPool(address, rpcType string, creator func(addr string) inf.IR
 		address:     address,
 		rpcType:     rpcType,
 		creator:     creator,
+		logger:      logger,
 		connections: make(map[string]*PoolConnection),
 		metrics:     &PoolMetrics{},
 		stopHealth:  make(chan struct{}),
@@ -259,7 +248,9 @@ func (cp *ConnectionPool) Start() error {
 	// 创建初始连接
 	for i := 0; i < cp.config.InitialConnections; i++ {
 		if err := cp.createConnection(); err != nil {
-			getPoolLogger().Errorf("Failed to create initial connection %d: %v", i, err)
+			if cp.logger != nil {
+				cp.logger.Errorf("Failed to create initial connection %d: %v", i, err)
+			}
 			// 继续创建其他连接
 		}
 	}
@@ -274,8 +265,10 @@ func (cp *ConnectionPool) Start() error {
 	cp.wg.Add(1)
 	go cp.cleanupLoop()
 
-	getPoolLogger().Infof("Connection pool started for %s:%s with %d initial connections",
-		cp.address, cp.rpcType, len(cp.connections))
+	if cp.logger != nil {
+		cp.logger.Infof("Connection pool started for %s:%s with %d initial connections",
+			cp.address, cp.rpcType, len(cp.connections))
+	}
 
 	return nil
 }
@@ -304,7 +297,9 @@ func (cp *ConnectionPool) Stop() {
 	cp.connections = make(map[string]*PoolConnection)
 	cp.connMutex.Unlock()
 
-	getPoolLogger().Infof("Connection pool stopped for %s:%s", cp.address, cp.rpcType)
+	if cp.logger != nil {
+		cp.logger.Infof("Connection pool stopped for %s:%s", cp.address, cp.rpcType)
+	}
 }
 
 // GetConnection 获取连接
@@ -357,13 +352,15 @@ func (cp *ConnectionPool) createConnection() error {
 	}
 
 	// 创建连接对象
-	conn := NewPoolConnection(connID, sender)
+	conn := NewPoolConnection(connID, sender, cp.logger)
 	cp.connections[connID] = conn
 
 	atomic.AddInt32(&cp.metrics.TotalConnections, 1)
 	atomic.AddInt32(&cp.metrics.IdleConnections, 1)
 
-	getPoolLogger().Debugf("Created new connection %s for %s:%s", connID, cp.address, cp.rpcType)
+	if cp.logger != nil {
+		cp.logger.Debugf("Created new connection %s for %s:%s", connID, cp.address, cp.rpcType)
+	}
 	return nil
 }
 
@@ -442,8 +439,10 @@ func (cp *ConnectionPool) checkAndScale() {
 			cp.lastScaleUp = now
 			atomic.AddInt64(&cp.metrics.ScaleOperations, 1)
 			cp.metrics.LastScaleTime = now
-			getPoolLogger().Infof("Scaled up connection pool for %s:%s by %d connections (load: %.2f)",
-				cp.address, cp.rpcType, scaleCount, loadRate)
+			if cp.logger != nil {
+				cp.logger.Infof("Scaled up connection pool for %s:%s by %d connections (load: %.2f)",
+					cp.address, cp.rpcType, scaleCount, loadRate)
+			}
 		}
 	}
 
@@ -457,8 +456,10 @@ func (cp *ConnectionPool) checkAndScale() {
 			cp.lastScaleDown = now
 			atomic.AddInt64(&cp.metrics.ScaleOperations, 1)
 			cp.metrics.LastScaleTime = now
-			getPoolLogger().Infof("Scaled down connection pool for %s:%s by %d connections (load: %.2f)",
-				cp.address, cp.rpcType, scaleCount, loadRate)
+			if cp.logger != nil {
+				cp.logger.Infof("Scaled down connection pool for %s:%s by %d connections (load: %.2f)",
+					cp.address, cp.rpcType, scaleCount, loadRate)
+			}
 		}
 	}
 }
@@ -563,8 +564,10 @@ func (cp *ConnectionPool) healthCheckConnection(conn *PoolConnection) {
 	// 检查连续失败次数
 	if atomic.LoadInt64(&conn.Metrics.ConsecutiveFails) > cp.config.MaxConsecutiveFails {
 		conn.State = StateUnhealthy
-		getPoolLogger().Warnf("Connection %s marked as unhealthy due to consecutive failures: %d",
-			conn.ID, conn.Metrics.ConsecutiveFails)
+		if cp.logger != nil {
+			cp.logger.Warnf("Connection %s marked as unhealthy due to consecutive failures: %d",
+				conn.ID, conn.Metrics.ConsecutiveFails)
+		}
 		return
 	}
 
@@ -577,7 +580,9 @@ func (cp *ConnectionPool) healthCheckConnection(conn *PoolConnection) {
 
 	// 检查连接年龄
 	if time.Since(conn.Metrics.CreateTime) > cp.config.MaxConnectionAge {
-		getPoolLogger().Infof("Connection %s exceeded max age, marking for replacement", conn.ID)
+		if cp.logger != nil {
+			cp.logger.Infof("Connection %s exceeded max age, marking for replacement", conn.ID)
+		}
 		// 可以在这里实现连接替换逻辑
 	}
 }
@@ -616,7 +621,9 @@ func (cp *ConnectionPool) cleanupConnections() {
 		conn.Sender.Close()
 		delete(cp.connections, id)
 		atomic.AddInt32(&cp.metrics.TotalConnections, -1)
-		getPoolLogger().Debugf("Cleaned up connection %s", id)
+		if cp.logger != nil {
+			cp.logger.Debugf("Cleaned up connection %s", id)
+		}
 	}
 
 	// 确保最小连接数
@@ -624,7 +631,9 @@ func (cp *ConnectionPool) cleanupConnections() {
 		needed := cp.config.MinConnections - len(cp.connections)
 		for i := 0; i < needed; i++ {
 			if err := cp.createConnection(); err != nil {
-				getPoolLogger().Errorf("Failed to create replacement connection: %v", err)
+				if cp.logger != nil {
+					cp.logger.Errorf("Failed to create replacement connection: %v", err)
+				}
 				break
 			}
 		}

@@ -1,5 +1,5 @@
 ---
-name: go-reviewer
+name: go代码审查员
 description: Go 语言专家，专注于惯用 Go、并发模式、错误处理和性能优化。用于所有 Go 代码更改。必须用于 Go 项目。
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: Claude Sonnet 4.6 (copilot)

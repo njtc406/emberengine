@@ -18,7 +18,7 @@ import (
 type BaseSession struct {
 	id           uint64
 	conn         inf.IConn
-	logger       *log.Logger
+	logger       log.ILoggerX
 	closed       atomic.Bool
 	uid          int64
 	wg           sync.WaitGroup

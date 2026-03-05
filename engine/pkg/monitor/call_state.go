@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
@@ -49,10 +50,10 @@ type CallState struct {
 
 var callStatePool pool.IPool[*CallState]
 var callStatePoolOnce sync.Once
-var runtimeDebug bool
+var runtimeDebug atomic.Bool
 
 func SetDebug(enabled bool) {
-	runtimeDebug = enabled
+	runtimeDebug.Store(enabled)
 }
 
 func getCallStatePool() pool.IPool[*CallState] {
@@ -62,7 +63,7 @@ func getCallStatePool() pool.IPool[*CallState] {
 				return &CallState{}
 			},
 			func() pool.IStatsRecorder {
-				if runtimeDebug {
+				if runtimeDebug.Load() {
 					return pool.NewStatsRecorder("rpcCallStatePool")
 				} else {
 					return pool.NewNoStatsRecorder()

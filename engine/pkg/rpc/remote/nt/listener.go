@@ -17,7 +17,8 @@ import (
 
 type NatsListener struct {
 	cliFactory inf.IRpcSenderFactory
-	logger     *log.Logger
+	logger     log.ILoggerX
+	handler    *handler.Handler
 }
 
 func (n *NatsListener) Handle(msg *nats.Msg) {
@@ -31,7 +32,10 @@ func (n *NatsListener) Handle(msg *nats.Msg) {
 		return
 	}
 
-	if err = handler.RpcMessageHandler(n.cliFactory, req); err != nil {
+	if n.handler == nil {
+		return
+	}
+	if err = n.handler.RpcMessageHandler(n.cliFactory, req); err != nil {
 		if n.logger != nil {
 			n.logger.Errorf("handle nats message error: %v  req:%+v", err, req)
 		}

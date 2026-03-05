@@ -1,5 +1,5 @@
 ---
-name: code-reviewer
+name: 代码审查员
 description: 资深代码审查员，确保代码质量和安全性
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: Claude Sonnet 4.6 (copilot)

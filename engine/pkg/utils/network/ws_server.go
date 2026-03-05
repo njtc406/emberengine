@@ -14,7 +14,7 @@ import (
 
 type WSServer struct {
 	Addr            string
-	Logger          *log.Logger
+	Logger          log.ILoggerX
 	MaxConnNum      int
 	PendingWriteNum int
 	MaxMsgLen       uint32
@@ -28,7 +28,7 @@ type WSServer struct {
 }
 
 type WSHandler struct {
-	logger          *log.Logger
+	logger          log.ILoggerX
 	maxConnNum      int
 	pendingWriteNum int
 	maxMsgLen       uint32

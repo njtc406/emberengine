@@ -17,10 +17,14 @@ import (
 
 type RpcxListener struct {
 	cliFactory inf.IRpcSenderFactory
-	logger     *log.Logger
+	logger     log.ILoggerX
+	handler    *handler.Handler
 }
 
 func (rm *RpcxListener) RPCCall(_ context.Context, req *actor.Message, _ *dto.RPCResponse) error {
-	//log.SysLogger.Debugf("rpcx call: %+v", req)
-	return handler.RpcMessageHandler(rm.cliFactory, req)
+	// rm.logger.Debugf("rpcx call: %+v", req)
+	if rm.handler == nil {
+		return nil
+	}
+	return rm.handler.RpcMessageHandler(rm.cliFactory, req)
 }

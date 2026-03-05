@@ -47,7 +47,7 @@ type watcher struct {
 	watchMasterWg     sync.WaitGroup
 }
 
-func (w *watcher) getLogger() *log.Logger {
+func (w *watcher) getLogger() log.ILoggerX {
 	if w.svc != nil {
 		return w.svc.GetLogger()
 	}

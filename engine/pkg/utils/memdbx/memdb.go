@@ -64,13 +64,21 @@ var (
 
 // Start 启动默认内存 DB（兼容旧接口）。
 func Start() {
+	if err := StartWithError(); err != nil {
+		fmt.Printf("memdb init failed: %v\n", err)
+	}
+}
+
+// StartWithError 启动默认内存 DB，并返回初始化错误。
+func StartWithError() error {
 	m, err := NewMemDB()
 	if err != nil {
-		panic(fmt.Sprintf("memdb init failed, err:%v", err))
+		return fmt.Errorf("memdb init failed: %w", err)
 	}
 	defaultMu.Lock()
 	defaultMemDB = m
 	defaultMu.Unlock()
+	return nil
 }
 
 func GetDB() *gorm.DB {

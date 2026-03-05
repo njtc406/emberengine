@@ -202,7 +202,7 @@ package wsmodule
 //		if err := client.SendMsg(pack); err != nil {
 //			// 发送失败, 删除该client
 //			delList = append(delList, sessionId)
-//			log.SysLogger.Errorf("CastMsgToClient:send msg error: %s", err)
+//			logger.Errorf("CastMsgToClient:send msg error: %s", err)
 //		}
 //	}
 //}
@@ -221,7 +221,7 @@ package wsmodule
 //		pack.Id = id
 //		pack.Data = msg
 //		if err = client.SendMsg(pack); err != nil {
-//			log.SysLogger.Errorf("RpcSendMsgToClient:send msg error: %s", err)
+//			logger.Errorf("RpcSendMsgToClient:send msg error: %s", err)
 //			return err
 //		}
 //	}

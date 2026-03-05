@@ -1,5 +1,5 @@
 ---
-name: go-build-resolver
+name: go语言构建错误解决专家
 description: Go 构建、vet 和编译错误解决专家。修复构建错误、go vet 问题和 linter 警告，尽量保持最小修改。用于 Go 构建失败时。
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: Claude Sonnet 4.6 (copilot)

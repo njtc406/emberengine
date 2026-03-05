@@ -8,6 +8,7 @@ package mysqlmodule
 import (
 	"fmt"
 	syslog "log"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -43,14 +44,14 @@ type MysqlModule struct {
 
 	conf   *Conf
 	client *gorm.DB
-	logger *log.Logger
+	logger log.ILoggerX
 }
 
 func NewMysqlModule() *MysqlModule {
 	return &MysqlModule{}
 }
 
-func (m *MysqlModule) SetLogger(logger *log.Logger) {
+func (m *MysqlModule) SetLogger(logger log.ILoggerX) {
 	m.logger = logger
 }
 
@@ -73,7 +74,7 @@ func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
 		baseLogger = m.GetLogger()
 	}
 	slowLogger := logger.New(
-		syslog.New(baseLogger.GetOutput(), "\n", syslog.LstdFlags),
+		syslog.New(os.Stdout, "\n", syslog.LstdFlags),
 		logger.Config{
 			// 设定慢查询时间阈值为 默认值：200 * time.Millisecond
 			SlowThreshold: 200 * time.Millisecond,
@@ -101,7 +102,9 @@ func (m *MysqlModule) initConn(database *string) (*gorm.DB, error) {
 		)
 	}
 
-	baseLogger.Infof("mysql connect : %s", dsn)
+	if baseLogger != nil {
+		baseLogger.Infof("mysql connect : %s", dsn)
+	}
 
 	return gorm.Open(mysql.New(mysql.Config{
 		DSN:                     dsn,

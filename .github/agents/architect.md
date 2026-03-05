@@ -1,5 +1,5 @@
 ---
-name: architect
+name: 架构师
 description: 软件架构师，负责任务拆分、技术方案设计和项目规划
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: Claude Opus 4.6 (copilot)

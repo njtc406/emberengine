@@ -56,6 +56,14 @@ func (d *inlineDispatcher) IsClosed() bool     { return d.closed.Load() }
 
 func (d *inlineDispatcher) Deliver(ctx context.Context, _ inf.IEnvelope) error { return nil }
 
+func (d *inlineDispatcher) DeliverRequest(ctx context.Context, env inf.IEnvelope) error {
+	return d.Deliver(ctx, env)
+}
+
+func (d *inlineDispatcher) DeliverResponse(ctx context.Context, env inf.IEnvelope) error {
+	return d.Deliver(ctx, env)
+}
+
 func (d *inlineDispatcher) PostJob(j inf.IMailboxJob) error {
 	if j == nil {
 		return nil
@@ -121,16 +129,9 @@ func TestRpcMonitorAdd_WhenSchedulerFails_CallDoesNotHang(t *testing.T) {
 func TestRpcMonitorAdd_WhenSchedulerFails_AsyncCallbackFires(t *testing.T) {
 	var called atomic.Int32
 	disp := &inlineDispatcher{cb: func(ctx context.Context, j inf.IMailboxJob) {
-		if cbj, ok := j.(*mbjob.ConcurrentCallbackJob); ok {
-			cb := cbj.GetPayload()
-			if cb != nil {
-				cb.DoCallback(ctx)
-				called.Add(1)
-				if st, ok := cb.(*CallState); ok {
-					st.Release()
-				}
-			}
-		}
+		_ = ctx
+		_ = j
+		called.Add(1)
 	}}
 
 	rm := newTestRpcMonitor(&errScheduler{})

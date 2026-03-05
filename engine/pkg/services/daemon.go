@@ -19,13 +19,9 @@ type daemon struct {
 }
 
 func (d *daemon) OnInit() error {
-	var bus *event.Bus
+	var bus inf.INodeEventBus
 	if ctx := d.GetNodeContext(); ctx != nil {
-		if provider, ok := ctx.(interface{ GetEventBus() *event.Bus }); ok {
-			if b := provider.GetEventBus(); b != nil {
-				bus = b
-			}
-		}
+		bus = ctx.GetEventBus()
 	}
 	if bus == nil {
 		d.Warn("daemon init: event bus is nil, skip global subscriptions")

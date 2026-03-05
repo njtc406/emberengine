@@ -38,7 +38,7 @@ type Processor struct {
 	mu       sync.RWMutex
 	listener inf.IListener
 	bus      *Bus
-	logger   *log.Logger
+	logger   log.ILoggerX
 
 	// 结构：map[事件类型]map[所属handler]map[回调名]entry
 	// 这样既能支持同一 module(handler) 多个 name 的注册，也能按 handler+name 精准解绑。
@@ -71,7 +71,7 @@ func (t *Processor) Init(listener inf.IListener) {
 	t.specificSubCnt = make(map[specificKey]int)
 
 	t.listener = listener
-	if loggerProvider, ok := listener.(interface{ GetLogger() *log.Logger }); ok {
+	if loggerProvider, ok := listener.(interface{ GetLogger() log.ILoggerX }); ok {
 		t.logger = loggerProvider.GetLogger()
 	}
 }

@@ -1,5 +1,5 @@
 ---
-name: doc-updater
+name: 文档专家
 description: 文档和代码映射专家。主动用于更新代码映射和文档。运行 /update-codemaps 和 /update-docs，生成 docs/CODEMAPS/*，更新 README 和指南。
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: GPT-5.1 (copilot)

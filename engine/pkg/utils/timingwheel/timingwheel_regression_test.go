@@ -140,13 +140,16 @@ func TestJobSchedulerStop_NoSendOnClosedChannelPanic(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(
+	scheduler, err := NewJobScheduler(
 		"closed-send",
 		100,
 		4,
 		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "closed-send"}),
 	)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 
 	// Create some timers that will expire soon
 	for i := 0; i < 50; i++ {
@@ -183,13 +186,16 @@ func TestJobScheduler_ConcurrentAddAndStop_NoPanic(t *testing.T) {
 	defer tw.Stop()
 
 	for round := 0; round < 10; round++ {
-		scheduler := NewJobScheduler(
+		scheduler, err := NewJobScheduler(
 			"concurrent-stop",
 			1000,
 			4,
 			tw,
 			log.NewLoggerX(logger, log.Fields{"pkg": "concurrent-stop"}),
 		)
+		if err != nil {
+			t.Fatalf("Failed to create scheduler: %v", err)
+		}
 
 		ctx := context.Background()
 		consumerDone := make(chan struct{})
@@ -249,13 +255,16 @@ func TestJobSchedulerStop_NoDeadlock_WhenCallbackCancelsTimer(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(
+	scheduler, err := NewJobScheduler(
 		"stop-deadlock",
 		1000,
 		4,
 		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "stop-deadlock"}),
 	)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 
 	// Store timer IDs so the callback can cancel other timers
 	var ids sync.Map
@@ -324,13 +333,16 @@ func TestSetTimeOffset_ConcurrentWithTimers_ExecutesSome(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler(
+	scheduler, err := NewJobScheduler(
 		"offset-race",
 		10000,
 		8,
 		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "offset-race"}),
 	)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 
 	ctx := context.Background()
 	var executed atomic.Int32
@@ -447,7 +459,10 @@ func TestOverflowWheel_SharesAdjustingState(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("overflow-adjusting", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("overflow-adjusting", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -504,7 +519,10 @@ func TestSetTimeOffset_WithOverflowTimers_NoDeadlock(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("offset-with-overflow", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("offset-with-overflow", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -560,7 +578,10 @@ func TestAddDuringAdjust_NoBusyWait(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("no-busy-wait", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("no-busy-wait", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -619,7 +640,10 @@ func TestProcessPendingTimers_DrainsAndExecutes(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("pending-drain", 2000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("pending-drain", 2000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -676,7 +700,10 @@ func TestDelayQueue_NoTimerLeakUnderChurn(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("delayqueue-churn", 1000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("delayqueue-churn", 1000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	defer scheduler.Stop()
 
 	ctx := context.Background()
@@ -719,7 +746,10 @@ func TestTimingWheel_CombinedStress_OverflowAndTimeOffset(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("combined-stress", 2000, 10, tw, nil)
+	scheduler, err := NewJobScheduler("combined-stress", 2000, 10, tw, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	defer scheduler.Stop()
 
 	ctx := context.Background()

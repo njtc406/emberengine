@@ -17,6 +17,8 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 )
 
 // NewCluster 创建新的 Cluster 实例（Phase 2 per-Node 模式推荐使用）。
@@ -25,7 +27,7 @@ func NewCluster() *Cluster {
 }
 
 type Cluster struct {
-	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
+	log.ILoggerX // 持有 ILoggerX，避免对 *log.Logger 的具体依赖
 
 	closed chan struct{}
 
@@ -46,23 +48,26 @@ type ctxEvent struct {
 	ev  inf.IEvent
 }
 
-func (c *Cluster) Init(clusterConf *config.ClusterConf, logger *log.Logger, senderMgr *client.SenderManager) error {
-	c.Logger = logger
+func (c *Cluster) Init(clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager, rpcHandler *remotehandler.Handler, natsConf *config.NatsConf, busFactory *msgbus.MessageBusFactory) error {
+	c.ILoggerX = logger
+	if c.ILoggerX == nil {
+		return fmt.Errorf("cluster init requires logger")
+	}
 	c.closed = make(chan struct{})
 	c.eventChannel = make(chan inf.IEvent, 1024)
 	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(nil)
 
 	var err error
-	c.endpoints, err = endpoints.NewEndpointManager().Init(c.eventProcessor, clusterConf, logger, senderMgr)
+	c.endpoints, err = endpoints.NewEndpointManager().InitWithDeps(c.eventProcessor, clusterConf, c.ILoggerX, senderMgr, rpcHandler, natsConf, busFactory)
 	if err != nil {
 		return fmt.Errorf("init endpoints error: %w", err)
 	}
 
 	c.discovery = discovery.CreateDiscovery(clusterConf.DiscoveryType)
 	if c.discovery != nil {
-		if loggerAware, ok := c.discovery.(interface{ SetLogger(*log.Logger) }); ok {
-			loggerAware.SetLogger(c.Logger)
+		if loggerAware, ok := c.discovery.(interface{ SetLogger(log.ILoggerX) }); ok {
+			loggerAware.SetLogger(c.ILoggerX)
 		}
 		if err = c.discovery.Init(clusterConf, c.eventProcessor, c); err != nil {
 			return fmt.Errorf("init discovery error: %w, conf: %+v", err, clusterConf)

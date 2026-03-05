@@ -40,7 +40,7 @@ type testService struct {
 //}
 //
 //func TestEventBus(t *testing.T) {
-//	if log.SysLogger == nil {
+//	// if logger is not initialized, initialize one for test output.
 //		log.Init(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "debug"}, true)
 //	}
 //

@@ -1,5 +1,5 @@
 ---
-name: planner
+name: 规划专员
 description: 复杂功能和重构的专家规划专员。当用户提出功能实现、架构变更或复杂重构需求时，请主动使用此功能。在规划任务中会自动激活。
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: Claude Sonnet 4.6 (copilot)

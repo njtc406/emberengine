@@ -12,7 +12,7 @@ import (
 type WSClient struct {
 	sync.Mutex
 	Addr             string
-	Logger           *log.Logger
+	Logger           log.ILoggerX
 	ConnNum          int
 	ConnectInterval  time.Duration
 	PendingWriteNum  int

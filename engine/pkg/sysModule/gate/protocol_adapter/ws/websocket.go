@@ -52,11 +52,9 @@ func (w *WebSocketAdapter) ListenAndServe(md inf.IModule, conf interface{}) erro
 	w.jwtSecret = cfg.JWTSecret
 	status := glbConfig.Release
 	if service := md.GetService(); service != nil {
-		if provider, ok := service.(interface{ GetNodeContext() inf.INodeContext }); ok {
-			if nodeCtx := provider.GetNodeContext(); nodeCtx != nil {
-				if c := nodeCtx.GetConfig(); c != nil {
-					status = c.GetStatus()
-				}
+		if nodeCtx := service.GetNodeContext(); nodeCtx != nil {
+			if c := nodeCtx.GetConfig(); c != nil {
+				status = c.GetStatus()
 			}
 		}
 	}

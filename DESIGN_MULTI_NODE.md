@@ -53,8 +53,23 @@
 | `dbservice/mysql/redis` 初始化 `panic -> error` 透传 | ✅ 已完成 | `MysqlModule.Init/RedisModule.Init` 改为返回 `error`，由 `DBService.OnInit()` 上抛 |
 | `config` 目录初始化 `panic -> error` 透传 | ✅ 已完成 | `createDirIfNotExists/initDir/Load` 全链路改为返回 `error`，并修正目录权限为 `0755` |
 | `utils/network` WebSocket 启动阶段 panic 清理 | ✅ 已完成 | `ws_server/ws_client` 启动参数与证书错误改为记录日志并安全返回 |
-| panic/fatal 全面改造为 error 透传（按 §7.4） | ⏳ 未完成 | 仍存在历史 panic/fatal 路径待分批清理 |
-| `INodeContext` 覆盖面与全组件注入一致性 | ⏳ 未完成 | 需继续对照第 4 章逐项核对 |
+| `core/rpc/handler` 方法注册 panic 清理 | ✅ 已完成 | `registerMethod()` 中签名不匹配改为错误日志并继续，避免启动期 panic |
+| `utils/memdbx` 启动兼容接口 panic 清理 | ✅ 已完成 | 新增 `StartWithError()`，旧 `Start()` 改为兼容包装且不再 panic |
+| `utils/network` `LenMsgLen` 非法值 panic 路径清理 | ✅ 已完成 | `tcp_msg/tcp_client/tcp_server/kcp_client/kcp_server` 统一容错并回退默认值 |
+| `rpc` logger 初始化 panic 清理 | ✅ 已完成 | `sender/pool/msgbus` 改为懒加载兜底 logger，不再因未注入 logger 直接 panic |
+| `rpc/msgbus` `rpcMonitor` 未初始化 panic 清理 | ✅ 已完成 | 改为 `requireRpcMonitor()` 错误透传，调用点统一返回 error，不再直接 panic |
+| `utils/timingwheel` 构造期 panic 清理 | ✅ 已完成 | `NewTimingWheel/NewJobScheduler` 的参数/依赖异常改为日志+默认回退，不再直接 panic |
+| `utils/bytespool` 归还路径 panic 清理 | ✅ 已完成 | `releaseByteSlice()` 非法容量分支改为返回 `false`，不再触发 panic |
+| `utils/mpmc` 队列构造 panic 清理 | ✅ 已完成 | `NewQueue()` 非法容量改为默认回退（最小 1）并继续构造 |
+| `utils/shardedlock` 构造参数 panic 清理 | ✅ 已完成 | `NewShardedRWLock()` 非法分片数改为默认/向上取 2 的幂，不再 panic |
+| `utils/timingwheel/cron` 解析器构造 panic 清理 | ✅ 已完成 | `NewParser()` 不再 panic；非法 optional 组合在 `Parse()` 阶段返回 error |
+| 非测试残留 `panic/fatal` 白名单归档（`deque/log/worker_pool`） | ✅ 已完成 | 残留点已归档为白名单语义（编程期断言/日志 API 明确语义），并与扫描结果对齐 |
+| `HookFun` 上下文注入与错误透传 | ✅ 已完成 | 签名改为 `func(ctx INodeContext, extra map[any]any) error`，`Node.Start()` 统一处理 hook error/panic |
+| `INodeContext` 节点唯一标识补齐（`GetNodeUid`） | ✅ 已完成 | `INodeContext`/`Node`/`EndpointManager` 增加 `GetNodeUid()`，支持上下文级节点身份读取 |
+| `INodeContext` 组件访问器覆盖扩展（`*Any`） | ✅ 已完成 | 增加 `GetClusterAny/GetEventBusAny/GetRouterAny...` 等访问器，避免包循环依赖并减少对 `Node` 具体类型依赖 |
+| `INodeContext` 调用侧替换（`core/service`/`daemon`/`rpc selector`） | ✅ 已完成 | 已从 `Get*Any()` 过渡到窄接口访问，临时 `nodeLike/provider` 断言链路已收敛 |
+| panic/fatal 全面改造为 error 透传（按 §7.4） | ✅ 已完成 | 运行时代码已收敛至白名单语义（`deque` 边界断言、`worker_pool` 参数断言、`log` 显式语义入口） |
+| `INodeContext` 覆盖面与全组件注入一致性 | ✅ 已完成 | 运行时关键链路已统一走窄接口；`core/module` 私有化回收路径已通过 `INodeEndpointManager.ToPrivateService` 收口 |
 
 ### 0.2 本次更新记录
 
@@ -81,6 +96,31 @@
 - 2026-03-02：完成 `actor/mailbox/worker_pool` 构造器 `Fatal` 清理（`invoker=nil` 改为程序员错误 `panic`）；`go build ./...` 已通过。
 - 2026-03-02：完成 `config` 目录初始化链路 `panic -> error` 透传（`createDirIfNotExists/initDir/Load`）；`go build ./...` 已通过。
 - 2026-03-02：完成 `utils/network` WebSocket 启动阶段 panic 清理（`ws_server/ws_client` 改为错误日志+安全返回）；`go build ./...` 已通过。
+- 2026-03-03：完成 `core/rpc/handler` 方法注册 panic 清理（签名不匹配改为错误日志）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/memdbx` 启动兼容接口 panic 清理（新增 `StartWithError()`，旧 `Start()` 不再 panic）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/network` `LenMsgLen` 非法值 panic 路径清理（`tcp_msg/tcp_client/tcp_server/kcp_client/kcp_server`）；`go build ./...` 已通过。
+- 2026-03-03：完成 `rpc` logger 初始化 panic 清理（`rpc/client/sender`、`rpc/client/pool/manager`、`rpc/message/msgbus`）；`go build ./...` 已通过。
+- 2026-03-03：完成 `rpc/message/msgbus` `rpcMonitor` 未初始化 panic 清理（改为 `requireRpcMonitor()` + 调用点 error 透传）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/timingwheel` 构造期 panic 清理（`NewTimingWheel/NewJobScheduler` 改为日志 + 默认回退）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/bytespool` 归还路径 panic 清理（`releaseByteSlice` 非法分支改为 `return false`）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/mpmc` 队列构造 panic 清理（`NewQueue` 非法容量默认回退为最小容量）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/shardedlock` 构造参数 panic 清理（非法分片数改为默认/向上取整）；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/timingwheel/cron` 解析器构造 panic 清理（`NewParser` 改为不 panic，交由 `Parse` 返回错误）；`go build ./...` 已通过。
+- 2026-03-03：执行非测试运行时代码残留扫描（`panic/log.Fatal/os.Exit`），当前主要剩余 `queue/deque` 边界 panic、`worker_pool` 构造器参数断言 panic、`log` 包 `Panic/Fatal` 语义实现；已登记为白名单归档待办。
+- 2026-03-03：完成“扫描噪音”清理（注释中的 `panic/log.Fatal` 文本），并再次扫描确认剩余仅三类白名单语义：`queue/deque` 边界断言、`worker_pool` 参数断言、`log` 语义入口；`go build ./...` 已通过。
+- 2026-03-03：完成 `utils/timingwheel/task_scheduler` `defaultSeed` 常量化（`var -> const`）；`go build ./...` 已通过。
+- 2026-03-03：完成 `HookFun` 签名改造（注入 `INodeContext` 并返回 `error`），`Node.Start()` 增加 hook panic 捕获与错误上抛；`go build ./...` 已通过。
+- 2026-03-03：完成 `INodeContext` 节点身份补齐（新增 `GetNodeUid()`，由 `Node` 经 `EndpointManager` 提供运行时 nodeUid，并带配置回退）；`go build ./...` 已通过。
+- 2026-03-03：完成 `INodeContext` 组件访问器覆盖扩展（新增 `Get*Any` 访问器组，`Node` 全量实现），用于在避免包循环依赖下通过上下文读取核心组件；`go build ./...` 已通过。
+- 2026-03-03：完成 `INodeContext` 调用侧替换首批（`core/service`、`services/daemon`、`core/rpc/selector`），运行时依赖获取统一优先走 `Get*Any()`；`go build ./...` 已通过。
+- 2026-03-03：完成 `core/service` profiler 路径调用侧替换（`GetProfilerRegistryAny()`），移除临时 `GetProfilerRegistry` 断言；`go build ./...` 已通过。
+- 2026-03-03：**INodeContext 接口精化** — 移除所有 `Get*Any()` 过渡方法，改为窄接口返回。新增 5 个窄接口 `INodeEndpointManager`/`INodeEventBus`/`INodeRouter`/`INodeProfilerRegistry`/`INodeMethodIndex`，由具体类型隐式满足。移除接口中未被外部消费的内部组件（`RpcMonitor`/`ServiceManager`/`PoolManager`/`SenderManager`/`PluginManager`）。Cluster 解构为 `IsClusterMode()` + `GetEndpointManager()`。更新 §4.1 设计文档。`Node` 实现、`core/service`、`core/rpc/selector`、`core/rpc/handler`、`services/daemon` 全部迁移至接口化路径；`go build ./...` 已通过。
+- 2026-03-03：补充 `ILoggerX` 字段派生语义：`WithField/WithFields` 明确为“在当前 logger 上追加字段（继承已有 fields）”；新增 `WithFreshFields` 作为“从根 logger 重新派生（不继承历史 fields）”标准入口。更新 §4.2 使用规范与示例，要求多模块复用场景优先使用 `WithFreshFields` 防止字段污染。
+- 2026-03-04：完成 logger 主链接口化第二阶段：`cluster/services/monitor/event` 入口签名统一为 `log.ILoggerX`，并同步迁移 `cluster/endpoints`、`cluster/discovery/etcd`、`rpc/remote/*`、`rpc/client/*`、`rpc/message/msgbus`、`rpc/remote/handler` 的 logger 字段/构造参数/provider。当前 `go build ./...` 已通过。
+- 2026-03-04：完成 logger 接口化第三阶段：`interfaces/IService.GetLogger()` 改为 `log.ILoggerX`，并同步完成 `core/module`、`core/service`、`cluster/discovery/etcd/watcher`、`sysModule/gate/protocol_adapter/session/*` 的签名与调用侧迁移。当前 `go build ./...` 已通过。
+- 2026-03-04：完成 logger 接口化第四阶段：`utils/network/ws*`、`utils/httpx/gin`、`sysModule/mysqlmodule`、`sysModule/redismodule` 已统一为 `log.ILoggerX`；`mysqlmodule` 保留对 `*log.Logger` 的窄兼容断言仅用于 gorm writer 输出桥接。当前 `go build ./...` 已通过。
+- 2026-03-04：完成 `IService` 契约补齐：`GetNodeContext()/GetRouter()` 升级为接口正式方法，`core/rpc/selector` 与 `gate/protocol_adapter/ws` 去除临时 provider 断言链路。当前 `go build ./...` 已通过。
+- 2026-03-04：完成 `INodeContext` 覆盖面收口：`INodeEndpointManager` 补齐 `ToPrivateService(svc)`，`core/module` 释放链路不再依赖具体 `EndpointManager` 类型或临时能力断言，统一走 `IService -> INodeContext -> INodeEndpointManager`。当前 `go build ./...` 已通过。
 
 ## 一、现状分析
 
@@ -2271,78 +2311,308 @@ func (h *Handler) Select(sender *actor.PID, ...) inf.IBus {
 
 ### 4.1 接口定义
 
+> **核心原则**: `INodeContext` 的所有返回值 **统一使用接口**，不返回任何具体类型。
+>
+> **为什么不返回具体类型？** 即使 `config`、`log`、`asynclib` 等包今天不 import `interfaces`，
+> 未来在迭代中一旦引入了 `interfaces` 依赖（哪怕只是用一个小接口），就会立刻形成循环引用，
+> 届时还是必须回来改 `INodeContext` 的返回类型。**使用接口是一次性防火墙，避免反复修改。**
+>
+> **循环依赖约束**: `INodeContext` 定义在 `interfaces` 包中。以下包 **import `interfaces`**，
+> 因此 `interfaces` **不能**反向 import 它们：
+> `monitor`、`event`、`cluster`、`services`、`router`、`rpc/client`、`rpc/client/pool`、`core/rpc`、
+> `timingwheel`（通过 `xcontext` 间接依赖）。
+>
+> 解决方式：全部通过**窄接口**暴露，由具体类型隐式满足（Go duck typing）。
+
+#### 4.1.1 窄接口定义
+
+##### A. 基础设施层窄接口
+
 ```go
-// interfaces/INodeContext.go
-type INodeContext interface {
-    // 基础设施
-    Config() *config.Config
-    Logger() *log.Logger
-    AntsPool() *asynclib.Pool
-    TimingWheel() *timingwheel.TimingWheel
-    
-    // 核心组件
-    RpcMonitor() *monitor.RpcMonitor
-    DeDuplicator() inf.IDeDuplicator
-    Cluster() *cluster.Cluster
-    EventBus() *event.Bus
-    ServiceMgr() *services.ServiceManager
-    
-    // RPC 层
-    PoolManager() *pool.PoolManager
-    SenderMgr() *client.SenderManager
-    
-    // 路由 & 辅助
-    Router() *router.Router
-    Profiler() *profiler.Registry
-    PluginMgr() *plugins.PluginManager
-    PoolStats() *pool.PoolStats
-    
-    // 节点信息
-    NodeId() int32
-    NodeUid() string
-    TimeOffset() time.Duration
+// interfaces/INodeContext.go — 基础设施层窄接口
+
+// INodeConfig 节点配置窄接口
+// 由 *config.Config 隐式满足
+// 消费者实际使用的方法: IsDebug(), GetStatus()
+// 预留 GetDefaultRpcTimeout / GetCheckTimeoutInterval 供后续消费者使用
+type INodeConfig interface {
+    IsDebug() bool
+    GetStatus() string
+    GetDefaultRpcTimeout() time.Duration
+    GetCheckTimeoutInterval() time.Duration
+}
+
+// INodePool 协程池窄接口
+// 由 *asynclib.Pool 隐式满足
+type INodePool interface {
+    Go(f func()) error
+    Release()
+    Running() int
+    Cap() int
+}
+
+// INodeTimingWheel 时间轮窄接口
+// 由 *timingwheel.TimingWheel 隐式满足
+//
+// 因 timingwheel → xcontext → interfaces 构成间接循环，interfaces 不能 import timingwheel，
+// 故仅暴露不引用 timingwheel 内部类型（如 *Timer）的方法。
+//
+// 消费者模式: 获取 INodeTimingWheel 后传入 timingwheel.NewJobScheduler()。
+// NewJobScheduler 内部对接口做类型断言获取 *TimingWheel（见 §4.1.3 迁移说明）。
+type INodeTimingWheel interface {
+    Start()
+    Stop()
+    IsClosed() bool
+    SetTimeOffset(offset time.Duration)
 }
 ```
 
-> **说明**: `Router()`、`SenderMgr()`、`PluginMgr()` 在原文档 §2.1 的 Node 结构体中已定义为字段，
-> 但原 `INodeContext` 接口中遗漏了。`NodeId()`、`NodeUid()` 用于需要标识当前 Node 身份的场景
-> （如 trace ID 前缀、日志标记）。`TimeOffset()` 用于获取当前 Node 的时间偏移。
+> **为什么 `GetLogger()` 直接返回 `log.ILoggerX`？**
+> `log` 包已定义了完备的 `ILoggerX` 接口（含 `WithField`、`WithFields`、`WithContext` 链式方法），
+> 且 `interfaces` 已 import `log`（在 `INodeProfilerRegistry` 中引用 `log.ILoggerX`）。
+> 直接复用 `log.ILoggerX` 而非再定义一层 `INodeLogger`，避免冗余包装。
+>
+> **消费者迁移**: 原来通过 `ctx.GetLogger()` 获取 `*log.Logger` 后调用 `log.NewLoggerX(baseLogger, fields)`
+> 创建子 logger 的模式，改为 `ctx.GetLogger().WithFields(fields)` 链式创建，更简洁且接口安全。
+
+##### B. 核心组件层窄接口（与改造前一致）
+
+```go
+// INodeEndpointManager 端点管理器窄接口
+// 由 *endpoints.EndpointManager 隐式满足
+type INodeEndpointManager interface {
+    CreatePid(partition int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID
+    AddService(svc IService)
+    RemoveService(svc IService)
+    ToPrivateService(svc IService)
+}
+
+// INodeEventBus 事件总线窄接口
+// 由 *event.Bus 隐式满足
+type INodeEventBus interface {
+    SubscribeGlobal(eventType def.EventType, svc IListener)
+    UnSubscribeGlobal(eventType def.EventType, svc IListener)
+}
+
+// INodeRouter 路由器窄接口
+// 由 *router.Router 隐式满足
+type INodeRouter interface {
+    Select(sender *actor.PID, options ...SelectParamBuilder) IBus
+    SelectByPid(sender, receiver *actor.PID) IBus
+    SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus
+    SelectByServiceUid(sender *actor.PID, receiverServiceUid string) IBus
+}
+
+// INodeProfilerRegistry Profiler 注册中心窄接口
+// 由 *profiler.Registry 隐式满足
+type INodeProfilerRegistry interface {
+    RegProfiler(name string, logger log.ILoggerX) IProfiler
+    UnRegProfiler(name string)
+}
+
+// IProfiler 性能分析器窄接口
+// 由 *profiler.Profiler 隐式满足
+// 避免 INodeProfilerRegistry 返回 *profiler.Profiler 具体类型
+type IProfiler interface {
+    Push(tag string)
+    Pop()
+    Reset()
+    IsEnabled() bool
+}
+
+// INodeMethodIndex 方法前缀索引窄接口
+// 由 *rpc.MethodIndex 隐式满足
+type INodeMethodIndex interface {
+    HasApiPrefix(s string) bool
+    HasRpcPrefix(s string) bool
+    HasApiReadOnlyPrefix(s string) bool
+    HasRpcReadOnlyPrefix(s string) bool
+}
+```
+
+#### 4.1.2 INodeContext 主接口
+
+```go
+type INodeContext interface {
+    // ── 基础设施层（全部返回窄接口，防止未来循环引用） ──
+    GetConfig() INodeConfig
+    GetLogger() log.ILoggerX
+    GetAntsPool() INodePool
+    GetTimingWheel() INodeTimingWheel
+    GetDeDuplicator() IDeDuplicator
+
+    // ── 节点身份 ──
+    GetNodeId() string
+    GetNodeType() string
+    GetNodeUid() string
+
+    // ── 核心组件（返回窄接口，解决循环依赖 + 防止接口混用） ──
+    IsClusterMode() bool
+    GetEndpointManager() INodeEndpointManager
+    GetEventBus() INodeEventBus
+    GetRouter() INodeRouter
+    GetProfilerRegistry() INodeProfilerRegistry
+    GetMethodIndex() INodeMethodIndex
+}
+```
+
+#### 4.1.3 TimingWheel 接口化迁移说明
+
+`INodeTimingWheel` 是所有窄接口中最特殊的一个，因为消费者拿到接口后需要传入
+`timingwheel.NewJobScheduler()`，而该函数当前签名为 `func NewJobScheduler(..., tw *TimingWheel, ...)`.
+
+**循环链**: `interfaces` → `timingwheel` → `xcontext` → `interfaces` ❌
+
+**迁移步骤**（实现者参考）:
+
+1. `timingwheel.NewJobScheduler` 参数类型从 `*TimingWheel` 改为 `INodeTimingWheel`（`interfaces` 中定义的窄接口），
+   函数内部使用类型断言 `tw.(*TimingWheel)` 获取具体类型以访问 `AfterFunc`/`ScheduleFunc`/`genTimerId` 等内部方法。
+   > 注：`NewJobScheduler` 在 `timingwheel` 包内，断言自己包的具体类型是安全的。
+
+2. 或者（更优）在 `timingwheel` 包内定义 `ITimingWheelInternal` 接口包含 `AfterFunc`/`ScheduleFunc`/`genTimerId`，
+   `NewJobScheduler` 接受该接口。`INodeTimingWheel`（`interfaces` 中）是外部消费者的窄视图，
+   `ITimingWheelInternal`（`timingwheel` 中）是内部消费者的宽视图，`*TimingWheel` 同时满足两者。
+
+3. **长期优化**（可选）: 打断 `timingwheel → xcontext → interfaces` 依赖链：
+   - 将 `xcontext` 中对 `interfaces.IContext` 的引用提取到 `def` 包（更底层，无 import interfaces）
+   - 则 `timingwheel → xcontext → def`，不再间接依赖 `interfaces`
+   - 此时 `INodeTimingWheel` 可扩展更多方法（包含引用 timingwheel 内部类型的方法）
+
+**消费者代码变更**（`core/service.go`、`monitor/monitor.go`）:
+
+```go
+// 改造前
+twAny := s.nodeCtx.GetTimingWheel()
+tw, ok := twAny.(*timingwheel.TimingWheel)  // 类型断言 any → 具体类型
+timingwheel.NewJobScheduler(..., tw, ...)
+
+// 改造后（步骤 1）
+tw := s.nodeCtx.GetTimingWheel()  // 直接得到 INodeTimingWheel，无需断言
+timingwheel.NewJobScheduler(..., tw, ...)  // NewJobScheduler 接受 INodeTimingWheel
+```
+
+> **设计决策**:
+> 1. **全部接口化返回**: `INodeContext` 所有方法返回接口而非具体类型。
+>    即使 `config`/`log`/`asynclib` 今天不 import `interfaces`，使用接口作为防火墙，
+>    避免未来引入循环引用时被迫修改所有消费者。**一次到位，避免后续返工。**
+> 2. **不暴露内部组件**: `RpcMonitor`、`ServiceManager`、`PoolManager`、`SenderManager`、
+>    `PluginManager` 没有外部消费者通过 INodeContext 访问，从接口中移除。
+>    这些组件通过构造注入或包级 setter 注入，不经过 INodeContext 传递。
+> 3. **Cluster 解构**: 不暴露 `*cluster.Cluster` 整体，改为 `IsClusterMode()` +
+>    `GetEndpointManager()` 两个精确方法，消费者只需要这两个入口。
+> 4. **Logger 复用 `log.ILoggerX`**: 已有完备接口，不再定义 `INodeLogger`，
+>    消费者用 `WithField()`/`WithFields()` 链式派生子 logger，替代 `log.NewLoggerX()` 模式。
+> 5. **TimingWheel 分层接口**: `INodeTimingWheel`（外部窄视图）+
+>    `ITimingWheelInternal`（timingwheel 包内部宽视图），打破循环依赖。
+> 6. **IProfiler 窄接口**: `INodeProfilerRegistry.RegProfiler()` 返回 `IProfiler` 而非
+>    `*profiler.Profiler`，确保 `profiler` 包也不会因未来变更引入循环。
+> 7. **MethodIndex 窄接口**: 消费者只需要 `HasXxxPrefix()` 四个方法，
+>    通过 `INodeMethodIndex` 窄接口暴露，避免 `core/rpc` → `interfaces` 循环。
 
 ### 4.2 Logger 嵌入策略
 
-所有核心组件通过 **嵌入 `*log.Logger`** 获得日志能力，使调用方可以直接 `s.Info()`：
+所有核心组件通过持有 `log.ILoggerX` 接口获得日志能力：
 
 ```go
-// 组件嵌入 Logger 的标准模式
+// 组件持有 logger 的标准模式
 type MyComponent struct {
-    *log.Logger           // 嵌入，获得 Info/Warn/Error 等方法
+    logger  log.ILoggerX  // 接口类型，非具体类型
     nodeCtx INodeContext  // 持有上下文引用
 }
 
 func NewMyComponent(ctx INodeContext) *MyComponent {
     return &MyComponent{
-        Logger:  ctx.Logger(),
+        logger:  ctx.GetLogger().WithField("component", "MyComponent"),
         nodeCtx: ctx,
     }
 }
 
 // 使用
 comp := NewMyComponent(ctx)
-comp.Info("started")       // 直接调用，无需 comp.logger.Info()
+comp.logger.Info("started")
 ```
 
-**需要嵌入 Logger 的组件列表**:
+> **与改造前的差异**: 原方案嵌入 `*log.Logger` 具体类型，现改为持有 `log.ILoggerX` 接口。
+> 派生子 logger 统一通过 `WithField()/WithFields()/WithFreshFields()` 链式调用，
+> 替代 `log.NewLoggerX(baseLogger, fields)` 构造模式。
+> 好处：不依赖 `*log.Logger` 具体类型，完全面向接口编程。
 
-| 组件 | 嵌入位置 |
-|------|----------|
-| `Service` (core) | `Service` 结构体 |
-| `Cluster` | `Cluster` 结构体 |
-| `RpcMonitor` | `RpcMonitor` 结构体 |
-| `ServiceManager` | `ServiceManager` 结构体 |
-| `EndpointManager` | `EndpointManager` 结构体 |
-| `EventBus` | `Bus` 结构体 |
-| `SenderManager` | `SenderManager` 结构体 |
-| `TimingWheel` | 通过构造参数传入（已有 `logger` 字段） |
+#### 4.2.1 字段派生语义（必须遵守）
+
+`ILoggerX` 中三个派生方法语义如下：
+
+| 方法 | 语义 | 是否继承当前 fields | 典型场景 |
+|------|------|--------------------|----------|
+| `WithField(k,v)` | 在当前 logger 上追加 1 个字段 | 是 | 局部补充上下文 |
+| `WithFields(map)` | 在当前 logger 上追加多个字段 | 是 | 同一职责链条继续追加 |
+| `WithFreshFields(map)` | 从根 logger 重新派生字段 | 否 | 新模块/新请求起点，避免字段污染 |
+
+> 关键点：`WithFields` **不会清空**已有字段，它是“追加”而不是“替换”。
+> 如果需要“干净 logger”，必须使用 `WithFreshFields`。
+
+**示例：继承追加（保留上游字段）**
+
+```go
+base := ctx.GetLogger().WithFields(map[string]interface{}{"node": nodeId})
+svc  := base.WithFields(map[string]interface{}{"service": serviceName})
+// svc 具备: node + service
+```
+
+**示例：干净派生（不继承上游字段）**
+
+```go
+base := ctx.GetLogger().WithFields(map[string]interface{}{"trace": traceId})
+mq   := base.WithFreshFields(map[string]interface{}{"component": "mq-consumer"})
+// mq 仅具备: component（不包含 trace）
+```
+
+**禁止写法（易造成字段串染）**
+
+```go
+// 错误：期望“新模块干净logger”，却使用了 WithFields，导致继承上游fields
+componentLogger := inheritedLogger.WithFields(map[string]interface{}{"component": "X"})
+```
+
+**推荐规则**：
+1. 同一调用链增量加字段：用 `WithField/WithFields`。
+2. 跨职责边界创建新 logger（如 service→dao、handler→async worker）：用 `WithFreshFields`。
+3. 需要保留 trace/requestId 但重置业务字段时：先 `WithFreshFields`，再显式补回必要字段。
+
+**需要持有 Logger 的组件列表**:
+
+| 组件 | Logger 字段类型 | 说明 |
+|------|----------------|------|
+| `Service` (core) | `log.ILoggerX` | 通过 `ctx.GetLogger().WithField("service", name)` 派生 |
+| `Cluster` | `log.ILoggerX` | 集群日志 |
+| `RpcMonitor` | `log.ILoggerX` | RPC 监控日志 |
+| `ServiceManager` | `log.ILoggerX` | 服务管理日志 |
+| `EndpointManager` | `log.ILoggerX` | 端点管理日志 |
+| `EventBus` | `log.ILoggerX` | 事件总线日志 |
+| `SenderManager` | `log.ILoggerX` | 发送管理日志 |
+| `TimingWheel` | `log.ILoggerX` | 通过构造参数传入（已有 `logger` 字段） |
+
+#### 4.2.2 当前落地状态（2026-03-04）
+
+已落地为 `log.ILoggerX` 的核心链路：
+
+1. Node 主启动链：`Cluster.Init`、`ServiceManager.New`、`RpcMonitor.Init`、`EventBus.Init`
+2. Cluster 子链：`EndpointManager.Init`、`EtcdDiscovery.SetLogger`
+3. RPC 子链：`remote` 包（`gr/rx/nt` server+listener）、`client/sender`、`client/pool`、`msgbus`、`remote/handler`
+4. 服务抽象链：`interfaces/IService.GetLogger()`、`core/module`、`core/service`
+5. Cluster watch 子链：`cluster/discovery/etcd/watcher`
+6. Gate 会话子链：`sysModule/gate/protocol_adapter/session/*`
+7. 外围网络子链：`utils/httpx/gin`、`utils/network/ws*`
+8. DB 子链：`sysModule/mysqlmodule`、`sysModule/redismodule`
+
+仍使用 `*log.Logger` 的边界（当前策略）：
+
+1. `mysqlmodule` 内部为兼容 gorm `logger.New(syslog.New(writer,...))` 的 writer 接口，保留一次性窄断言 `ILoggerX -> *log.Logger` 仅用于获取输出流
+2. 其余业务模块已无 `*log.Logger` 参数签名暴露
+
+> 迁移策略保持不变：
+> - 新增/改造 API 优先使用 `log.ILoggerX`
+> - 旧接口短期保留兼容断言（`if l, ok := x.(*log.Logger); ok { ... }`）
+> - 每批迁移后执行 `go build ./...` 验证
 
 ### 4.3 传递策略
 
@@ -2350,16 +2620,16 @@ comp.Info("started")       // 直接调用，无需 comp.logger.Info()
 
 1. **构造函数注入 `INodeContext`**（推荐）: `NewCluster(ctx INodeContext) *Cluster`
 2. **组件内部存储 `INodeContext` 引用**，后续方法调用直接使用
-3. **Logger 通过嵌入获得**，其他依赖通过 `nodeCtx` 获取
+3. **Logger 通过 `ctx.GetLogger().WithField()` 派生**，其他依赖通过 `nodeCtx` 获取
 
 ### 4.4 Service 中的上下文传递
 
-每个 `Service` 嵌入 Logger 并持有 `NodeContext`：
+每个 `Service` 持有 `log.ILoggerX` 和 `NodeContext`：
 
 ```go
 // core/service.go — 改造后
 type Service struct {
-    *log.Logger            // 嵌入 Logger（替代 log.SysLogger）
+    logger  log.ILoggerX   // 接口类型（替代嵌入 *log.Logger）
     nodeCtx INodeContext   // 所属 Node 的上下文
     
     // --- 以下字段保持不变 ---
@@ -2373,9 +2643,8 @@ type Service struct {
     isPrimarySecondaryMode bool
     mailbox                *mailbox.Mailbox
     eventProcessor         *event.Processor
-    profiler               *profiler.Profiler
+    profiler               IProfiler
     // ...
-}
 ```
 
 **Service 初始化时注入 NodeContext**:
@@ -2384,7 +2653,7 @@ type Service struct {
 // ServiceManager.Init() 中为每个 Service 注入上下文
 func (m *ServiceManager) initService(svc inf.IService) {
     coreService := svc.GetCoreService()  // 获取内嵌的 core.Service
-    coreService.Logger = m.nodeCtx.Logger()
+    coreService.logger = m.nodeCtx.GetLogger().WithField("service", svc.GetName())
     coreService.nodeCtx = m.nodeCtx
     coreService.Init(m.nodeCtx, ...)
 }
@@ -2394,17 +2663,17 @@ func (m *ServiceManager) initService(svc inf.IService) {
 
 | 原全局调用 | 改造后调用 |
 |-----------|-----------|
-| `log.SysLogger.Info(...)` | `s.Info(...)` (嵌入 Logger) |
-| `config.Conf.XXX` | `s.nodeCtx.Config().XXX` |
-| `config.Conf.IsDebug()` | `s.nodeCtx.Config().IsDebug()` |
-| `endpoints.GetEndpointManager()` | `s.nodeCtx.Cluster().GetEndpointManager()` |
-| `cluster.GetCluster().IsClusterMode()` | `s.nodeCtx.Cluster().IsClusterMode()` |
-| `router.Select(...)` | `s.nodeCtx.Router().Select(...)` |
-| `timingwheel.GetTimingWheel()` | `s.nodeCtx.TimingWheel()` |
-| `asynclib.Go(f)` | `s.nodeCtx.AntsPool().Go(f)` |
-| `monitor.GetRpcMonitor().GenSeq()` | `s.nodeCtx.RpcMonitor().GenSeq()` |
-| `event.GetEventBus()` | `s.nodeCtx.EventBus()` |
-| `profiler.RegProfiler(...)` | `s.nodeCtx.Profiler().RegProfiler(...)` |
+| `log.SysLogger.Info(...)` | `s.logger.Info(...)` (持有 ILoggerX) |
+| `config.Conf.XXX` | `s.nodeCtx.GetConfig().XXX` |
+| `config.Conf.IsDebug()` | `s.nodeCtx.GetConfig().IsDebug()` |
+| `endpoints.GetEndpointManager()` | `s.nodeCtx.GetEndpointManager()` |
+| `cluster.GetCluster().IsClusterMode()` | `s.nodeCtx.IsClusterMode()` |
+| `router.Select(...)` | `s.nodeCtx.GetRouter().Select(...)` |
+| `timingwheel.GetTimingWheel()` | `s.nodeCtx.GetTimingWheel()` |
+| `asynclib.Go(f)` | `s.nodeCtx.GetAntsPool().Go(f)` |
+| `monitor.GetRpcMonitor().GenSeq()` | 构造注入 RpcMonitor（不经 INodeContext） |
+| `event.GetEventBus()` | `s.nodeCtx.GetEventBus()` |
+| `profiler.RegProfiler(...)` | `s.nodeCtx.GetProfilerRegistry().RegProfiler(...)` |
 
 > **用户服务（继承 `core.Service`）无需额外操作**: 框架自动注入 `NodeContext`，
 > 用户服务中通过 `s.Info()`、`s.Select()` 等方法间接使用，无感知。
@@ -2525,6 +2794,9 @@ import _ "github.com/.../cluster/discovery/etcd"  // 触发 etcd init() 注册
 | `utils/timingwheel` | `cronParser`, spec 解析常量 | 只读解析器 |
 | `utils/timingwheel/cron.go` | `places`, `defaults`, `standardParser` | cron 解析只读数据 |
 | `utils/timingwheel/task_scheduler.go` | `defaultSeed` | 初始值常量（建议改为 `const`） |
+| `utils/queue/deque.go` | 边界检查 panic（空队列/越界） | 容器 API 编程期契约断言，属于程序员错误场景 |
+| `actor/mailbox/worker_pool.go` | `panic("invoker is nil")` | 构造参数契约断言，属于程序员错误场景 |
+| `log/logger.go` | `Panic/Fatal/os.Exit` 语义实现 | 日志 API 的显式语义入口，非运行时配置/网络故障路径 |
 | `def/error.go` | `Err*` 系列 | 不可变 `errors.New()` |
 | `def/consts.go` | 常量 | 不可变 |
 | `def/mailbox.go` | `RWModeContextKey`, `RWSourceServiceKey` | 不可变 context key |

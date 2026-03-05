@@ -41,7 +41,7 @@ type EventMetrics struct {
 }
 
 type Bus struct {
-	*log.Logger // 嵌入 Logger（替代 log.SysLogger）
+	log.ILoggerX // 持有 ILoggerX
 
 	nc     *nats.Conn // TODO 目前只支持nats,后续再看要不要扩展吧
 	enable atomic.Int32
@@ -135,8 +135,8 @@ func switchOpts(conf *config.NatsConf) []nats.Option {
 	return opts
 }
 
-func (eb *Bus) Init(conf *config.EventBusConf, logger *log.Logger) error {
-	eb.Logger = logger
+func (eb *Bus) Init(conf *config.EventBusConf, logger log.ILoggerX) error {
+	eb.ILoggerX = logger
 	// 初始化事件分类和限流系统
 	eb.eventRegistry = NewEventRegistry()
 	eb.throttleManager = NewThrottleManager(eb.eventRegistry)

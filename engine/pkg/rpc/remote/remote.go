@@ -11,6 +11,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/pool"
 )
 
@@ -19,17 +20,25 @@ func NewRemote() *Remote {
 }
 
 type Remote struct {
-	*log.Logger // 嵌入 Logger，替代 log.SysLogger
-	conf        *config.RPCServer
-	svr         inf.IRemoteServer
+	log.ILoggerX // 持有 ILoggerX
+	conf         *config.RPCServer
+	svr          inf.IRemoteServer
 }
 
 type loggerAwareRemoteServer interface {
-	SetLogger(logger *log.Logger)
+	SetLogger(logger log.ILoggerX)
 }
 
-func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, logger *log.Logger) (*Remote, error) {
-	r.Logger = logger
+type handlerAwareRemoteServer interface {
+	SetHandler(h *handler.Handler)
+}
+
+type natsConfAwareRemoteServer interface {
+	SetNatsConf(conf *config.NatsConf)
+}
+
+func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, logger log.ILoggerX, rpcHandler *handler.Handler, natsConf *config.NatsConf) (*Remote, error) {
+	r.ILoggerX = logger
 	r.conf = conf
 	r.svr = pool.CreateServer(conf.Type)
 	if r.svr == nil {
@@ -37,6 +46,12 @@ func (r *Remote) Init(conf *config.RPCServer, cliFactory inf.IRpcSenderFactory, 
 	}
 	if aware, ok := r.svr.(loggerAwareRemoteServer); ok {
 		aware.SetLogger(logger)
+	}
+	if aware, ok := r.svr.(handlerAwareRemoteServer); ok {
+		aware.SetHandler(rpcHandler)
+	}
+	if aware, ok := r.svr.(natsConfAwareRemoteServer); ok {
+		aware.SetNatsConf(natsConf)
 	}
 	r.svr.Init(cliFactory)
 	return r, nil

@@ -32,13 +32,16 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 	tw.Start()
 	defer tw.Stop()
 
-	dp = timingwheel.NewJobScheduler(
+	dp, err = timingwheel.NewJobScheduler(
 		"benchmark test",
 		10000000,
 		10,
 		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_benchmark"}),
 	)
+	if err != nil {
+		b.Fatalf("Failed to create scheduler: %v", err)
+	}
 
 	cases := []struct {
 		name string

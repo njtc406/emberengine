@@ -6,6 +6,7 @@
 package services
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
@@ -42,14 +43,14 @@ func GetServiceFactory(name string) (func() inf.IService, bool) {
 
 // ServiceManager 管理单个 Node 的运行时服务实例。
 type ServiceManager struct {
-	*log.Logger // 嵌入 Logger
-	runServices []inf.IService
-	daemon      *daemon
-	cluster     *cluster.Cluster
-	endpoints   *endpoints.EndpointManager
-	profilerReg *profiler.Registry
-	router      *router.Router
-	nodeCtx     inf.INodeContext
+	log.ILoggerX // 持有 ILoggerX
+	runServices  []inf.IService
+	daemon       *daemon
+	cluster      *cluster.Cluster
+	endpoints    *endpoints.EndpointManager
+	profilerReg  *profiler.Registry
+	router       *router.Router
+	nodeCtx      inf.INodeContext
 }
 
 type runtimeDepsAware interface {
@@ -61,9 +62,9 @@ type nodeContextAware interface {
 }
 
 // NewServiceManager 创建 ServiceManager。
-func NewServiceManager(logger *log.Logger) *ServiceManager {
+func NewServiceManager(logger log.ILoggerX) *ServiceManager {
 	return &ServiceManager{
-		Logger: logger,
+		ILoggerX: logger,
 	}
 }
 
@@ -79,7 +80,8 @@ func (sm *ServiceManager) SetNodeContext(ctx inf.INodeContext) {
 }
 
 // Init 根据配置创建并初始化所有服务。
-func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) {
+// 任一服务初始化失败将立即返回错误，由上层决定后续处理。
+func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 	lock.RLock()
 	defer lock.RUnlock()
 
@@ -102,23 +104,38 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) {
 			if ctxAware, ok := svc.(nodeContextAware); ok {
 				ctxAware.SetNodeContext(sm.nodeCtx)
 			}
-			svc.Init(svc, initConf, cfg)
+			if err := svc.Init(svc, initConf, cfg); err != nil {
+				sm.WithField("service", serviceName).Errorf("Init Service failed, err: %v", err)
+				return fmt.Errorf("init service[%s] failed: %w", serviceName, err)
+			}
 			sm.runServices = append(sm.runServices, svc)
 		} else {
 			sm.WithField("service", initConf.ClassName).Error("Service is configured to start but not imported in the package. Please check service dependencies or remove it from configuration")
+			return fmt.Errorf("service[%s] is configured to start but not registered", initConf.ClassName)
 		}
 	}
+
+	return nil
 }
 
 // Start 启动所有已初始化的服务。
-func (sm *ServiceManager) Start() {
+// 任一服务启动失败将立即中断，并回滚已启动服务。
+func (sm *ServiceManager) Start() error {
+	started := make([]inf.IService, 0, len(sm.runServices))
 	for _, svc := range sm.runServices {
 		sm.WithField("service", svc.GetName()).Info("Start Service")
 		if err := svc.Start(); err != nil {
-			sm.WithField("service", svc.GetName()).Errorf("Start Service failed, err: %s", err)
+			sm.WithField("service", svc.GetName()).Errorf("Start Service failed, err: %v", err)
+			for i := len(started) - 1; i >= 0; i-- {
+				sm.WithField("service", started[i].GetName()).Info("Rollback Stop Service")
+				started[i].Stop()
+			}
+			return fmt.Errorf("start service[%s] failed: %w", svc.GetName(), err)
 		}
+		started = append(started, svc)
 	}
 	sm.Info("=============服务启动完成===================")
+	return nil
 }
 
 // StopAll 倒序停止所有服务。

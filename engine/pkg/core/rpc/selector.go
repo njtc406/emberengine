@@ -3,7 +3,6 @@ package rpc
 import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/router"
 )
 
 func WithPartition(partition int32) inf.SelectParamBuilder {
@@ -36,18 +35,19 @@ func WithIsSlaver(isSlaver bool) inf.SelectParamBuilder {
 	}
 }
 
-func (h *Handler) getRouter() *router.Router {
-	if svcWithRouter, ok := h.GetService().(interface{ GetRouter() *router.Router }); ok {
-		if rt := svcWithRouter.GetRouter(); rt != nil {
-			return rt
-		}
+func (h *Handler) getRouter() inf.INodeRouter {
+	if rt := h.GetService().GetRouter(); rt != nil {
+		return rt
+	}
+	if ctx := h.GetService().GetNodeContext(); ctx != nil {
+		return ctx.GetRouter()
 	}
 	return nil
 }
 
 // Select 选择相同Partition服务
 func (h *Handler) Select(options ...inf.SelectParamBuilder) inf.IBus {
-	//log.SysLogger.Debugf("pid:%s", h.GetPid().String())
+	// h.GetService().GetLogger().Debugf("pid:%s", h.GetPid().String())
 	pid := h.GetPid()
 	options = append(options, WithPartition(pid.GetPartition()))
 	rt := h.getRouter()

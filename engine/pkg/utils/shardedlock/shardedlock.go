@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
 
 type ShardedRWLock struct {
@@ -17,8 +19,11 @@ type ShardedRWLock struct {
 }
 
 func NewShardedRWLock(shardCount int) *ShardedRWLock {
-	if shardCount <= 0 || (shardCount&(shardCount-1)) != 0 {
-		panic("shardCount must be power of 2")
+	if shardCount <= 0 {
+		shardCount = 16
+	}
+	if shardCount&(shardCount-1) != 0 {
+		shardCount = util.RoundUpToPowerOfTwoInt(shardCount)
 	}
 
 	return &ShardedRWLock{

@@ -49,8 +49,8 @@ func (m *WebSocketManager) Bind(uid int64, conn inf.IConn) {
 	}
 
 	sessionId := m.genSessionID()
-	var logger *log.Logger
-	if provider, ok := m.handler.(interface{ GetLogger() *log.Logger }); ok {
+	var logger log.ILoggerX
+	if provider, ok := m.handler.(interface{ GetLogger() log.ILoggerX }); ok {
 		logger = provider.GetLogger()
 	}
 	session := NewWSSession(sessionId, conn, uid, logger)
@@ -88,7 +88,7 @@ func (m *WebSocketManager) closeSession(session inf.ISession, reason string) {
 	session.Close()
 	_ = session.GetConn().Close()
 
-	if provider, ok := m.handler.(interface{ GetLogger() *log.Logger }); ok {
+	if provider, ok := m.handler.(interface{ GetLogger() log.ILoggerX }); ok {
 		if logger := provider.GetLogger(); logger != nil {
 			logger.Debugf("user[%d] session %d closed, reason: %s", uid, sessionId, reason)
 		}

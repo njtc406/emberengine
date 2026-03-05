@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -25,9 +26,10 @@ import (
 type rpcxSender struct {
 	rpcClients []client.XClient
 	i          atomic.Uint64
+	logger     log.ILoggerX
 }
 
-func newRpcxClient(addr string) inf.IRpcSender {
+func newRpcxClient(addr string, logger log.ILoggerX) inf.IRpcSender {
 	d, _ := client.NewPeer2PeerDiscovery("tcp@"+addr, "")
 	// 如果调用失败,会自动重试3次
 	var clients []client.XClient
@@ -54,9 +56,12 @@ func newRpcxClient(addr string) inf.IRpcSender {
 
 	remoteClient := &rpcxSender{
 		rpcClients: clients,
+		logger:     logger,
 	}
 
-	getClientLogger().Debugf("create remote client success : %s", addr)
+	if logger != nil {
+		logger.Debugf("create remote client success : %s", addr)
+	}
 	return remoteClient
 }
 
@@ -69,7 +74,7 @@ func (rc *rpcxSender) Close() {
 		_ = rpcClient.Close()
 	}
 
-	//log.SysLogger.Debugf("############################close remote rpcx client success : %s", rc.IRpcDispatcher.GetPid().String())
+	// getClientLogger().Debugf("close remote rpcx client success: %s", rc.IRpcDispatcher.GetPid().String())
 	rc.rpcClients = nil
 }
 
@@ -81,7 +86,9 @@ func (rc *rpcxSender) send(ctx context.Context, dispatcher inf.IRpcDispatcher, e
 	// 构建发送消息
 	msg, err := envelope.ToProtoMsg(ctx)
 	if err != nil {
-		getClientLogger().WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		if rc.logger != nil {
+			rc.logger.WithContext(ctx).Errorf("serialize message[%+v] is error: %s", envelope, err)
+		}
 		return def.ErrMsgSerializeFailed
 	}
 	defer msgenvelope.ReleaseMessage(msg) // 发送后立即释放
@@ -91,21 +98,27 @@ func (rc *rpcxSender) send(ctx context.Context, dispatcher inf.IRpcDispatcher, e
 
 	call, err := rpcClient.Go(ctx, "RPCCall", msg, nil, make(chan *client.Call, 1))
 	if err != nil {
-		getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
+		if rc.logger != nil {
+			rc.logger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), err)
+		}
 		return def.ErrRPCCallFailed
 	}
 	select {
 	case <-call.Done:
 		if call.Error != nil {
-			getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), call.Error)
+			if rc.logger != nil {
+				rc.logger.WithContext(ctx).Errorf("send message[%+v] to %s is error: %s", envelope, dispatcher.GetPid().GetServiceUid(), call.Error)
+			}
 			return def.ErrRPCCallFailed
 		}
 	case <-ctx.Done():
-		getClientLogger().WithContext(ctx).Errorf("send message[%+v] to %s is timeout", envelope, dispatcher.GetPid().GetServiceUid())
+		if rc.logger != nil {
+			rc.logger.WithContext(ctx).Errorf("send message[%+v] to %s is timeout", envelope, dispatcher.GetPid().GetServiceUid())
+		}
 		return def.ErrRPCCallFailed
 	}
 
-	//log.SysLogger.WithContext(ctx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())
+	// getClientLogger().WithContext(ctx).Infof("send message[%+v] to %s success", envelope, dispatcher.GetPid().GetServiceUid())
 	// 这里仅仅代表消息发送成功(不代表对方已经处理完成,处理全是异步的,会在回复消息中通知处理结果)
 	return nil
 }

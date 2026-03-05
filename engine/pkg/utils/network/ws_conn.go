@@ -17,11 +17,11 @@ type WSConn struct {
 	conn      *websocket.Conn
 	writeChan chan []byte
 	maxMsgLen uint32
-	logger    *log.Logger
+	logger    log.ILoggerX
 	closeFlag bool
 }
 
-func NewWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, messageType int, logger *log.Logger) *WSConn {
+func NewWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, messageType int, logger log.ILoggerX) *WSConn {
 	wsConn := new(WSConn)
 	wsConn.conn = conn
 	wsConn.writeChan = make(chan []byte, pendingWriteNum)

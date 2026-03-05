@@ -1,11 +1,13 @@
 package msgenvelope
 
-var runtimeDebug bool
+import "sync/atomic"
+
+var runtimeDebug atomic.Bool
 
 func SetDebug(enabled bool) {
-	runtimeDebug = enabled
+	runtimeDebug.Store(enabled)
 }
 
 func isDebug() bool {
-	return runtimeDebug
+	return runtimeDebug.Load()
 }

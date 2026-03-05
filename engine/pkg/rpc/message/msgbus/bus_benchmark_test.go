@@ -22,6 +22,7 @@ import (
 
 var benchInitOnce sync.Once
 var benchSenderMgr *client.SenderManager
+var benchBusFactory *MessageBusFactory
 var benchLogger *log.Logger
 
 func benchInitRPC() {
@@ -42,11 +43,10 @@ func benchInitRPC() {
 		}
 
 		rm := monitor.NewRpcMonitor().Init(rpcMonitorConf, benchLogger, tw, p)
-		SetLogger(benchLogger)
-		SetRpcMonitor(rm)
 		rm.Start()
+		benchBusFactory = NewMessageBusFactory(10000, benchLogger, rm, def.DefaultRpcTimeout)
 
-		benchSenderMgr = client.NewSenderManager(pool.NewPoolManager(benchLogger), benchLogger)
+		benchSenderMgr = client.NewSenderManager(pool.NewPoolManager(benchLogger), benchLogger, rm, nil)
 	})
 }
 
@@ -158,9 +158,9 @@ func newBenchRPCPair() benchRPCPair {
 	receiver := client.NewDispatcher(benchSenderMgr, serverPid, serverBox)
 
 	// Keep counters referenced to avoid compiler eliminating work.
-	_ = callCount
-	_ = asyncCount
-	_ = sendCount
+	_ = &callCount
+	_ = &asyncCount
+	_ = &sendCount
 
 	return benchRPCPair{sender: sender, receiver: receiver}
 }
@@ -171,7 +171,7 @@ func BenchmarkMsgBus_Send_Local_NoPayload(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_ = mb.Send(nil, "Noop", nil)
 	}
 }
@@ -183,7 +183,7 @@ func BenchmarkMsgBus_Send_Local_Parallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			mb := NewMessageBus(pair.sender, pair.receiver, nil)
+			mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 			_ = mb.Send(nil, "Noop", nil)
 		}
 	})
@@ -195,7 +195,7 @@ func BenchmarkMsgBus_Call_Local_NoOut(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_ = mb.Call(nil, "RpcSum", nil, nil)
 	}
 }
@@ -207,7 +207,7 @@ func BenchmarkMsgBus_Call_Local_IntOut(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		var out int
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_ = mb.Call(nil, "RpcSum", nil, &out)
 		_ = out
 	}
@@ -220,7 +220,7 @@ func BenchmarkMsgBus_Call_Local_Parallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			mb := NewMessageBus(pair.sender, pair.receiver, nil)
+			mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 			_ = mb.Call(nil, "RpcSum", nil, nil)
 		}
 	})
@@ -232,7 +232,7 @@ func BenchmarkMsgBus_AsyncCall_Local_Callback1(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mb := NewMessageBus(pair.sender, pair.receiver, nil)
+		mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 		_, _ = mb.AsyncCall(context.Background(), "RpcSum", nil, nil, func(ctx context.Context, data interface{}, err error, params ...interface{}) {
 			_ = ctx
 			_ = data
@@ -249,7 +249,7 @@ func BenchmarkMsgBus_AsyncCall_Local_Callback1_Parallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			mb := NewMessageBus(pair.sender, pair.receiver, nil)
+			mb := benchBusFactory.New(pair.sender, pair.receiver, nil)
 			_, _ = mb.AsyncCall(context.Background(), "RpcSum", nil, nil, func(ctx context.Context, data interface{}, err error, params ...interface{}) {
 				_ = ctx
 				_ = data

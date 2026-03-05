@@ -2,6 +2,8 @@ package node
 
 import (
 	"fmt"
+	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,7 +23,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
-	remotent "github.com/njtc406/emberengine/engine/pkg/rpc/remote/nt"
 	"github.com/njtc406/emberengine/engine/pkg/services"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
@@ -53,7 +54,7 @@ type Node struct {
 	// 配置（由 Node 独立持有）
 	Config *config.Config
 
-	// 日志（原 log.SysLogger）— Node 嵌入 Logger，可直接 n.Info(...)
+	// 日志
 	*log.Logger
 
 	// 协程池（原 asynclib.antsPool）
@@ -90,6 +91,9 @@ type Node struct {
 	// 方法前缀索引（原 core/rpc 包级 apiPrefixIndex 等）
 	MethodIndex *rpc.MethodIndex
 
+	// MessageBus 工厂（用于隔离每个 Node 的 bus pool/logger/monitor/timeout）
+	BusFactory *msgbus.MessageBusFactory
+
 	// ====== Phase 4: 辅助组件 ======
 
 	// Profiler 注册中心（原 profiler 包级 mapProfiler）
@@ -105,38 +109,154 @@ type Node struct {
 	stopped atomic.Bool
 }
 
+type profilerRegistryAdapter struct {
+	registry *profiler.Registry
+}
+
+type profilerAdapter struct {
+	profiler *profiler.Profiler
+	mu       sync.Mutex
+	stack    []*profiler.Analyzer
+}
+
+func (a *profilerAdapter) Push(tag string) {
+	if a == nil || a.profiler == nil {
+		return
+	}
+	analyzer := a.profiler.Push(tag)
+	if analyzer == nil {
+		return
+	}
+	a.mu.Lock()
+	a.stack = append(a.stack, analyzer)
+	a.mu.Unlock()
+}
+
+func (a *profilerAdapter) Pop() {
+	if a == nil || a.profiler == nil {
+		return
+	}
+	a.mu.Lock()
+	n := len(a.stack)
+	if n == 0 {
+		a.mu.Unlock()
+		return
+	}
+	analyzer := a.stack[n-1]
+	a.stack = a.stack[:n-1]
+	a.mu.Unlock()
+	if analyzer != nil {
+		analyzer.Pop()
+	}
+}
+
+func (a *profilerAdapter) Reset() {
+	for {
+		a.mu.Lock()
+		n := len(a.stack)
+		if n == 0 {
+			a.mu.Unlock()
+			return
+		}
+		analyzer := a.stack[n-1]
+		a.stack = a.stack[:n-1]
+		a.mu.Unlock()
+		if analyzer != nil {
+			analyzer.Pop()
+		}
+	}
+}
+
+func (a *profilerAdapter) IsEnabled() bool {
+	return a != nil && a.profiler != nil
+}
+
+func (a *profilerRegistryAdapter) RegProfiler(name string, logger log.ILoggerX) inf.IProfiler {
+	if a == nil || a.registry == nil {
+		return nil
+	}
+	p := a.registry.RegProfiler(name, logger)
+	if p == nil {
+		return nil
+	}
+	return &profilerAdapter{profiler: p}
+}
+
+func (a *profilerRegistryAdapter) UnRegProfiler(name string) {
+	if a == nil || a.registry == nil {
+		return
+	}
+	a.registry.UnRegProfiler(name)
+}
+
 func New() *Node {
 	return &Node{}
 }
 
 // ── INodeContext 接口实现 ──
 
-func (n *Node) GetConfig() *config.Config          { return n.Config }
-func (n *Node) GetLogger() *log.Logger             { return n.Logger }
-func (n *Node) GetAntsPool() *asynclib.Pool        { return n.AntsPool }
-func (n *Node) GetTimingWheel() any                { return n.TimingWheel }
-func (n *Node) GetDeDuplicator() inf.IDeDuplicator { return n.DeDuplicator }
-func (n *Node) GetNodeId() string                  { return n.Config.NodeConf.NodeId }
-func (n *Node) GetNodeType() string                { return n.Config.NodeConf.NodeType }
-
-func (n *Node) GetCluster() *cluster.Cluster {
-	return n.Cluster
+func (n *Node) GetConfig() inf.INodeConfig           { return n.Config }
+func (n *Node) GetLogger() log.ILoggerX              { return n.Logger }
+func (n *Node) GetAntsPool() inf.INodePool           { return n.AntsPool }
+func (n *Node) GetTimingWheel() inf.INodeTimingWheel { return n.TimingWheel }
+func (n *Node) GetDeDuplicator() inf.IDeDuplicator   { return n.DeDuplicator }
+func (n *Node) GetNodeId() string                    { return n.Config.NodeConf.NodeId }
+func (n *Node) GetNodeType() string                  { return n.Config.NodeConf.NodeType }
+func (n *Node) GetNodeUid() string {
+	if n.Cluster != nil {
+		em := n.Cluster.GetEndpointManager()
+		if em != nil {
+			if nodeUid := em.GetNodeUid(); nodeUid != "" {
+				return nodeUid
+			}
+		}
+	}
+	if n.Config != nil && n.Config.NodeConf != nil {
+		return n.Config.NodeConf.NodeType + "_" + n.Config.NodeConf.NodeId
+	}
+	return ""
 }
 
-func (n *Node) GetProfilerRegistry() *profiler.Registry {
-	return n.ProfilerRegistry
+func (n *Node) IsClusterMode() bool {
+	if n.Cluster == nil {
+		return false
+	}
+	return n.Cluster.IsClusterMode()
 }
 
-func (n *Node) GetRouter() *router.Router {
+func (n *Node) GetEndpointManager() inf.INodeEndpointManager {
+	if n.Cluster == nil {
+		return nil
+	}
+	return n.Cluster.GetEndpointManager()
+}
+
+func (n *Node) GetEventBus() inf.INodeEventBus {
+	if n.EventBus == nil {
+		return nil
+	}
+	return n.EventBus
+}
+
+func (n *Node) GetRouter() inf.INodeRouter {
+	if n.Router == nil {
+		return nil
+	}
 	return n.Router
 }
 
-func (n *Node) GetMethodIndex() *rpc.MethodIndex {
-	return n.MethodIndex
+func (n *Node) GetProfilerRegistry() inf.INodeProfilerRegistry {
+	if n.ProfilerRegistry == nil {
+		return nil
+	}
+	return &profilerRegistryAdapter{registry: n.ProfilerRegistry}
 }
 
-func (n *Node) GetEventBus() *event.Bus {
-	return n.EventBus
+func (n *Node) GetMethodIndex() inf.INodeMethodIndex {
+	if n.MethodIndex == nil {
+		return nil
+	}
+	return n.MethodIndex
 }
 
 // 编译期检查：确保 Node 实现了 INodeContext
@@ -147,6 +267,15 @@ func fixVersion(v string) string {
 		return version.Version
 	}
 	return v
+}
+
+func (n *Node) runHookSafe(hook HookFun) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("hook panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	return hook(n, n.extra)
 }
 
 func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
@@ -263,25 +392,24 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	cleanups = append(cleanups, func() { n.PoolManager.Close() })
 
 	// Sender 管理器
-	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger)
+	var natsConf *config.NatsConf
 	if n.Config != nil && n.Config.NodeConf != nil && n.Config.NodeConf.EventBusConf != nil {
-		client.SetNatsConf(n.Config.NodeConf.EventBusConf.NatsConf)
-		remotent.SetNatsConf(n.Config.NodeConf.EventBusConf.NatsConf)
+		natsConf = n.Config.NodeConf.EventBusConf.NatsConf
 	}
-	client.SetRpcMonitor(n.RpcMonitor)
-	remotehandler.SetRpcMonitor(n.RpcMonitor)
-	remotehandler.SetLogger(n.Logger)
-	remotehandler.SetDeDuplicator(n.DeDuplicator)
+	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger, n.RpcMonitor, natsConf)
+	remoteMsgHandler := remotehandler.NewHandler(n.RpcMonitor, n.Logger, n.DeDuplicator)
 	cleanups = append(cleanups, func() { n.SenderMgr.Close() })
 
 	// 方法前缀索引
 	n.MethodIndex = rpc.NewMethodIndex()
 
-	// MessageBus 对象池配置（按需惰性初始化）
-	msgbus.SetPoolSize(n.Config.NodeConf.BusPoolSize)
-	msgbus.SetLogger(n.Logger)
-	msgbus.SetRpcMonitor(n.RpcMonitor)
-	msgbus.SetDefaultRPCTimeout(n.Config.GetDefaultRpcTimeout())
+	// MessageBus 工厂（每个 Node 独立）
+	n.BusFactory = msgbus.NewMessageBusFactory(
+		n.Config.NodeConf.BusPoolSize,
+		n.Logger,
+		n.RpcMonitor,
+		n.Config.GetDefaultRpcTimeout(),
+	)
 
 	// ==============================
 	// 4.6 辅助组件（Phase 4）
@@ -295,7 +423,7 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	// 5. 集群 & 事件总线
 	// ==============================
 	n.Cluster = cluster.NewCluster()
-	if err := n.Cluster.Init(n.Config.ClusterConf, n.Logger, n.SenderMgr); err != nil {
+	if err := n.Cluster.Init(n.Config.ClusterConf, n.Logger, n.SenderMgr, remoteMsgHandler, natsConf, n.BusFactory); err != nil {
 		return nil, fmt.Errorf("cluster init: %w", err)
 	}
 	n.Router = router.NewRouter(n.Cluster.GetEndpointManager())
@@ -313,8 +441,13 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	// ==============================
 	// 6. 用户钩子
 	// ==============================
-	for _, f := range n.hooks {
-		f(n.extra)
+	for i, f := range n.hooks {
+		if f == nil {
+			continue
+		}
+		if err := n.runHookSafe(f); err != nil {
+			return nil, fmt.Errorf("run hook[%d]: %w", i, err)
+		}
 	}
 
 	// ==============================
@@ -323,8 +456,12 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	n.ServiceMgr = services.NewServiceManager(n.Logger)
 	n.ServiceMgr.SetRuntimeDeps(n.Cluster, n.Cluster.GetEndpointManager(), n.ProfilerRegistry, n.Router)
 	n.ServiceMgr.SetNodeContext(n)
-	n.ServiceMgr.Init(n.Config.ServiceConf)
-	n.ServiceMgr.Start()
+	if err := n.ServiceMgr.Init(n.Config.ServiceConf); err != nil {
+		return nil, fmt.Errorf("service manager init: %w", err)
+	}
+	if err := n.ServiceMgr.Start(); err != nil {
+		return nil, fmt.Errorf("service manager start: %w", err)
+	}
 	cleanups = append(cleanups, func() { n.ServiceMgr.StopAll() })
 
 	n.startTime = time.Now()

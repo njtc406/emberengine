@@ -59,28 +59,19 @@ type TimingWheel struct {
 
 // NewTimingWheel 使用指定的刻度和轮大小创建一个 TimingWheel 实例。
 func NewTimingWheel(tick time.Duration, wheelSize int64, logger log.ILoggerX) *TimingWheel {
-	if logger == nil {
-		l, err := log.NewDefaultLogger(nil)
-		if err != nil {
-			panic(fmt.Sprintf("create logger failed: %v", err))
-		}
-		logger = log.NewLoggerX(l, log.Fields{"pkg": "timingwheel"})
-	}
 	tickMs := int64(tick / time.Millisecond)
 	if tickMs <= 0 {
-		if logger == nil {
-			panic("logger is nil")
-		} else {
-			logger.Panic("tick must be greater than or equal to 1ms")
+		if logger != nil {
+			logger.Errorf("tick must be greater than or equal to 1ms, got=%v, fallback to 1ms", tick)
 		}
+		tickMs = 1
 	}
 
 	if wheelSize <= 0 {
-		if logger == nil {
-			panic("logger is nil")
-		} else {
-			logger.Panic("wheelSize must be greater than 0")
+		if logger != nil {
+			logger.Errorf("wheelSize must be greater than 0, got=%d, fallback to 20", wheelSize)
 		}
+		wheelSize = 20
 	}
 
 	startMs := timeToMs(time.Now())

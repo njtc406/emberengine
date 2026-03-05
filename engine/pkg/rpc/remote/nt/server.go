@@ -15,32 +15,25 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 )
 
 type natsServer struct {
 	listener                    *NatsListener
 	server                      *nats.Conn
 	subscription                *nats.Subscription
-	logger                      *log.Logger
+	logger                      log.ILoggerX
+	natsConf                    *config.NatsConf
+	handler                     *handler.Handler
 	lastSlowConsumerLogUnixNano atomic.Int64
 	slowConsumerSuppressed      atomic.Uint64
-}
-
-var natsConfProvider *config.NatsConf
-
-func SetNatsConf(conf *config.NatsConf) {
-	natsConfProvider = conf
-}
-
-func getNatsConf() *config.NatsConf {
-	return natsConfProvider
 }
 
 func NewNatsServer() inf.IRemoteServer {
 	return &natsServer{}
 }
 
-func (s *natsServer) SetLogger(logger *log.Logger) {
+func (s *natsServer) SetLogger(logger log.ILoggerX) {
 	if logger != nil {
 		s.logger = logger
 		if s.listener != nil {
@@ -49,17 +42,29 @@ func (s *natsServer) SetLogger(logger *log.Logger) {
 	}
 }
 
+func (s *natsServer) SetNatsConf(conf *config.NatsConf) {
+	s.natsConf = conf
+}
+
+func (s *natsServer) SetHandler(h *handler.Handler) {
+	s.handler = h
+	if s.listener != nil {
+		s.listener.handler = h
+	}
+}
+
 func (s *natsServer) Init(sf inf.IRpcSenderFactory) {
 	s.listener = &NatsListener{
 		cliFactory: sf,
 		logger:     s.logger,
+		handler:    s.handler,
 	}
 }
 
 func (s *natsServer) Serve(conf *config.RPCServer, nodeUid string) error {
 	s.logger.Infof("nats server listening at: %s", conf.Addr)
 
-	natsConf := getNatsConf()
+	natsConf := s.natsConf
 
 	var opts []nats.Option
 	maxReconnects := def.NatsDefaultMaxReconnects

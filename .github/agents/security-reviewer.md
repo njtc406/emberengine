@@ -1,5 +1,5 @@
 ---
-name: security-reviewer
+name: 安全漏洞检测与修复专家
 description: 安全漏洞检测与修复专家。在处理用户输入、身份验证、API 端点或敏感数据的代码后，主动使用。标记秘密、SSRF、注入、不安全的加密和 OWASP 前 10 个漏洞。
 tools: ['vscode', 'execute', 'edit','read', 'agent', 'edit', 'search', 'web', 'azure-mcp/*', 'todo']
 model: Claude Sonnet 4.6 (copilot)

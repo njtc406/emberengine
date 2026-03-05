@@ -13,20 +13,22 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"google.golang.org/grpc"
 )
 
 type grpcServer struct {
 	listener *GrpcListener
 	server   *grpc.Server
-	logger   *log.Logger
+	logger   log.ILoggerX
+	handler  *handler.Handler
 }
 
 func NewGrpcServer() inf.IRemoteServer {
 	return &grpcServer{}
 }
 
-func (s *grpcServer) SetLogger(logger *log.Logger) {
+func (s *grpcServer) SetLogger(logger log.ILoggerX) {
 	if logger != nil {
 		s.logger = logger
 	}
@@ -35,8 +37,16 @@ func (s *grpcServer) SetLogger(logger *log.Logger) {
 func (s *grpcServer) Init(sf inf.IRpcSenderFactory) {
 	s.listener = &GrpcListener{
 		cliFactory: sf,
+		handler:    s.handler,
 	}
 	s.server = grpc.NewServer()
+}
+
+func (s *grpcServer) SetHandler(h *handler.Handler) {
+	s.handler = h
+	if s.listener != nil {
+		s.listener.handler = h
+	}
 }
 
 func (s *grpcServer) Serve(conf *config.RPCServer, nodeUid string) error {

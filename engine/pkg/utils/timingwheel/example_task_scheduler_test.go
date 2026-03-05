@@ -32,13 +32,16 @@ func Example_scheduleTimer() {
 	tw.Start()
 	defer tw.Stop()
 
-	dp := timingwheel.NewJobScheduler(
+	dp, err := timingwheel.NewJobScheduler(
 		"example",
 		1000,
 		10,
 		tw,
 		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_example"}),
 	)
+	if err != nil {
+		panic(err)
+	}
 	defer dp.Stop()
 
 	_, err = dp.AfterFunc(10*time.Millisecond, "hello", printTask)

@@ -23,7 +23,7 @@ type RedisModule struct {
 
 	conf   *redis.Options
 	client *redis.Client
-	logger *log.Logger
+	logger log.ILoggerX
 	// TODO redis需要支持集群模式
 	clusterClient *redis.ClusterClient
 	timerId       uint64
@@ -35,7 +35,7 @@ func NewRedisModule() *RedisModule {
 	return &RedisModule{}
 }
 
-func (rm *RedisModule) SetLogger(logger *log.Logger) {
+func (rm *RedisModule) SetLogger(logger log.ILoggerX) {
 	rm.logger = logger
 }
 

@@ -38,12 +38,12 @@ type MethodMgr struct {
 	mu       sync.RWMutex
 	rpcCnt   int
 	methods  map[string]*methodEntry // 方法名 → 条目
-	index    *MethodIndex
+	index    inf.INodeMethodIndex
 	enableRW *atomic.Bool // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
 	logger   log.ILoggerX
 }
 
-func NewMethodMgr(logger log.ILoggerX, index *MethodIndex) inf.IMethodMgr {
+func NewMethodMgr(logger log.ILoggerX, index inf.INodeMethodIndex) inf.IMethodMgr {
 	if index == nil {
 		index = NewMethodIndex()
 	}
@@ -148,7 +148,7 @@ type Handler struct {
 	inf.IModule
 	mgr       inf.IMethodMgr
 	methods   []string
-	methodIdx *MethodIndex
+	methodIdx inf.INodeMethodIndex
 }
 
 func NewHandler(owner inf.IModule) *Handler {
@@ -157,24 +157,26 @@ func NewHandler(owner inf.IModule) *Handler {
 	}
 }
 
-func (h *Handler) Init(hd inf.IMethodMgr) inf.IRpcHandler {
+func (h *Handler) Init(hd inf.IMethodMgr) (inf.IRpcHandler, error) {
 	h.mgr = hd
 	if mm, ok := hd.(*MethodMgr); ok {
 		h.methodIdx = mm.index
 	}
 	if h.methodIdx == nil {
-		h.methodIdx = NewMethodIndex()
+		h.methodIdx = NewMethodIndex() // fallback: 默认空索引
 	}
-	h.registerMethod()
-	return h
+	if err := h.registerMethod(); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
-func (h *Handler) registerMethod() {
+func (h *Handler) registerMethod() error {
 	typ := reflect.TypeOf(h.IModule)
 	for m := 0; m < typ.NumMethod(); m++ {
 		err := h.suitableMethods(typ.Method(m))
 		if err != nil {
-			h.Panic(err)
+			return fmt.Errorf("register method %s failed: %w", typ.Method(m).Name, err)
 		}
 	}
 
@@ -194,6 +196,8 @@ func (h *Handler) registerMethod() {
 			}
 		}
 	}
+
+	return nil
 }
 
 func isExported(name string) bool {

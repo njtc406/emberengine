@@ -26,7 +26,7 @@ func init() {
 	})
 }
 
-var exitCh = make(chan os.Signal)
+var exitCh = make(chan os.Signal, 1)
 
 func init() {
 	// 注册退出信号

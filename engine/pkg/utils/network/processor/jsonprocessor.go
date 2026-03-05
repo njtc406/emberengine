@@ -110,7 +110,6 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16, msg []byte) *Json
 
 func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
 	if jsonProcessor.unknownMessageHandler == nil {
-		//log.SysLogger.Debugf("Unknown message, clientId=%s", clientId)
 		return
 	}
 

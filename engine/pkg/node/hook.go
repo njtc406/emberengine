@@ -1,8 +1,12 @@
 package node
 
-import "github.com/njtc406/emberengine/engine/pkg/utils/translate"
+import (
+	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
 
-type HookFun func(map[any]any)
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+)
+
+type HookFun func(ctx inf.INodeContext, extra map[any]any) error
 
 type StartParam struct {
 	Language translate.LanguageType // 语言

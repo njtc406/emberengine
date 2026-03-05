@@ -13,6 +13,13 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
+func (r *Repository) newMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *msgbus.MessageBus {
+	if r.busFactory != nil {
+		return r.busFactory.New(sender, receiver, err)
+	}
+	return msgbus.NewMessageBus(sender, receiver, err)
+}
+
 func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 	v, ok := r.mapPID.Load(serviceUid)
 	if ok {
@@ -82,10 +89,10 @@ func (r *Repository) SelectByPid(sender, receiver *actor.PID) inf.IBus {
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	c := r.SelectByServiceUid(receiver.GetServiceUid())
 	if c != nil && !actor.IsRetired(c.GetPid()) {
-		b := msgbus.NewMessageBus(s, c, nil)
+		b := r.newMessageBus(s, c, nil)
 		return b
 	}
-	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
+	return r.newMessageBus(s, c, def.ErrServiceNotFound)
 }
 
 func (r *Repository) SelectBySvcUid(sender *actor.PID, serviceUid string) inf.IBus {
@@ -93,10 +100,10 @@ func (r *Repository) SelectBySvcUid(sender *actor.PID, serviceUid string) inf.IB
 	c := r.SelectByServiceUid(serviceUid)
 
 	if c != nil && !actor.IsRetired(c.GetPid()) {
-		b := msgbus.NewMessageBus(s, c, nil)
+		b := r.newMessageBus(s, c, nil)
 		return b
 	}
-	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
+	return r.newMessageBus(s, c, def.ErrServiceNotFound)
 }
 
 func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) inf.IBus {
@@ -106,7 +113,7 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 		c := value.(inf.IRpcDispatcher)
 		pid := c.GetPid()
 		if pid.GetIsMaster() && rule(pid) {
-			returnList = append(returnList, msgbus.NewMessageBus(s, value.(inf.IRpcDispatcher), nil))
+			returnList = append(returnList, r.newMessageBus(s, value.(inf.IRpcDispatcher), nil))
 		}
 		return true
 	})
@@ -126,7 +133,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 
 	nameUidMap, ok := r.mapSvcBySNameAndSUid[*param.ServiceName] // 不做判断,如果没给serviceName直接崩,免得忘写
 	if !ok {
-		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
+		return r.newMessageBus(s, nil, def.ErrServiceNotFound)
 	}
 
 	var returnList msgbus.MultiBus
@@ -138,7 +145,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 		cPid := c.GetPid()
 		if !actor.IsRetired(cPid) && (param.Partition == nil || cPid.GetPartition() == *param.Partition) &&
 			(param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.GetIsMaster() == !param.IsSlaver {
-			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 	}
 
@@ -196,7 +203,7 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, ser
 		}
 		cPid := c.GetPid()
 		if c != nil && !actor.IsRetired(cPid) && (partition == 0 || cPid.GetPartition() == partition) && cPid.GetIsMaster() {
-			list = append(list, msgbus.NewMessageBus(s, c, nil))
+			list = append(list, r.newMessageBus(s, c, nil))
 		}
 	}
 
@@ -218,7 +225,7 @@ func (r *Repository) SelectByFilterAndChoice(sender *actor.PID, filter func(pid 
 	for _, pid := range list {
 		c := r.SelectByServiceUid(pid.GetServiceUid())
 		if c != nil && !actor.IsRetired(c.GetPid()) {
-			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 	}
 

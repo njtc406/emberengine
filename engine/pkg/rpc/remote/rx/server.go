@@ -9,20 +9,22 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"github.com/smallnest/rpcx/server"
 )
 
 type rpcxServer struct {
 	svr      *server.Server
 	listener *RpcxListener
-	logger   *log.Logger
+	logger   log.ILoggerX
+	handler  *handler.Handler
 }
 
 func NewRpcxServer() inf.IRemoteServer {
 	return &rpcxServer{}
 }
 
-func (rs *rpcxServer) SetLogger(logger *log.Logger) {
+func (rs *rpcxServer) SetLogger(logger log.ILoggerX) {
 	if logger != nil {
 		rs.logger = logger
 		if rs.listener != nil {
@@ -35,8 +37,16 @@ func (rs *rpcxServer) Init(sf inf.IRpcSenderFactory) {
 	rs.listener = &RpcxListener{
 		cliFactory: sf,
 		logger:     rs.logger,
+		handler:    rs.handler,
 	}
 	rs.svr = server.NewServer()
+}
+
+func (rs *rpcxServer) SetHandler(h *handler.Handler) {
+	rs.handler = h
+	if rs.listener != nil {
+		rs.listener.handler = h
+	}
 }
 
 func (rs *rpcxServer) Serve(conf *config.RPCServer, nodeUid string) error {

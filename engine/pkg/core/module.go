@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
@@ -52,7 +51,7 @@ type Module struct {
 
 	// 独立日志
 	enableLogging bool
-	logger        *log.Logger
+	logger        log.ILoggerX
 	log.ILoggerX  // 需要在服务init阶段之后才能使用
 }
 
@@ -80,7 +79,7 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	pModule.ITimerScheduler = m.GetRoot().GetBaseModule().(*Module).ITimerScheduler
 	pModule.root = m.root
 	pModule.logger = m.GetService().GetLogger()
-	pModule.ILoggerX = m.GetService().GetLoggerX()
+	pModule.ILoggerX = m.GetService().GetLogger()
 	pModule.ILoggerX = pModule.ILoggerX.WithFields(log.Fields{
 		"mId":   pModule.GetModuleID(),
 		"mName": pModule.GetModuleName(),
@@ -89,7 +88,11 @@ func (m *Module) AddModule(module inf.IModule) (uint32, error) {
 	pModule.eventHandler = event.NewTriggerHandler()
 	pModule.eventHandler.Init(m.eventHandler.GetProcessor().(*event.Processor))
 	pModule.IConcurrent = m.IConcurrent
-	pModule.IRpcHandler = rpc.NewHandler(pModule.self).Init(m.root.GetMethodMgr())
+	rpcHandler, err := rpc.NewHandler(pModule.self).Init(m.root.GetMethodMgr())
+	if err != nil {
+		return 0, err
+	}
+	pModule.IRpcHandler = rpcHandler
 	if err := module.OnInit(); err != nil {
 		return 0, err
 	}
@@ -123,10 +126,8 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 	// 从methodmgr中移除模块api(service那层的api是不会移除的)
 	if m.root.GetMethodMgr().RemoveMethods(m.GetMethods()) {
 		// 表示所有的rpc接口都已经注销,服务变为一个节点的私有服务了,通知cluster从远程监听中移除
-		if svcWithEndpoints, ok := m.GetService().(interface {
-			GetEndpointManager() *endpoints.EndpointManager
-		}); ok {
-			if em := svcWithEndpoints.GetEndpointManager(); em != nil {
+		if nodeCtx := m.GetService().GetNodeContext(); nodeCtx != nil {
+			if em := nodeCtx.GetEndpointManager(); em != nil {
 				em.ToPrivateService(m.GetService())
 			}
 		}
@@ -243,10 +244,6 @@ func (m *Module) TriggerEvent(ctx context.Context, tp def.EventType, ev inf.IEve
 	m.eventHandler.Trigger(ctx, tp, ev)
 }
 
-func (m *Module) GetLogger() *log.Logger {
+func (m *Module) GetLogger() log.ILoggerX {
 	return m.logger
-}
-
-func (m *Module) GetLoggerX() log.ILoggerX {
-	return m.ILoggerX
 }

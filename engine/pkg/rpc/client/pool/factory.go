@@ -19,7 +19,7 @@ type SenderCreator func(addr string) inf.IRpcSender
 
 // PoolManager 连接池管理器
 type PoolManager struct {
-	*log.Logger // 嵌入 Logger，替代 log.SysLogger
+	log.ILoggerX // 持有 ILoggerX
 
 	pools       map[string]*ConnectionPool // key: addr_type
 	poolMutex   sync.RWMutex
@@ -28,10 +28,9 @@ type PoolManager struct {
 }
 
 // NewPoolManager 创建新的连接池管理器
-func NewPoolManager(logger *log.Logger) *PoolManager {
-	setPoolLogger(logger)
+func NewPoolManager(logger log.ILoggerX) *PoolManager {
 	return &PoolManager{
-		Logger:      logger,
+		ILoggerX:    logger,
 		pools:       make(map[string]*ConnectionPool),
 		creators:    make(map[string]SenderCreator),
 		poolConfigs: make(map[string]*PoolConfig),
@@ -98,7 +97,7 @@ func (pm *PoolManager) GetOrCreatePool(address, rpcType string) (*ConnectionPool
 	}
 
 	// 创建新的连接池
-	pool := NewConnectionPool(address, rpcType, creator, config)
+	pool := NewConnectionPool(address, rpcType, creator, config, pm.ILoggerX)
 
 	// 启动连接池
 	if err := pool.Start(); err != nil {

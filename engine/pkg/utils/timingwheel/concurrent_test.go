@@ -20,7 +20,10 @@ func TestConcurrentTimerStopAndExecute(t *testing.T) {
 	tw.Start()
 	defer tw.Stop()
 
-	scheduler := NewJobScheduler("concurrent test", 1000, 10, tw, log.NewLoggerX(logger, log.Fields{"pkg": "concurrent test"}))
+	scheduler, err := NewJobScheduler("concurrent test", 1000, 10, tw, log.NewLoggerX(logger, log.Fields{"pkg": "concurrent test"}))
+	if err != nil {
+		t.Fatalf("Failed to create scheduler: %v", err)
+	}
 	var executedCount atomic.Int32
 	var stoppedCount atomic.Int32
 

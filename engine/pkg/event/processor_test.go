@@ -16,12 +16,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Processor 在 panic recover / error 路径会写日志；确保 SysLogger 初始化避免 nil panic。
+	// 保留测试 logger 初始化，避免日志后端未就绪影响测试环境。
 	l, err := log.NewLogger(&log.LoggerConf{Stdout: true, Caller: false, Color: false, Level: "error"}, true)
 	if err != nil {
 		panic(err)
 	}
-	log.SysLogger = l
+	_ = l
 	os.Exit(m.Run())
 }
 
