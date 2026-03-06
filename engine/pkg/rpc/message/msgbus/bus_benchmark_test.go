@@ -46,7 +46,7 @@ func benchInitRPC() {
 		rm.Start()
 		benchBusFactory = NewMessageBusFactory(10000, benchLogger, rm, def.DefaultRpcTimeout)
 
-		benchSenderMgr = client.NewSenderManager(pool.NewPoolManager(benchLogger), benchLogger, rm, nil)
+		benchSenderMgr = client.NewSenderManager(pool.NewPoolManager(benchLogger), benchLogger, rm, nil, 0)
 	})
 }
 

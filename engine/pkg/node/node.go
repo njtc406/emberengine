@@ -3,7 +3,6 @@ package node
 import (
 	"fmt"
 	"runtime/debug"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -107,68 +106,44 @@ type Node struct {
 
 	// 停止标志（防止 Stop() 重复调用）
 	stopped atomic.Bool
+
+	// 启动成功后用于 Stop() 的清理步骤（按注册顺序，Stop 时逆序执行）
+	stopCleanups []nodeCleanup
+}
+
+type nodeCleanup struct {
+	name          string
+	fn            func()
+	includeInStop bool
+}
+
+func appendCleanup(cleanups *[]nodeCleanup, name string, includeInStop bool, fn func()) {
+	if fn == nil {
+		return
+	}
+	*cleanups = append(*cleanups, nodeCleanup{name: name, fn: fn, includeInStop: includeInStop})
+}
+
+func runCleanupReverse(cleanups []nodeCleanup) {
+	for i := len(cleanups) - 1; i >= 0; i-- {
+		if cleanups[i].fn != nil {
+			cleanups[i].fn()
+		}
+	}
+}
+
+func filterStopCleanups(cleanups []nodeCleanup) []nodeCleanup {
+	result := make([]nodeCleanup, 0, len(cleanups))
+	for _, step := range cleanups {
+		if step.includeInStop {
+			result = append(result, step)
+		}
+	}
+	return result
 }
 
 type profilerRegistryAdapter struct {
 	registry *profiler.Registry
-}
-
-type profilerAdapter struct {
-	profiler *profiler.Profiler
-	mu       sync.Mutex
-	stack    []*profiler.Analyzer
-}
-
-func (a *profilerAdapter) Push(tag string) {
-	if a == nil || a.profiler == nil {
-		return
-	}
-	analyzer := a.profiler.Push(tag)
-	if analyzer == nil {
-		return
-	}
-	a.mu.Lock()
-	a.stack = append(a.stack, analyzer)
-	a.mu.Unlock()
-}
-
-func (a *profilerAdapter) Pop() {
-	if a == nil || a.profiler == nil {
-		return
-	}
-	a.mu.Lock()
-	n := len(a.stack)
-	if n == 0 {
-		a.mu.Unlock()
-		return
-	}
-	analyzer := a.stack[n-1]
-	a.stack = a.stack[:n-1]
-	a.mu.Unlock()
-	if analyzer != nil {
-		analyzer.Pop()
-	}
-}
-
-func (a *profilerAdapter) Reset() {
-	for {
-		a.mu.Lock()
-		n := len(a.stack)
-		if n == 0 {
-			a.mu.Unlock()
-			return
-		}
-		analyzer := a.stack[n-1]
-		a.stack = a.stack[:n-1]
-		a.mu.Unlock()
-		if analyzer != nil {
-			analyzer.Pop()
-		}
-	}
-}
-
-func (a *profilerAdapter) IsEnabled() bool {
-	return a != nil && a.profiler != nil
 }
 
 func (a *profilerRegistryAdapter) RegProfiler(name string, logger log.ILoggerX) inf.IProfiler {
@@ -179,7 +154,7 @@ func (a *profilerRegistryAdapter) RegProfiler(name string, logger log.ILoggerX) 
 	if p == nil {
 		return nil
 	}
-	return &profilerAdapter{profiler: p}
+	return profiler.NewAdapter(p)
 }
 
 func (a *profilerRegistryAdapter) UnRegProfiler(name string) {
@@ -280,12 +255,11 @@ func (n *Node) runHookSafe(hook HookFun) (err error) {
 
 func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	// ── cleanups 栈：记录已完成的初始化步骤，失败时逆序回滚 ──
-	var cleanups []func()
+	var cleanups []nodeCleanup
 	defer func() {
 		if retErr != nil {
-			for i := len(cleanups) - 1; i >= 0; i-- {
-				cleanups[i]()
-			}
+			runCleanupReverse(cleanups)
+			n.stopCleanups = nil
 		}
 	}()
 
@@ -323,7 +297,7 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("logger init: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.Logger.Close() })
+	appendCleanup(&cleanups, "close logger", false, func() { n.Logger.Close() })
 
 	n.Info("-------->system log init ok<---------")
 
@@ -340,7 +314,7 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("ants pool: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.AntsPool.Release() })
+	appendCleanup(&cleanups, "release async pool", true, func() { n.AntsPool.Release() })
 
 	twConf := n.Config.NodeConf.TimingWheelConf
 	interval := twConf.Interval
@@ -353,13 +327,13 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 		log.NewLoggerX(n.Logger, log.Fields{"pkg": "timingwheel"}),
 	)
 	n.TimingWheel.Start()
-	cleanups = append(cleanups, func() { n.TimingWheel.Stop() })
+	appendCleanup(&cleanups, "stop timing wheel", true, func() { n.TimingWheel.Stop() })
 
 	n.DeDuplicator, err = dedup.NewDeDuplicator(n.Config.NodeConf.DeDuplicatorConf)
 	if err != nil {
 		return nil, fmt.Errorf("dedup: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.DeDuplicator.Close() })
+	appendCleanup(&cleanups, "close deduplicator", true, func() { n.DeDuplicator.Close() })
 
 	// ==============================
 	// 4. RPC 监控
@@ -373,7 +347,7 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 
 	// 记录 PID
 	pid.RecordPID(n.Config.NodeConf.PVPath, n.Config.NodeConf.NodeId, n.Config.NodeConf.NodeType)
-	cleanups = append(cleanups, func() {
+	appendCleanup(&cleanups, "delete pid file", false, func() {
 		pid.DeletePID(n.Config.NodeConf.PVPath, n.Config.NodeConf.NodeId, n.Config.NodeConf.NodeType)
 	})
 
@@ -381,7 +355,7 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if err := n.RpcMonitor.Start(); err != nil {
 		return nil, fmt.Errorf("rpc monitor start: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.RpcMonitor.Stop() })
+	appendCleanup(&cleanups, "stop rpc monitor", true, func() { n.RpcMonitor.Stop() })
 
 	// ==============================
 	// 4.5 RPC 层（Phase 3 组件）
@@ -389,16 +363,20 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 
 	// 连接池管理器
 	n.PoolManager = pool.NewPoolManager(n.Logger)
-	cleanups = append(cleanups, func() { n.PoolManager.Close() })
+	appendCleanup(&cleanups, "close pool manager", true, func() { n.PoolManager.Close() })
 
 	// Sender 管理器
 	var natsConf *config.NatsConf
+	grpcConnNum := 0
 	if n.Config != nil && n.Config.NodeConf != nil && n.Config.NodeConf.EventBusConf != nil {
 		natsConf = n.Config.NodeConf.EventBusConf.NatsConf
 	}
-	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger, n.RpcMonitor, natsConf)
+	if n.Config != nil && n.Config.NodeConf != nil {
+		grpcConnNum = n.Config.NodeConf.GrpcSenderConnNum
+	}
+	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger, n.RpcMonitor, natsConf, grpcConnNum)
 	remoteMsgHandler := remotehandler.NewHandler(n.RpcMonitor, n.Logger, n.DeDuplicator)
-	cleanups = append(cleanups, func() { n.SenderMgr.Close() })
+	appendCleanup(&cleanups, "close sender manager", true, func() { n.SenderMgr.Close() })
 
 	// 方法前缀索引
 	n.MethodIndex = rpc.NewMethodIndex()
@@ -430,13 +408,13 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if err := n.Cluster.Start(); err != nil {
 		return nil, fmt.Errorf("cluster start: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.Cluster.Close() })
+	appendCleanup(&cleanups, "close cluster", true, func() { n.Cluster.Close() })
 
 	n.EventBus = event.NewEventBus()
 	if err := n.EventBus.Init(n.Config.NodeConf.EventBusConf, n.Logger); err != nil {
 		return nil, fmt.Errorf("event bus init: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.EventBus.Stop() })
+	appendCleanup(&cleanups, "stop event bus", true, func() { n.EventBus.Stop() })
 
 	// ==============================
 	// 6. 用户钩子
@@ -462,7 +440,9 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if err := n.ServiceMgr.Start(); err != nil {
 		return nil, fmt.Errorf("service manager start: %w", err)
 	}
-	cleanups = append(cleanups, func() { n.ServiceMgr.StopAll() })
+	appendCleanup(&cleanups, "stop all services", true, func() { n.ServiceMgr.StopAll() })
+
+	n.stopCleanups = filterStopCleanups(cleanups)
 
 	n.startTime = time.Now()
 	return n, nil
@@ -478,49 +458,14 @@ func (n *Node) Stop() {
 
 	n.Info("==================>>begin stop<<==================")
 
-	// 1. 停止所有服务（逆序）
-	n.Info("[1/9] Stopping all services...")
-	n.ServiceMgr.StopAll()
-	n.Info("[1/9] All services stopped")
-
-	// 2. 关闭事件总线
-	n.Info("[2/9] Stopping event bus...")
-	n.EventBus.Stop()
-	n.Info("[2/9] Event bus stopped")
-
-	// 3. 关闭集群
-	n.Info("[3/9] Closing cluster...")
-	n.Cluster.Close()
-	n.Info("[3/9] Cluster closed")
-
-	// 4. 关闭 Sender 管理器 & 连接池
-	n.Info("[4/9] Closing sender manager...")
-	n.SenderMgr.Close()
-	n.Info("[4/9] Sender manager closed")
-
-	n.Info("[4/9] Closing pool manager...")
-	n.PoolManager.Close()
-	n.Info("[4/9] Pool manager closed")
-
-	// 5. 停止 RPC 监控
-	n.Info("[5/9] Stopping RPC monitor...")
-	n.RpcMonitor.Stop()
-	n.Info("[5/9] RPC monitor stopped")
-
-	// 6. 关闭去重器
-	n.Info("[6/9] Closing deduplicator...")
-	n.DeDuplicator.Close()
-	n.Info("[6/9] Deduplicator closed")
-
-	// 7. 停止时间轮
-	n.Info("[7/9] Stopping timing wheel...")
-	n.TimingWheel.Stop()
-	n.Info("[7/9] Timing wheel stopped")
-
-	// 8. 释放协程池
-	n.Info("[8/9] Releasing async pool...")
-	n.AntsPool.Release()
-	n.Info("[8/9] Async pool released")
+	for i := len(n.stopCleanups) - 1; i >= 0; i-- {
+		step := n.stopCleanups[i]
+		n.Infof("stopping: %s", step.name)
+		if step.fn != nil {
+			step.fn()
+		}
+	}
+	n.stopCleanups = nil
 
 	// 9. 关闭日志（最后 — 确保以上步骤的日志都能输出）
 	if n.Config.IsDebug() {

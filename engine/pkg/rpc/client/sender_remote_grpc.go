@@ -26,11 +26,14 @@ type grpcSender struct {
 	logger     log.ILoggerX
 }
 
-func newGrpcClient(addr string, logger log.ILoggerX) inf.IRpcSender {
+func newGrpcClient(addr string, logger log.ILoggerX, grpcConnNum int) inf.IRpcSender {
 	var clients []actor.GrpcListenerClient
 	var conns []*grpc.ClientConn
-	cpuNum := runtime.NumCPU()
-	connNum := cpuNum / 2
+	connNum := grpcConnNum
+	if connNum <= 0 {
+		cpuNum := runtime.NumCPU()
+		connNum = cpuNum / 2
+	}
 	if connNum < 1 {
 		connNum = 1
 	}
@@ -106,5 +109,5 @@ func (rc *grpcSender) DeliverResponse(ctx context.Context, _ inf.IRpcDispatcher,
 }
 
 func (rc *grpcSender) IsClosed() bool {
-	return rc.rpcClients == nil || len(rc.rpcClients) == 0
+	return len(rc.rpcClients) == 0
 }

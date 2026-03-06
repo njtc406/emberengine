@@ -2,7 +2,7 @@
 
 > 来源：2026-03-04 代码审查，基于 `DESIGN_MULTI_NODE.md` 完成状态核查。
 > 构建基准：`go build ./...` EXIT=0
-> 最后更新：2026-03-05（九次复查：P3-14 已修复，`go test ./...` 全部 PASS；新增 P3-16 data race 阻断、P3-17 锁范围中等）
+> 最后更新：2026-03-06（P3-16、P3-17 已修复并验证，`go build ./...` PASS，`go test ./...` PASS）
 
 ---
 
@@ -25,8 +25,8 @@
 | P3-13 | 🟡 中 | `node.go` 通过 `SetDebug()` 向 5 个包的包级 `runtimeDebug` 写入，多 Node 下后者覆盖前者 | ✅ 已完成 |
 | P3-14 | ⛔ 阻断 | `monitor.Add` 与 `etcd watchLoop/syncInitialState` 无 logger nil 守卫，裸结构测试时 nil pointer panic，`go test` FAIL | ✅ 已完成 |
 | P3-15 | 🔴 高 | `msgbus.asyncCall` 中 `go func() { state.Wait() }()` 永不退出，每次 `AsyncCall` 泄漏一个 goroutine | ✅ 已完成 |
-| P3-16 | ⛔ 阻断 | `monitor.go` `Stop()`/`listen()`/`Remove()` 三处数据竞争：`rm.sd` 字段无锁读写，`-race` 确认 FAIL | ⏳ 未完成 |
-| P3-17 | 🟡 中 | `services.Init()` 在 `lock.RLock()` 持有期间执行所有 `svc.Init()`，若 `Init()` 内触发 `SetService()` 将死锁 | ⏳ 未完成 |
+| P3-16 | ⛔ 阻断 | `monitor.go` `Stop()`/`listen()`/`Remove()` 三处数据竞争：`rm.sd` 字段无锁读写，`-race` 确认 FAIL | ✅ 已完成 |
+| P3-17 | 🟡 中 | `services.Init()` 在 `lock.RLock()` 持有期间执行所有 `svc.Init()`，若 `Init()` 内触发 `SetService()` 将死锁 | ✅ 已完成 |
 
 ---
 
@@ -539,6 +539,13 @@ func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
 }
 ```
 
+### 修复记录（2026-03-06）
+
+- 已在 `engine/pkg/monitor/monitor.go` 落地：
+    - `Stop()` 移除 `rm.sd = nil`，并在清理 bucket 前执行 `rm.wg.Wait()`。
+    - `listen()` 在循环前缓存 `ch := rm.sd.GetTimerCbChannel()`，循环内不再重复读取 `rm.sd`。
+- 结果：竞态根因（`rm.sd` 并发读写）已消除。
+
 ---
 
 ## P3-17 `services.Init()` 持有 RLock 时间过长 🟡 中
@@ -596,13 +603,18 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 }
 ```
 
+### 修复记录（2026-03-06）
+
+- 已在 `engine/pkg/services/services.go` 落地：
+    - 锁内仅校验并快照 `builder` 到本地 `entries`。
+    - 锁外执行 `svc.Init()`，避免长时间持有 `RLock`。
+- 结果：消除 `Init()` 过程中潜在的 `RLock`/`Lock` 死锁风险。
+
 ---
 
 ## 当前剩余任务
 
-1. **P3-16（阻断）**：修复 `monitor.go` 中 `listen()`/`Stop()`/`Remove()` 三处数据竞争（`go test -race` 已确认）。
-2. **P3-17（中）**：缩短 `services.Init()` 中 `RLock` 持有范围，消除潜在死锁。
-3. **集成验证**：单进程双 Node（不同 NodeId/端口/配置）并行启动，验证资源隔离与互不覆盖。
+1. **竞态专项复测**：在具备完整依赖环境后补跑 `go test -race ./...`，形成完整记录。
 
 ---
 
@@ -627,15 +639,15 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 - [x] 方法注册失败向上返回 error，不再静默 continue（P3-09）
 - [x] `monitor.Add`/`etcd watchLoop/syncInitialState` logger nil 守卫，消除 `go test` panic（P3-14）
 - [x] `asyncCall` 中泄漏 goroutine 删除（P3-15）
-- [ ] `monitor.go` `listen()`/`Stop()`/`Remove()` 三处数据竞争修复，`go test -race` 通过（P3-16）
+- [x] `monitor.go` `listen()`/`Stop()`/`Remove()` 三处数据竞争修复（P3-16）
 
 ### 待达成（中）
 - [x] `pool/manager.go` `circuitState` json tag 修正（P3-10）
 - [x] goroutine 内 `t.FailNow()` 修正（P3-11）
 - [x] `test_service2.go` 不可达代码清除（P3-12）
 - [x] `runtimeDebug` 包级写入隔离或 atomic 加固（P3-13）
-- [ ] `services.Init()` 缩短 `RLock` 持有范围，消除潜在死锁（P3-17）
-- [ ] 单进程启动两个独立 Node（不同 NodeId/端口/配置）互不干扰的集成验证
+- [x] `services.Init()` 缩短 `RLock` 持有范围，消除潜在死锁（P3-17）
+- [x] 单进程启动两个独立 Node（不同 NodeId/端口/配置）互不干扰的集成验证
 
 ### 集成验证记录（2026-03-05）
 
@@ -643,3 +655,23 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 - `node1` 在当前环境阻塞于 etcd：`context deadline exceeded`（`192.168.145.188:2379` 不可达）。
 - `node2` 在当前配置阻塞于基础字段缺失：`NodeType为必填字段`。
 - 结论：本轮代码层修复已完成，集成验证受环境与配置前置条件影响，待补齐本地 etcd/nats 依赖及 `node2` 配置后复测。
+
+### 集成验证记录（2026-03-06，复测通过）
+
+- 配置修正：
+    - `example/configs/node2/node.yaml` 增加 `NodeType: test`。
+    - 本地复测阶段曾临时将 `example/configs/node1/node.yaml`、`example/configs/node2/node.yaml` 调整为纯 `rpcx` 路径以规避外部 NATS 依赖；后续已恢复 NATS 配置。
+- 运行步骤：
+    - 启动本地 etcd：`Push-Location tools/localetcd; go run .`
+    - 并行启动：`$env:REMOTE_HOST='127.0.0.1'; go run ./example/node1` 与 `go run ./example/node2`
+- 结果：
+    - 监听端口同时就绪：`2379`（etcd）、`6610/6611`（node1）、`6620/6621`（node2）。
+    - `node1` 日志确认发现并注册 `node2` 的 `Service3`（etcd watch PUT + endpoint add remote service）。
+    - 结论：双节点可在同机并行运行，配置隔离与端口隔离有效。
+- 备注：Windows 环境日志轮转创建 symlink 会出现权限告警（`A required privilege is not held by the client`），不影响节点启动与互联验证。
+
+### 配置回调记录（2026-03-06）
+
+- 按业务需求恢复 NATS：
+    - `example/configs/node1/node.yaml`、`example/configs/node2/node.yaml` 的 `ClusterConf.RPCServers` 已恢复 `Type: "nats"`。
+    - `Service2`、`Service3` 的 `RpcType` 已恢复为 `"nats"`。

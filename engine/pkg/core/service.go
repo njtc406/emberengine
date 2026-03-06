@@ -87,7 +87,7 @@ func (a *profilerRegistryAdapter) RegProfiler(name string, logger log.ILoggerX) 
 	if p == nil {
 		return nil
 	}
-	return &profilerAdapter{profiler: p}
+	return profiler.NewAdapter(p)
 }
 
 func (a *profilerRegistryAdapter) UnRegProfiler(name string) {
@@ -95,44 +95,6 @@ func (a *profilerRegistryAdapter) UnRegProfiler(name string) {
 		return
 	}
 	a.registry.UnRegProfiler(name)
-}
-
-type profilerAdapter struct {
-	profiler *profiler.Profiler
-	stack    []*profiler.Analyzer
-}
-
-func (a *profilerAdapter) Push(tag string) {
-	if a == nil || a.profiler == nil {
-		return
-	}
-	analyzer := a.profiler.Push(tag)
-	if analyzer == nil {
-		return
-	}
-	a.stack = append(a.stack, analyzer)
-}
-
-func (a *profilerAdapter) Pop() {
-	if a == nil || len(a.stack) == 0 {
-		return
-	}
-	n := len(a.stack)
-	analyzer := a.stack[n-1]
-	a.stack = a.stack[:n-1]
-	if analyzer != nil {
-		analyzer.Pop()
-	}
-}
-
-func (a *profilerAdapter) Reset() {
-	for len(a.stack) > 0 {
-		a.Pop()
-	}
-}
-
-func (a *profilerAdapter) IsEnabled() bool {
-	return a != nil && a.profiler != nil
 }
 
 func (s *Service) SetRuntimeDeps(c *cluster.Cluster, em *endpoints.EndpointManager, pr *profiler.Registry, rt *router.Router) {

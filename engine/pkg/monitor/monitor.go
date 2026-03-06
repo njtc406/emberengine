@@ -185,8 +185,8 @@ func (rm *RpcMonitor) Stop() {
 	rm.cancel()
 	if rm.sd != nil {
 		rm.sd.Stop()
-		rm.sd = nil
 	}
+	rm.wg.Wait()
 	// 清空 buckets，释放 CallState
 	for _, bucket := range rm.buckets {
 		bucket.Clear()
@@ -195,6 +195,10 @@ func (rm *RpcMonitor) Stop() {
 
 func (rm *RpcMonitor) listen() {
 	defer rm.wg.Done()
+	if rm.sd == nil {
+		return
+	}
+	ch := rm.sd.GetTimerCbChannel()
 	wg := sync.WaitGroup{}
 	defer func() {
 		rm.Infof("rpc monitor listen stop")
@@ -202,7 +206,7 @@ func (rm *RpcMonitor) listen() {
 	defer wg.Wait() // 等待所有回调执行完成
 	for {
 		select {
-		case t, ok := <-rm.sd.GetTimerCbChannel():
+		case t, ok := <-ch:
 			if !ok {
 				return
 			}

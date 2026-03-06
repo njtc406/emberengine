@@ -3,7 +3,12 @@
 > **分析时间**: 2026-07  
 > **分析范围**: 全项目源码、设计文档、Roadmap  
 > **分析分支**: `v2-dev-node-fix` (HEAD: ef08ca6)  
-> **构建状态**: `go build ./...` ✅ | `go vet ./...` ✅ | `go test ./...` ✅ | `go test -race` ❌ (monitor 包)
+> **构建状态**: `go build ./...` ✅ | `go vet ./...` ✅ | `go test ./...` ✅ | `go test -race ./engine/pkg/monitor/...` ✅
+
+> **修复更新（2026-03-06）**  
+> 已按架构反馈完成并入代码：P3-16、P3-17、NEW-01、NEW-02、NEW-03、NEW-04、NEW-05、NEW-06、NEW-07、NEW-08、NEW-09、NEW-10、NEW-11、NEW-13、NEW-14。  
+> 对应实现文件：`engine/pkg/monitor/monitor.go`、`engine/pkg/services/services.go`、`engine/pkg/services/diagnostics.go`、`engine/pkg/profiler/adapter.go`、`engine/pkg/core/service.go`、`engine/pkg/core/module.go`、`engine/pkg/core/module_lookup.go`、`engine/pkg/node/node.go`、`engine/pkg/node/diagnostics.go`、`engine/pkg/cluster/endpoints/endpoints.go`、`engine/pkg/event/eventBus.go`、`engine/pkg/cluster/cluster.go`、`engine/pkg/rpc/client/pool/factory.go`、`engine/pkg/config/define.go`、`engine/pkg/config/config.go`。  
+> 已验证：`go build ./...` ✅，`go test ./...` ✅。
 
 ---
 
@@ -260,7 +265,10 @@ Module 提供了服务内部的模块化组织能力：
 
 **⚠️ 问题**：
 
-1. **大量 `GetBaseModule().(*Module)` 类型断言**：Module 层的代码充斥着对基类的向下转型。如果有人实现了自定义的 `IModule` 但不嵌入 `Module`，会 panic。
+1. **大量 `GetBaseModule().(*Module)` 类型断言**：✅ **已修复（2026-03-06）**。`module.go` 已改为安全断言与降级处理：
+    - 新增 `asCoreModule()` / `rootCoreModule()` 统一执行类型检查
+    - `AddModule()` 在非 `*Module` 场景返回 error，不再 panic
+    - `ReleaseModule()` / `GetModule()` / `newModuleID()` 改为安全分支，避免 nil+断言链路崩溃
 
 ```go
 // module.go 中多处出现
@@ -349,16 +357,19 @@ if connNum < 1 { connNum = 1 }
 
 **⚠️ 问题**：
 
-1. **eventBus.go 800+ 行**：全局/服务器/特定三套订阅管理 + NATS 连接 + 限流 + 批处理全部集中在一个文件。建议拆分：
-   - `bus_global.go` — 全局事件
-   - `bus_server.go` — 服务器事件
-   - `bus_specific.go` — 特定事件
-   - `bus_nats.go` — NATS 连接管理
-   - `bus_throttle.go` — 限流 + 批处理
+1. **eventBus.go 职责过重**：✅ **已修复（2026-03-06）**，已按职责拆分为：
+    - `bus_global.go` — 全局事件
+    - `bus_server.go` — 服务器事件
+    - `bus_specific.go` — 特定事件
+    - `bus_nats.go` — NATS/TLS 与订阅管理
+    - `bus_batch.go` — 批处理刷新逻辑
 
 2. **批处理定时器在非 NATS 模式下也启动**（`Init()` 中无条件 `go eb.processBatchedEvents()`）：单机模式下浪费资源。
 
-3. **NATS TLS 配置 `InsecureSkipVerify: true`** 注释着 "TODO 有风险"——确实需要修复。
+3. **NATS TLS 配置 `InsecureSkipVerify: true`** 注释着 "TODO 有风险"——✅ **已修复（2026-03-06）**：
+    - 移除硬编码 `InsecureSkipVerify: true`
+    - 新增 `NatsConf.InsecureSkipVerify`（默认 `false`）与 `NatsConf.TLSServerName`
+    - TLS 最低版本设为 `TLS1.2`，默认启用证书校验
 
 ---
 
@@ -379,9 +390,9 @@ etcd Watch → PushEvent → Cluster.run() → eventProcessor.Trigger()
 
 **⚠️ 问题**：
 
-1. **Cluster.eventChannel 固定 1024 缓冲**：高峰期如果事件处理慢，channel 会阻塞 PushEvent 调用者。应可配置。
+1. **Cluster.eventChannel 固定 1024 缓冲**：高峰期如果事件处理慢，channel 会阻塞 PushEvent 调用者。应可配置。✅ **已修复（2026-03-06）**：新增 `ClusterConf.EventChannelSize`，默认 `1024`。
 
-2. **EndpointManager.stopped 字段是普通 bool**（非 atomic），多 goroutine 访问时不安全。
+2. **EndpointManager.stopped 字段是普通 bool**（非 atomic），多 goroutine 访问时不安全。✅ **已修复（2026-03-06）**：改为 `atomic.Bool`。
 
 3. **Repository 的两级索引 `mapSvcBySNameAndSUid` / `mapSvcBySTpAndSName` 使用普通 map + ShardedRWLock**，锁粒度与索引键不匹配（锁是分片的，但 indexAdd/indexRemove 拿的是同一个锁分片吗？需要验证）。
 
@@ -394,7 +405,7 @@ etcd Watch → PushEvent → Cluster.run() → eventProcessor.Trigger()
 - epoch + seq 生成唯一 ID，无需外部依赖
 - TimingWheel 调度器处理超时回调
 
-**⛔ 已知数据竞态（P3-16）**：
+**✅ 已修复数据竞态（P3-16，2026-03-06）**：
 
 ```go
 // Stop() 中
@@ -404,9 +415,9 @@ rm.sd = nil      // 写
 rm.sd.GetTimerCbChannel()  // 读（在另一个 goroutine）
 ```
 
-`Stop()` 不等待 `listen()` goroutine 退出就将 `rm.sd` 置 nil，导致 data race。
+历史问题：`Stop()` 不等待 `listen()` goroutine 退出就将 `rm.sd` 置 nil，导致 data race。
 
-**修复方案**：
+**已落地修复**：
 1. listen() 在循环前缓存 channel：`ch := rm.sd.GetTimerCbChannel()`
 2. Stop() 移除 `rm.sd = nil`，改由 GC 回收
 3. Stop() 增加 `rm.wg.Wait()` 等待 listen() 退出
@@ -459,6 +470,8 @@ type IService interface {
 
 `profilerAdapter` 和 `profilerRegistryAdapter` 在 `node.go` 和 `core/service.go` 中**各实现了一份**。`service.go` 中的版本还少了 mutex 保护（与 node.go 中的 `sync.Mutex` 版本不一致）。
 
+✅ **已修复（NEW-01，2026-03-06）**：已抽取共享实现到 `engine/pkg/profiler/adapter.go`，`node.go` 与 `service.go` 统一复用线程安全版本。
+
 | 位置 | 版本 | mutex |
 |------|------|-------|
 | `node.go` | 有 `sync.Mutex` 保护 stack | ✅ |
@@ -474,30 +487,32 @@ type IService interface {
 
 | 编号 | 问题 | 位置 | 影响 |
 |------|------|------|------|
-| **P3-16** | monitor.go 数据竞态 | `monitor.go:188,205` | `go test -race` 失败；生产环境可能 crash |
+| **P3-16** | monitor.go 数据竞态（已修复） | `monitor.go` | 历史阻断项，已于 2026-03-06 修复 |
 
 ### 6.2 中等级别
 
 | 编号 | 问题 | 位置 | 影响 |
 |------|------|------|------|
-| **P3-17** | services.Init() RLock 持锁范围过大 | `services.go:91` | 若 svc.Init() 触发 SetService() 会死锁 |
-| **NEW-01** | profilerAdapter 重复实现且不一致 | `node.go` / `service.go` | service.go 版本缺少 mutex，并发不安全 |
-| **NEW-02** | EndpointManager.stopped 非 atomic | `endpoints.go` | 多 goroutine 访问无保护 |
-| **NEW-03** | eventBus.go 职责过重 (800+ 行) | `eventBus.go` | 维护困难，测试困难 |
-| **NEW-04** | gRPC 连接数 / NATS 池大小硬编码 | `sender_remote_grpc.go`, `sender_remote_nats.go` | 无法按需调优 |
-| **NEW-05** | Node.Start() cleanups 栈与 Stop() 逻辑重复 | `node.go` | 新增组件需同步修改两处 |
+| **P3-17** | services.Init() RLock 持锁范围过大（已修复） | `services.go` | 历史中风险项，已于 2026-03-06 修复 |
+| **NEW-01** | profilerAdapter 重复实现且不一致（已修复） | `profiler/adapter.go`、`node.go`、`service.go` | 已统一共享实现并补齐并发保护 |
+| **NEW-02** | EndpointManager.stopped 非 atomic（已修复） | `endpoints.go` | 已改为 atomic.Bool |
+| **NEW-03** | eventBus.go 职责过重 (800+ 行)（已修复） | `eventBus.go`、`bus_global.go`、`bus_server.go`、`bus_specific.go`、`bus_nats.go`、`bus_batch.go` | 已完成职责拆分，降低单文件复杂度 |
+| **NEW-04** | gRPC 连接数 / NATS 池大小硬编码（已修复） | `sender_remote_grpc.go`, `sender_remote_nats.go`, `config/define.go` | 已支持配置化调优 |
+| **NEW-05** | Node.Start() cleanups 栈与 Stop() 逻辑重复（已修复） | `node.go` | 已统一为注册式清理步骤，Stop 复用同一清理栈逆序执行 |
 
 ### 6.3 低级别 / 建议
 
 | 编号 | 问题 | 位置 | 影响 |
 |------|------|------|------|
-| **NEW-06** | Module 中大量 `(*Module)` 类型断言 | `module.go` | 自定义 IModule 实现会 panic |
-| **NEW-07** | Cluster.eventChannel 缓冲大小固定 1024 | `cluster.go` | 高负载下阻塞调用者 |
-| **NEW-08** | NATS TLS `InsecureSkipVerify: true` | `eventBus.go` | 安全风险 |
-| **NEW-09** | MessageBus.call() 热路径 reflect | `bus.go` | 性能可优化 |
-| **NEW-10** | pool/manager.go 706 行单文件 | `pool/manager.go` | 可读性 |
-| **NEW-11** | 批处理定时器非 NATS 模式下无条件启动 | `eventBus.go` | 资源浪费 |
-| **NEW-12** | 测试覆盖率不足 | 全项目 | 核心路径缺乏单元测试 |
+| **NEW-06** | Module 中大量 `(*Module)` 类型断言（已修复） | `module.go` | 已引入内部 `coreModuleCarrier`（`CoreModule() *Module`）桥接，外部 `IModule` 合约不变；并替换为安全断言与错误返回，避免 panic |
+| **NEW-07** | Cluster.eventChannel 缓冲大小固定 1024（已修复） | `cluster.go`、`config/define.go` | 已支持通过配置调整缓冲区大小 |
+| **NEW-08** | NATS TLS `InsecureSkipVerify: true`（已修复） | `eventBus.go`、`config/define.go` | 已改为配置化，默认安全校验证书 |
+| **NEW-09** | MessageBus.call() 热路径 reflect（已修复） | `bus.go` | 已移除发送前反射校验热路径，改为响应赋值阶段统一校验并补充多返回值长度检查 |
+| **NEW-10** | pool/manager.go 706 行单文件（已修复） | `pool/manager.go`、`pool/manager_types.go`、`pool/manager_runtime.go` | 已按职责拆分为结构定义/类型定义/运行逻辑三个文件，降低单文件复杂度 |
+| **NEW-11** | 批处理定时器非 NATS 模式下无条件启动（已修复） | `eventBus.go` | 非 NATS 模式不再启动批处理 ticker/goroutine |
+| **NEW-12** | 测试覆盖率不足（阶段性完成，暂缓继续） | 全项目 | 核心高风险路径已补充：`core/module_lookup_test.go`、`rpc/client/pool/manager_runtime_test.go`、`rpc/client/pool/factory_test.go`、`services/services_test.go`、`rpc/message/msgbus/bus_test.go`（含 MultiBus 模式覆盖）、`cluster/endpoints/repository/repository_test.go`、`cluster/endpoints/endpoints_test.go`；其余低优先级模块后续按需补齐 |
+| **NEW-13** | 模块间调用需类型断言（已修复） | `core/module_lookup.go` | 已提供泛型辅助 `GetModule[T](hierarchy, id) (T, bool)`，统一处理不存在/类型不匹配场景并返回 `(zero, false)` |
+| **NEW-14** | PoolManager 在无 logger 场景下 panic（已修复） | `rpc/client/pool/factory.go` | 已为 `GetOrCreatePool/Close/RemovePool` 的日志输出增加 nil 保护，避免空指针 panic |
 
 ---
 
@@ -505,7 +520,7 @@ type IService interface {
 
 ### 7.1 短期（1-2 周）
 
-#### 7.1.1 修复 monitor.go 数据竞态 (P3-16)
+#### 7.1.1 修复 monitor.go 数据竞态 (P3-16) ✅ 已完成（2026-03-06）
 
 ```go
 // 修复方案
@@ -536,7 +551,7 @@ func (rm *RpcMonitor) listen() {
 }
 ```
 
-#### 7.1.2 修复 services.Init() 锁范围 (P3-17)
+#### 7.1.2 修复 services.Init() 锁范围 (P3-17) ✅ 已完成（2026-03-06）
 
 ```go
 func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
@@ -558,11 +573,11 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 }
 ```
 
-#### 7.1.3 合并重复的 profilerAdapter
+#### 7.1.3 合并重复的 profilerAdapter ✅ 已完成（2026-03-06）
 
 将 `profilerAdapter` / `profilerRegistryAdapter` 抽取到 `profiler` 包或 `interfaces` 辅助包中，统一使用带 `sync.Mutex` 的版本。
 
-#### 7.1.4 EndpointManager.stopped 改为 atomic.Bool
+#### 7.1.4 EndpointManager.stopped 改为 atomic.Bool ✅ 已完成（2026-03-06）
 
 ```go
 type EndpointManager struct {
@@ -614,13 +629,13 @@ func (n *Node) Stop() {
 将 gRPC 连接数、NATS 连接池大小、Cluster eventChannel 缓冲等纳入统一配置体系：
 
 ```yaml
-rpc:
-  grpc:
-    connections_per_peer: 4  # 替代 NumCPU/2
-  nats:
-    sender_pool_size: 4      # 替代环境变量
-cluster:
-  event_channel_size: 4096   # 替代硬编码 1024
+NodeConf:
+    GrpcSenderConnNum: 4           # gRPC sender 每个远端地址连接数（<=0 回退 NumCPU/2）
+    EventBusConf:
+        NatsConf:
+            SenderPoolSize: 4          # NATS sender 连接池大小（<=0 回退默认1）
+ClusterConf:
+    EventChannelSize: 4096         # 替代硬编码 1024
 ```
 
 #### 7.2.4 增加核心路径单元测试
@@ -637,6 +652,10 @@ cluster:
 #### 7.3.1 可观测性体系
 
 当前仅有基础 Profiler 和 EventMetrics。建议分阶段接入：
+
+已完成第一步（2026-03-06）：
+- 新增 `services.GetRuntimeSummary()`：输出服务数量与服务名列表。
+- 新增 `node.GetRuntimeSnapshot()`：输出 Node UID、集群模式、运行时长、服务摘要、连接池指标快照。
 
 1. **Prometheus Metrics**：RPC QPS/延迟/错误率、Mailbox 队列长度、Pool 命中率
 2. **OpenTelemetry Tracing**：基于现有 `xcontext.traceId` 接入 Jaeger
@@ -725,11 +744,10 @@ EmberEngine 经过 Node 自包含改造后，架构质量显著提升。**核心
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
-| **P0** | 修复 monitor 数据竞态 | `go test -race` 失败，生产风险 |
-| **P1** | 增加单元测试覆盖 | 核心路径无测试保护，重构有回归风险 |
+| **P0** | 增加单元测试覆盖（阶段二） | 核心高风险路径已补齐，但 `core/node/rpc-remote` 等模块覆盖率仍低 |
 | **P1** | 可观测性 | 当前几乎裸跑，出问题后排查困难 |
-| **P2** | 拆分大文件 | eventBus.go 800+、pool/manager.go 700+ |
-| **P2** | 配置化硬编码参数 | gRPC 连接数、NATS 池大小等 |
+| **P2** | 继续补齐低优先级测试 | `sysModule/sysService/config/utils` 大量包仍为 0% 覆盖 |
+| **P2** | 跑通更大范围 race 检查 | 当前已验证 `monitor` 包，建议逐步扩大到核心链路包 |
 | **P3** | 文档体系 | 有良好的设计文档，缺使用指南 |
 
 ### 9.3 扩展性评估

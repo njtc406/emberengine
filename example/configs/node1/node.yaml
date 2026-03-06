@@ -63,6 +63,7 @@ ServiceConf:
     # 服务名称
     - ClassName: Service2
       ServiceName: Service2
+      RpcType: "nats"
       Type: test
       Partition: 1
       ServiceId: 1

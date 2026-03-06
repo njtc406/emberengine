@@ -288,8 +288,9 @@ func (c *Config) setDefaultValues() {
 				Type:   def.RpcTypeGrpc,
 			},
 		},
-		DiscoveryType:  def.DiscoveryConfUseLocal,
-		RemoteConfPath: "",
+		EventChannelSize: 1024,
+		DiscoveryType:    def.DiscoveryConfUseLocal,
+		RemoteConfPath:   "",
 	})
 }
 

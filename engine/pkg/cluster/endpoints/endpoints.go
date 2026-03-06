@@ -8,6 +8,7 @@ package endpoints
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
@@ -34,7 +35,7 @@ type EndpointManager struct {
 	nodeUid       string
 	isClusterMode bool
 	remotes       map[string]*remote.Remote // 远程服务监听器
-	stopped       bool                      // 是否已停止
+	stopped       atomic.Bool               // 是否已停止
 	repository    *repository.Repository    // 服务存储仓库
 	senderMgr     *client.SenderManager
 }
@@ -90,7 +91,7 @@ func (em *EndpointManager) Start() error {
 }
 
 func (em *EndpointManager) Stop() {
-	em.stopped = true
+	em.stopped.Store(true)
 	for _, rt := range em.remotes {
 		rt.Close()
 	}

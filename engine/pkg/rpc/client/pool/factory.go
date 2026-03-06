@@ -105,7 +105,9 @@ func (pm *PoolManager) GetOrCreatePool(address, rpcType string) (*ConnectionPool
 	}
 
 	pm.pools[poolKey] = pool
-	pm.Infof("创建新的连接池: %s, 类型: %s", address, rpcType)
+	if pm.ILoggerX != nil {
+		pm.Infof("创建新的连接池: %s, 类型: %s", address, rpcType)
+	}
 
 	return pool, nil
 }
@@ -127,7 +129,9 @@ func (pm *PoolManager) Close() {
 
 	for poolKey, pool := range pm.pools {
 		pool.Stop()
-		pm.Infof("关闭连接池: %s", poolKey)
+		if pm.ILoggerX != nil {
+			pm.Infof("关闭连接池: %s", poolKey)
+		}
 	}
 
 	// 清空池映射
@@ -172,6 +176,8 @@ func (pm *PoolManager) RemovePool(address, rpcType string) {
 	if pool, exists := pm.pools[poolKey]; exists {
 		pool.Stop()
 		delete(pm.pools, poolKey)
-		pm.Infof("移除连接池: %s", poolKey)
+		if pm.ILoggerX != nil {
+			pm.Infof("移除连接池: %s", poolKey)
+		}
 	}
 }

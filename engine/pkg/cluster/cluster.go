@@ -54,7 +54,11 @@ func (c *Cluster) Init(clusterConf *config.ClusterConf, logger log.ILoggerX, sen
 		return fmt.Errorf("cluster init requires logger")
 	}
 	c.closed = make(chan struct{})
-	c.eventChannel = make(chan inf.IEvent, 1024)
+	eventChannelSize := 1024
+	if clusterConf != nil && clusterConf.EventChannelSize > 0 {
+		eventChannelSize = clusterConf.EventChannelSize
+	}
+	c.eventChannel = make(chan inf.IEvent, eventChannelSize)
 	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(nil)
 

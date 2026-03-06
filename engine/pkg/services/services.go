@@ -82,37 +82,48 @@ func (sm *ServiceManager) SetNodeContext(ctx inf.INodeContext) {
 // Init 根据配置创建并初始化所有服务。
 // 任一服务初始化失败将立即返回错误，由上层决定后续处理。
 func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
-	lock.RLock()
-	defer lock.RUnlock()
+	type initEntry struct {
+		initConf *config.ServiceInitConf
+		builder  func() inf.IService
+	}
 
+	entries := make([]initEntry, 0, len(serviceConf.StartServices))
+	lock.RLock()
 	for _, initConf := range serviceConf.StartServices {
-		if builder, ok := serviceMap[initConf.ClassName]; ok {
-			sm.WithField("service", initConf.ClassName).Info("Init Service")
-			svc := builder()
-			serviceName := initConf.ClassName
-			if initConf.ServiceName != "" {
-				serviceName = initConf.ServiceName
-			}
-			svc.SetName(serviceName)
-			var cfg interface{}
-			if serviceConf, ok := serviceConf.ServicesConfMap[serviceName]; ok {
-				cfg = serviceConf.Cfg
-			}
-			if depAware, ok := svc.(runtimeDepsAware); ok {
-				depAware.SetRuntimeDeps(sm.cluster, sm.endpoints, sm.profilerReg, sm.router)
-			}
-			if ctxAware, ok := svc.(nodeContextAware); ok {
-				ctxAware.SetNodeContext(sm.nodeCtx)
-			}
-			if err := svc.Init(svc, initConf, cfg); err != nil {
-				sm.WithField("service", serviceName).Errorf("Init Service failed, err: %v", err)
-				return fmt.Errorf("init service[%s] failed: %w", serviceName, err)
-			}
-			sm.runServices = append(sm.runServices, svc)
-		} else {
+		builder, ok := serviceMap[initConf.ClassName]
+		if !ok {
+			lock.RUnlock()
 			sm.WithField("service", initConf.ClassName).Error("Service is configured to start but not imported in the package. Please check service dependencies or remove it from configuration")
 			return fmt.Errorf("service[%s] is configured to start but not registered", initConf.ClassName)
 		}
+		entries = append(entries, initEntry{initConf: initConf, builder: builder})
+	}
+	lock.RUnlock()
+
+	for _, entry := range entries {
+		initConf := entry.initConf
+		sm.WithField("service", initConf.ClassName).Info("Init Service")
+		svc := entry.builder()
+		serviceName := initConf.ClassName
+		if initConf.ServiceName != "" {
+			serviceName = initConf.ServiceName
+		}
+		svc.SetName(serviceName)
+		var cfg interface{}
+		if serviceCfg, ok := serviceConf.ServicesConfMap[serviceName]; ok {
+			cfg = serviceCfg.Cfg
+		}
+		if depAware, ok := svc.(runtimeDepsAware); ok {
+			depAware.SetRuntimeDeps(sm.cluster, sm.endpoints, sm.profilerReg, sm.router)
+		}
+		if ctxAware, ok := svc.(nodeContextAware); ok {
+			ctxAware.SetNodeContext(sm.nodeCtx)
+		}
+		if err := svc.Init(svc, initConf, cfg); err != nil {
+			sm.WithField("service", serviceName).Errorf("Init Service failed, err: %v", err)
+			return fmt.Errorf("init service[%s] failed: %w", serviceName, err)
+		}
+		sm.runServices = append(sm.runServices, svc)
 	}
 
 	return nil

@@ -155,6 +155,75 @@ func (mb *MessageBus) GetReceiverPid() *actor.PID {
 	return mb.receiver.GetPid()
 }
 
+func validateSingleOutParam(out interface{}) (reflect.Value, reflect.Type, error) {
+	outVal := reflect.ValueOf(out)
+	if !outVal.IsValid() || outVal.Kind() != reflect.Ptr || outVal.IsNil() {
+		return reflect.Value{}, nil, fmt.Errorf("single out call: out param must be non-nil pointer, but got %T", out)
+	}
+	outElem := outVal.Elem()
+	return outElem, outElem.Type(), nil
+}
+
+func validateMultiOutParams(outs []interface{}) error {
+	for idx := range outs {
+		if _, _, err := validateSingleOutParam(outs[idx]); err != nil {
+			return fmt.Errorf("multi out call: invalid out param at index %d: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+func assignSingleOutCached(outElem reflect.Value, outType reflect.Type, resp interface{}) error {
+	respVal := reflect.ValueOf(resp)
+	if !respVal.IsValid() {
+		outElem.Set(reflect.Zero(outType))
+		return nil
+	}
+
+	if respVal.Kind() == reflect.Ptr {
+		if respVal.IsNil() {
+			outElem.Set(reflect.Zero(outType))
+			return nil
+		}
+		respVal = respVal.Elem()
+	}
+
+	if outType != respVal.Type() {
+		return fmt.Errorf("call: type not match3, expected %v but got %v", respVal.Type(), outType)
+	}
+
+	outElem.Set(respVal)
+	return nil
+}
+
+func assignSingleOut(out interface{}, resp interface{}) error {
+	outElem, outType, err := validateSingleOutParam(out)
+	if err != nil {
+		return err
+	}
+	return assignSingleOutCached(outElem, outType, resp)
+}
+
+func assignCallResponse(out interface{}, resp interface{}, isMulti bool, multiOuts []interface{}, singleOutElem reflect.Value, singleOutType reflect.Type) error {
+	if isMulti {
+		respList, ok := resp.([]interface{})
+		if !ok {
+			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(resp), reflect.TypeOf(out))
+		}
+		if len(multiOuts) != len(respList) {
+			return fmt.Errorf("call: multi out count not match, expected %d but got %d", len(respList), len(multiOuts))
+		}
+		for idx := range multiOuts {
+			if err := assignSingleOut(multiOuts[idx], respList[idx]); err != nil {
+				return fmt.Errorf("multi out call: invalid out param at index %d: %w", idx, err)
+			}
+		}
+		return nil
+	}
+
+	return assignSingleOutCached(singleOutElem, singleOutType, resp)
+}
+
 func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, out interface{}) error {
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
@@ -167,25 +236,24 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		return fmt.Errorf("receiver is nil")
 	}
 
+	var (
+		isMulti       bool
+		multiOuts     []interface{}
+		singleOutElem reflect.Value
+		singleOutType reflect.Type
+		err           error
+	)
 	if out != nil {
-		switch out.(type) {
-		case []interface{}:
-			// 远程调用都是固定的proto消息,不会出现这个类型的参数
-			// 本地调用,接收多参数返回值,那么所有的接收参数都必须是指针或者引用类型
-			for i, v := range out.([]interface{}) {
-				kd := reflect.TypeOf(v).Kind()
-				if kd != reflect.Ptr && kd != reflect.Interface &&
-					kd != reflect.Func && kd != reflect.Map &&
-					kd != reflect.Slice && kd != reflect.Chan {
-					return fmt.Errorf("multi out call: all out params must be pointer, but the %v one got %v", i, kd)
-				}
+		if outs, ok := out.([]interface{}); ok {
+			isMulti = true
+			multiOuts = outs
+			if err = validateMultiOutParams(multiOuts); err != nil {
+				return err
 			}
-		default:
-			kd := reflect.TypeOf(out).Kind()
-			if kd != reflect.Ptr && kd != reflect.Interface &&
-				kd != reflect.Func && kd != reflect.Map &&
-				kd != reflect.Slice && kd != reflect.Chan {
-				return fmt.Errorf("single out call: out param must be pointer, but got:%v", kd)
+		} else {
+			singleOutElem, singleOutType, err = validateSingleOutParam(out)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -265,61 +333,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 		return nil
 	}
 
-	// 有返回值
-	// 先判断是否时多返回值
-	switch resp.(type) {
-	case []interface{}:
-		respList := resp.([]interface{})
-		// 多返回值,那么接收者也必须时多返回值
-		if outs, ok := out.([]interface{}); !ok {
-			return fmt.Errorf("call: type not match, expected %v but got %v", reflect.TypeOf(resp), reflect.TypeOf(out))
-		} else {
-			for idx, v := range outs {
-				respType := reflect.TypeOf(respList[idx])
-				respKd := respType.Kind()
-				if respKd == reflect.Ptr {
-					respType = respType.Elem()
-				}
-				outType := reflect.TypeOf(v)
-				outKd := outType.Kind()
-				if outKd == reflect.Ptr {
-					outType = outType.Elem()
-				}
-				if outType != respType {
-					return fmt.Errorf("call: type not match2, expected %v but got %v", respType, outType)
-				}
-				respVal := reflect.ValueOf(respList[idx])
-				if respVal.Kind() == reflect.Ptr {
-					respVal = respVal.Elem()
-				}
-
-				reflect.ValueOf(v).Elem().Set(respVal)
-			}
-		}
-	default:
-		// 单返回值,那么接收者也必须是单返回值
-		respType := reflect.TypeOf(resp)
-		respKd := respType.Kind()
-		if respKd == reflect.Ptr {
-			respType = respType.Elem()
-		}
-		outType := reflect.TypeOf(out)
-		outKd := outType.Kind()
-		if outKd == reflect.Ptr {
-			outType = outType.Elem()
-		}
-		if outType != respType {
-			return fmt.Errorf("call: type not match3, expected %v but got %v", respType, outType)
-		}
-		respVal := reflect.ValueOf(resp)
-		if respVal.Kind() == reflect.Ptr {
-			respVal = respVal.Elem()
-		}
-
-		reflect.ValueOf(out).Elem().Set(respVal)
-	}
-
-	return nil
+	return assignCallResponse(out, resp, isMulti, multiOuts, singleOutElem, singleOutType)
 }
 
 // Call 同步调用服务

@@ -20,13 +20,13 @@ import (
 
 // ── 默认创建器注册表（返回副本，避免全局可变 map） ──
 
-func defaultSenderMap(logger log.ILoggerX, natsConf *config.NatsConf) map[string]SenderCreator {
+func defaultSenderMap(logger log.ILoggerX, natsConf *config.NatsConf, grpcConnNum int) map[string]SenderCreator {
 	return map[string]SenderCreator{
 		def.RpcTypeRpcx: func(addr string) inf.IRpcSender {
 			return newRpcxClient(addr, logger)
 		},
 		def.RpcTypeGrpc: func(addr string) inf.IRpcSender {
-			return newGrpcClient(addr, logger)
+			return newGrpcClient(addr, logger, grpcConnNum)
 		},
 		def.RpcTypeNats: func(addr string) inf.IRpcSender {
 			return newNatsClient(addr, logger, natsConf)
@@ -46,20 +46,22 @@ type SenderManager struct {
 	poolMgr     *pool.PoolManager
 	rpcMonitor  *monitor.RpcMonitor
 	natsConf    *config.NatsConf
+	grpcConnNum int
 	senderMap   map[string]SenderCreator             // 协议 → 创建器（初始化后只读）
 	handlerMap  map[string]map[string]inf.IRpcSender // map[addr][tp]sender
 	handlerLock sync.RWMutex
 }
 
 // NewSenderManager 创建 SenderManager 并向 PoolManager 注册远程创建器。
-func NewSenderManager(poolMgr *pool.PoolManager, logger log.ILoggerX, rpcMonitor *monitor.RpcMonitor, natsConf *config.NatsConf) *SenderManager {
+func NewSenderManager(poolMgr *pool.PoolManager, logger log.ILoggerX, rpcMonitor *monitor.RpcMonitor, natsConf *config.NatsConf, grpcConnNum int) *SenderManager {
 	mgr := &SenderManager{
-		ILoggerX:   logger,
-		poolMgr:    poolMgr,
-		rpcMonitor: rpcMonitor,
-		natsConf:   natsConf,
-		senderMap:  defaultSenderMap(logger, natsConf),
-		handlerMap: make(map[string]map[string]inf.IRpcSender),
+		ILoggerX:    logger,
+		poolMgr:     poolMgr,
+		rpcMonitor:  rpcMonitor,
+		natsConf:    natsConf,
+		grpcConnNum: grpcConnNum,
+		senderMap:   defaultSenderMap(logger, natsConf, grpcConnNum),
+		handlerMap:  make(map[string]map[string]inf.IRpcSender),
 	}
 	mgr.registerCreators()
 	return mgr

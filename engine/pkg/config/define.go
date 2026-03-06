@@ -23,17 +23,18 @@ func (c *Config) String() string {
 }
 
 type NodeConf struct {
-	NodeId           string            `binding:"required"` // 节点ID(目前这个只用于记录pid文件是组成生成路径)
-	NodeType         string            `binding:"required"` // 节点类型(默认ember)
-	SystemStatus     string            `binding:"required"` // 系统状态(debug/release)
-	PVCPath          string            `binding:"required"` // 数据持久化目录(默认./data)
-	PVPath           string            `binding:"required"` // 缓存目录(默认./run)
-	AntsPoolSize     int               `binding:"required"` // 线程池大小
-	RpcMonitorConf   *RpcMonitorConf   `binding:""`         // rpc监控配置
-	EventBusConf     *EventBusConf     `binding:""`         // nats配置
-	DeDuplicatorConf *DeDuplicatorConf `binding:""`         // deDuplicator配置
-	TimingWheelConf  *TimingWheelConf  `binding:""`         // 定时器配置
-	BusPoolSize      int               `binding:""`         // 消息总线缓存池池大小(默认10000)
+	NodeId            string            `binding:"required"` // 节点ID(目前这个只用于记录pid文件是组成生成路径)
+	NodeType          string            `binding:"required"` // 节点类型(默认ember)
+	SystemStatus      string            `binding:"required"` // 系统状态(debug/release)
+	PVCPath           string            `binding:"required"` // 数据持久化目录(默认./data)
+	PVPath            string            `binding:"required"` // 缓存目录(默认./run)
+	AntsPoolSize      int               `binding:"required"` // 线程池大小
+	GrpcSenderConnNum int               `binding:""`         // gRPC sender 每个远端地址的连接数(<=0时默认NumCPU/2)
+	RpcMonitorConf    *RpcMonitorConf   `binding:""`         // rpc监控配置
+	EventBusConf      *EventBusConf     `binding:""`         // nats配置
+	DeDuplicatorConf  *DeDuplicatorConf `binding:""`         // deDuplicator配置
+	TimingWheelConf   *TimingWheelConf  `binding:""`         // 定时器配置
+	BusPoolSize       int               `binding:""`         // 消息总线缓存池池大小(默认10000)
 }
 type TimingWheelConf struct {
 	Interval  time.Duration `binding:""` // 定时器间隔(默认10毫秒)
@@ -59,11 +60,12 @@ type RpcMonitorConf struct {
 }
 
 type ClusterConf struct {
-	ETCDConf       *ETCDConf      `binding:"required"` // etcd配置
-	RPCServers     []*RPCServer   `binding:""`         // rpc服务配置
-	DiscoveryType  string         `binding:""`         // 服务发现类型(默认etcd)
-	RemoteConfPath string         `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)(暂未使用)
-	DiscoveryConf  *DiscoveryConf `binding:""`         // 服务发现配置(目前先直接配置,后续会支持多种服务发现方式)
+	ETCDConf         *ETCDConf      `binding:"required"` // etcd配置
+	RPCServers       []*RPCServer   `binding:""`         // rpc服务配置
+	EventChannelSize int            `binding:""`         // Cluster 事件通道缓冲区大小(默认1024)
+	DiscoveryType    string         `binding:""`         // 服务发现类型(默认etcd)
+	RemoteConfPath   string         `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)(暂未使用)
+	DiscoveryConf    *DiscoveryConf `binding:""`         // 服务发现配置(目前先直接配置,后续会支持多种服务发现方式)
 }
 
 type ServiceConf struct {
@@ -286,6 +288,8 @@ type NatsConf struct {
 	Password             string        `binding:""` // nats密码
 	Token                string        `binding:""` // nats token
 	Secure               string        `binding:""` // nats secure
+	InsecureSkipVerify   bool          `binding:""` // 是否跳过服务端证书校验(默认false，生产不建议开启)
+	TLSServerName        string        `binding:""` // TLS服务端证书名称(SNI/证书主机名校验)
 	Cert                 string        `binding:""` // 证书
 	CertKey              string        `binding:""` // 证书密钥
 	CAs                  string        `binding:""` // ca证书
@@ -295,6 +299,7 @@ type NatsConf struct {
 	PingInterval         time.Duration `binding:""` // ping间隔时间
 	PingMaxOutstanding   int           `binding:""` // 最大未响应ping数
 	ReconnectBufSize     int           `binding:""` // 重连缓冲区大小
+	SenderPoolSize       int           `binding:""` // sender 连接池大小(<=0时默认1)
 	SubPendingMsgLimit   int           `binding:""` // 订阅 pending 最大消息数(用于提升高突发下的缓冲能力)
 	SubPendingBytesLimit int           `binding:""` // 订阅 pending 最大字节数(用于提升高突发下的缓冲能力)
 }

@@ -103,9 +103,13 @@ func newNatsClient(addr string, logger log.ILoggerX, natsConf *config.NatsConf) 
 	}
 
 	poolSize := 1
-	if v := os.Getenv("EMBER_NATS_SENDER_POOL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			poolSize = n
+	if natsConf != nil && natsConf.SenderPoolSize > 0 {
+		poolSize = natsConf.SenderPoolSize
+	} else {
+		if v := os.Getenv("EMBER_NATS_SENDER_POOL"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				poolSize = n
+			}
 		}
 	}
 
