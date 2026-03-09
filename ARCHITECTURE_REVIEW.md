@@ -510,7 +510,7 @@ type IService interface {
 | **NEW-09** | MessageBus.call() 热路径 reflect（已修复） | `bus.go` | 已移除发送前反射校验热路径，改为响应赋值阶段统一校验并补充多返回值长度检查 |
 | **NEW-10** | pool/manager.go 706 行单文件（已修复） | `pool/manager.go`、`pool/manager_types.go`、`pool/manager_runtime.go` | 已按职责拆分为结构定义/类型定义/运行逻辑三个文件，降低单文件复杂度 |
 | **NEW-11** | 批处理定时器非 NATS 模式下无条件启动（已修复） | `eventBus.go` | 非 NATS 模式不再启动批处理 ticker/goroutine |
-| **NEW-12** | 测试覆盖率不足（阶段性完成，暂缓继续） | 全项目 | 核心高风险路径已补充：`core/module_lookup_test.go`、`rpc/client/pool/manager_runtime_test.go`、`rpc/client/pool/factory_test.go`、`services/services_test.go`、`rpc/message/msgbus/bus_test.go`（含 MultiBus 模式覆盖）、`cluster/endpoints/repository/repository_test.go`、`cluster/endpoints/endpoints_test.go`；其余低优先级模块后续按需补齐 |
+| **NEW-12** | 测试覆盖率不足（阶段性完成，暂缓继续） | 全项目 | 核心高风险路径已补充：`core/module_lookup_test.go`、`core/module_carrier_test.go`、`core/service_test.go`（含 `fixConf` 默认值/负值归一化/边界值保留）、`core/service_rwmode_test.go`（`setJobRWMode` 读写标记与 `PostJob` 自投递拦截路径）、`config/config_test.go`（`Config` 状态/超时及 Service/Discovery 注册表行为）、`rpc/client/pool/manager_runtime_test.go`、`rpc/client/pool/factory_test.go`、`services/services_test.go`、`rpc/message/msgbus/bus_test.go`（含 MultiBus 模式覆盖）、`cluster/endpoints/repository/repository_test.go`、`cluster/endpoints/endpoints_test.go`；其余低优先级模块后续按需补齐 |
 | **NEW-13** | 模块间调用需类型断言（已修复） | `core/module_lookup.go` | 已提供泛型辅助 `GetModule[T](hierarchy, id) (T, bool)`，统一处理不存在/类型不匹配场景并返回 `(zero, false)` |
 | **NEW-14** | PoolManager 在无 logger 场景下 panic（已修复） | `rpc/client/pool/factory.go` | 已为 `GetOrCreatePool/Close/RemovePool` 的日志输出增加 nil 保护，避免空指针 panic |
 
