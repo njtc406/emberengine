@@ -74,8 +74,8 @@ type CircuitBreakerMiddleware struct {
 	mu           sync.Mutex   // 仅用于状态转换的临界区保护
 
 	// 统计
-	totalRequests   uint64
-	rejectedByBreak uint64
+	totalRequests   atomic.Uint64
+	rejectedByBreak atomic.Uint64
 }
 
 // CircuitBreakerOption 熔断器配置选项
@@ -147,12 +147,22 @@ func (m *CircuitBreakerMiddleware) OnStop() {
 	if m.logger != nil {
 		state := CircuitState(m.state.Load())
 		m.logger.Infof("CircuitBreakerMiddleware stopped: state=%s, total=%d, rejected=%d",
-			state, m.totalRequests, m.rejectedByBreak)
+			state, m.totalRequests.Load(), m.rejectedByBreak.Load())
 	}
 }
 
 func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.MiddlewareResult {
-	atomic.AddUint64(&m.totalRequests, 1)
+	m.totalRequests.Add(1)
+
+	// 检查并重置过期的统计窗口（在 OnReceive 也检查，避免流量归零后 failures 虚假累加）
+	now := time.Now()
+	nowNano := now.UnixNano()
+	windowStartNano := m.windowStart.Load()
+	if now.Sub(time.Unix(0, windowStartNano)) >= m.windowDuration {
+		if m.windowStart.CompareAndSwap(windowStartNano, nowNano) {
+			m.failures.Store(0)
+		}
+	}
 
 	state := CircuitState(m.state.Load())
 
@@ -165,29 +175,30 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Mi
 		// 检查是否应该转换到半开状态（使用原子操作读取时间）
 		lastFailNano := m.lastFailTime.Load()
 		if time.Since(time.Unix(0, lastFailNano)) >= m.cooldownDuration {
-			// 尝试 CAS 转换状态到半开
-			if m.state.CompareAndSwap(int32(StateOpen), int32(StateHalfOpen)) {
-				// 成功转换，重置半开状态计数
-				m.halfOpenReqs.Store(1) // 当前请求算作第一个探测请求
+			// 【P1-4 修复】状态切换 + 计数清零必须原子组合，否则与并发探测者
+			// 在 HalfOpen 分支的 CAS 增加发生 race，导致探测计数被 Store(...) 覆盖、
+			// 实际探测请求数短时超过 halfOpenMaxAllowed。
+			m.mu.Lock()
+			if m.state.Load() == int32(StateOpen) {
+				// 真正的 Open→HalfOpen 切换者：先清零计数，再翻状态
+				m.halfOpenReqs.Store(0)
 				m.successes.Store(0)
+				m.state.Store(int32(StateHalfOpen))
 				if m.logger != nil {
 					m.logger.Infof("CircuitBreaker state: open -> half-open")
 				}
-				return dto.Continue()
 			}
-			// CAS 失败，说明其他线程已经转换了，重新检查状态
+			m.mu.Unlock()
+			// 状态已确定为 HalfOpen，统一走下面的 CAS 取额度逻辑
 			state = CircuitState(m.state.Load())
-			if state == StateHalfOpen {
-				// 已经是半开状态，尝试获取探测机会
-				// fallthrough 到 StateHalfOpen 处理
-			} else {
-				// 仍在打开状态或冷却时间未到，拒绝请求
-				atomic.AddUint64(&m.rejectedByBreak, 1)
+			if state != StateHalfOpen {
+				// 极少数情况：刚切完又被探测失败翻回 Open
+				m.rejectedByBreak.Add(1)
 				return dto.Reject(ErrCircuitBreakerOpen)
 			}
 		} else {
 			// 冷却时间未到，拒绝请求
-			atomic.AddUint64(&m.rejectedByBreak, 1)
+			m.rejectedByBreak.Add(1)
 			return dto.Reject(ErrCircuitBreakerOpen)
 		}
 		fallthrough
@@ -198,7 +209,7 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Mi
 			current := m.halfOpenReqs.Load()
 			if current >= int32(m.halfOpenMaxAllowed) {
 				// 超过探测请求数限制
-				atomic.AddUint64(&m.rejectedByBreak, 1)
+				m.rejectedByBreak.Add(1)
 				return dto.Reject(ErrCircuitBreakerOpen)
 			}
 			// 尝试 CAS 增加计数
@@ -248,24 +259,35 @@ func (m *CircuitBreakerMiddleware) OnComplete(mctx inf.IMiddlewareContext, err e
 
 	case StateHalfOpen:
 		if isFailure {
-			// 探测失败，尝试 CAS 回到打开状态
-			if m.state.CompareAndSwap(int32(StateHalfOpen), int32(StateOpen)) {
+			// 探测失败：HalfOpen → Open，需要在临界区内重置探测计数，
+			// 避免下次 Open→HalfOpen 切换时与并发探测者出现 race。
+			m.mu.Lock()
+			if m.state.Load() == int32(StateHalfOpen) {
+				m.state.Store(int32(StateOpen))
+				m.halfOpenReqs.Store(0)
+				m.successes.Store(0)
 				m.lastFailTime.Store(nowNano)
 				if m.logger != nil {
 					m.logger.Warnf("CircuitBreaker state: half-open -> open (probe failed)")
 				}
 			}
+			m.mu.Unlock()
 		} else {
 			// 探测成功，原子地增加成功计数
 			newSuccesses := m.successes.Add(1)
 			if int(newSuccesses) >= m.successThreshold {
-				// 尝试 CAS 恢复到关闭状态
-				if m.state.CompareAndSwap(int32(StateHalfOpen), int32(StateClosed)) {
+				// HalfOpen → Closed：在临界区内重置所有计数
+				m.mu.Lock()
+				if m.state.Load() == int32(StateHalfOpen) {
+					m.state.Store(int32(StateClosed))
 					m.failures.Store(0)
+					m.successes.Store(0)
+					m.halfOpenReqs.Store(0)
 					if m.logger != nil {
 						m.logger.Infof("CircuitBreaker state: half-open -> closed (recovered)")
 					}
 				}
+				m.mu.Unlock()
 			}
 		}
 	}
@@ -278,11 +300,16 @@ func (m *CircuitBreakerMiddleware) GetState() CircuitState {
 
 // GetStats 获取统计信息
 func (m *CircuitBreakerMiddleware) GetStats() (total, rejected uint64, state CircuitState) {
-	return atomic.LoadUint64(&m.totalRequests), atomic.LoadUint64(&m.rejectedByBreak), m.GetState()
+	return m.totalRequests.Load(), m.rejectedByBreak.Load(), m.GetState()
 }
 
-// Reset 手动重置熔断器到关闭状态
+// Reset 手动重置熔断器到关闭状态。
+//
+// 持 mu 锁与 OnReceive 的 Open→HalfOpen 切换、OnComplete 的 HalfOpen→Open/Closed
+// 组合写串行化，避免多个 atomic.Store 之间被 OnComplete 的状态机切换插入，
+// 导致部分字段被覆盖回旧值。
 func (m *CircuitBreakerMiddleware) Reset() {
+	m.mu.Lock()
 	m.state.Store(int32(StateClosed))
 	m.failures.Store(0)
 	m.successes.Store(0)
@@ -290,6 +317,7 @@ func (m *CircuitBreakerMiddleware) Reset() {
 	now := time.Now().UnixNano()
 	m.windowStart.Store(now)
 	m.lastFailTime.Store(now)
+	m.mu.Unlock()
 	if m.logger != nil {
 		m.logger.Infof("CircuitBreaker manually reset to closed state")
 	}

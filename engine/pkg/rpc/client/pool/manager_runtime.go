@@ -36,19 +36,23 @@ func (cp *ConnectionPool) Start() error {
 	return nil
 }
 
-// Stop 停止连接池
+// Stop 停止连接池（幂等，可安全多次调用）
 func (cp *ConnectionPool) Stop() {
-	cp.cancel()
+	cp.stopOnce.Do(func() {
+		if cp.cancel != nil {
+			cp.cancel()
+		}
 
-	if cp.healthTicker != nil {
-		cp.healthTicker.Stop()
-	}
-	if cp.cleanupTicker != nil {
-		cp.cleanupTicker.Stop()
-	}
+		if cp.healthTicker != nil {
+			cp.healthTicker.Stop()
+		}
+		if cp.cleanupTicker != nil {
+			cp.cleanupTicker.Stop()
+		}
 
-	close(cp.stopHealth)
-	close(cp.stopCleanup)
+		close(cp.stopHealth)
+		close(cp.stopCleanup)
+	})
 
 	cp.wg.Wait()
 
@@ -67,33 +71,40 @@ func (cp *ConnectionPool) Stop() {
 
 // GetConnection 获取连接
 func (cp *ConnectionPool) GetConnection() (*PoolConnection, error) {
-	cp.connMutex.RLock()
+	const maxRetries = 1
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		cp.connMutex.RLock()
 
-	// 找到健康的连接
-	var healthyConns []*PoolConnection
-	for _, conn := range cp.connections {
-		if conn.IsHealthy() {
-			healthyConns = append(healthyConns, conn)
+		// 找到健康的连接
+		var healthyConns []*PoolConnection
+		for _, conn := range cp.connections {
+			if conn.IsHealthy() {
+				healthyConns = append(healthyConns, conn)
+			}
 		}
-	}
-	cp.connMutex.RUnlock()
+		cp.connMutex.RUnlock()
 
-	if len(healthyConns) == 0 {
-		// 没有健康连接，尝试创建新连接
-		if err := cp.scaleUp(1); err != nil {
-			return nil, fmt.Errorf("no healthy connections available and failed to create new one: %w", err)
+		if len(healthyConns) == 0 {
+			if attempt == maxRetries {
+				return nil, fmt.Errorf("no healthy connections available after %d retries", maxRetries)
+			}
+			// 没有健康连接，尝试创建新连接
+			if err := cp.scaleUp(1); err != nil {
+				return nil, fmt.Errorf("no healthy connections available and failed to create new one: %w", err)
+			}
+			continue
 		}
-		// 重新获取
-		return cp.GetConnection()
+
+		// 负载均衡选择连接
+		conn := cp.selectConnection(healthyConns)
+
+		// 检查是否需要扩容
+		cp.checkAndScale()
+
+		return conn, nil
 	}
-
-	// 负载均衡选择连接
-	conn := cp.selectConnection(healthyConns)
-
-	// 检查是否需要扩容
-	cp.checkAndScale()
-
-	return conn, nil
+	// unreachable, but satisfy compiler
+	return nil, fmt.Errorf("no healthy connections available")
 }
 
 // createConnection 创建新连接

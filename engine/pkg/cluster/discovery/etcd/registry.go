@@ -26,6 +26,8 @@ func (r *etcdServiceRegistry) RegisterService(ctx context.Context, pid *actor.PI
 	if !ok || !isEtcdClientConnected(r.d.client) {
 		return fmt.Errorf("etcd client not connected or invalid leaseRef")
 	}
+	// 序列化前把运行时 MasterFlag 投影到 IsMaster bool（proto 传输字段）
+	pid.PrepareForMarshal()
 	pidData, err := protojson.Marshal(pid)
 	if err != nil {
 		return fmt.Errorf("marshal pid failed: %w", err)

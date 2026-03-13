@@ -6,6 +6,8 @@
 package mailbox
 
 import (
+	"sync/atomic"
+
 	job2 "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -44,9 +46,11 @@ func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 	// 规则2: RPC Reply 放行
 	if job.GetType() == def.MailboxJobTypeRpc {
 		envelope := job2.GetJobPayloadAs[inf.IEnvelope](job)
-		data := envelope.GetData()
-		if data != nil && data.IsReply() {
-			return true
+		if envelope != nil {
+			data := envelope.GetData()
+			if data != nil && data.IsReply() {
+				return true
+			}
 		}
 	}
 
@@ -60,19 +64,30 @@ func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 
 // CompositeSuspendPolicy 组合多个 ISuspendPolicy，任一策略放行则放行。
 // 便于用户在默认规则基础上追加自定义放行条件。
+//
+// 使用 atomic.Pointer + COW 实现读路径无锁，写操作（AddPolicy）通常仅在初始化阶段调用。
 type CompositeSuspendPolicy struct {
-	policies []inf.ISuspendPolicy
+	policies atomic.Pointer[[]inf.ISuspendPolicy]
 }
 
 // NewCompositeSuspendPolicy 创建组合策略。
 // 传入的策略将按顺序检查，任一返回 true 即放行。
 func NewCompositeSuspendPolicy(policies ...inf.ISuspendPolicy) *CompositeSuspendPolicy {
-	return &CompositeSuspendPolicy{policies: policies}
+	c := &CompositeSuspendPolicy{}
+	snap := make([]inf.ISuspendPolicy, len(policies))
+	copy(snap, policies)
+	c.policies.Store(&snap)
+	return c
 }
 
 // ShouldAllow 检查所有策略，任一放行则返回 true。
+// 读路径无锁（atomic.Pointer Load）。
 func (p *CompositeSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
-	for _, policy := range p.policies {
+	snap := p.policies.Load()
+	if snap == nil {
+		return false
+	}
+	for _, policy := range *snap {
 		if policy.ShouldAllow(job) {
 			return true
 		}
@@ -80,7 +95,20 @@ func (p *CompositeSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 	return false
 }
 
-// AddPolicy 动态添加策略。
+// AddPolicy 动态添加策略（COW：创建新切片存储）。
+// 通常仅在初始化阶段调用。
 func (p *CompositeSuspendPolicy) AddPolicy(policy inf.ISuspendPolicy) {
-	p.policies = append(p.policies, policy)
+	for {
+		old := p.policies.Load()
+		var oldSlice []inf.ISuspendPolicy
+		if old != nil {
+			oldSlice = *old
+		}
+		newSlice := make([]inf.ISuspendPolicy, len(oldSlice)+1)
+		copy(newSlice, oldSlice)
+		newSlice[len(oldSlice)] = policy
+		if p.policies.CompareAndSwap(old, &newSlice) {
+			return
+		}
+	}
 }

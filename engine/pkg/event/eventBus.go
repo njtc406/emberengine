@@ -115,11 +115,6 @@ func (eb *Bus) Init(conf *config.EventBusConf, logger log.ILoggerX) error {
 			eb.specificPrefix = def.DefaultSpecificPrefix
 		}
 		eb.Debug("==========> nats init success")
-
-		// 启动批处理定时器 (每100ms处理一次缓冲)
-		eb.batchStop = make(chan struct{})
-		eb.batchTicker = time.NewTicker(100 * time.Millisecond)
-		go eb.processBatchedEvents()
 	}
 
 	var shardCount = def.NatsDefaultShardCount
@@ -133,6 +128,12 @@ func (eb *Bus) Init(conf *config.EventBusConf, logger log.ILoggerX) error {
 	eb.serverSubscribers = make(map[def.EventType]map[int32]map[string]inf.IListener)
 	eb.specificLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.specificSubscribers = make(map[def.EventType]map[string]map[string]inf.IListener)
+
+	// 始终启动批处理定时器，确保非 NATS 模式下缓冲事件也能被 flush
+	eb.batchStop = make(chan struct{})
+	eb.batchTicker = time.NewTicker(100 * time.Millisecond)
+	go eb.processBatchedEvents()
+
 	return nil
 }
 

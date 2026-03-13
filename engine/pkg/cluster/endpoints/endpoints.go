@@ -119,6 +119,7 @@ func (em *EndpointManager) updateServiceInfo(ctx context.Context, kv *mvccpb.Key
 		em.WithContext(ctx).Errorf("unmarshal pid error: %v", err)
 		return fmt.Errorf("unmarshal pid error: %v", err)
 	}
+	pid.SyncMasterFlag() // proto 反序列化后同步 MasterFlag 原子字段
 
 	if pid.GetNodeUid() == em.nodeUid {
 		em.WithContext(ctx).Debugf("endpointmgr ignore local service -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())

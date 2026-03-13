@@ -13,8 +13,9 @@ message PID {
   int64 Version = 7;          // 服务版本号
   string RpcType = 8;         // rpc类型(默认使用nats)
   string NodeUid = 9;         // 节点唯一标识(这个主要是用来区分本地服务用的)
-  bool IsMaster = 10;         // 是否是主服务(主从)
+  bool IsMaster = 10;         // 是否是主服务(主从) -- 仅用于序列化传输
   string ServiceUid = 11;     // 服务实例唯一id
+  int32 MasterFlag = 12;      // 运行时原子化主从标志 (0=从, 1=主, 使用 atomic 访问)
 }
 
 message Message {

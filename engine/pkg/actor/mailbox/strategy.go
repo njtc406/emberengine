@@ -6,6 +6,8 @@
 package mailbox
 
 import (
+	"strings"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -17,18 +19,23 @@ type AutoScalerStrategy interface {
 // CompositeStrategy 组合自动扩容器
 type CompositeStrategy struct {
 	Strategies []AutoScalerStrategy
-	Mode       string // "any" 或 "all"
+	Mode       string // "any" 或 "all"（大小写不敏感）
 }
 
 func newCompositeStrategy(strategies []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
+	mode, _ := params["Mode"].(string)
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "any"
+	}
 	return &CompositeStrategy{
 		Strategies: strategies,
-		Mode:       params["Mode"].(string),
+		Mode:       mode,
 	}
 }
 
 func (c *CompositeStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
-	if c.Mode == "all" {
+	if strings.EqualFold(c.Mode, "all") {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleUp(workers) {
 				return false
@@ -47,7 +54,7 @@ func (c *CompositeStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 }
 
 func (c *CompositeStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int32) bool {
-	if c.Mode == "all" {
+	if strings.EqualFold(c.Mode, "all") {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleDown(workers, min) {
 				return false
@@ -71,9 +78,17 @@ type MaxLoadStrategy struct {
 }
 
 func newMaxLoadStrategy(_ []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
+	idleThreshold := 50
+	if v, ok := params["IdleThreshold"].(int); ok {
+		idleThreshold = v
+	}
+	maxLoadThreshold := 64
+	if v, ok := params["MaxLoadThreshold"].(int); ok {
+		maxLoadThreshold = v
+	}
 	return &MaxLoadStrategy{
-		IdleThreshold:    params["IdleThreshold"].(int),
-		MaxLoadThreshold: params["MaxLoadThreshold"].(int),
+		IdleThreshold:    idleThreshold,
+		MaxLoadThreshold: maxLoadThreshold,
 	}
 }
 

@@ -7,6 +7,7 @@ package job
 
 import (
 	"context"
+	"log"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -126,10 +127,12 @@ func NewRpcJob() *RpcJob {
 }
 
 func (j *RpcJob) Release() {
-	// 先释放 payload (envelope)，避免 msgEnvelopePool 泄漏
-	//if payload := j.GetPayload(); payload != nil {
-	//	payload.Release() // TODO 不应该释放,应该由业务自己控制数据的释放
-	//}
+	// Debug 模式下检查 payload 是否已被业务层释放
+	if runtimeDebug.Load() {
+		if payload := j.GetPayload(); payload != nil && payload.IsRef() {
+			log.Printf("[WARN] RpcJob.Release: envelope payload still referenced (not released by caller), possible leak")
+		}
+	}
 	getMsgJobPool().Put(j)
 }
 

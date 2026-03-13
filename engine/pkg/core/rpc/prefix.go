@@ -58,8 +58,8 @@ func (idx *prefixBucketIndex) has(s string) bool {
 type MethodIndex struct {
 	ApiPrefixIndex   *prefixBucketIndex // 只允许 node 内部调用的方法
 	RpcPrefixIndex   *prefixBucketIndex // 允许 rpc 调用的方法
-	ApiRoPrefixIndex *prefixBucketIndex // API 只读前缀
-	RpcRoPrefixIndex *prefixBucketIndex // RPC 只读前缀
+	ApiRoPrefixIndex *prefixBucketIndex // API 只读前缀(方法中不允许修改数据)
+	RpcRoPrefixIndex *prefixBucketIndex // RPC 只读前缀(方法中不允许修改数据)
 }
 
 // NewMethodIndex 创建带有默认前缀的 MethodIndex 实例

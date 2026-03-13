@@ -2,6 +2,7 @@ package emberctx
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -15,18 +16,35 @@ type contextKey struct{}
 
 var emberHeaderKey = &contextKey{}
 
-var traceSeq atomic.Uint64
+var (
+	tracePrefix string
+	traceSeq    atomic.Uint64
+)
 
-// NewTraceID 生成新的 traceID，格式为 hex(unixNano)-hex(seq)。
-// 该函数是高性能的，避免了 uuid 的随机数开销。
+func init() {
+	var buf [4]byte
+	if _, err := crypto_rand.Read(buf[:]); err != nil {
+		panic("emberctx: failed to read crypto/rand: " + err.Error())
+	}
+	const hexDigits = "0123456789abcdef"
+	var prefix [8]byte
+	for i, b := range buf {
+		prefix[i*2] = hexDigits[b>>4]
+		prefix[i*2+1] = hexDigits[b&0x0f]
+	}
+	tracePrefix = string(prefix[:])
+}
+
+// NewTraceID 生成新的 traceID，格式为 {prefix}-{hex(nano)}-{hex(seq)}。
+// prefix 为进程启动时生成的 4 字节随机前缀，保证跨进程唯一性。
+// 该函数是高性能的，hot path 仅涉及 atomic.Add 和 time.Now()。
 func NewTraceID() string {
-	// 在 hot path 里避免 uuid.NewString() 的随机数开销。
-	// 这里用 (unixNano)-(seq) 的十六进制串，唯一性对链路追踪足够。
-	// 为减少临时分配，使用栈上的固定缓冲。
 	n := uint64(time.Now().UnixNano())
 	s := traceSeq.Add(1)
-	var tmp [33]byte
+	var tmp [48]byte
 	buf := tmp[:0]
+	buf = append(buf, tracePrefix...)
+	buf = append(buf, '-')
 	buf = strconv.AppendUint(buf, n, 16)
 	buf = append(buf, '-')
 	buf = strconv.AppendUint(buf, s, 16)

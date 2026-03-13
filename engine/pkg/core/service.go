@@ -324,7 +324,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
 
 	// 创建邮箱（将停机 drain 策略下发给 mailbox/workerPool）
-	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares, mailbox.WithDrainPolicy(drainPolicy))
+	s.mailbox, err = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares, mailbox.WithDrainPolicy(drainPolicy))
+	if err != nil {
+		return
+	}
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)
@@ -538,12 +541,12 @@ func (s *Service) PostJob(j inf.IMailboxJob) error {
 	// 进入队列等待后续处理），但这暗示 ReadOnly handler
 	// 存在副作用（触发写操作），应被标记为 Write 而非 Read。
 	//
-	// 通过 RWSourceServiceKey 区分自投递和跨服务调用：
+	// 通过 RWContextInfo.SourceService 区分自投递和跨服务调用：
 	// 仅当源 Service 与当前 Service 相同时才拦截，允许跨服务 RPC。
 	if s.mailbox.IsRWEnabled() {
 		if ctx := j.GetContext(); ctx != nil {
-			if mode, ok := ctx.Value(def.RWModeContextKey).(def.RWMode); ok && mode == def.RWModeRead {
-				if srcSvc, ok := ctx.Value(def.RWSourceServiceKey).(string); ok && srcSvc == s.GetServiceName() {
+			if rwInfo, ok := ctx.Value(def.RWContextKey).(def.RWContextInfo); ok && rwInfo.Mode == def.RWModeRead {
+				if rwInfo.SourceService == s.GetServiceName() {
 					s.Warnf("ReadOnly handler attempted to PostJob (self-posting detected). "+
 						"This method should NOT be marked as ReadOnly. job_type=%v", j.GetType())
 					return def.ErrReadOnlyPostJob
@@ -604,7 +607,7 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	// 显式标记为 Write：并发回调通常伴随状态更新（如写缓存、修改字段），必须独占执行。
 	j.SetRWMode(def.RWModeWrite)
 	// 框架内部投递，直接调用 mailbox.PostJob 而非 s.PostJob：
-	// 1. ctx 是全新的（无 RWModeContextKey），不会触发 ReadOnly 自投递检测；
+	// 1. ctx 是全新的（无 RWContextKey），不会触发 ReadOnly 自投递检测；
 	// 2. 已显式设置 RWMode，无需经过 setJobRWMode 推断；
 	// 3. 避免框架内部投递承担 PostJob 中面向用户的检查开销。
 	if err := s.mailbox.PostJob(j); err != nil {

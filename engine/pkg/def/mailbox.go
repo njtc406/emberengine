@@ -34,19 +34,15 @@ const (
 	RWModeRead
 )
 
-// rwModeContextKeyType 是 RWModeContextKey 的类型，避免 context key 冲突
-type rwModeContextKeyType struct{}
+// ---- RW 合并 context 结构体（减少 WithValue 分配） ----
 
-// RWModeContextKey 用于在 context 中注入 RWMode 信息
-// ReadOnly handler 的 context 会携带此 key，值为 RWModeRead
-// 业务层可通过 ctx.Value(def.RWModeContextKey) 检测当前是否在 ReadOnly 上下文中
-var RWModeContextKey = rwModeContextKeyType{}
+// RWContextInfo 合并 RWMode 和 SourceService 为单次 context.WithValue 注入
+type RWContextInfo struct {
+	Mode          RWMode
+	SourceService string
+}
 
-// rwSourceServiceKeyType 是 RWSourceServiceKey 的类型
-type rwSourceServiceKeyType struct{}
+type rwContextKeyType struct{}
 
-// RWSourceServiceKey 框架内部使用，标记注入 RWModeRead 的源 Service 名称。
-// 用于 Service.PostJob 中的自投递检测：仅当源 Service 与目标 Service 相同时才拦截，
-// 避免误拦截跨 Service 的合法 RPC 调用。
-// 业务层不应使用此 key。
-var RWSourceServiceKey = rwSourceServiceKeyType{}
+// RWContextKey 用于在 context 中注入合并的 RW 信息（替代 RWModeContextKey + RWSourceServiceKey）
+var RWContextKey = rwContextKeyType{}

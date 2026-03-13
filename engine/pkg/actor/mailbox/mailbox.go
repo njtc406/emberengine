@@ -70,9 +70,13 @@ func WithDrainPolicy(policy DrainPolicy) MailboxOption {
 //   - middlewares: 可选的 mailbox 中间件；
 //   - opts: 可选的配置选项，如自定义挂起策略。
 func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker,
-	middlewares []inf.IMailboxMiddleware, opts ...MailboxOption) *Mailbox {
+	middlewares []inf.IMailboxMiddleware, opts ...MailboxOption) (*Mailbox, error) {
+	wp, err := NewWorkerPool(conf, logger, invoker, middlewares...)
+	if err != nil {
+		return nil, err
+	}
 	m := &Mailbox{
-		workerPool:    NewWorkerPool(conf, logger, invoker, middlewares...),
+		workerPool:    wp,
 		suspendPolicy: NewDefaultSuspendPolicy(), // 默认挂起策略
 		drainPolicy:   DrainExecute,
 		logger:        logger,
@@ -82,7 +86,7 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 	}
 	// 将策略下发给 workerPool（worker 在 Start 时读取）
 	m.workerPool.SetDrainPolicy(m.drainPolicy)
-	return m
+	return m, nil
 }
 
 // PostJob 将任务投递到 mailbox。
@@ -91,8 +95,15 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 //  1. 如果 mailbox 已挂起，通过 ISuspendPolicy 判断是否放行，不放行则返回 ErrMailboxSuspended；
 //  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
 //  3. 将事件和中间件上下文交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
+//
+// 资源契约：
+//   - 调用方负责在返回非 nil error 时调用 job.Release()；
+//   - 当 OnReceive 已经执行（无论 Reject 还是 DispatchJob 失败），mailbox 内部
+//     会调用 ExecuteOnComplete 触发已经跑过的中间件 OnComplete 回调，并归还
+//     MiddlewareContext 到对象池，避免 mctx 泄漏与中间件 OnComplete 缺失
+//     （如 Sentinel.entry.Exit、CircuitBreaker 失败计数）。
 func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
-	// 挂起检查
+	// 挂起检查（OnReceive 尚未执行，无 mctx 需要回收）
 	if m.isSuspended() && !m.suspendPolicy.ShouldAllow(job) {
 		return def.ErrMailboxSuspended
 	}
@@ -100,16 +111,25 @@ func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
 	// 执行中间件链的 OnReceive
 	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(job, m.workerPool.invoker.GetServiceName())
 	if result.Action == def.ActionReject {
-		if result.Err != nil {
-			return result.Err
+		rejectErr := result.Err
+		if rejectErr == nil {
+			rejectErr = def.ErrMailboxMiddlewareRejected
 		}
-		return def.ErrMailboxMiddlewareRejected
+		// Reject 时仍需触发已跑过的中间件 OnComplete + 归还 mctx
+		m.workerPool.middlewareChain.ExecuteOnComplete(mctx, rejectErr, nil)
+		return rejectErr
 	}
 
 	job.SetMiddlewareContext(mctx)
 
 	// 分发事件（携带中间件上下文，用于 OnComplete 回调）
-	return m.workerPool.DispatchJob(job)
+	if dispatchErr := m.workerPool.DispatchJob(job); dispatchErr != nil {
+		// DispatchJob/SubmitJob 失败：job 永远不会被 worker 执行，
+		// 必须在此处补调 OnComplete 释放 mctx，避免泄漏与回调丢失。
+		m.workerPool.middlewareChain.ExecuteOnComplete(mctx, dispatchErr, nil)
+		return dispatchErr
+	}
+	return nil
 }
 
 func (m *Mailbox) isSuspended() bool {

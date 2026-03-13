@@ -7,8 +7,9 @@ package mailbox
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
-	"sync"
+	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -19,15 +20,17 @@ import (
 // PriorityQueueManager 多优先级队列管理器
 // 职责：管理多个优先级队列，按照调度策略返回下一个待处理消息
 // 调度策略：由 PriorityScheduler 决定（绝对优先/加权/公平）
+//
+// 并发模型：单 Worker 独占（与 PriorityScheduler 一致），nextJobBuf 复用安全。
 type PriorityQueueManager struct {
 	queues           map[def.Priority]queue[inf.IMailboxJob] // 各优先级队列
 	scheduler        *PriorityScheduler                      // 优先级调度器
 	batchSizes       map[def.Priority]int                    // 各优先级批量大小
 	sortedPriorities []def.Priority                          // 预排序的优先级列表（数值小的优先级高）
+	nextJobBuf       []def.Priority                          // NextJob 复用 buffer，长度 = len(sortedPriorities)
 	totalBatchLimit  int                                     // 单次处理的总批次限制
-
-	// 内存复用池
-	availablePrioritiesPool sync.Pool
+	fallbackPriority def.Priority                            // 未注册优先级的 fallback 目标
+	fallbackWarned   atomic.Bool                             // fallback 日志 warn-once 标记
 }
 
 // NewPriorityQueueManager 创建多优先级队列管理器
@@ -43,9 +46,11 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 		sortedPriorities: make([]def.Priority, 0, len(conf.PriorityBatches)),
 	}
 
-	// 初始化内存池
-	m.availablePrioritiesPool.New = func() interface{} {
-		return make([]def.Priority, 0, 16)
+	// 确保配置至少包含一个优先级队列，避免空配置导致运行时丢消息
+	if len(conf.PriorityBatches) == 0 {
+		conf.PriorityBatches = map[def.Priority]*config.PriorityConfig{
+			def.PriorityNormal: {BatchSize: 8},
+		}
 	}
 
 	// 初始化调度器
@@ -68,6 +73,12 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 		return m.sortedPriorities[i] < m.sortedPriorities[j]
 	})
 
+	// 预分配 NextJob 复用 buffer，长度等于注册的优先级数（避免 [16] 固定数组越界）
+	m.nextJobBuf = make([]def.Priority, len(m.sortedPriorities))
+
+	// 记录最低优先级，作为未注册优先级的 fallback 目标
+	m.fallbackPriority = m.sortedPriorities[len(m.sortedPriorities)-1]
+
 	// 设置总批次限制
 	if conf.TotalBatchLimit > 0 {
 		m.totalBatchLimit = conf.TotalBatchLimit
@@ -86,11 +97,21 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 }
 
 // Submit 提交事件到对应优先级队列
+// 未注册的优先级会 fallback 到已注册的最低优先级队列
 func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 	priority := e.GetPriority()
 	que, exists := m.queues[priority]
 	if !exists {
-		return fmt.Errorf("invalid priority: %d", priority)
+		// fallback 到最低优先级队列，避免静默丢弃消息
+		que, exists = m.queues[m.fallbackPriority]
+		if !exists {
+			return fmt.Errorf("no available queue for priority: %d", priority)
+		}
+		// warn-once: 提示未注册的优先级发生了 fallback
+		if m.fallbackWarned.CompareAndSwap(false, true) {
+			slog.Warn("PriorityQueueManager: unregistered priority fallback",
+				"requested", int(priority), "fallback", int(m.fallbackPriority))
+		}
 	}
 
 	que.Push(e)
@@ -100,27 +121,25 @@ func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 // NextJob 获取下一个待处理事件
 // 调度策略：根据调度器策略选择优先级，然后从对应队列弹出消息
 func (m *PriorityQueueManager) NextJob() (inf.IMailboxJob, bool) {
-	// 从对象池获取可复用切片
-	availableSlice := m.availablePrioritiesPool.Get().([]def.Priority)
-	available := availableSlice[:0]
-	defer func() {
-		m.availablePrioritiesPool.Put(available[:0])
-	}()
+	// 复用预分配的 buffer，长度严格匹配 sortedPriorities，避免越界 panic
+	buf := m.nextJobBuf
+	n := 0
 
 	// 收集非空队列的优先级
 	for _, priority := range m.sortedPriorities {
 		if !m.queues[priority].Empty() {
-			available = append(available, priority)
+			buf[n] = priority
+			n++
 		}
 	}
 
 	// 没有可用消息
-	if len(available) == 0 {
+	if n == 0 {
 		return nil, false
 	}
 
 	// 使用调度器选择优先级
-	selectedPriority := m.scheduler.NextPriorityWithOrdering(available)
+	selectedPriority := m.scheduler.NextPriorityWithOrdering(buf[:n])
 	if selectedPriority == -1 {
 		return nil, false
 	}

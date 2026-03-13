@@ -203,6 +203,12 @@ type MailboxConf struct {
 	// 0 表示不启用 watchdog。
 	// 默认: 30s
 	MaxJobExecutionTime time.Duration `binding:""`
+
+	// ReadPoolSize 读 goroutine 池容量（仅在 EnableRWMode=true 时生效）
+	// 每个 WorkerPool 创建独立的 ants 池用于执行读 goroutine，实现资源隔离。
+	// 0 表示使用默认值（= MaxConcurrentReads），负数回退到默认值。
+	// 默认: MaxConcurrentReads
+	ReadPoolSize int `binding:""`
 }
 
 // MailboxMiddlewareConf 邮箱中间件配置
@@ -219,6 +225,11 @@ type MailboxMiddlewareConf struct {
 	// DispatchKeyStatsTopN 统计输出 TopN
 	// 默认: 10
 	DispatchKeyStatsTopN int `binding:""`
+
+	// DispatchKeyStatsMaxKeys 统计中间件最大跟踪 key 数量
+	// 大型集群可调大，小型服务可调小节省内存
+	// 默认: 100000
+	DispatchKeyStatsMaxKeys int `binding:""`
 
 	// RateLimitConf 限流中间件配置（nil 表示不启用）
 	RateLimitConf *RateLimitConf `binding:""`

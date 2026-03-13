@@ -25,8 +25,8 @@ func TestCreateJob_Builtins(t *testing.T) {
 			if !ok || job == nil {
 				t.Fatalf("expected job for type %v", tc.jobType)
 			}
-			if job.GetType() != def.MailboxJobTypeNone {
-				// 新建 job 默认 Reset 后应为 None（具体类型在派发前再赋值）
+			if job.GetType() != tc.jobType {
+				t.Fatalf("expected type %v, got %v", tc.jobType, job.GetType())
 			}
 			job.Release()
 		})
@@ -48,6 +48,7 @@ func (j *Test1Job) Release() {
 }
 
 func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
+	resetFactoryFrozenForTest()
 	const customType def.MailboxJobType = 10001
 	const customType1 def.MailboxJobType = 10002
 

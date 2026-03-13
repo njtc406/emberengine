@@ -275,7 +275,7 @@ func (s *MasterSlaverTest) RpcSyncAllData(req *msg.TestData) error {
 	if req == nil {
 		return def.ErrParamNotMatch
 	}
-	if s.GetPid().GetIsMaster() {
+	if s.GetPid().IsMasterNode() {
 		// 不能向主服务同步全量数据
 		return fmt.Errorf("不能向主服务同步全量数据")
 	}
@@ -292,7 +292,7 @@ func (s *MasterSlaverTest) RpcGetAllData() (*msg.TestData, error) {
 		// 主服务还未加载完成
 		return nil, fmt.Errorf("主服务还未加载完成")
 	}
-	if !s.GetPid().GetIsMaster() {
+	if !s.GetPid().IsMasterNode() {
 		return nil, fmt.Errorf("当前服务非主服务")
 	}
 	s.Debugf("slaver get master all data, version: %v", s.a.Version)

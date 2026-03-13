@@ -112,7 +112,7 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 	r.mapPID.Range(func(key, value any) bool {
 		c := value.(inf.IRpcDispatcher)
 		pid := c.GetPid()
-		if pid.GetIsMaster() && rule(pid) {
+		if pid.IsMasterNode() && rule(pid) {
 			returnList = append(returnList, r.newMessageBus(s, value.(inf.IRpcDispatcher), nil))
 		}
 		return true
@@ -144,7 +144,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 		}
 		cPid := c.GetPid()
 		if !actor.IsRetired(cPid) && (param.Partition == nil || cPid.GetPartition() == *param.Partition) &&
-			(param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.GetIsMaster() == !param.IsSlaver {
+			(param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.IsMasterNode() == !param.IsSlaver {
 			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 	}
@@ -202,7 +202,7 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, ser
 			continue
 		}
 		cPid := c.GetPid()
-		if c != nil && !actor.IsRetired(cPid) && (partition == 0 || cPid.GetPartition() == partition) && cPid.GetIsMaster() {
+		if c != nil && !actor.IsRetired(cPid) && (partition == 0 || cPid.GetPartition() == partition) && cPid.IsMasterNode() {
 			list = append(list, r.newMessageBus(s, c, nil))
 		}
 	}

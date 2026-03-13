@@ -43,9 +43,10 @@ type ConnectionPool struct {
 	cleanupTicker *time.Ticker
 	stopCleanup   chan struct{}
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	stopOnce sync.Once
 }
 
 // NewConnectionPool 创建新连接池

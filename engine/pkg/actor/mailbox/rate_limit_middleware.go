@@ -7,9 +7,9 @@ package mailbox
 
 import (
 	"errors"
-	"sync"
 	"sync/atomic"
-	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -25,13 +25,13 @@ var ErrRateLimitExceeded = errors.New("rate limit exceeded")
 //   - 限制消息入队速率，超过阈值时拒绝消息
 //   - 支持突发流量（burst）
 //   - 可选的白名单机制（如紧急消息跳过限流）
+//
+// 底层使用 golang.org/x/time/rate.Limiter，内部通过 CAS 实现，无互斥锁。
 type RateLimitMiddleware struct {
-	logger     log.ILoggerX
-	rate       float64   // 每秒产生的令牌数
-	burst      int       // 桶容量（突发流量上限）
-	tokens     float64   // 当前令牌数
-	lastUpdate time.Time // 上次更新时间
-	mu         sync.Mutex
+	logger  log.ILoggerX
+	limiter *rate.Limiter
+	rateVal float64 // 记录配置值，用于日志
+	burst   int
 
 	// 统计
 	accepted atomic.Uint64
@@ -62,14 +62,13 @@ func WithRateLimitSkipFunc(fn func(mctx inf.IMiddlewareContext) bool) RateLimitO
 // NewRateLimitMiddleware 创建限流中间件
 //
 // 参数：
-//   - rate: 每秒允许的请求数
+//   - ratePerSec: 每秒允许的请求数
 //   - burst: 突发流量上限（桶容量）
-func NewRateLimitMiddleware(rate float64, burst int, opts ...RateLimitOption) *RateLimitMiddleware {
+func NewRateLimitMiddleware(ratePerSec float64, burst int, opts ...RateLimitOption) *RateLimitMiddleware {
 	m := &RateLimitMiddleware{
-		rate:       rate,
-		burst:      burst,
-		tokens:     float64(burst), // 初始填满
-		lastUpdate: time.Now(),
+		limiter: rate.NewLimiter(rate.Limit(ratePerSec), burst),
+		rateVal: ratePerSec,
+		burst:   burst,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -83,7 +82,7 @@ func (m *RateLimitMiddleware) Name() string {
 
 func (m *RateLimitMiddleware) OnStart() {
 	if m.logger != nil {
-		m.logger.Infof("RateLimitMiddleware started: rate=%.2f/s, burst=%d", m.rate, m.burst)
+		m.logger.Infof("RateLimitMiddleware started: rate=%.2f/s, burst=%d", m.rateVal, m.burst)
 	}
 }
 
@@ -99,29 +98,13 @@ func (m *RateLimitMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Middlew
 		return dto.Continue()
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// 使用纳秒计算，避免浮点数精度损失
-	now := time.Now()
-	elapsed := now.Sub(m.lastUpdate)
-	tokensToAdd := float64(elapsed.Nanoseconds()) * m.rate / 1e9 // rate 是每秒数量
-	m.tokens += tokensToAdd
-	if m.tokens > float64(m.burst) {
-		m.tokens = float64(m.burst)
-	}
-	m.lastUpdate = now
-
-	// 尝试获取令牌
-	if m.tokens >= 1 {
-		m.tokens--
-		m.accepted.Add(1)
-		return dto.Continue()
+	if !m.limiter.Allow() {
+		m.rejected.Add(1)
+		return dto.Reject(ErrRateLimitExceeded)
 	}
 
-	// 被限流
-	m.rejected.Add(1)
-	return dto.Reject(ErrRateLimitExceeded)
+	m.accepted.Add(1)
+	return dto.Continue()
 }
 
 func (m *RateLimitMiddleware) OnComplete(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {

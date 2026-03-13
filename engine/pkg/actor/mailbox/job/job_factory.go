@@ -17,6 +17,9 @@ import (
 
 var runtimeDebug atomic.Bool
 
+var jobFactoryFrozen atomic.Bool
+var jobFactoryMu sync.Mutex // 保护 RegisterJobFactory 的并发安全
+
 func SetDebug(enabled bool) {
 	runtimeDebug.Store(enabled)
 }
@@ -54,6 +57,11 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 }
 
 func RegisterJobFactory(jobType def.MailboxJobType, creator Creator, getter Getter) error {
+	jobFactoryMu.Lock()
+	defer jobFactoryMu.Unlock()
+	if jobFactoryFrozen.Load() {
+		return fmt.Errorf("job factory is frozen, cannot register type %d after first use", jobType)
+	}
 	if _, ok := jobFactory[jobType]; ok {
 		return fmt.Errorf("job type %d is already registered", jobType)
 	}
@@ -61,9 +69,29 @@ func RegisterJobFactory(jobType def.MailboxJobType, creator Creator, getter Gett
 	return nil
 }
 
+// FreezeJobFactory 显式冻结 job factory 注册表。
+// 推荐调用点：Node.Start 在用户 init 完成后、业务服务启动前。
+// 用途：避免"某个包先调用 CreateJob 触发隐式冻结导致其他 init 中的
+// RegisterJobFactory 失败"的 init 顺序依赖问题。
+// 重复调用安全。
+func FreezeJobFactory() {
+	if jobFactoryFrozen.Load() {
+		return
+	}
+	jobFactoryMu.Lock()
+	jobFactoryFrozen.Store(true)
+	jobFactoryMu.Unlock()
+}
+
 // CreateJob 按类型创建一个 job。
+// 首次调用时冻结注册表，之后不再允许注册新类型。
 // 未注册则返回 (nil, false)。
 func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
+	if !jobFactoryFrozen.Load() {
+		jobFactoryMu.Lock()
+		jobFactoryFrozen.Store(true)
+		jobFactoryMu.Unlock()
+	}
 	entry, ok := jobFactory[jobType]
 	if !ok {
 		return nil, false
@@ -75,6 +103,11 @@ func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
 // 返回值需要调用方根据 jobType 断言为具体类型。
 // 未注册的类型返回 nil。
 func GetJobPayload(job inf.IMailboxJob) any {
+	if !jobFactoryFrozen.Load() {
+		jobFactoryMu.Lock()
+		jobFactoryFrozen.Store(true)
+		jobFactoryMu.Unlock()
+	}
 	entry, ok := jobFactory[job.GetType()]
 	if !ok {
 		return nil
