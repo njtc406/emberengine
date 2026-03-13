@@ -186,7 +186,7 @@ func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 	msg.Method = e.data.GetMethod()
 	msg.Request = nil
 	msg.Response = nil
-	msg.Err = e.data.GetErrStr()
+	msg.Err = e.data.GetErrBytes()
 	msg.ContextHeaders = emberctx.ToHeaders(ctx)
 	msg.Reply = e.data.IsReply()
 	msg.ReqId = e.meta.GetReqId()

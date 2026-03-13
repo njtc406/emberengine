@@ -16,6 +16,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/engine/pkg/utils/errorx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
 
@@ -44,8 +45,8 @@ func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message
 		}
 		if state := rm.Remove(req.ReqId); state != nil {
 			response, err := codec.DecodeFromAny(req.Response)
-			if err == nil && req.Err != "" {
-				err = errors.New(req.Err)
+			if err == nil && len(req.Err) > 0 {
+				err = errorx.UnmarshalFromBytes(req.Err)
 			}
 
 			state.SetResult(response, err)

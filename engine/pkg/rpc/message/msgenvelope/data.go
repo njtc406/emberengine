@@ -6,13 +6,16 @@
 package msgenvelope
 
 import (
-	"errors"
 	"sync"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/engine/pkg/utils/errorx"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+// 编译期检查 Data 实现 IEnvelopeData
+var _ inf.IEnvelopeData = (*Data)(nil)
 
 func NewData() inf.IEnvelopeData {
 	return &Data{} // data不使用缓存池, 因为多个共用相同的data时,前面的释放会导致后面的都取不到了
@@ -77,16 +80,6 @@ func (e *Data) SetError(err error) {
 	e.err = err
 }
 
-func (e *Data) SetErrStr(err string) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	if err == "" {
-		e.err = nil
-		return
-	}
-	e.err = errors.New(err)
-}
-
 func (e *Data) SetNeedResponse(need bool) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
@@ -117,13 +110,10 @@ func (e *Data) GetError() error {
 	return e.err
 }
 
-func (e *Data) GetErrStr() string {
+func (e *Data) GetErrBytes() []byte {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	if e.err == nil {
-		return ""
-	}
-	return e.err.Error()
+	return errorx.MarshalToBytes(e.err)
 }
 
 func (e *Data) GetRequestBuff() (*anypb.Any, error) {
