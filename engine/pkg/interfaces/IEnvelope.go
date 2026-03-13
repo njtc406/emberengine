@@ -69,7 +69,6 @@ type IEnvelopeData interface {
 	SetRequest(req interface{})
 	SetResponse(res interface{})
 	SetError(err error)
-	SetErrStr(err string)
 	SetNeedResponse(need bool)
 
 	// Get
@@ -78,7 +77,6 @@ type IEnvelopeData interface {
 	GetRequest() interface{}
 	GetResponse() interface{}
 	GetError() error
-	GetErrStr() string
 	GetRequestBuff() (*anypb.Any, error)
 
 	// Check

@@ -30,7 +30,7 @@ message Message {
   string Method                       = 5;  // 调用方法
   google.protobuf.Any Request         = 6;  // 方法参数
   google.protobuf.Any Response        = 7;  // 方法返回值
-  string Err                          = 8;  // 错误信息
+  bytes Err                           = 8;  // 错误信息(ErrorDetail protobuf 编码)
   bool Reply                          = 9;  // 是否是回复
   uint64 ReqId                        = 10; // 请求ID
   bool NeedResp                       = 11; // 是否需要回复
@@ -72,4 +72,20 @@ message MasterStateData {
   bool OldStateIsMaster = 1;
   int64 PrevEpoch = 2;
   int64 NewEpoch = 3;
+}
+
+// ErrorDetail 结构化错误信息，用于 RPC 错误跨节点传输。
+// 通过 proto 编码写入 Message.Err (bytes)，保留错误码、调用位置、上下文字段和完整错误链。
+message ErrorDetail {
+  int32 code              = 1;  // 错误码 (0 表示未设置)
+  string msg              = 2;  // 当前层错误描述
+  string file             = 3;  // 创建位置文件路径
+  int32 line              = 4;  // 创建位置行号
+  repeated ErrorField fields = 5;  // 结构化上下文键值对
+  ErrorDetail cause       = 6;  // 被包装的底层错误 (错误链)
+}
+
+message ErrorField {
+  string key              = 1;
+  string val              = 2;
 }
