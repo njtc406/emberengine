@@ -6,8 +6,6 @@
 package mailbox
 
 import (
-	"sync"
-
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
@@ -63,7 +61,6 @@ type PriorityScheduler struct {
 	priorities map[def.Priority]*config.PriorityConfig
 	weights    map[def.Priority]int
 	counters   map[def.Priority]int // 用于加权轮询和防饥饿
-	mutex      sync.RWMutex
 }
 
 // NewPriorityScheduler 创建新的优先级调度器

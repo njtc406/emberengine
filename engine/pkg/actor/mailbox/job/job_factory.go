@@ -17,6 +17,8 @@ import (
 
 var runtimeDebug atomic.Bool
 
+var jobFactoryFrozen atomic.Bool
+
 func SetDebug(enabled bool) {
 	runtimeDebug.Store(enabled)
 }
@@ -54,6 +56,9 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 }
 
 func RegisterJobFactory(jobType def.MailboxJobType, creator Creator, getter Getter) error {
+	if jobFactoryFrozen.Load() {
+		return fmt.Errorf("job factory is frozen, cannot register type %d after first use", jobType)
+	}
 	if _, ok := jobFactory[jobType]; ok {
 		return fmt.Errorf("job type %d is already registered", jobType)
 	}
@@ -64,6 +69,7 @@ func RegisterJobFactory(jobType def.MailboxJobType, creator Creator, getter Gett
 // CreateJob 按类型创建一个 job。
 // 未注册则返回 (nil, false)。
 func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
+	jobFactoryFrozen.Store(true)
 	entry, ok := jobFactory[jobType]
 	if !ok {
 		return nil, false
@@ -75,6 +81,7 @@ func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
 // 返回值需要调用方根据 jobType 断言为具体类型。
 // 未注册的类型返回 nil。
 func GetJobPayload(job inf.IMailboxJob) any {
+	jobFactoryFrozen.Store(true)
 	entry, ok := jobFactory[job.GetType()]
 	if !ok {
 		return nil

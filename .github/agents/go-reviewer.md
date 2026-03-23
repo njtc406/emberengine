@@ -1,7 +1,7 @@
 ---
 name: 代码审查专家
 description: 负责代码质量检查、发现Bug和架构问题
-tools: ['vscode','read','search']
+tools: ['vscode','read','search','edit','todo','execute']
 model: Claude Opus 4.6 (copilot)
 ---
 

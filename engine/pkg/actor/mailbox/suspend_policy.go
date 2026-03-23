@@ -6,6 +6,8 @@
 package mailbox
 
 import (
+	"sync"
+
 	job2 "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -44,9 +46,11 @@ func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 	// 规则2: RPC Reply 放行
 	if job.GetType() == def.MailboxJobTypeRpc {
 		envelope := job2.GetJobPayloadAs[inf.IEnvelope](job)
-		data := envelope.GetData()
-		if data != nil && data.IsReply() {
-			return true
+		if envelope != nil {
+			data := envelope.GetData()
+			if data != nil && data.IsReply() {
+				return true
+			}
 		}
 	}
 
@@ -61,6 +65,7 @@ func (p *DefaultSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 // CompositeSuspendPolicy 组合多个 ISuspendPolicy，任一策略放行则放行。
 // 便于用户在默认规则基础上追加自定义放行条件。
 type CompositeSuspendPolicy struct {
+	mu       sync.RWMutex
 	policies []inf.ISuspendPolicy
 }
 
@@ -72,7 +77,10 @@ func NewCompositeSuspendPolicy(policies ...inf.ISuspendPolicy) *CompositeSuspend
 
 // ShouldAllow 检查所有策略，任一放行则返回 true。
 func (p *CompositeSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
-	for _, policy := range p.policies {
+	p.mu.RLock()
+	policies := p.policies
+	p.mu.RUnlock()
+	for _, policy := range policies {
 		if policy.ShouldAllow(job) {
 			return true
 		}
@@ -82,5 +90,7 @@ func (p *CompositeSuspendPolicy) ShouldAllow(job inf.IMailboxJob) bool {
 
 // AddPolicy 动态添加策略。
 func (p *CompositeSuspendPolicy) AddPolicy(policy inf.ISuspendPolicy) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.policies = append(p.policies, policy)
 }

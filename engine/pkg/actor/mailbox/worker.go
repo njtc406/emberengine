@@ -7,11 +7,9 @@ package mailbox
 
 import (
 	"context"
-	"fmt"
-	"math/rand"
-	"reflect"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +26,12 @@ const (
 	QueueModePriority = "priority"
 )
 
+const (
+	workerStateRunning int32 = iota
+	workerStateClosing
+	workerStateClosed
+)
+
 // Worker 统一的消息处理 Worker，实现 IMailboxWorker。
 //
 // 职责：
@@ -37,8 +41,7 @@ const (
 //   - 在 Stop 时，通过 queueManager.DrainAll 将队列中剩余事件处理完毕，保证关闭过程无消息丢失。
 type Worker struct {
 	workerId        int32
-	closed          atomic.Bool
-	closing         atomic.Bool
+	state           atomic.Int32 // workerStateRunning / workerStateClosing / workerStateClosed
 	submitters      atomic.Int64
 	pool            *WorkerPool
 	wg              sync.WaitGroup
@@ -120,12 +123,12 @@ func (w *Worker) GetWorkerId() int32 {
 // SubmitJob 提交任务到队列
 func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
 	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
-	if w.closing.Load() || w.closed.Load() {
+	if w.state.Load() != workerStateRunning {
 		return def.ErrMailboxWorkerClosed
 	}
 	w.submitters.Add(1)
-	// If Stop flipped closing concurrently, back out and refuse.
-	if w.closing.Load() || w.closed.Load() {
+	// If Stop flipped state concurrently, back out and refuse.
+	if w.state.Load() != workerStateRunning {
 		w.submitters.Add(-1)
 		return def.ErrMailboxWorkerClosed
 	}
@@ -229,7 +232,7 @@ func (w *Worker) run() {
 	}()
 
 	// 主处理循环
-	for !w.closed.Load() {
+	for w.state.Load() != workerStateClosed {
 		e, ok := w.queueManager.NextJob()
 		if !ok {
 			w.idler.Idle()
@@ -247,7 +250,7 @@ func (w *Worker) run() {
 // BeginStop 发起停止（非阻塞）。
 func (w *Worker) BeginStop() {
 	// First, stop accepting new submissions.
-	if !w.closing.CompareAndSwap(false, true) {
+	if !w.state.CompareAndSwap(workerStateRunning, workerStateClosing) {
 		return // already stopping/stopped
 	}
 
@@ -257,9 +260,7 @@ func (w *Worker) BeginStop() {
 	}
 
 	// Now stop the run loop.
-	if !w.closed.CompareAndSwap(false, true) {
-		return
-	}
+	w.state.Store(workerStateClosed)
 
 	// 唤醒可能在等待的Worker
 	if w.idler != nil {
@@ -374,7 +375,7 @@ func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipProfiler bool) {
 	var analyzer *profiler.Analyzer
 	// skipProfiler=true 时跳过共享 Profiler，避免并发安全问题和 stack 语义破坏
 	if w.pool.profiler != nil && !skipProfiler {
-		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE ]%s", reflect.TypeOf(job).String()))
+		analyzer = w.pool.profiler.Push("[ STATE ]job_type_" + strconv.Itoa(int(job.GetType())))
 	}
 
 	// ---------- 执行 Job + 读时长采集 ----------
@@ -425,40 +426,25 @@ func (w *Worker) execWithRW(job inf.IMailboxJob) {
 // ① closed 检查（响应 Stop）；② writeRequested 自旋让步（防止写饥饿）；
 // ③ 信号量令牌获取（MaxConcurrentReads 硬上限）。
 func (w *Worker) execRead(job inf.IMailboxJob) {
-	readBackoff := time.Duration(0)
-	const maxReadBackoff = 100 * time.Microsecond
+	yieldCount := 1
+	const maxYieldCount = 64 // 上限，避免空转过多
 	for {
 		// ① 优先检查 Stop 状态
-		if w.closed.Load() {
+		if w.state.Load() == workerStateClosed {
 			w.pendingJob = job
 			return
 		}
 		// ② 若有 pending writer，退避让步（让已有的读 goroutine 完成 RUnlock）
+		// 使用 runtime.Gosched() 循环替代 time.Sleep，避免 Windows 下 15ms 最小精度问题
 		if w.pool.writeRequested.Load() > 0 {
-			if readBackoff == 0 {
+			for i := 0; i < yieldCount; i++ {
 				runtime.Gosched()
-				readBackoff = time.Microsecond
-			} else {
-				// 加入随机 jitter，避免惊群效应
-				wcFactor := int64(w.pool.workerCount.Load())
-				if wcFactor < 1 {
-					wcFactor = 1
+				if w.pool.writeRequested.Load() == 0 {
+					break
 				}
-				if wcFactor > 8 {
-					wcFactor = 8
-				}
-				jitterBase := int64(readBackoff) * 2 / 5
-				jitterRange := jitterBase * wcFactor
-				if jitterRange > 0 {
-					jitter := time.Duration(rand.Int63n(jitterRange)) - time.Duration(jitterRange/2)
-					time.Sleep(readBackoff + jitter)
-				} else {
-					time.Sleep(readBackoff)
-				}
-				readBackoff *= 2
-				if readBackoff > maxReadBackoff {
-					readBackoff = maxReadBackoff
-				}
+			}
+			if yieldCount < maxYieldCount {
+				yieldCount *= 2
 			}
 			continue
 		}
@@ -468,16 +454,12 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 			case w.pool.readSem <- struct{}{}:
 				// 获取令牌成功
 			default:
-				// 令牌已满，退避后重试
-				if readBackoff == 0 {
+				// 令牌已满，Gosched 退避后重试
+				for i := 0; i < yieldCount; i++ {
 					runtime.Gosched()
-					readBackoff = time.Microsecond
-				} else {
-					time.Sleep(readBackoff)
-					readBackoff *= 2
-					if readBackoff > maxReadBackoff {
-						readBackoff = maxReadBackoff
-					}
+				}
+				if yieldCount < maxYieldCount {
+					yieldCount *= 2
 				}
 				continue
 			}
@@ -512,10 +494,7 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 		defer func() {
 			// 归还信号量令牌
 			if w.pool.readSem != nil {
-				func() {
-					defer func() { recover() }()
-					<-w.pool.readSem
-				}()
+				<-w.pool.readSem
 			}
 			// 释放读锁（必须在 Done 之前）
 			if rlockReleased.CompareAndSwap(false, true) {
@@ -542,7 +521,7 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 	backoff := time.Duration(0)
 	const maxBackoff = 1 * time.Millisecond
 	for !w.pool.rwMu.TryLock() {
-		if w.closed.Load() {
+		if w.state.Load() == workerStateClosed {
 			w.pool.writeRequested.Add(-1)
 			// Worker 正在停止但无法获取写锁，暂存到 pendingJob 由 Drain 处理
 			w.pendingJob = job

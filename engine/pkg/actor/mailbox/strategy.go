@@ -21,9 +21,13 @@ type CompositeStrategy struct {
 }
 
 func newCompositeStrategy(strategies []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
+	mode, _ := params["Mode"].(string)
+	if mode == "" {
+		mode = "any"
+	}
 	return &CompositeStrategy{
 		Strategies: strategies,
-		Mode:       params["Mode"].(string),
+		Mode:       mode,
 	}
 }
 
@@ -71,9 +75,17 @@ type MaxLoadStrategy struct {
 }
 
 func newMaxLoadStrategy(_ []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
+	idleThreshold := 50
+	if v, ok := params["IdleThreshold"].(int); ok {
+		idleThreshold = v
+	}
+	maxLoadThreshold := 64
+	if v, ok := params["MaxLoadThreshold"].(int); ok {
+		maxLoadThreshold = v
+	}
 	return &MaxLoadStrategy{
-		IdleThreshold:    params["IdleThreshold"].(int),
-		MaxLoadThreshold: params["MaxLoadThreshold"].(int),
+		IdleThreshold:    idleThreshold,
+		MaxLoadThreshold: maxLoadThreshold,
 	}
 }
 

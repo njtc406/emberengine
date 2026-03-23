@@ -8,7 +8,6 @@ package mailbox
 import (
 	"fmt"
 	"sort"
-	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -25,9 +24,6 @@ type PriorityQueueManager struct {
 	batchSizes       map[def.Priority]int                    // 各优先级批量大小
 	sortedPriorities []def.Priority                          // 预排序的优先级列表（数值小的优先级高）
 	totalBatchLimit  int                                     // 单次处理的总批次限制
-
-	// 内存复用池
-	availablePrioritiesPool sync.Pool
 }
 
 // NewPriorityQueueManager 创建多优先级队列管理器
@@ -41,11 +37,6 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 		queues:           make(map[def.Priority]queue[inf.IMailboxJob]),
 		batchSizes:       make(map[def.Priority]int),
 		sortedPriorities: make([]def.Priority, 0, len(conf.PriorityBatches)),
-	}
-
-	// 初始化内存池
-	m.availablePrioritiesPool.New = func() interface{} {
-		return make([]def.Priority, 0, 16)
 	}
 
 	// 初始化调度器
@@ -100,27 +91,25 @@ func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 // NextJob 获取下一个待处理事件
 // 调度策略：根据调度器策略选择优先级，然后从对应队列弹出消息
 func (m *PriorityQueueManager) NextJob() (inf.IMailboxJob, bool) {
-	// 从对象池获取可复用切片
-	availableSlice := m.availablePrioritiesPool.Get().([]def.Priority)
-	available := availableSlice[:0]
-	defer func() {
-		m.availablePrioritiesPool.Put(available[:0])
-	}()
+	// 栈分配的固定数组，避免 sync.Pool Get/Put 开销
+	var buf [16]def.Priority
+	n := 0
 
 	// 收集非空队列的优先级
 	for _, priority := range m.sortedPriorities {
 		if !m.queues[priority].Empty() {
-			available = append(available, priority)
+			buf[n] = priority
+			n++
 		}
 	}
 
 	// 没有可用消息
-	if len(available) == 0 {
+	if n == 0 {
 		return nil, false
 	}
 
 	// 使用调度器选择优先级
-	selectedPriority := m.scheduler.NextPriorityWithOrdering(available)
+	selectedPriority := m.scheduler.NextPriorityWithOrdering(buf[:n])
 	if selectedPriority == -1 {
 		return nil, false
 	}

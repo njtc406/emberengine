@@ -29,6 +29,9 @@ var (
 	// sentinelInitOnce 确保 Sentinel 只初始化一次
 	sentinelInitOnce sync.Once
 	sentinelInitErr  error
+
+	// sentinelSystemRulesOnce 确保 system rules 只加载一次（全局保护资源）
+	sentinelSystemRulesOnce sync.Once
 )
 
 // SentinelMiddleware 基于阿里 Sentinel 的限流熔断中间件
@@ -250,38 +253,40 @@ func (m *SentinelMiddleware) OnStart() {
 		return
 	}
 
-	// 加载流量控制规则
+	// 加载流量控制规则（按资源加载，避免覆盖其他 Service 的规则）
 	if len(m.flowRules) > 0 {
 		// 更新资源名
 		for _, rule := range m.flowRules {
 			rule.Resource = m.serviceName
 		}
-		if _, err := flow.LoadRules(m.flowRules); err != nil {
+		if _, err := flow.LoadRulesOfResource(m.serviceName, m.flowRules); err != nil {
 			if m.logger != nil {
 				m.logger.Errorf("Sentinel load flow rules failed: %v", err)
 			}
 		}
 	}
 
-	// 加载熔断规则
+	// 加载熔断规则（按资源加载）
 	if len(m.circuitBreakerRules) > 0 {
 		for _, rule := range m.circuitBreakerRules {
 			rule.Resource = m.serviceName
 		}
-		if _, err := circuitbreaker.LoadRules(m.circuitBreakerRules); err != nil {
+		if _, err := circuitbreaker.LoadRulesOfResource(m.serviceName, m.circuitBreakerRules); err != nil {
 			if m.logger != nil {
 				m.logger.Errorf("Sentinel load circuit breaker rules failed: %v", err)
 			}
 		}
 	}
 
-	// 加载系统保护规则
+	// 加载系统保护规则（全局资源，仅加载一次，避免多 Service 相互覆盖）
 	if len(m.systemRules) > 0 {
-		if _, err := system.LoadRules(m.systemRules); err != nil {
-			if m.logger != nil {
-				m.logger.Errorf("Sentinel load system rules failed: %v", err)
+		sentinelSystemRulesOnce.Do(func() {
+			if _, err := system.LoadRules(m.systemRules); err != nil {
+				if m.logger != nil {
+					m.logger.Errorf("Sentinel load system rules failed: %v", err)
+				}
 			}
-		}
+		})
 	}
 
 	if m.logger != nil {

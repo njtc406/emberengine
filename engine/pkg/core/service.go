@@ -324,7 +324,10 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
 
 	// 创建邮箱（将停机 drain 策略下发给 mailbox/workerPool）
-	s.mailbox = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares, mailbox.WithDrainPolicy(drainPolicy))
+	s.mailbox, err = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares, mailbox.WithDrainPolicy(drainPolicy))
+	if err != nil {
+		return
+	}
 
 	// 初始化根模块
 	s.self = svc.(inf.IModule)

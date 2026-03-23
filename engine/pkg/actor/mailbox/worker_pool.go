@@ -21,7 +21,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
-	"gorm.io/gorm/utils"
 )
 
 // ErrRWDisableTimeout SetRWEnabled(false) 超时，有泄漏的读 goroutine
@@ -88,9 +87,9 @@ func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
 	p.drainPolicy = policy
 }
 
-func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) *WorkerPool {
+func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker, middlewares ...inf.IMailboxMiddleware) (*WorkerPool, error) {
 	if invoker == nil {
-		panic("invoker is nil")
+		return nil, errors.New("invoker is nil")
 	}
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,7 +121,7 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 		pool.maxJobExecTime = conf.MaxJobExecutionTime
 	}
 
-	return pool
+	return pool, nil
 }
 
 func (p *WorkerPool) Start() error {
@@ -359,6 +358,7 @@ func (p *WorkerPool) SetRWEnabled(enabled bool) error {
 		p.logger.Warnf("RW mode disabled at runtime")
 	} else if enabled && !p.enableRW.Load() {
 		// 开启 RW 模式：翻转标志前确保 readSem 已初始化
+		p.mu.Lock()
 		if p.readSem == nil {
 			maxReads := p.conf.MaxConcurrentReads
 			// 初始 EnableRWMode=false 时 fixConf 会将 MaxConcurrentReads 设为 0，
@@ -372,6 +372,7 @@ func (p *WorkerPool) SetRWEnabled(enabled bool) error {
 			p.readSem = make(chan struct{}, maxReads)
 			p.conf.MaxConcurrentReads = maxReads // 回写，供后续 SetRWEnabled 使用
 		}
+		p.mu.Unlock()
 		p.enableRW.Store(true)
 		p.logger.Warnf("RW mode enabled at runtime, readSem initialized with cap=%d",
 			cap(p.readSem))
@@ -468,7 +469,7 @@ func (p *WorkerPool) logDispatchStatsOnce() {
 		if i > 0 {
 			msg += ", "
 		}
-		msg += "w" + utils.ToString(items[i].id) + "=" + itoaU64(items[i].count)
+		msg += "w" + itoa(int(items[i].id)) + "=" + itoaU64(items[i].count)
 	}
 
 	//p.logger.Infof(msg)
@@ -559,6 +560,17 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	}
 	if conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff <= 0 {
 		conf.SchedulePolicy.IdlerConf.MaxIdleBeforeBackoff = 1000
+	}
+
+	// ---- 扩缩容因子校验 ----
+	if conf.SchedulePolicy.ScalingStrategy != nil {
+		sc := conf.SchedulePolicy.ScalingStrategy
+		if sc.GrowthFactor <= 0 {
+			sc.GrowthFactor = 0.5
+		}
+		if sc.ShrinkFactor <= 0 || sc.ShrinkFactor > 0.5 {
+			sc.ShrinkFactor = 0.25
+		}
 	}
 
 	// ---- RW 模式配置校验（单 worker 场景不允许开启 RW 模式） ----

@@ -74,8 +74,8 @@ type CircuitBreakerMiddleware struct {
 	mu           sync.Mutex   // 仅用于状态转换的临界区保护
 
 	// 统计
-	totalRequests   uint64
-	rejectedByBreak uint64
+	totalRequests   atomic.Uint64
+	rejectedByBreak atomic.Uint64
 }
 
 // CircuitBreakerOption 熔断器配置选项
@@ -147,12 +147,12 @@ func (m *CircuitBreakerMiddleware) OnStop() {
 	if m.logger != nil {
 		state := CircuitState(m.state.Load())
 		m.logger.Infof("CircuitBreakerMiddleware stopped: state=%s, total=%d, rejected=%d",
-			state, m.totalRequests, m.rejectedByBreak)
+			state, m.totalRequests.Load(), m.rejectedByBreak.Load())
 	}
 }
 
 func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.MiddlewareResult {
-	atomic.AddUint64(&m.totalRequests, 1)
+	m.totalRequests.Add(1)
 
 	state := CircuitState(m.state.Load())
 
@@ -182,12 +182,12 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Mi
 				// fallthrough 到 StateHalfOpen 处理
 			} else {
 				// 仍在打开状态或冷却时间未到，拒绝请求
-				atomic.AddUint64(&m.rejectedByBreak, 1)
+				m.rejectedByBreak.Add(1)
 				return dto.Reject(ErrCircuitBreakerOpen)
 			}
 		} else {
 			// 冷却时间未到，拒绝请求
-			atomic.AddUint64(&m.rejectedByBreak, 1)
+			m.rejectedByBreak.Add(1)
 			return dto.Reject(ErrCircuitBreakerOpen)
 		}
 		fallthrough
@@ -198,7 +198,7 @@ func (m *CircuitBreakerMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Mi
 			current := m.halfOpenReqs.Load()
 			if current >= int32(m.halfOpenMaxAllowed) {
 				// 超过探测请求数限制
-				atomic.AddUint64(&m.rejectedByBreak, 1)
+				m.rejectedByBreak.Add(1)
 				return dto.Reject(ErrCircuitBreakerOpen)
 			}
 			// 尝试 CAS 增加计数
@@ -278,7 +278,7 @@ func (m *CircuitBreakerMiddleware) GetState() CircuitState {
 
 // GetStats 获取统计信息
 func (m *CircuitBreakerMiddleware) GetStats() (total, rejected uint64, state CircuitState) {
-	return atomic.LoadUint64(&m.totalRequests), atomic.LoadUint64(&m.rejectedByBreak), m.GetState()
+	return m.totalRequests.Load(), m.rejectedByBreak.Load(), m.GetState()
 }
 
 // Reset 手动重置熔断器到关闭状态

@@ -70,9 +70,13 @@ func WithDrainPolicy(policy DrainPolicy) MailboxOption {
 //   - middlewares: 可选的 mailbox 中间件；
 //   - opts: 可选的配置选项，如自定义挂起策略。
 func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMessageInvoker,
-	middlewares []inf.IMailboxMiddleware, opts ...MailboxOption) *Mailbox {
+	middlewares []inf.IMailboxMiddleware, opts ...MailboxOption) (*Mailbox, error) {
+	wp, err := NewWorkerPool(conf, logger, invoker, middlewares...)
+	if err != nil {
+		return nil, err
+	}
 	m := &Mailbox{
-		workerPool:    NewWorkerPool(conf, logger, invoker, middlewares...),
+		workerPool:    wp,
 		suspendPolicy: NewDefaultSuspendPolicy(), // 默认挂起策略
 		drainPolicy:   DrainExecute,
 		logger:        logger,
@@ -82,7 +86,7 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 	}
 	// 将策略下发给 workerPool（worker 在 Start 时读取）
 	m.workerPool.SetDrainPolicy(m.drainPolicy)
-	return m
+	return m, nil
 }
 
 // PostJob 将任务投递到 mailbox。

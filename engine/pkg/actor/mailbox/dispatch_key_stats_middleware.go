@@ -112,18 +112,7 @@ func (m *DispatchKeyStatsMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.
 		return dto.Continue()
 	}
 
-	// 达到上限，淘汰计数最小的 key（LRU 策略）
-	minKey := ""
-	minCount := uint64(^uint64(0)) // max uint64
-	for k, c := range m.counts {
-		if c < minCount {
-			minKey = k
-			minCount = c
-		}
-	}
-	delete(m.counts, minKey)
-	m.counts[key] = 1
-	m.total++
+	// 达到上限，丢弃新 key 不记录（避免 O(n) 淘汰）
 	return dto.Continue()
 }
 

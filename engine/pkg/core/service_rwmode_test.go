@@ -125,7 +125,7 @@ func newRWMailboxService(t *testing.T, serviceName string, enableRW bool) *Servi
 			InitialWorkerNum: 2,
 		},
 	}
-	svc.mailbox = mailbox.NewMailbox(mbConf, baseLogger, svc, nil)
+	svc.mailbox, _ = mailbox.NewMailbox(mbConf, baseLogger, svc, nil)
 	return svc
 }
 
