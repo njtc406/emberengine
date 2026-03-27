@@ -488,7 +488,7 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 	w.inflightReadCnt.Add(1)  // 可观测性：暂存当前 in-flight 读数量
 	w.pool.rwReadTotal.Add(1) // 全局读计数
 
-	go func() {
+	readFunc := func() {
 		// WaitGroup + 锁 + 信号量泄漏防护
 		var rlockReleased atomic.Bool
 		defer func() {
@@ -507,7 +507,16 @@ func (w *Worker) execRead(job inf.IMailboxJob) {
 		}()
 
 		w.safeExecSkipProfiler(job) // 读 goroutine 跳过共享 Profiler
-	}()
+	}
+
+	// 优先使用读 goroutine 池，失败则 fallback 到裸 goroutine
+	if w.pool.readPool != nil {
+		if err := w.pool.readPool.Go(readFunc); err != nil {
+			go readFunc()
+		}
+	} else {
+		go readFunc()
+	}
 }
 
 // execWrite 写操作：等待所有 in-flight 读完成，然后独占执行。
@@ -519,7 +528,7 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 	writeWaitStart := time.Now() // 写等待计时开始
 	w.pool.writeRequested.Add(1)
 	backoff := time.Duration(0)
-	const maxBackoff = 1 * time.Millisecond
+	const maxBackoff = 5 * time.Millisecond
 	for !w.pool.rwMu.TryLock() {
 		if w.state.Load() == workerStateClosed {
 			w.pool.writeRequested.Add(-1)
@@ -539,8 +548,13 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 		}
 	}
 	// 写等待耗时指标
-	w.rwWriteWaitSum.Add(time.Since(writeWaitStart).Nanoseconds())
+	writeWait := time.Since(writeWaitStart)
+	w.rwWriteWaitSum.Add(writeWait.Nanoseconds())
 	w.rwWriteWaitCount.Add(1)
+	if writeWait > 100*time.Millisecond {
+		w.pool.logger.Warnf("Worker %d write lock wait %v (>100ms), possible long-running readers",
+			w.workerId, writeWait)
+	}
 	// defer 保证 Unlock 在 Add(-1) 之前执行（LIFO）
 	// 确保 writeRequested.Add(-1) 在 Unlock 之后：
 	// 读路径看到 writeRequested==0 时 WLock 必定已释放

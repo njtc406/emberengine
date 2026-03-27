@@ -68,10 +68,9 @@ func (c *Config) parseNodeConfig(confPath string) error {
 		confPath = defaultConfPath
 	}
 
-	// 1. 加载 .env 文件
+	// 1. 加载 .env 文件（可选，容器化部署可依赖系统环境变量）
 	if err := godotenv.Load(path.Join(confPath, ".env")); err != nil {
 		fmt.Println("No .env file found, fallback to system env")
-		return fmt.Errorf("load .env: %w", err)
 	}
 
 	// 2. 读取原始配置文件（带 ${VAR}）

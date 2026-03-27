@@ -237,7 +237,7 @@ func ExampleAutoScalingConfig() *config.MailboxConf {
 				MinWorkerNum:   2,               // 最小2个Worker
 				MaxWorkerNum:   16,              // 最大16个Worker
 				GrowthFactor:   1.5,             // 扩容因子：当前数量 * 1.5
-				ShrinkFactor:   0.75,            // 缩容因子：当前数量 * 0.75
+				ShrinkFactor:   0.25,            // 缩容因子：每次减少 25%
 				ResizeCoolDown: 5 * time.Second, // 调整间隔5秒
 			},
 

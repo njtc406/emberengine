@@ -17,4 +17,5 @@
 /example/data
 /example/data/logs
 /engine/pkg/log/logs/
+tools/localetcd/example/data/
 /.vscode

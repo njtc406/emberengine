@@ -20,6 +20,7 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
 )
 
@@ -77,6 +78,9 @@ type WorkerPool struct {
 	rwDrainDiscardTotal atomic.Int64  // StopTimeout 导致的 Job 丢弃数
 	maxJobExecTime      time.Duration // Job 执行硬超时看门狗阈值（0=禁用）
 
+	// ---- 读 goroutine 池（per-WorkerPool 独立池，资源隔离） ----
+	readPool *asynclib.Pool // 仅在 EnableRWMode 时初始化，可为 nil
+
 	// Debug-only dispatch distribution stats.
 	statsEnabled  bool // 是否开启统计（仅在 Debug 模式下）
 	statsInterval time.Duration
@@ -119,6 +123,16 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	// watchdog 执行时长阈值
 	if conf.MaxJobExecutionTime > 0 {
 		pool.maxJobExecTime = conf.MaxJobExecutionTime
+	}
+
+	// ---- 读 goroutine 池初始化（per-WorkerPool 独立池） ----
+	if conf.EnableRWMode && conf.ReadPoolSize > 0 {
+		rp, err := asynclib.NewPool(conf.ReadPoolSize)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("create read pool: %w", err)
+		}
+		pool.readPool = rp
 	}
 
 	return pool, nil
@@ -210,6 +224,12 @@ func (p *WorkerPool) Wait() {
 	}
 	p.ring.Clear()
 	p.workers = nil
+
+	// 释放读 goroutine 池
+	if p.readPool != nil {
+		p.readPool.Release()
+		p.readPool = nil
+	}
 }
 
 // Stop 兼容接口：BeginStop + Wait。
@@ -597,6 +617,10 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 		// MaxJobExecutionTime 默认 30s
 		if conf.MaxJobExecutionTime <= 0 {
 			conf.MaxJobExecutionTime = 30 * time.Second
+		}
+		// ReadPoolSize 默认等于 MaxConcurrentReads
+		if conf.ReadPoolSize <= 0 {
+			conf.ReadPoolSize = conf.MaxConcurrentReads
 		}
 	} else {
 		// 未启用 RW 时忽略相关配置

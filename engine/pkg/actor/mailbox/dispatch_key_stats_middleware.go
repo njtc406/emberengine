@@ -31,18 +31,21 @@ type DispatchKeyStatsMiddleware struct {
 	total  uint64
 }
 
-func NewDispatchKeyStatsMiddleware(logger log.ILoggerX, interval time.Duration, topN int) *DispatchKeyStatsMiddleware {
+func NewDispatchKeyStatsMiddleware(logger log.ILoggerX, interval time.Duration, topN int, maxKeys int) *DispatchKeyStatsMiddleware {
 	if interval <= 0 {
 		interval = 10 * time.Second
 	}
 	if topN <= 0 {
 		topN = 10
 	}
+	if maxKeys <= 0 {
+		maxKeys = 100_000
+	}
 	return &DispatchKeyStatsMiddleware{
 		logger:   logger,
 		interval: interval,
 		topN:     topN,
-		maxKeys:  100_000,
+		maxKeys:  maxKeys,
 		stopCh:   make(chan struct{}),
 		counts:   make(map[string]uint64, 1024),
 	}

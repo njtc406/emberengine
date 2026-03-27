@@ -42,7 +42,8 @@ func CreateMiddlewaresFromConfig(conf *config.MailboxConf, logger log.ILoggerX, 
 		if topN <= 0 {
 			topN = 10
 		}
-		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, interval, topN))
+		maxKeys := mconf.DispatchKeyStatsMaxKeys
+		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, interval, topN, maxKeys))
 	}
 
 	// 2. 限流中间件
@@ -109,7 +110,7 @@ func createDefaultMiddlewares(logger log.ILoggerX, isDebug bool) []inf.IMailboxM
 
 	// debug 模式下启用 DispatchKey 统计
 	if isDebug {
-		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, 10*time.Second, 10))
+		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, 10*time.Second, 10, 0))
 	}
 
 	return middlewares
