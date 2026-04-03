@@ -134,8 +134,10 @@ func TestPostJob_ReadOnlySelfPostingRejected(t *testing.T) {
 
 	j := job.NewTimerJob()
 	defer j.Release()
-	ctx := context.WithValue(context.Background(), def.RWModeContextKey, def.RWModeRead)
-	ctx = context.WithValue(ctx, def.RWSourceServiceKey, "svc-a")
+	ctx := context.WithValue(context.Background(), def.RWContextKey, def.RWContextInfo{
+		Mode:          def.RWModeRead,
+		SourceService: "svc-a",
+	})
 	j.SetContext(ctx)
 
 	err := svc.PostJob(j)
@@ -149,8 +151,10 @@ func TestPostJob_ReadOnlyCrossServiceNotRejected(t *testing.T) {
 
 	j := job.NewTimerJob()
 	defer j.Release()
-	ctx := context.WithValue(context.Background(), def.RWModeContextKey, def.RWModeRead)
-	ctx = context.WithValue(ctx, def.RWSourceServiceKey, "svc-b")
+	ctx := context.WithValue(context.Background(), def.RWContextKey, def.RWContextInfo{
+		Mode:          def.RWModeRead,
+		SourceService: "svc-b",
+	})
 	j.SetContext(ctx)
 
 	err := svc.PostJob(j)
@@ -167,8 +171,10 @@ func TestPostJob_RWDisabledIgnoresReadOnlyGuard(t *testing.T) {
 
 	j := job.NewTimerJob()
 	defer j.Release()
-	ctx := context.WithValue(context.Background(), def.RWModeContextKey, def.RWModeRead)
-	ctx = context.WithValue(ctx, def.RWSourceServiceKey, "svc-a")
+	ctx := context.WithValue(context.Background(), def.RWContextKey, def.RWContextInfo{
+		Mode:          def.RWModeRead,
+		SourceService: "svc-a",
+	})
 	j.SetContext(ctx)
 
 	err := svc.PostJob(j)

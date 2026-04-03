@@ -325,13 +325,14 @@ func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipProfiler bool) {
 	var execErr error
 	var panicVal interface{}
 
-	// 读 goroutine 路径：向 context 中注入 RWModeRead，
-	// 业务层可通过 ctx.Value(def.RWModeContextKey) 检测当前是否在 ReadOnly 上下文中执行。
+	// 读 goroutine 路径：向 context 中注入 RWContextInfo，
+	// 业务层可通过 ctx.Value(def.RWContextKey) 检测当前是否在 ReadOnly 上下文中执行。
 	// 框架层在 Service.PostJob 中检测此标记，拒绝 ReadOnly handler 的自投递。
-	// 同时注入 RWSourceServiceKey 标记源 Service，用于区分自投递和跨服务调用。
 	if skipProfiler && w.pool.enableRW.Load() {
-		ctx = context.WithValue(ctx, def.RWModeContextKey, def.RWModeRead)
-		ctx = context.WithValue(ctx, def.RWSourceServiceKey, w.pool.invoker.GetServiceName())
+		ctx = context.WithValue(ctx, def.RWContextKey, def.RWContextInfo{
+			Mode:          def.RWModeRead,
+			SourceService: w.pool.invoker.GetServiceName(),
+		})
 	}
 
 	defer func() {

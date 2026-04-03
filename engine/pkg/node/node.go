@@ -50,44 +50,44 @@ type Node struct {
 
 	// ====== Phase 1: 从全局收归的组件 ======
 
-	// 配置（由 Node 独立持有）
+	// 节点配置
 	Config *config.Config
 
 	// 日志
 	*log.Logger
 
-	// 协程池（原 asynclib.antsPool）
+	// 协程池
 	AntsPool *asynclib.Pool
 
-	// 时间轮（原 timingwheel.globTW）
+	// 时间轮
 	TimingWheel *timingwheel.TimingWheel
 
-	// 去重器（原 dedup.duplicator）
+	// rpc请求去重器
 	DeDuplicator inf.IDeDuplicator
 
 	// ====== Phase 2: 核心组件 ======
 
-	// RPC 监控（原 monitor.rpcMonitor）
+	// RPC 监控
 	RpcMonitor *monitor.RpcMonitor
 
-	// 事件总线（原 event.bus）
+	// 事件总线
 	EventBus *event.Bus
 
-	// 集群（原 cluster.cluster）
+	// 集群
 	Cluster *cluster.Cluster
 
-	// 服务管理器（原 services 包级 runServices）
+	// 服务管理器
 	ServiceMgr *services.ServiceManager
 
 	// ====== Phase 3: RPC 层组件 ======
 
-	// RPC 连接池管理器（原 pool.globalPoolManager）
+	// RPC 连接池管理器
 	PoolManager *pool.PoolManager
 
-	// RPC Sender 管理器（原 client 包级 senderMap/senderHandlerMap）
+	// RPC Sender 管理器
 	SenderMgr *client.SenderManager
 
-	// 方法前缀索引（原 core/rpc 包级 apiPrefixIndex 等）
+	// 方法前缀索引
 	MethodIndex *rpc.MethodIndex
 
 	// MessageBus 工厂（用于隔离每个 Node 的 bus pool/logger/monitor/timeout）
@@ -95,13 +95,13 @@ type Node struct {
 
 	// ====== Phase 4: 辅助组件 ======
 
-	// Profiler 注册中心（原 profiler 包级 mapProfiler）
+	// Profiler 注册中心
 	ProfilerRegistry *profiler.Registry
 
-	// 插件管理器（原 plugins 包级 pluginMap）
+	// 插件管理器
 	PluginManager *plugins.PluginManager
 
-	// 路由器（原 router 直接依赖 endpoints.GetEndpointManager）
+	// 路由器
 	Router *router.Router
 
 	// 停止标志（防止 Stop() 重复调用）

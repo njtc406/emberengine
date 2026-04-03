@@ -2,21 +2,21 @@
 
 > 基于 `ACTOR_MODULE_ANALYSIS.md` 第六章 7 项改进方向的深度分析  
 > 编写日期: 2026-03-27  
-> 状态: 待实施
+> 状态: P0–P3 已实施，P4 不做
 
 ---
 
 ## 优先级总览
 
-| 优先级 | 改进项 | 类型 | 工作量 | 风险 |
-|--------|--------|------|--------|------|
-| **P0** | 6.4 RW 模式集成测试 | 正确性保障 | 大 | 无 |
-| **P1** | 6.2 TryLock 退避优化 + 写等待 warning | 防御优化 | 极小 | 极低 |
-| **P1** | 6.7 maxKeys 配置化 | 代码质量 | 极小 | 无 |
-| **P2** | 6.1 读 goroutine 池化 | 性能优化 | 小 | 低 |
-| **P3** | 6.6 AutoScaler 事件驱动 | 响应性优化 | 中 | 低 |
-| **P3** | 6.3 context.WithValue 合并 | 微优化 | 小 | 低 |
-| **P4** | 6.5 PriorityScheduler DRR/WFQ | 调度优化 | 大 | 中 |
+| 优先级 | 改进项 | 类型 | 工作量 | 风险 | 状态 |
+|--------|--------|------|--------|------|------|
+| **P0** | 6.4 RW 模式集成测试 | 正确性保障 | 大 | 无 | ✅ 已完成 |
+| **P1** | 6.2 TryLock 退避优化 + 写等待 warning | 防御优化 | 极小 | 极低 | ✅ 已完成 |
+| **P1** | 6.7 maxKeys 配置化 | 代码质量 | 极小 | 无 | ✅ 已完成 |
+| **P2** | 6.1 读 goroutine 池化 | 性能优化 | 小 | 低 | ✅ 已完成 |
+| **P3** | 6.6 AutoScaler 事件驱动 | 响应性优化 | 中 | 低 | ✅ 已完成 |
+| **P3** | 6.3 context.WithValue 合并 | 微优化 | 小 | 低 | ✅ 已完成 |
+| **P4** | 6.5 PriorityScheduler DRR/WFQ | 调度优化 | 大 | 中 | ❌ 不做 |
 
 ---
 
@@ -69,7 +69,9 @@ type mockInvoker struct {
 
 ### 决策
 
-立即实施。这是唯一的正确性缺口，没有测试覆盖等于没有回归保护。
+✅ 已实施。新建 `mailbox/worker_pool_rw_test.go`，6 个场景 `go test -race -count=10` 全部通过。
+
+实施过程中额外修复了 `AdaptiveController.Idle()` 的 lost wakeup bug（`idle.go`）。
 
 ---
 
@@ -124,7 +126,7 @@ if writeWait > 100*time.Millisecond {
 
 ### 决策
 
-立即实施。改动极小，零风险，线上可通过 warning 日志快速定位读锁持有过久的问题。
+✅ 已实施。改动极小，零风险，线上可通过 warning 日志快速定位读锁持有过久的问题。
 
 ---
 
@@ -172,7 +174,7 @@ func NewDispatchKeyStatsMiddleware(
 
 ### 决策
 
-立即实施。改动极简，零风险。
+✅ 已实施。改动极简，零风险。
 
 ---
 
@@ -252,7 +254,14 @@ Service 创建 Mailbox 时从 `INodeContext.GetAntsPool()` 获取并传入。
 
 ### 决策
 
-近期实施。有实际性能收益，基础设施已就绪。
+✅ 已实施（采用方案 B: per-WorkerPool 独立 ants 池，资源隔离）。
+
+实际实施说明：
+- 每个 WorkerPool 创建独立的 `asynclib.Pool`（`ReadPoolSize` 配置，默认等于 `MaxConcurrentReads`）
+- 使用 `ants.WithNonblocking(true)` 避免池满时阻塞 Worker 主循环
+- `readPool.Go()` 失败时 fallback 到 `go func()`
+- `SetRWEnabled(true)` 路径也会初始化 readPool
+- `Wait()` 中释放池资源
 
 ---
 
@@ -309,7 +318,10 @@ case <-p.scaleTrigger:
 
 ### 决策
 
-需要时再做。当前无真实痛点。代码中已有 TODO 标注此方向。
+✅ 已实施。采用方案 C + 定时轮询双模：
+- WorkerPool 新增 `scaleTrigger chan struct{}` （容量 1）
+- `DispatchJob` 检测到 worker 队列有积压时非阻塞通知
+- `autoScaleWorkers` 改为 `select { ticker.C | scaleTrigger }` 双监听
 
 ---
 
@@ -355,8 +367,8 @@ ctx = context.WithValue(ctx, def.RWContextKey, def.RWContextInfo{
 
 ### 决策
 
-需要时再做。32 字节的 `valueCtx` 是 Go 标准库高度优化的路径，GC 压力有限。
-若后续需要向 context 注入更多 RW 信息（traceID、读超时等），统一为结构体更有意义。
+✅ 已实施。合并为 `RWContextKey` + `RWContextInfo` 结构体，旧 key 保留并标记 Deprecated。
+读取端（`service.go PostJob`）和测试已同步更新。
 
 ---
 
@@ -390,19 +402,23 @@ ctx = context.WithValue(ctx, def.RWContextKey, def.RWContextInfo{
 
 ### 第一批（立即）
 
-- [ ] **P0**: 新建 `mailbox/worker_pool_rw_test.go`，补充 6 个集成测试场景
-- [ ] **P1-a**: `worker.go` execWrite — maxBackoff 改 5ms + 写等待 warning
-- [ ] **P1-b**: `dispatch_key_stats_middleware.go` — maxKeys 参数化
+- [x] **P0**: 新建 `mailbox/worker_pool_rw_test.go`，补充 6 个集成测试场景
+- [x] **P1-a**: `worker.go` execWrite — maxBackoff 改 5ms + 写等待 warning
+- [x] **P1-b**: `dispatch_key_stats_middleware.go` — maxKeys 参数化
 
 ### 第二批（近期）
 
-- [ ] **P2**: 读 goroutine 池化 — NewWorkerPool 注入 INodePool + execRead 改池化调用
+- [x] **P2**: 读 goroutine 池化 — per-WorkerPool 独立 ants 池 + `ants.WithNonblocking(true)` + fallback
 
-### 第三批（需要时）
+### 第三批
 
-- [ ] **P3-a**: AutoScaler 异步 channel 触发
-- [ ] **P3-b**: context.WithValue 合并
+- [x] **P3-a**: AutoScaler 异步 channel 触发（scaleTrigger + 定时轮询双模）
+- [x] **P3-b**: context.WithValue 合并（RWContextKey + RWContextInfo）
 
 ### 不做
 
 - **P4**: PriorityScheduler DRR/WFQ — 当前场景无需
+
+### 额外修复
+
+- **AdaptiveController lost wakeup**: `idle.go` 中 `AdaptiveController.Idle()` 缺少 `notified` 标记保护，导致 `BeginStop()` 的 `Wake()` 信号可能丢失。已修复为与 `Controller` 一致的 `for !c.notified { c.cond.Wait() }` 模式。

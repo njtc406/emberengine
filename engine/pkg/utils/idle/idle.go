@@ -133,8 +133,9 @@ type AdaptiveController struct {
 	idleCount atomic.Int32
 	bo        *ExponentialBackoff
 
-	mu   sync.Mutex
-	cond *sync.Cond
+	mu       sync.Mutex
+	cond     *sync.Cond
+	notified bool // 防止 lost wakeup：Wake 在 Idle 进入 Wait 之前调用时保留信号
 }
 
 // NewAdaptiveController 创建自适应空闲控制器
@@ -176,9 +177,12 @@ func (c *AdaptiveController) Idle() {
 		return
 	}
 
-	// 超过阈值，启用 cond park
+	// 超过阈值，启用 cond park（在锁内检查 notified，避免丢失唤醒）
 	c.mu.Lock()
-	c.cond.Wait()
+	for !c.notified {
+		c.cond.Wait()
+	}
+	c.notified = false
 	c.mu.Unlock()
 
 	// 被唤醒后重置 idleCount
@@ -191,6 +195,9 @@ func (c *AdaptiveController) Wake() {
 		c.Reset()
 		return
 	}
+	c.mu.Lock()
+	c.notified = true
 	c.cond.Broadcast()
+	c.mu.Unlock()
 	c.Reset()
 }

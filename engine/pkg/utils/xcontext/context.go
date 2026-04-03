@@ -38,7 +38,7 @@ func NewWithCloneCtx(ctx context.Context) XContext {
 
 	headers := emberctx.GetHeader(ctx)
 	newCtx := emberctx.NewCtx(context.Background())
-	emberctx.AddHeaders(newCtx, headers)
+	newCtx = emberctx.AddHeaders(newCtx, headers)
 	return XContext{
 		Context: newCtx,
 	}

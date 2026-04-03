@@ -22,6 +22,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
+	"github.com/panjf2000/ants/v2"
 )
 
 // ErrRWDisableTimeout SetRWEnabled(false) 超时，有泄漏的读 goroutine
@@ -85,6 +86,9 @@ type WorkerPool struct {
 	statsEnabled  bool // 是否开启统计（仅在 Debug 模式下）
 	statsInterval time.Duration
 	dispatchCnt   map[int32]*atomic.Uint64 // 每个 worker 的事件计数
+
+	// ---- AutoScaler 事件驱动触发 ----
+	scaleTrigger chan struct{} // 容量 1，非阻塞通知 autoScaleWorkers
 }
 
 func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
@@ -106,10 +110,10 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 		ctx:             ctx,
 		cancel:          cancel,
 		logger:          logger,
-		//statsEnabled:    config.IsDebug(), // TODO 改成配置吧
-		statsInterval: 10 * time.Second,
-		dispatchCnt:   make(map[int32]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
-		stopTimeout:   conf.StopTimeout,
+		statsInterval:   10 * time.Second,
+		dispatchCnt:     make(map[int32]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
+		stopTimeout:     conf.StopTimeout,
+		scaleTrigger:    make(chan struct{}, 1),
 	}
 
 	// ---- RW 共享状态初始化 ----
@@ -127,7 +131,7 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 
 	// ---- 读 goroutine 池初始化（per-WorkerPool 独立池） ----
 	if conf.EnableRWMode && conf.ReadPoolSize > 0 {
-		rp, err := asynclib.NewPool(conf.ReadPoolSize)
+		rp, err := asynclib.NewPool(conf.ReadPoolSize, ants.WithNonblocking(true))
 		if err != nil {
 			cancel()
 			return nil, fmt.Errorf("create read pool: %w", err)
@@ -278,6 +282,14 @@ func (p *WorkerPool) DispatchJob(job inf.IMailboxJob) error {
 	}
 	p.mu.RUnlock()
 
+	// AutoScaler 事件驱动：当 worker 队列有积压时，非阻塞通知扩缩容协程
+	if p.conf.SchedulePolicy.EnableAutoScaling && worker.GetJobLen() > 0 {
+		select {
+		case p.scaleTrigger <- struct{}{}:
+		default: // 已有信号待处理，跳过
+		}
+	}
+
 	return worker.SubmitJob(job)
 }
 
@@ -377,7 +389,7 @@ func (p *WorkerPool) SetRWEnabled(enabled bool) error {
 		p.rwMu.Unlock()
 		p.logger.Warnf("RW mode disabled at runtime")
 	} else if enabled && !p.enableRW.Load() {
-		// 开启 RW 模式：翻转标志前确保 readSem 已初始化
+		// 开启 RW 模式：翻转标志前确保 readSem 和 readPool 已初始化
 		p.mu.Lock()
 		if p.readSem == nil {
 			maxReads := p.conf.MaxConcurrentReads
@@ -391,6 +403,19 @@ func (p *WorkerPool) SetRWEnabled(enabled bool) error {
 			}
 			p.readSem = make(chan struct{}, maxReads)
 			p.conf.MaxConcurrentReads = maxReads // 回写，供后续 SetRWEnabled 使用
+		}
+		if p.readPool == nil {
+			poolSize := p.conf.ReadPoolSize
+			if poolSize <= 0 {
+				poolSize = p.conf.MaxConcurrentReads
+			}
+			if poolSize > 0 {
+				if rp, err := asynclib.NewPool(poolSize, ants.WithNonblocking(true)); err == nil {
+					p.readPool = rp
+				} else {
+					p.logger.Warnf("Failed to create read pool (size=%d): %v, will fallback to go func()", poolSize, err)
+				}
+			}
 		}
 		p.mu.Unlock()
 		p.enableRW.Store(true)
@@ -523,23 +548,27 @@ func (p *WorkerPool) autoScaleWorkers() {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
-			p.mu.RLock()
-			if len(p.workers) == 0 {
-				p.mu.RUnlock()
-				continue
-			}
+			// 定时兆底
+		case <-p.scaleTrigger:
+			// 事件驱动，仍受 CoolDown 限制（ticker 不重置）
+		}
 
-			workers := make([]inf.IMailboxWorker, 0, len(p.workers))
-			for _, w := range p.workers {
-				workers = append(workers, w)
-			}
-			current := len(workers)
+		p.mu.RLock()
+		if len(p.workers) == 0 {
 			p.mu.RUnlock()
+			continue
+		}
 
-			if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
-				p.logger.Debugf("resizing from %d -> %d: %s", current, newSize, reason)
-				p.resizeWorkers(newSize)
-			}
+		workers := make([]inf.IMailboxWorker, 0, len(p.workers))
+		for _, w := range p.workers {
+			workers = append(workers, w)
+		}
+		current := len(workers)
+		p.mu.RUnlock()
+
+		if newSize, reason, ok := p.autoScaler.ShouldResize(current, workers); ok {
+			p.logger.Debugf("resizing from %d -> %d: %s", current, newSize, reason)
+			p.resizeWorkers(newSize)
 		}
 	}
 }

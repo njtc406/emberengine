@@ -352,6 +352,17 @@ func TestRW_ReadSemMaxConcurrency(t *testing.T) {
 		}
 	}
 
+	// 等待所有读操作完成后再 Stop，避免 idle/BeginStop 的 lost wakeup 竞态
+	deadline := time.After(10 * time.Second)
+	for invoker.readCount.Load() < readN {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout waiting for reads: got %d, want %d", invoker.readCount.Load(), readN)
+		default:
+			runtime.Gosched()
+		}
+	}
+
 	wp.Stop()
 
 	maxC := maxConcurrent.Load()

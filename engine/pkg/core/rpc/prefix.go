@@ -56,7 +56,7 @@ func (idx *prefixBucketIndex) has(s string) bool {
 // MethodIndex 管理 API/RPC 方法前缀索引。
 // 每个 Node 应持有独立的 MethodIndex 实例。
 type MethodIndex struct {
-	ApiPrefixIndex   *prefixBucketIndex // 单 node 内部调用的方法(只包含这个前缀的实例不会注册进集群服务发现)
+	ApiPrefixIndex   *prefixBucketIndex // 只允许 node 内部调用的方法
 	RpcPrefixIndex   *prefixBucketIndex // 允许 rpc 调用的方法
 	ApiRoPrefixIndex *prefixBucketIndex // API 只读前缀(方法中不允许修改数据)
 	RpcRoPrefixIndex *prefixBucketIndex // RPC 只读前缀(方法中不允许修改数据)
