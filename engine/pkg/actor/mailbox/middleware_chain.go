@@ -104,21 +104,6 @@ func (c *MiddlewareContext) Elapsed() time.Duration {
 	return time.Since(c.startTime)
 }
 
-// Reset 重置上下文以便复用（对象池场景）
-func (c *MiddlewareContext) Reset(ctx context.Context, job inf.IMailboxJob, serviceName string) {
-	c.ctx = ctx
-	c.job = job
-	c.serviceName = serviceName
-	c.startTime = time.Now()
-	c.executed.Store(0)
-	c.middlewareSnapshot = nil
-	c.mu.Lock()
-	for k := range c.data {
-		delete(c.data, k)
-	}
-	c.mu.Unlock()
-}
-
 // ============================================================================
 // 中间件链实现
 // ============================================================================
@@ -153,8 +138,14 @@ func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain 
 			mc.middlewareSnapshot = nil
 			mc.startTime = time.Time{}
 			mc.mu.Lock()
-			for k := range mc.data {
-				delete(mc.data, k)
+			// 如果 map 扩容过大，直接重建以释放底层哈希桶内存
+			const maxRetainKeys = 64
+			if len(mc.data) > maxRetainKeys {
+				mc.data = make(map[string]interface{}, 8)
+			} else {
+				for k := range mc.data {
+					delete(mc.data, k)
+				}
 			}
 			mc.mu.Unlock()
 		}),
@@ -252,6 +243,17 @@ func (c *MiddlewareChain) ExecuteOnComplete(mctx inf.IMiddlewareContext, err err
 
 	// 归还到池
 	if ok {
+		c.ctxPool.Put(mc)
+	}
+}
+
+// ReturnContext 仅归还 mctx 到池，不执行任何中间件回调。
+// 用于 rwUnsafe drain 路径：需要回收资源但不能安全执行 OnComplete。
+func (c *MiddlewareChain) ReturnContext(mctx inf.IMiddlewareContext) {
+	if mctx == nil {
+		return
+	}
+	if mc, ok := mctx.(*MiddlewareContext); ok {
 		c.ctxPool.Put(mc)
 	}
 }

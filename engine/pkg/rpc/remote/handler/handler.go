@@ -31,6 +31,14 @@ func NewHandler(rm *monitor.RpcMonitor, logger log.ILoggerX, dedup inf.IDeDuplic
 }
 
 func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
+	// proto 反序列化后同步 PID 的 MasterFlag 原子字段，避免 IsMasterNode() 读取到 false
+	if p := req.GetSenderPid(); p != nil {
+		p.SyncMasterFlag()
+	}
+	if p := req.GetReceiverPid(); p != nil {
+		p.SyncMasterFlag()
+	}
+
 	headers := make(map[string]any, len(req.ContextHeaders)+2)
 	for k, v := range req.ContextHeaders {
 		headers[k] = v

@@ -19,30 +19,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/hashring"
-	"github.com/panjf2000/ants/v2"
+	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
 // ErrRWDisableTimeout SetRWEnabled(false) 超时，有泄漏的读 goroutine
 var ErrRWDisableTimeout = errors.New("RW disable timeout: leaked read goroutines prevent safe switch")
-
-func formatFloat1(v float64) string {
-	// keep it short: 1 decimal, no fmt
-	neg := false
-	if v < 0 {
-		neg = true
-		v = -v
-	}
-	whole := int(v)
-	frac := int((v - float64(whole)) * 10)
-	s := itoa(whole) + "." + itoa(frac)
-	if neg {
-		return "-" + s
-	}
-	return s
-}
 
 type IScaler interface {
 	ShouldResize(current int, workers []inf.IMailboxWorker) (newSize int32, reason string, ok bool)
@@ -58,7 +40,6 @@ type WorkerPool struct {
 	ring            *hashring.HashRing[int32]    // 一致性哈希环，用于分派事件
 	invoker         inf.IMessageInvoker          // 消息处理器
 	middlewareChain *MiddlewareChain             // 中间件链
-	profiler        *profiler.Profiler           // 性能分析
 	autoScaler      IScaler                      // 自动扩容器
 	logger          log.ILoggerX
 	workerCount     atomic.Int32 // 当前 worker 数量（用于扩缩容），atomic 以支持 RW 模式下无锁读取
@@ -66,21 +47,8 @@ type WorkerPool struct {
 	// 停机时队列处理策略（由 Mailbox 下发）
 	drainPolicy DrainPolicy
 
-	// ---- RW 增强字段（Mailbox 级共享） ----
-	enableRW       atomic.Bool   // 是否启用 RW 模式（atomic：支持运行时动态开关）
-	rwMu           sync.RWMutex  // 全 Service 共享读写锁，所有 Worker 引用
-	writeRequested atomic.Int32  // 正在等待写锁的 Writer 计数，读路径检查 >0 时让步避免写饥饿
-	readSem        chan struct{} // 全 Service 读并发信号量（nil = 不限制）
-	stopTimeout    time.Duration // Stop 时等待 in-flight 读 goroutine 的最大时间
-
-	// ---- RW 可观测性指标（§10.7） ----
-	rwReadTotal         atomic.Int64  // 累计读操作数
-	rwWriteTotal        atomic.Int64  // 累计写操作数
-	rwDrainDiscardTotal atomic.Int64  // StopTimeout 导致的 Job 丢弃数
-	maxJobExecTime      time.Duration // Job 执行硬超时看门狗阈值（0=禁用）
-
-	// ---- 读 goroutine 池（per-WorkerPool 独立池，资源隔离） ----
-	readPool *asynclib.Pool // 仅在 EnableRWMode 时初始化，可为 nil
+	// ---- RW 读写分离控制器 ----
+	rw *RWController
 
 	// Debug-only dispatch distribution stats.
 	statsEnabled  bool // 是否开启统计（仅在 Debug 模式下）
@@ -89,6 +57,16 @@ type WorkerPool struct {
 
 	// ---- AutoScaler 事件驱动触发 ----
 	scaleTrigger chan struct{} // 容量 1，非阻塞通知 autoScaleWorkers
+
+	// ---- Worker ID 分配器（单调递增，避免缩-扩后 ID 复用导致监控差分异常）----
+	nextWorkerID atomic.Int32
+
+	// ---- watchdog 时间轮（per-WorkerPool，替代 per-Job time.AfterFunc）----
+	// 仅在 MaxJobExecutionTime > 0 时初始化。
+	// TODO: 后续可改为复用 Node 级共享 TimingWheel，减少 goroutine 开销。
+	watchdogTW        *timingwheel.TimingWheel
+	watchdogScheduler timingwheel.ITimerScheduler
+	watchdogAdapter   watchdogCanceler // 供 WorkerEnv 传递给 Worker
 }
 
 func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
@@ -112,50 +90,91 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 		logger:          logger,
 		statsInterval:   10 * time.Second,
 		dispatchCnt:     make(map[int32]*atomic.Uint64, conf.SchedulePolicy.InitialWorkerNum),
-		stopTimeout:     conf.StopTimeout,
 		scaleTrigger:    make(chan struct{}, 1),
 	}
 
-	// ---- RW 共享状态初始化 ----
-	pool.enableRW.Store(conf.EnableRWMode)
-	if conf.EnableRWMode && conf.MaxConcurrentReads > 0 {
-		pool.readSem = make(chan struct{}, conf.MaxConcurrentReads)
+	// ---- RW 控制器初始化 ----
+	rw, err := newRWController(conf)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create rw controller: %w", err)
 	}
-	if pool.enableRW.Load() && pool.stopTimeout <= 0 {
-		pool.stopTimeout = 10 * time.Second
-	}
-	// watchdog 执行时长阈值
-	if conf.MaxJobExecutionTime > 0 {
-		pool.maxJobExecTime = conf.MaxJobExecutionTime
-	}
-
-	// ---- 读 goroutine 池初始化（per-WorkerPool 独立池） ----
-	if conf.EnableRWMode && conf.ReadPoolSize > 0 {
-		rp, err := asynclib.NewPool(conf.ReadPoolSize, ants.WithNonblocking(true))
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("create read pool: %w", err)
-		}
-		pool.readPool = rp
-	}
+	pool.rw = rw
 
 	return pool, nil
 }
 
+// workerEnv 构建当前 WorkerPool 对应的 WorkerEnv（Worker 的运行时依赖）
+func (p *WorkerPool) workerEnv() *WorkerEnv {
+	return &WorkerEnv{
+		logger:            p.logger,
+		invoker:           p.invoker,
+		middlewareChain:   p.middlewareChain,
+		rw:                p.rw,
+		watchdogScheduler: p.watchdogAdapter,
+	}
+}
+
+// watchdogTimerAdapter 将 timingwheel.ITimerScheduler 适配为 watchdogCanceler 接口。
+type watchdogTimerAdapter struct {
+	scheduler timingwheel.ITimerScheduler
+}
+
+func (a *watchdogTimerAdapter) Schedule(d time.Duration, onExpire func()) uint64 {
+	if a == nil || a.scheduler == nil || d <= 0 {
+		return 0
+	}
+	id, err := a.scheduler.AfterFunc(d, "watchdog", func(_ context.Context, _ *timingwheel.Timer, _ ...interface{}) error {
+		onExpire()
+		return nil
+	})
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+func (a *watchdogTimerAdapter) Cancel(id uint64) {
+	if a == nil || a.scheduler == nil || id == 0 {
+		return
+	}
+	a.scheduler.CancelTimer(id)
+}
+
 func (p *WorkerPool) Start() error {
-	p.mu.Lock()
-	for i := int32(0); i < p.conf.SchedulePolicy.InitialWorkerNum; i++ {
-		worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
-		if worker == nil {
-			p.mu.Unlock()
-			return fmt.Errorf("service[%s] failed to create worker, conf:%v", p.invoker.GetServiceName(), p.conf)
+	// ---- watchdog 时间轮初始化 ----
+	if p.rw.maxJobExecTime > 0 {
+		tw := timingwheel.NewTimingWheel(100*time.Millisecond, 64, p.logger)
+		tw.Start()
+		p.watchdogTW = tw
+		scheduler, err := timingwheel.NewJobScheduler("mailbox-watchdog", 4096, 4, tw, p.logger)
+		if err != nil {
+			p.logger.Warnf("Failed to create watchdog scheduler: %v, fallback to time.AfterFunc", err)
+		} else {
+			p.watchdogScheduler = scheduler
+			p.watchdogAdapter = &watchdogTimerAdapter{scheduler: scheduler}
+			// 消费者 goroutine：从 channel 取出过期 Timer 并执行回调
+			p.wg.Add(1)
+			go func() {
+				defer p.wg.Done()
+				ch := scheduler.GetTimerCbChannel()
+				for t := range ch {
+					t.Do(p.ctx)
+				}
+			}()
 		}
-		p.workers[i] = worker
+	}
+
+	p.mu.Lock()
+	for n := int32(0); n < p.conf.SchedulePolicy.InitialWorkerNum; n++ {
+		id := p.nextWorkerID.Add(1) - 1
+		worker := newWorker(id, p.conf, p.workerEnv(), p.drainPolicy)
+		p.workers[id] = worker
 		worker.Start()
 		// 将 worker 加入到哈希环中（这里每个都加进入,但是单线程时可能不会使用）
-		p.ring.Add(i)
+		p.ring.Add(id)
 		if p.statsEnabled {
-			p.dispatchCnt[i] = &atomic.Uint64{}
+			p.dispatchCnt[id] = &atomic.Uint64{}
 		}
 	}
 	p.workerCount.Store(int32(p.conf.SchedulePolicy.InitialWorkerNum))
@@ -221,18 +240,33 @@ func (p *WorkerPool) Wait() {
 	// 停止中间件链（需要在 workers 完全退出后，避免 DrainDiscard 时仍调用 OnComplete）
 	p.middlewareChain.Stop()
 
+	// 先在锁内把 workers / ring 清空并取出 readPool 引用，锁外再调用 Release。
+	// 这样避免在持锁状态下执行 ants Release 的内部逻辑，也让 readPool 生命周期
+	// 语义更清晰：仅当 WorkerPool 结束运行后才释放。
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.workers == nil {
+		p.mu.Unlock()
 		return
 	}
 	p.ring.Clear()
 	p.workers = nil
+	releasePool := p.rw.readPool
+	p.rw.readPool = nil
+	p.mu.Unlock()
 
-	// 释放读 goroutine 池
-	if p.readPool != nil {
-		p.readPool.Release()
-		p.readPool = nil
+	if releasePool != nil {
+		releasePool.Release()
+	}
+
+	// 停止 watchdog 时间轮（先 Stop scheduler 关闭 channel，consumer goroutine 自动退出）
+	if p.watchdogScheduler != nil {
+		p.watchdogScheduler.Stop()
+		p.watchdogScheduler = nil
+		p.watchdogAdapter = nil
+	}
+	if p.watchdogTW != nil {
+		p.watchdogTW.Stop()
+		p.watchdogTW = nil
 	}
 }
 
@@ -264,8 +298,13 @@ func (p *WorkerPool) DispatchJob(job inf.IMailboxJob) error {
 		}
 		worker, exists = p.workers[workerID]
 	} else {
-		// 单线程时直接使用 workerID=0
-		worker, exists = p.workers[workerID]
+		// 单 worker 时直接取 map 中唯一的 entry（ID 不再固定为 0）
+		for id, w := range p.workers {
+			workerID = id
+			worker = w
+			exists = true
+			break
+		}
 	}
 
 	if !exists {
@@ -311,29 +350,54 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 			newSize = maxWorkers
 		}
 
-		for i := currentCount; i < newSize; i++ {
-			worker := newWorker(i, p.conf, p) // 使用配置的workerConfig
-			p.workers[i] = worker
+		for n := newSize - currentCount; n > 0; n-- {
+			id := p.nextWorkerID.Add(1) - 1
+			worker := newWorker(id, p.conf, p.workerEnv(), p.drainPolicy)
+			p.workers[id] = worker
 			worker.Start()
-			p.ring.Add(i)
+			p.ring.Add(id)
 			if p.statsEnabled {
-				p.dispatchCnt[i] = &atomic.Uint64{}
+				p.dispatchCnt[id] = &atomic.Uint64{}
 			}
 		}
 		p.workerCount.Store(newSize)
 		p.mu.Unlock()
 	} else {
-		// 缩容：【P0 修复】先 Unlock 后 Stop + 原地排空 Drain，消除死锁风险。
-		// 流程：Lock → 从 hash ring 移除 → 取出 Worker 引用 → Unlock → Stop → Lock → 清理 map
+		// 缩容：【P1-3 修复】"先 delete 再 Stop"，消除 DispatchJob 命中已停 worker 丢消息的窗口。
+		// 流程：Lock → 从 hash ring 移除 + delete(workers, id) → Unlock → Stop + Wait。
+		// DispatchJob 在锁内通过 ring.Get→workers[id] 查询时：
+		//   - ring 已移除：ring.Get 不会再选到该 id（即便选到，workers[id] 也已删除→ErrMailboxWorkerNotFound）；
+		//   - 这样上层能拿到明确的"未找到"错误，而不是 SubmitJob 阶段的"已关闭"。
+		//
+		// 改用按 ID 降序淘汰：单调递增 ID 后活跃 ID 不再连续，
+		// 需遍历 workers map 收集所有 ID → 排序 → 淘汰末尾 N 个。
 		p.mu.Lock()
-		removeMap := make(map[int32]struct{}, currentCount-newSize)
-		removedWorkers := make([]inf.IMailboxWorker, 0, currentCount-newSize)
-		removedIds := make([]int32, 0, currentCount-newSize)
-		for i := newSize; i < currentCount; i++ {
-			if worker, exists := p.workers[i]; exists {
+		toRemove := int(currentCount - newSize)
+		ids := make([]int32, 0, len(p.workers))
+		for id := range p.workers {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		// 保留前 newSize 个（ID 最小的），淘汰其余
+		if len(ids) > int(newSize) {
+			ids = ids[newSize:]
+		} else {
+			ids = nil
+		}
+		if len(ids) > toRemove {
+			ids = ids[:toRemove]
+		}
+
+		removeMap := make(map[int32]struct{}, len(ids))
+		removedWorkers := make([]inf.IMailboxWorker, 0, len(ids))
+		for _, id := range ids {
+			if worker, exists := p.workers[id]; exists {
 				removedWorkers = append(removedWorkers, worker)
-				removedIds = append(removedIds, i)
-				removeMap[i] = struct{}{}
+				removeMap[id] = struct{}{}
+				delete(p.workers, id)
+				if p.statsEnabled {
+					delete(p.dispatchCnt, id)
+				}
 			}
 		}
 		// 从哈希环移除（新 Job 不再路由到这些 Worker）
@@ -348,79 +412,35 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 		for _, w := range removedWorkers {
 			w.Wait()
 		}
-
-		// 重新获取锁清理 map 数据结构
-		p.mu.Lock()
-		for _, id := range removedIds {
-			delete(p.workers, id)
-			if p.statsEnabled {
-				delete(p.dispatchCnt, id)
-			}
-		}
-		p.mu.Unlock()
 	}
 }
 
 // IsRWEnabled 返回当前 RW 模式是否启用
 func (p *WorkerPool) IsRWEnabled() bool {
-	return p.enableRW.Load()
+	return p.rw.IsEnabled()
 }
 
 // GetEnableRWPtr 返回 enableRW 的指针，供 MethodMgr 等外部组件引用。
 // 仅在服务初始化阶段调用一次，用于建立跨组件引用关系。
 func (p *WorkerPool) GetEnableRWPtr() *atomic.Bool {
-	return &p.enableRW
+	return p.rw.EnabledPtr()
 }
 
 // SetRWEnabled 运行时动态开关 RW 模式（§10.14 安全协议）
 // 关闭时通过 rwMu.Lock() + RLock-after-check 协议保证切换窗口无数据竞争
 func (p *WorkerPool) SetRWEnabled(enabled bool) error {
-	if !enabled && p.enableRW.Load() {
-		// 关闭 RW 模式：获取 WLock，等待所有 RLock 释放 + 阻止新的 RLock 进入
-		deadline := time.Now().Add(p.stopTimeout)
-		for !p.rwMu.TryLock() {
-			if time.Now().After(deadline) {
-				return ErrRWDisableTimeout
-			}
-			runtime.Gosched()
+	if !enabled && p.rw.IsEnabled() {
+		if err := p.rw.Disable(); err != nil {
+			return err
 		}
-		// 持有 WLock 期间翻转标志——此刻无任何 goroutine 访问共享状态
-		p.enableRW.Store(false)
-		p.rwMu.Unlock()
 		p.logger.Warnf("RW mode disabled at runtime")
-	} else if enabled && !p.enableRW.Load() {
-		// 开启 RW 模式：翻转标志前确保 readSem 和 readPool 已初始化
+	} else if enabled && !p.rw.IsEnabled() {
 		p.mu.Lock()
-		if p.readSem == nil {
-			maxReads := p.conf.MaxConcurrentReads
-			// 初始 EnableRWMode=false 时 fixConf 会将 MaxConcurrentReads 设为 0，
-			// 运行时启用需要计算默认值
-			if maxReads <= 0 {
-				maxReads = runtime.NumCPU() * 4
-				if maxReads > 64 {
-					maxReads = 64
-				}
-			}
-			p.readSem = make(chan struct{}, maxReads)
-			p.conf.MaxConcurrentReads = maxReads // 回写，供后续 SetRWEnabled 使用
-		}
-		if p.readPool == nil {
-			poolSize := p.conf.ReadPoolSize
-			if poolSize <= 0 {
-				poolSize = p.conf.MaxConcurrentReads
-			}
-			if poolSize > 0 {
-				if rp, err := asynclib.NewPool(poolSize, ants.WithNonblocking(true)); err == nil {
-					p.readPool = rp
-				} else {
-					p.logger.Warnf("Failed to create read pool (size=%d): %v, will fallback to go func()", poolSize, err)
-				}
-			}
-		}
+		p.rw.EnsureReadResources(p.conf, p.logger)
 		p.mu.Unlock()
-		p.enableRW.Store(true)
+		p.rw.Enable()
 		p.logger.Warnf("RW mode enabled at runtime, readSem initialized with cap=%d",
-			cap(p.readSem))
+			cap(p.rw.readSem))
 	}
 	return nil
 }
@@ -518,6 +538,7 @@ func (p *WorkerPool) logDispatchStatsOnce() {
 	}
 
 	//p.logger.Infof(msg)
+	p.logger.Debugf(msg)
 }
 
 // 自动调整 worker 数量
@@ -620,6 +641,14 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 		if sc.ShrinkFactor <= 0 || sc.ShrinkFactor > 0.5 {
 			sc.ShrinkFactor = 0.25
 		}
+		// MinWorkerNum 必须 >= 1，否则缩容可能导致 Worker 数降为 0 而无法处理消息
+		if sc.MinWorkerNum < 1 {
+			sc.MinWorkerNum = 1
+		}
+		// MaxWorkerNum 必须 >= MinWorkerNum
+		if sc.MaxWorkerNum < sc.MinWorkerNum {
+			sc.MaxWorkerNum = sc.MinWorkerNum
+		}
 	}
 
 	// ---- RW 模式配置校验（单 worker 场景不允许开启 RW 模式） ----
@@ -665,7 +694,9 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 type RWMetrics struct {
 	ReadTotal         int64         // 累计读操作数
 	WriteTotal        int64         // 累计写操作数
-	DrainDiscardTotal int64         // Drain 阶段丢弃 Job 数
+	DrainDiscardTotal int64         // Drain 阶段丢弃 Job 数（per-job 累计）
+	UnsafeDrainEvents int64         // unsafe drain 事件次数（StopTimeout 触发，事件级）
+	LongJobTotal      int64         // watchdog 触发次数（Job 执行超过 maxJobExecTime）
 	InflightReads     int64         // 当前 in-flight 读 goroutine 数
 	AvgReadDuration   time.Duration // 平均读执行耗时
 	AvgWriteWait      time.Duration // 平均写锁等待耗时
@@ -674,9 +705,11 @@ type RWMetrics struct {
 // GetRWMetrics 返回当前 RW 可观测性指标快照（无锁聚合，允许微小误差）
 func (p *WorkerPool) GetRWMetrics() RWMetrics {
 	m := RWMetrics{
-		ReadTotal:         p.rwReadTotal.Load(),
-		WriteTotal:        p.rwWriteTotal.Load(),
-		DrainDiscardTotal: p.rwDrainDiscardTotal.Load(),
+		ReadTotal:         p.rw.readTotal.Load(),
+		WriteTotal:        p.rw.writeTotal.Load(),
+		DrainDiscardTotal: p.rw.drainDiscardTotal.Load(),
+		UnsafeDrainEvents: p.rw.unsafeDrainEvents.Load(),
+		LongJobTotal:      p.rw.longJobTotal.Load(),
 	}
 
 	// 聚合各 Worker 的 per-Worker 指标

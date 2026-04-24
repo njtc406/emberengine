@@ -1,9 +1,8 @@
-// Package mailbox
-// @Title  配置示例
-// @Description  演示如何配置双队列模式和多优先级队列模式
-// @Author  yr  2025/11/27
-// @Update  yr  2025/11/27
-package mailbox
+// Package comm 提供 mailbox 配置示例
+//
+// 演示如何配置双队列模式、多优先级队列模式（绝对优先/加权/公平）、
+// 自动扩缩容及单 Worker 模式。
+package comm
 
 import (
 	"time"

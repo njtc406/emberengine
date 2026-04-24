@@ -280,13 +280,19 @@ func (m *SentinelMiddleware) OnStart() {
 
 	// 加载系统保护规则（全局资源，仅加载一次，避免多 Service 相互覆盖）
 	if len(m.systemRules) > 0 {
+		loaded := false
 		sentinelSystemRulesOnce.Do(func() {
 			if _, err := system.LoadRules(m.systemRules); err != nil {
 				if m.logger != nil {
 					m.logger.Errorf("Sentinel load system rules failed: %v", err)
 				}
 			}
+			loaded = true
 		})
+		if !loaded && m.logger != nil {
+			m.logger.Warnf("Sentinel system rules for service=%s were ignored: "+
+				"system rules have already been loaded by another service (sync.Once)", m.serviceName)
+		}
 	}
 
 	if m.logger != nil {
@@ -296,6 +302,19 @@ func (m *SentinelMiddleware) OnStart() {
 }
 
 func (m *SentinelMiddleware) OnStop() {
+	// 卸载流量控制规则（对称 OnStart 中的 LoadRulesOfResource）
+	if len(m.flowRules) > 0 {
+		if err := flow.ClearRulesOfResource(m.serviceName); err != nil && m.logger != nil {
+			m.logger.Warnf("Sentinel clear flow rules failed: %v", err)
+		}
+	}
+	// 卸载熔断规则
+	if len(m.circuitBreakerRules) > 0 {
+		if err := circuitbreaker.ClearRulesOfResource(m.serviceName); err != nil && m.logger != nil {
+			m.logger.Warnf("Sentinel clear circuit breaker rules failed: %v", err)
+		}
+	}
+	// system rules 全局共享，由 sync.Once 控制，OnStop 不卸载
 	if m.logger != nil {
 		m.logger.Infof("SentinelMiddleware stopped: service=%s", m.serviceName)
 	}
@@ -389,12 +408,12 @@ func NewSentinelMiddlewareWithJobType(serviceName string, opts ...SentinelOption
 // ========== 默认跳过函数 ==========
 
 // DefaultSentinelSkipFunc 默认跳过检查函数
-// 跳过紧急优先级的消息
+// 跳过紧急及以上优先级的消息（数值 <= PriorityUrgent）
 func DefaultSentinelSkipFunc(mctx inf.IMiddlewareContext) bool {
 	job := mctx.Job()
 	if job == nil {
 		return false
 	}
-	// 紧急消息不限流
-	return job.GetPriority() >= def.PriorityUrgent
+	// 紧急及以上消息不限流（与 SuspendPolicy、RateLimitMiddleware 保持一致）
+	return job.GetPriority() <= def.PriorityUrgent
 }

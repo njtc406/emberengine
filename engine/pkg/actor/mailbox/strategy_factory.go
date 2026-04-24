@@ -31,7 +31,16 @@ func RegisterStrategy(name string, strategy StrategyBuilder) {
 	builderMap.Store(name, strategy)
 }
 
+const maxStrategyDepth = 10 // 防止配置循环引用导致无限递归
+
 func BuildStrategy(cfg *config.WorkerStrategyConfig) (AutoScalerStrategy, error) {
+	return buildStrategyRecur(cfg, 0)
+}
+
+func buildStrategyRecur(cfg *config.WorkerStrategyConfig, depth int) (AutoScalerStrategy, error) {
+	if depth > maxStrategyDepth {
+		return nil, fmt.Errorf("strategy nesting too deep (max %d), possible circular reference", maxStrategyDepth)
+	}
 	if cfg == nil {
 		return newMaxLoadStrategy(nil, map[string]interface{}{"minLoadThreshold": 64}), nil
 	}
@@ -45,7 +54,7 @@ func BuildStrategy(cfg *config.WorkerStrategyConfig) (AutoScalerStrategy, error)
 
 	var subs []AutoScalerStrategy
 	for _, item := range cfg.Subs {
-		strategy, err := BuildStrategy(item)
+		strategy, err := buildStrategyRecur(item, depth+1)
 		if err != nil {
 			return nil, err
 		}

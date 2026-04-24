@@ -56,6 +56,10 @@ func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
 }
 
 // PriorityScheduler 多级优先级调度器
+//
+// NOTE: PriorityScheduler 不是并发安全的。
+// counters map 由单个 Worker goroutine 独占使用（每个 Worker 拥有独立的 PriorityQueueManager/Scheduler），
+// 不需要额外的锁或 atomic 保护。如果未来 QueueManager 被多 Worker 共享，需重新评估并发安全性。
 type PriorityScheduler struct {
 	strategy   def.ScheduleStrategy
 	priorities map[def.Priority]*config.PriorityConfig
@@ -183,90 +187,6 @@ func (ps *PriorityScheduler) fairnessPriorityWithOrdering(available []def.Priori
 	minCounter := 1<<63 - 1
 
 	for _, p := range samePriorityQueues {
-		counter := ps.counters[p]
-		if selectedPriority == -1 || counter < minCounter {
-			minCounter = counter
-			selectedPriority = p
-		}
-	}
-
-	if selectedPriority != -1 {
-		ps.counters[selectedPriority]++
-	}
-
-	return selectedPriority
-}
-
-// NextPriority 原有方法，保持向后兼容
-func (ps *PriorityScheduler) NextPriority(availablePriorities []def.Priority) def.Priority {
-	if ps == nil || len(availablePriorities) == 0 {
-		return -1
-	}
-	// 单线程 worker 内调用，无需加锁
-	switch ps.strategy {
-	case def.StrategyAbsolute:
-		return ps.absolutePriority(availablePriorities)
-	case def.StrategyWeighted:
-		return ps.weightedPriority(availablePriorities)
-	case def.StrategyFairness:
-		return ps.fairnessPriority(availablePriorities)
-	default:
-		return ps.absolutePriority(availablePriorities)
-	}
-}
-
-// absolutePriority 绝对优先策略：总是选择数值最小的优先级
-func (ps *PriorityScheduler) absolutePriority(available []def.Priority) def.Priority {
-	minPriority := available[0]
-	for _, p := range available[1:] {
-		if p < minPriority {
-			minPriority = p
-		}
-	}
-	return minPriority
-}
-
-// weightedPriority 加权轮询策略：根据权重分配处理机会
-func (ps *PriorityScheduler) weightedPriority(available []def.Priority) def.Priority {
-	// 检查并重置计数器（防止溢出）
-	ps.resetCountersIfNeeded()
-
-	// 找到计数器值最小且有权重的优先级
-	var selectedPriority def.Priority = -1
-	minRatio := float64(1<<63 - 1)
-
-	for _, p := range available {
-		weight, exists := ps.weights[p]
-		if !exists || weight <= 0 {
-			continue
-		}
-
-		counter := ps.counters[p]
-		ratio := float64(counter) / float64(weight)
-
-		if selectedPriority == -1 || ratio < minRatio {
-			minRatio = ratio
-			selectedPriority = p
-		}
-	}
-
-	if selectedPriority != -1 {
-		ps.counters[selectedPriority]++
-	}
-
-	return selectedPriority
-}
-
-// fairnessPriority 防饥饿策略：确保每个优先级都有处理机会
-func (ps *PriorityScheduler) fairnessPriority(available []def.Priority) def.Priority {
-	// 检查并重置计数器（防止溢出）
-	ps.resetCountersIfNeeded()
-
-	// 找到计数器值最小的优先级
-	var selectedPriority def.Priority = -1
-	minCounter := 1<<63 - 1
-
-	for _, p := range available {
 		counter := ps.counters[p]
 		if selectedPriority == -1 || counter < minCounter {
 			minCounter = counter

@@ -310,6 +310,11 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	monitor.SetDebug(n.Config.IsDebug())
 	etcddiscovery.SetDebug(n.Config.IsDebug())
 
+	// 显式冻结 job factory 注册表：
+	// 此时所有包的 init() 都已执行完毕（import 图保证），可以安全冻结。
+	// 之后任何 RegisterJobFactory 调用都会返回错误，避免依赖隐式冻结顺序。
+	job.FreezeJobFactory()
+
 	n.AntsPool, err = asynclib.NewPool(n.Config.NodeConf.AntsPoolSize)
 	if err != nil {
 		return nil, fmt.Errorf("ants pool: %w", err)

@@ -175,9 +175,12 @@ func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 	}()
 
 	if senderPid := e.meta.GetSenderPid(); senderPid != nil {
+		// 序列化前把运行时 MasterFlag 投影到 IsMaster bool（proto 传输字段）
+		senderPid.PrepareForMarshal()
 		msg.SenderPid = senderPid
 	}
 	if receiverPid := e.meta.GetReceiverPid(); receiverPid != nil {
+		receiverPid.PrepareForMarshal()
 		msg.ReceiverPid = receiverPid
 	}
 	// 从 ctx 获取调度信息

@@ -6,6 +6,8 @@
 package mailbox
 
 import (
+	"strings"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
@@ -17,11 +19,12 @@ type AutoScalerStrategy interface {
 // CompositeStrategy 组合自动扩容器
 type CompositeStrategy struct {
 	Strategies []AutoScalerStrategy
-	Mode       string // "any" 或 "all"
+	Mode       string // "any" 或 "all"（大小写不敏感）
 }
 
 func newCompositeStrategy(strategies []AutoScalerStrategy, params map[string]interface{}) AutoScalerStrategy {
 	mode, _ := params["Mode"].(string)
+	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
 		mode = "any"
 	}
@@ -32,7 +35,7 @@ func newCompositeStrategy(strategies []AutoScalerStrategy, params map[string]int
 }
 
 func (c *CompositeStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
-	if c.Mode == "all" {
+	if strings.EqualFold(c.Mode, "all") {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleUp(workers) {
 				return false
@@ -51,7 +54,7 @@ func (c *CompositeStrategy) ShouldScaleUp(workers []inf.IMailboxWorker) bool {
 }
 
 func (c *CompositeStrategy) ShouldScaleDown(workers []inf.IMailboxWorker, min int32) bool {
-	if c.Mode == "all" {
+	if strings.EqualFold(c.Mode, "all") {
 		for _, s := range c.Strategies {
 			if !s.ShouldScaleDown(workers, min) {
 				return false
