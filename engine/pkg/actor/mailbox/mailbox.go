@@ -94,22 +94,27 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 // 行为：
 //  1. 如果 mailbox 已挂起，通过 ISuspendPolicy 判断是否放行，不放行则返回 ErrMailboxSuspended；
 //  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
-//  3. 将事件和中间件上下文交给 WorkerPool.DispatchEvent，由后者选择合适的 worker 入队。
+//  3. 将事件和中间件上下文交给 WorkerPool.DispatchJob，由后者选择合适的 worker 入队。
 //
-// 资源契约：
-//   - 调用方负责在返回非 nil error 时调用 job.Release()；
-//   - 当 OnReceive 已经执行（无论 Reject 还是 DispatchJob 失败），mailbox 内部
-//     会调用 ExecuteOnComplete 触发已经跑过的中间件 OnComplete 回调，并归还
-//     MiddlewareContext 到对象池，避免 mctx 泄漏与中间件 OnComplete 缺失
-//     （如 Sentinel.entry.Exit、CircuitBreaker 失败计数）。
+// 资源契约（ADR-4 / P0-4 / P0-5）：
+//   - **PostJob 拥有 Job 所有权**：返回后调用方一律不再持有 job，无论成功或失败、
+//     无论是否 nil error。成功时由 Worker 执行完毕后 Release；失败时由 Mailbox 内部
+//     在错误返回前完成 Release + invoker.OnJobDiscarded 回调。
+//   - 任何"Job 不会被业务执行"的路径（Suspended / Middleware Reject / Dispatch 失败）
+//     都会同步触发 invoker.OnJobDiscarded(job, reason)，业务可统一审计或释放外部资源。
+//   - 已执行过 OnReceive 的中间件会在错误路径上拿到 OnComplete 回调（保证 mctx 归池、
+//     Sentinel.entry.Exit / CircuitBreaker 失败计数等内置中间件不漏调）。
 func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
+	invoker := m.workerPool.invoker
+
 	// 挂起检查（OnReceive 尚未执行，无 mctx 需要回收）
 	if m.isSuspended() && !m.suspendPolicy.ShouldAllow(job) {
+		m.discardJob(invoker, job, def.ErrMailboxSuspended)
 		return def.ErrMailboxSuspended
 	}
 
 	// 执行中间件链的 OnReceive
-	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(job, m.workerPool.invoker.GetServiceName())
+	result, mctx := m.workerPool.middlewareChain.ExecuteOnReceive(job, invoker.GetServiceName())
 	if result.Action == def.ActionReject {
 		rejectErr := result.Err
 		if rejectErr == nil {
@@ -117,6 +122,7 @@ func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
 		}
 		// Reject 时仍需触发已跑过的中间件 OnComplete + 归还 mctx
 		m.workerPool.middlewareChain.ExecuteOnComplete(mctx, rejectErr, nil)
+		m.discardJob(invoker, job, rejectErr)
 		return rejectErr
 	}
 
@@ -125,11 +131,32 @@ func (m *Mailbox) PostJob(job inf.IMailboxJob) (err error) {
 	// 分发事件（携带中间件上下文，用于 OnComplete 回调）
 	if dispatchErr := m.workerPool.DispatchJob(job); dispatchErr != nil {
 		// DispatchJob/SubmitJob 失败：job 永远不会被 worker 执行，
-		// 必须在此处补调 OnComplete 释放 mctx，避免泄漏与回调丢失。
+		// 必须在此处补调 OnComplete 释放 mctx，并 Release Job + 通知业务层。
 		m.workerPool.middlewareChain.ExecuteOnComplete(mctx, dispatchErr, nil)
+		m.discardJob(invoker, job, dispatchErr)
 		return dispatchErr
 	}
 	return nil
+}
+
+// discardJob 处理 PostJob 错误路径的 Job 收尾：
+//   - 通知业务层 Job 被丢弃（OnJobDiscarded，业务可释放外部关联资源）；
+//   - Release Job（归还 sync.Pool / 递减 ref-count）。
+//
+// invoker.OnJobDiscarded 自身若 panic 不应影响 Release，统一用 recover 兜底。
+func (m *Mailbox) discardJob(invoker inf.IMessageInvoker, job inf.IMailboxJob, reason error) {
+	if job == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			m.logger.Errorf("OnJobDiscarded panic: %v", r)
+		}
+		job.Release()
+	}()
+	if invoker != nil {
+		invoker.OnJobDiscarded(job, reason)
+	}
 }
 
 func (m *Mailbox) isSuspended() bool {

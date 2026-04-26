@@ -501,8 +501,8 @@ func (s *MailboxTestService) postPriorityEvent(ctx context.Context, eventType de
 	j.SetDispatcherKey(message)
 	j.SetPayload(evt)
 
+	// 【ADR-4】PostJob 内部已接管 Job 生命周期；失败时由 mailbox 负责 Release+OnJobDiscarded，调用方禁止再次 Release。
 	if err := s.PostJob(j); err != nil {
-		j.Release()
 		s.GetLogger().Errorf("[%s] post event job failed: %v", s.GetName(), err)
 	}
 }

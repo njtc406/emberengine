@@ -107,6 +107,10 @@ func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 		if !exists {
 			return fmt.Errorf("no available queue for priority: %d", priority)
 		}
+		// 【P2-1】同步将 Job 的 priority 字段改写为 fallback 优先级，
+		// 保证后续 SuspendPolicy / RateLimit / DispatchKey 统计 / 可观测性
+		// 看到的优先级与实际队列一致，避免“队列与表象不一致”隐性 bug。
+		e.SetPriority(m.fallbackPriority)
 		// warn-once: 提示未注册的优先级发生了 fallback
 		if m.fallbackWarned.CompareAndSwap(false, true) {
 			slog.Warn("PriorityQueueManager: unregistered priority fallback",

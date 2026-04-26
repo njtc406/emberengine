@@ -21,7 +21,16 @@ import (
 // 中间件上下文实现
 // ============================================================================
 
-// MiddlewareContext 是 IMiddlewareContext 的默认实现
+// MiddlewareContext 是 IMiddlewareContext 的默认实现。
+//
+// 并发契约（P1-5）：
+//   - OnReceive 阶段：在调用方调用 PostJob 的 goroutine 内串行执行；
+//   - OnComplete 阶段：在 worker goroutine 中串行执行；
+//   - 跨阶段之间的 happens-before 由 mpsc 队列的 atomic 操作建立。
+//
+// 因此 data map 不存在并发访问场景，顶层不再为它加 RWMutex——
+// 面向热路径上的 N 个中间件可以省下 2N 次 atomic 读写开销。
+// 若业务中间件确有跨 goroutine 共享需求，请自行使用 sync.Map 封装。
 type MiddlewareContext struct {
 	ctx                context.Context
 	job                inf.IMailboxJob
@@ -30,7 +39,6 @@ type MiddlewareContext struct {
 	executed           atomic.Int32
 	middlewareSnapshot []inf.IMailboxMiddleware // OnReceive 时快照
 	data               map[string]interface{}
-	mu                 sync.RWMutex
 }
 
 // NewMiddlewareContext 创建中间件上下文
@@ -57,15 +65,11 @@ func (c *MiddlewareContext) ServiceName() string {
 }
 
 func (c *MiddlewareContext) Set(key string, value interface{}) {
-	c.mu.Lock()
 	c.data[key] = value
-	c.mu.Unlock()
 }
 
 func (c *MiddlewareContext) Get(key string) (interface{}, bool) {
-	c.mu.RLock()
 	v, ok := c.data[key]
-	c.mu.RUnlock()
 	return v, ok
 }
 
@@ -137,7 +141,7 @@ func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain 
 			mc.executed.Store(0)
 			mc.middlewareSnapshot = nil
 			mc.startTime = time.Time{}
-			mc.mu.Lock()
+			// 【P1-5】sync.Pool Put/Get 已提供 happens-before，无需 mutex。
 			// 如果 map 扩容过大，直接重建以释放底层哈希桶内存
 			const maxRetainKeys = 64
 			if len(mc.data) > maxRetainKeys {
@@ -147,7 +151,6 @@ func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain 
 					delete(mc.data, k)
 				}
 			}
-			mc.mu.Unlock()
 		}),
 	)
 	return c

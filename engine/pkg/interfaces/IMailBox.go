@@ -78,6 +78,15 @@ type IMailboxJob interface {
 }
 
 // IMailboxChannel 消息接口
+//
+// 资源契约（ADR-4 / P0-4 / P0-5）：
+//   - PostJob 拥有 Job 的所有权：返回后调用方一律不得再持有 job，无论 err 是否为 nil。
+//   - 成功路径：由 Worker 执行完毕后 Release。
+//   - 失败路径（Suspended / Middleware Reject / Dispatch 失败）：由实现方在
+//     返回前完成 Release + invoker.OnJobDiscarded 回调，业务可统一审计或
+//     释放外部关联资源。
+//   - 调用方不要再写 `if err := PostJob(j); err != nil { j.Release() }` —— 否则
+//     会造成 ref-count 下溢。
 type IMailboxChannel interface {
 	PostJob(job IMailboxJob) error
 }
@@ -87,8 +96,18 @@ type IMessageInvoker interface {
 	GetServiceName() string
 	ExecuteJob(ctx context.Context, job IMailboxJob) error
 	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
-	// OnJobDiscarded 当 Job 在 Drain 阶段被丢弃时回调，业务层可用于审计或释放关联资源。
-	// reason 描述丢弃原因（例如 def.ErrMailboxNotRunning）。
+	// OnJobDiscarded 当 Job 不会被业务执行时回调，业务层可用于审计或释放关联资源。
+	//
+	// 触发时机（ADR-4 对称契约）：
+	//   - Drain 阶段（Stop/缩容）丢弃残留 Job；
+	//   - PostJob 早期拒绝：Mailbox suspended、Middleware Reject、DispatchJob 失败；
+	//   - Service 层早期拒绝：ReadOnly handler 自投递（ErrReadOnlyPostJob）。
+	//
+	// reason 描述丢弃原因（例如 def.ErrMailboxNotRunning / ErrMailboxSuspended /
+	// ErrMailboxMiddlewareRejected / ErrReadOnlyPostJob 等）。
+	//
+	// 实现要求：必须保证幂等且非阻塞；Mailbox 内部已 recover 该回调的 panic，
+	// 但仍建议业务方自行避免重操作。
 	OnJobDiscarded(job IMailboxJob, reason error)
 }
 

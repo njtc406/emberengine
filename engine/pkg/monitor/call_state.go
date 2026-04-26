@@ -166,9 +166,8 @@ func (s *CallState) Complete() {
 		rpcJob := job.NewRpcJob()
 		rpcJob.SetContext(s.ctx)
 		rpcJob.SetPayload(envelopeResp)
-		if err := s.dispatcher.PostJob(rpcJob); err != nil {
-			rpcJob.Release()
-		}
+		// 【ADR-4】PostJob 拥有 Job 所有权：err 路径 dispatcher 内部已 Release。
+		_ = s.dispatcher.PostJob(rpcJob)
 
 		getCallStatePool().Put(s)
 		return

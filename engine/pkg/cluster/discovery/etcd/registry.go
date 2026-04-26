@@ -8,7 +8,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type etcdServiceRegistry struct{ d *EtcdDiscovery }
@@ -26,9 +25,9 @@ func (r *etcdServiceRegistry) RegisterService(ctx context.Context, pid *actor.PI
 	if !ok || !isEtcdClientConnected(r.d.client) {
 		return fmt.Errorf("etcd client not connected or invalid leaseRef")
 	}
-	// 序列化前把运行时 MasterFlag 投影到 IsMaster bool（proto 传输字段）
-	pid.PrepareForMarshal()
-	pidData, err := protojson.Marshal(pid)
+	// 【ADR-1 / P0-1】走 MarshalPIDJSON 唯一出口：内部 Clone + PrepareForMarshal，
+	// 与并发 RPC 序列化、运行时 SetMaster 完全不竞争 IsMaster 字段。
+	pidData, err := actor.MarshalPIDJSON(pid)
 	if err != nil {
 		return fmt.Errorf("marshal pid failed: %w", err)
 	}

@@ -57,9 +57,9 @@ func (eb *Bus) publishSpecific(ctx context.Context, e *actor.Event) {
 				j.SetPriority(def.Priority(e.GetPriority()))
 				j.SetDeadline(e.GetDeadline())
 
+				// 【ADR-4】PostJob 拥有 Job 所有权
 				if err := ch.PostJob(j); err != nil {
 					eb.Errorf("push specific event error: %v", err)
-					j.Release()
 				}
 			}
 		}

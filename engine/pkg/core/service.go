@@ -543,12 +543,17 @@ func (s *Service) PostJob(j inf.IMailboxJob) error {
 	//
 	// 通过 RWContextInfo.SourceService 区分自投递和跨服务调用：
 	// 仅当源 Service 与当前 Service 相同时才拦截，允许跨服务 RPC。
+	//
+	// 【ADR-4】PostJob 拥有 Job 所有权：早期拒绝路径同样负责 Release + OnJobDiscarded，
+	// 调用方在 err 返回后不再 Release。
 	if s.mailbox.IsRWEnabled() {
 		if ctx := j.GetContext(); ctx != nil {
 			if rwInfo, ok := ctx.Value(def.RWContextKey).(def.RWContextInfo); ok && rwInfo.Mode == def.RWModeRead {
 				if rwInfo.SourceService == s.GetServiceName() {
 					s.Warnf("ReadOnly handler attempted to PostJob (self-posting detected). "+
 						"This method should NOT be marked as ReadOnly. job_type=%v", j.GetType())
+					s.OnJobDiscarded(j, def.ErrReadOnlyPostJob)
+					j.Release()
 					return def.ErrReadOnlyPostJob
 				}
 			}
@@ -610,9 +615,11 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	// 1. ctx 是全新的（无 RWContextKey），不会触发 ReadOnly 自投递检测；
 	// 2. 已显式设置 RWMode，无需经过 setJobRWMode 推断；
 	// 3. 避免框架内部投递承担 PostJob 中面向用户的检查开销。
+	//
+	// 【ADR-4】PostJob 拥有 Job 所有权：err 返回时 mailbox 内部已 Release+OnJobDiscarded，
+	// 这里不再外部 Release，避免 ref-count 下溢。
 	if err := s.mailbox.PostJob(j); err != nil {
 		s.Errorf("post job error: %v", err)
-		j.Release()
 		return err
 	}
 	return nil
@@ -627,9 +634,9 @@ func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) e
 	// 显式标记为 Write：定时器回调通常伴随状态更新，必须独占执行。
 	j.SetRWMode(def.RWModeWrite)
 	// 框架内部投递，直接调用 mailbox.PostJob（理由同 pushConcurrentCallback）
+	// 【ADR-4】PostJob 拥有 Job 所有权，err 路径已内化 Release+OnJobDiscarded。
 	if err := s.mailbox.PostJob(j); err != nil {
 		s.Errorf("post job error: %v", err)
-		j.Release()
 		return err
 	}
 	return nil

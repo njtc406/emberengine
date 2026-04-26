@@ -67,6 +67,9 @@ type WorkerPool struct {
 	watchdogTW        *timingwheel.TimingWheel
 	watchdogScheduler timingwheel.ITimerScheduler
 	watchdogAdapter   watchdogCanceler // 供 WorkerEnv 传递给 Worker
+	watchdogWg        sync.WaitGroup   // 独立跟踪 watchdog consumer goroutine。
+	// 不走 p.wg：其 channel 要到 Wait() 阶段 scheduler.Stop() 才会关闭，
+	// 如果走 p.wg 会导致 BeginStop 的 p.wg.Wait() 与 watchdog 形成死锁。
 }
 
 func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
@@ -112,6 +115,11 @@ func (p *WorkerPool) workerEnv() *WorkerEnv {
 		middlewareChain:   p.middlewareChain,
 		rw:                p.rw,
 		watchdogScheduler: p.watchdogAdapter,
+		// 【P1-3】预构 RWContextInfo，SourceService 在 Pool 生命周期内不变
+		rwReadCtxInfo: def.RWContextInfo{
+			Mode:          def.RWModeRead,
+			SourceService: p.invoker.GetServiceName(),
+		},
 	}
 }
 
@@ -153,10 +161,15 @@ func (p *WorkerPool) Start() error {
 		} else {
 			p.watchdogScheduler = scheduler
 			p.watchdogAdapter = &watchdogTimerAdapter{scheduler: scheduler}
-			// 消费者 goroutine：从 channel 取出过期 Timer 并执行回调
-			p.wg.Add(1)
+			// 消费者 goroutine：从 channel 取出过期 Timer 并执行回调。
+			// 【关闭顺序修复】不挂在 p.wg 上：channel 由 Wait() 阶段的
+			// scheduler.Stop() 才关闭，如果挂在 p.wg 上会让 BeginStop 的
+			// p.wg.Wait() 与 watchdog 形成死锁（BeginStop 等 consumer 退出，
+			// consumer 等 channel 关闭，channel 关闭要等 Wait 阶段）。
+			// 改用独立 watchdogWg，在 Wait() 里 scheduler.Stop() 之后再 join。
+			p.watchdogWg.Add(1)
 			go func() {
-				defer p.wg.Done()
+				defer p.watchdogWg.Done()
 				ch := scheduler.GetTimerCbChannel()
 				for t := range ch {
 					t.Do(p.ctx)
@@ -261,6 +274,8 @@ func (p *WorkerPool) Wait() {
 	// 停止 watchdog 时间轮（先 Stop scheduler 关闭 channel，consumer goroutine 自动退出）
 	if p.watchdogScheduler != nil {
 		p.watchdogScheduler.Stop()
+		// channel 已关闭，等待 consumer goroutine 退出后再清理引用
+		p.watchdogWg.Wait()
 		p.watchdogScheduler = nil
 		p.watchdogAdapter = nil
 	}
@@ -363,14 +378,27 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 		p.workerCount.Store(newSize)
 		p.mu.Unlock()
 	} else {
-		// 缩容：【P1-3 修复】"先 delete 再 Stop"，消除 DispatchJob 命中已停 worker 丢消息的窗口。
-		// 流程：Lock → 从 hash ring 移除 + delete(workers, id) → Unlock → Stop + Wait。
-		// DispatchJob 在锁内通过 ring.Get→workers[id] 查询时：
-		//   - ring 已移除：ring.Get 不会再选到该 id（即便选到，workers[id] 也已删除→ErrMailboxWorkerNotFound）；
-		//   - 这样上层能拿到明确的"未找到"错误，而不是 SubmitJob 阶段的"已关闭"。
+		// 缩容【P0-2 修复】：保证 dispatcherKey 顺序契约。
 		//
-		// 改用按 ID 降序淘汰：单调递增 ID 后活跃 ID 不再连续，
-		// 需遍历 workers map 收集所有 ID → 排序 → 淘汰末尾 N 个。
+		// 旧实现："先从 ring 删除 → 再 Stop+Wait" 会让同 dispatcherKey 的新 Job 立刻 rehash
+		// 到另一个 worker 与老 worker 的残留 Job 并发执行，等价于"同一 actor 实体被两个 actor 处理"，
+		// 直接破坏 mailbox 对外承诺的"按 dispatcherKey 顺序执行"契约。
+		//
+		// 新流程："先 BeginStop+Wait → 再从 ring/workers 删除"：
+		//   1. 选定淘汰 ids；
+		//   2. BeginStop：老 worker 拒绝新 SubmitJob（新到达的同 key Job 会拿到
+		//      ErrMailboxWorkerClosed，由 ADR-4 / Mailbox.PostJob 统一走 OnJobDiscarded，
+		//      业务可感知，而不会被并发执行）；
+		//   3. Wait：老 worker 串行 drain 完队列残留（DrainPolicy 决定执行 / 丢弃），
+		//      保证残留 Job 之间的 per-key 顺序；
+		//   4. 拿锁从 ring/workers map 移除并更新 workerCount —— 此后新 Job 才被 rehash 到
+		//      新 owner，且老 worker 上对该 key 的执行已彻底结束。
+		//
+		// 取舍：缩容窗口（约等于老 worker drain 时长）内同 key 新 Job 可能被拒（伴随
+		// OnJobDiscarded 通知），但永远不会"老队列还在跑、新消息又被并发处理"——
+		// 顺序契约优先，丢失 / 拒收对调用方明确可感知。
+		//
+		// 按 ID 升序保留前 newSize 个，淘汰末尾 N 个（单调递增 ID 后活跃 ID 不再连续）。
 		p.mu.Lock()
 		toRemove := int(currentCount - newSize)
 		ids := make([]int32, 0, len(p.workers))
@@ -378,7 +406,6 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 			ids = append(ids, id)
 		}
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-		// 保留前 newSize 个（ID 最小的），淘汰其余
 		if len(ids) > int(newSize) {
 			ids = ids[newSize:]
 		} else {
@@ -388,11 +415,39 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 			ids = ids[:toRemove]
 		}
 
-		removeMap := make(map[int32]struct{}, len(ids))
 		removedWorkers := make([]inf.IMailboxWorker, 0, len(ids))
+		removedIDs := make([]int32, 0, len(ids))
 		for _, id := range ids {
 			if worker, exists := p.workers[id]; exists {
 				removedWorkers = append(removedWorkers, worker)
+				removedIDs = append(removedIDs, id)
+			}
+		}
+		p.mu.Unlock() // 释放 pool 锁，避免 BeginStop/Wait 期间长时间阻塞 dispatch
+
+		if len(removedWorkers) == 0 {
+			return
+		}
+
+		// ① 老 worker 拒绝新 SubmitJob（CAS 到 closing 状态）。
+		//    此时 ring 仍指向它们，DispatchJob 选中后 SubmitJob 立即返回 ErrMailboxWorkerClosed，
+		//    经 ADR-4 在 Mailbox.PostJob 路径统一回调 OnJobDiscarded。
+		for _, w := range removedWorkers {
+			w.BeginStop()
+		}
+		// ② 等待 drain 完成（按 DrainPolicy：DrainExecute 串行执行残留 / DrainDiscard 仅回收）。
+		//    drain 是老 worker 自己的 run goroutine 串行进行，per-key 顺序天然保留。
+		for _, w := range removedWorkers {
+			w.Wait()
+		}
+
+		// ③ 老 worker 已彻底退出后才从 ring + workers map 移除。
+		//    在此之前，DispatchJob 命中老 worker 都返回 closed 错误（业务可感知），
+		//    在此之后，新 Job 才被 rehash 到新 owner —— 对老 key 的"先后执行"不会跨 worker 并发。
+		p.mu.Lock()
+		removeMap := make(map[int32]struct{}, len(removedIDs))
+		for _, id := range removedIDs {
+			if _, exists := p.workers[id]; exists {
 				removeMap[id] = struct{}{}
 				delete(p.workers, id)
 				if p.statsEnabled {
@@ -400,18 +455,9 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 				}
 			}
 		}
-		// 从哈希环移除（新 Job 不再路由到这些 Worker）
 		p.ring.RemoveMany(removeMap)
 		p.workerCount.Store(int32(newSize))
-		p.mu.Unlock() // ← 先释放 pool 锁，避免 Drain handler 自投递死锁
-
-		// 在 pool 锁外停止 Worker（Worker 会原地排空 Drain 队列残留 Job）
-		for _, w := range removedWorkers {
-			w.BeginStop()
-		}
-		for _, w := range removedWorkers {
-			w.Wait()
-		}
+		p.mu.Unlock()
 	}
 }
 
@@ -595,9 +641,12 @@ func (p *WorkerPool) autoScaleWorkers() {
 }
 
 func fixConf(conf *config.MailboxConf) *config.MailboxConf {
-	if conf == nil {
-		conf = &config.MailboxConf{}
-	}
+	// 【P1-9】fixConf 会改写 conf.EnableRWMode / MaxConcurrentReads / MaxJobExecutionTime 等
+	// 字段；如果上层把同一份 *MailboxConf 模板共享给多个 Service，第一个 Service 启动时
+	// 的副作用会污染后续 Service 的初始化（典型场景：单 worker Service 把模板的
+	// EnableRWMode 改成 false，多 worker Service 再用就丢了 RW 配置）。
+	// 这里做一次按需 deep-copy，保证 fixConf 完全无副作用。
+	conf = cloneMailboxConfForFix(conf)
 
 	// 设置默认队列模式
 	if conf.QueueMode == "" {
@@ -686,6 +735,35 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	}
 
 	return conf
+}
+
+// cloneMailboxConfForFix 为 fixConf 准备一份"按需 deep-copy"的 MailboxConf（P1-9）。
+//
+// 仅深拷贝 fixConf 真正会写入字段的子结构，其余共享指针保留，控制开销：
+//   - SchedulePolicy（fixConf 直接改 InitialWorkerNum / VirtualWorkerRate 等）；
+//   - SchedulePolicy.IdlerConf（可能新建并改字段）；
+//   - SchedulePolicy.ScalingStrategy（可能改 GrowthFactor / MinWorkerNum 等）。
+//
+// 顶层结构本身做一次浅拷贝，使 fixConf 修改 EnableRWMode / MaxConcurrentReads /
+// StopTimeout / MaxJobExecutionTime 等标量字段不会泄漏回模板。
+func cloneMailboxConfForFix(src *config.MailboxConf) *config.MailboxConf {
+	if src == nil {
+		return &config.MailboxConf{}
+	}
+	dst := *src // 浅拷贝顶层标量字段
+	if src.SchedulePolicy != nil {
+		sp := *src.SchedulePolicy
+		if src.SchedulePolicy.IdlerConf != nil {
+			ic := *src.SchedulePolicy.IdlerConf
+			sp.IdlerConf = &ic
+		}
+		if src.SchedulePolicy.ScalingStrategy != nil {
+			ss := *src.SchedulePolicy.ScalingStrategy
+			sp.ScalingStrategy = &ss
+		}
+		dst.SchedulePolicy = &sp
+	}
+	return &dst
 }
 
 // ---- RW 可观测性指标查询 ----

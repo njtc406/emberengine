@@ -209,6 +209,15 @@ type MailboxConf struct {
 	// 0 表示使用默认值（= MaxConcurrentReads），负数回退到默认值。
 	// 默认: MaxConcurrentReads
 	ReadPoolSize int `binding:""`
+
+	// ReadDispatchChanCap 【ADR-3 / P0-3】每个 Worker 的读派发通道容量。
+	// 主循环 dequeue 到读 Job 后非阻塞投递到 readPipeline goroutine，
+	// readPipeline 负责 gate spin（writeRequested / readSem）+ RLock + spawn。
+	// 通道满时按 ADR-3 入队侧回压语义直接 OnJobDiscarded（ErrMailboxWorkerIsFull），
+	// 避免主循环被 head-of-line 阻塞。
+	// 仅在 EnableRWMode=true 时生效。
+	// 0 表示使用默认值（= max(MaxConcurrentReads, 256)）。
+	ReadDispatchChanCap int `binding:""`
 }
 
 // MailboxMiddlewareConf 邮箱中间件配置
