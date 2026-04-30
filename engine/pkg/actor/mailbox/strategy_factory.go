@@ -1,8 +1,8 @@
 // Package mailbox
 // @Title  策略构建器
-// @Description  desc
+// @Description  根据 MailboxConf.ScalingStrategy 配置构建对应的扩缩容策略实例，为 WorkerPool 与 AutoScaler 提供统一入口。
 // @Author  yr  2025/4/24
-// @Update  yr  2025/4/24
+// @Update  yr  2026/4/27
 package mailbox
 
 import (

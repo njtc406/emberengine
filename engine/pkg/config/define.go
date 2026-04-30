@@ -210,7 +210,7 @@ type MailboxConf struct {
 	// 默认: MaxConcurrentReads
 	ReadPoolSize int `binding:""`
 
-	// ReadDispatchChanCap 【ADR-3 / P0-3】每个 Worker 的读派发通道容量。
+	// ReadDispatchChanCap 每个 Worker 的读派发通道容量。
 	// 主循环 dequeue 到读 Job 后非阻塞投递到 readPipeline goroutine，
 	// readPipeline 负责 gate spin（writeRequested / readSem）+ RLock + spawn。
 	// 通道满时按 ADR-3 入队侧回压语义直接 OnJobDiscarded（ErrMailboxWorkerIsFull），
@@ -433,10 +433,10 @@ type WorkerSchedulePolicy struct {
 	InitialWorkerNum int32 `binding:""`
 
 	// VirtualWorkerRate 虚拟节点倍率
-	// 一致性哈希环中每个Worker对应的虚拟节点数量
-	// 值越大，消息分布越均匀，但哈希计算开销越大
-	// 建议: 10-24之间
-	// 默认: 24
+	//
+	// Deprecated: 自 P1-6 起调度环改用 jump consistent hash（Lamping & Veach），
+	// 无需虚拟节点；此字段保留仅为兼容已有 yaml 配置，任何值都被忽略。
+	// 后续版本将移除。
 	VirtualWorkerRate int `binding:""`
 
 	// EnableAutoScaling 是否启用自动扩缩容

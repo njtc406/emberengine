@@ -174,7 +174,7 @@ func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 		}
 	}()
 
-	// 【ADR-1 / P0-1】PID 作为子消息嵌入到 Message 的 SenderPid / ReceiverPid 字段时，
+	// PID 作为子消息嵌入到 Message 的 SenderPid / ReceiverPid 字段时，
 	// 必须使用独立 wire 副本；直接对原 PID 调用 PrepareForMarshal 会与并发 RPC
 	// 形成对 IsMaster 字段的非原子写竞争（-race 下可复现，且会污染 endpoint
 	// 选主链路）。改用 actor.SnapshotForWire 在副本上做投影，原 PID 不动。

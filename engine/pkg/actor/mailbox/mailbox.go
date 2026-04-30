@@ -32,7 +32,7 @@ import (
 // 中间件机制：
 //   - 采用洋葱模型，OnReceive 按顺序执行，OnComplete 按逆序执行；
 //   - 中间件可通过返回 Reject 拒绝消息入队；
-//   - 中间件可通过返回 Skip 跳过后续中间件直接入队。
+//   - 中间件可通过返回 Skip 跳过剩余中间件直接入队。
 type Mailbox struct {
 	// 挂起标记
 	suspended atomic.Bool
@@ -48,7 +48,7 @@ type Mailbox struct {
 // MailboxOption 用于配置 Mailbox 的选项函数
 type MailboxOption func(*Mailbox)
 
-// WithSuspendPolicy 设置自定义的挂起策略( TODO 这个可能需要修改为注册式的，方便扩展)
+// WithSuspendPolicy 设置自定义的挂起策略。
 func WithSuspendPolicy(policy inf.ISuspendPolicy) MailboxOption {
 	return func(m *Mailbox) {
 		m.suspendPolicy = policy
@@ -96,7 +96,7 @@ func NewMailbox(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IMess
 //  2. 依次调用所有中间件的 OnReceive，任一返回 Reject 则拒绝入队；
 //  3. 将事件和中间件上下文交给 WorkerPool.DispatchJob，由后者选择合适的 worker 入队。
 //
-// 资源契约（ADR-4 / P0-4 / P0-5）：
+// 资源契约：
 //   - **PostJob 拥有 Job 所有权**：返回后调用方一律不再持有 job，无论成功或失败、
 //     无论是否 nil error。成功时由 Worker 执行完毕后 Release；失败时由 Mailbox 内部
 //     在错误返回前完成 Release + invoker.OnJobDiscarded 回调。
@@ -193,10 +193,4 @@ func (m *Mailbox) Stop() {
 // IsRWEnabled 返回当前 RW 模式是否启用
 func (m *Mailbox) IsRWEnabled() bool {
 	return m.workerPool.IsRWEnabled()
-}
-
-// GetEnableRWPtr 返回 WorkerPool 内 enableRW 的指针，供 MethodMgr 等外部组件引用。
-// 仅在服务初始化阶段调用一次。
-func (m *Mailbox) GetEnableRWPtr() *atomic.Bool {
-	return m.workerPool.GetEnableRWPtr()
 }

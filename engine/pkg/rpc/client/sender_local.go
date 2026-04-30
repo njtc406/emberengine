@@ -46,7 +46,7 @@ func (lc *localSender) DeliverRequest(ctx context.Context, dispatcher inf.IRpcDi
 	rpcJob.SetPriority(envelope.GetPriority())
 	rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
 	rpcJob.SetDeadline(envelope.GetMeta().GetDeadline())
-	// 【ADR-4】PostJob 拥有 Job 所有权：err 时 dispatcher 已内化 Release+OnJobDiscarded。
+	// PostJob 拥有 Job 所有权：err 时 dispatcher 已内化 Release+OnJobDiscarded。
 	if err := dispatcher.PostJob(rpcJob); err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcD
 			rpcJob.SetPriority(envelope.GetPriority())
 			rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
 			rpcJob.SetDeadline(meta.GetDeadline())
-			// 【ADR-4】PostJob 拥有 Job 所有权
+			// PostJob 拥有 Job 所有权
 			if err := dispatcher.PostJob(rpcJob); err != nil {
 				return err
 			}

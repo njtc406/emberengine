@@ -4,7 +4,7 @@
 > 视角：性能、并发安全、资源泄漏、API 合约、可维护性
 > 等级：P0=必须立即修；P1=本迭代修；P2=后续优化
 > 验证：`go build ./...` ✅ `go vet ./...` ✅ `go test -race ./engine/pkg/actor/... ./engine/pkg/core/...` ✅
-> 最后更新：2026-04-22（第二轮审计追加 P1-16..P2-20）
+> 最后更新：2026-04-29（RW Stop / 中间件 recover / Job 池 debug / Sentinel resource 复审见 [ACTOR_REVIEW_2026_04_29.md](ACTOR_REVIEW_2026_04_29.md)）
 
 ---
 

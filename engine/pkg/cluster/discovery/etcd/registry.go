@@ -25,7 +25,7 @@ func (r *etcdServiceRegistry) RegisterService(ctx context.Context, pid *actor.PI
 	if !ok || !isEtcdClientConnected(r.d.client) {
 		return fmt.Errorf("etcd client not connected or invalid leaseRef")
 	}
-	// 【ADR-1 / P0-1】走 MarshalPIDJSON 唯一出口：内部 Clone + PrepareForMarshal，
+	// 走 MarshalPIDJSON 唯一出口：内部 Clone + PrepareForMarshal，
 	// 与并发 RPC 序列化、运行时 SetMaster 完全不竞争 IsMaster 字段。
 	pidData, err := actor.MarshalPIDJSON(pid)
 	if err != nil {

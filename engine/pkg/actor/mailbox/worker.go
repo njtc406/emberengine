@@ -50,9 +50,14 @@ type WorkerEnv struct {
 	rw                *RWController
 	watchdogScheduler watchdogCanceler // 时间轮看门狗（nil = 使用 time.AfterFunc 降级）
 
-	// 【P1-3】预构的 RWContextInfo，SourceService 在 Pool 生命周期内是常量，
+	// 预构的 RWContextInfo，SourceService 在 Pool 生命周期内是常量，
 	// 避免 execRead 路径上每条 Job 重建 struct + 字符串拷贝。
 	rwReadCtxInfo def.RWContextInfo
+
+	// 调试计数开关：SubmitJob 热路径上的 count.Add(1) 仅在启用时
+	// 起作用，release 环境默认 false 可避免每条 Job 一次 atomic.Add。
+	// 由 WorkerPool.statsEnabled 控制，与 dispatch 分布统计同步开关。
+	statsEnabled bool
 }
 
 // Worker 统一的消息处理 Worker，实现 IMailboxWorker。
@@ -68,10 +73,16 @@ type Worker struct {
 	submitters      atomic.Int64
 	env             *WorkerEnv
 	wg              sync.WaitGroup
-	inflightReads   sync.WaitGroup  // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
-	inflightReadCnt atomic.Int64    // per-Worker：当前 in-flight 读 goroutine 数（WaitGroup 无法查询计数）
-	pendingJob      inf.IMailboxJob // 单值字段：TryLock/读路径轮询检测到 closed=true 时暂存已出队未执行 Job
-	queueManager    IQueueManager   // 队列管理器（可以是双队列或多优先级队列）
+	inflightReads   sync.WaitGroup // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
+	inflightReadCnt atomic.Int64   // per-Worker：当前 in-flight 读 goroutine 数（WaitGroup 无法查询计数）
+	writeRequested  atomic.Int32   // per-Worker 写排队计数：execWrite Add(1) 后同 Worker 的 launchRead 让步，
+	// 避免同 Worker 读饱和导致写长期等待；跨 Worker 读不再让步（mu 本身会串行化 W/R 抢占）。
+	pendingJob inf.IMailboxJob // 单值字段：TryLock/读路径轮询检测到 closed=true 时暂存已出队未执行 Job。
+	// 不变量：Worker 主循环单 goroutine 执行，两个写入点（execWrite 等读 / TryLock）任一命中后立即 return，
+	// 主循环下一轮检查 state==closed 退出 → defer 消费。storePending() 内置覆盖检测，
+	// 静态分析下不会出现覆盖；若运行期出现（说明协议被破坏），记录 ERROR 并直接 OnJobDiscarded
+	// 老 pendingJob 防止泄漏。
+	queueManager IQueueManager // 队列管理器（可以是双队列或多优先级队列）
 	// per-Worker RW 指标（跨 goroutine 安全，WorkerPool 汇总时遍历累加）
 	rwReadDurationSum atomic.Int64             // 读操作累计耗时（纳秒），除以 rwReadCount 得平均值
 	rwReadCount       atomic.Int64             // 本 Worker 累计读操作数（用于计算平均读耗时）
@@ -81,13 +92,14 @@ type Worker struct {
 	count             atomic.Int64
 	drainPolicy       DrainPolicy
 
-	// ---- ADR-3 / P0-3：RW 读路径解耦 ----
+	// ---- RW 读路径解耦 ----
 	// readCh: 主循环 dequeue 到读 Job 后非阻塞投递的通道；readPipeline 负责消费。
-	// 容量满 = ADR-3 入队侧回压：主循环直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
+	// 容量满 = 入队侧回压：主循环直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
 	// 不再让读 Job 在主循环里同步等待 gate（writeRequested/readSem）。
 	readCh         chan inf.IMailboxJob // nil = RW 未启用或运行时尚未初始化（execRead 走兜底同步路径）
 	readPipelineWg sync.WaitGroup       // 跟踪 readPipeline goroutine 退出
-	// readsDispatched：主循环投递到 readCh 的累计读 Job 数（含被 ADR-3 回压丢弃的）
+	stopDeadlineNS int64                // BeginStop 设置的统一停止 deadline，用于 readPipeline 关闭阶段让步退出
+	// readsDispatched：主循环投递到 readCh 的累计读 Job 数（含被回压丢弃的）
 	// readsLaunched：readPipeline 已完成 RLock + inflightReads.Add 的累计读 Job 数
 	// 用途：execWrite 在 mu.WLock 之前必须先等待 readsLaunched.Load() 追平
 	// 写 Job dequeue 时刻的 readsDispatched 快照，保证"先序读已注册到 inflightReads"，
@@ -122,7 +134,7 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 		idlerConf.BackoffMaxRetries,
 	)
 
-	// ADR-3 / P0-3：RW 启用时为读路径创建独立通道
+	// RW 启用时为读路径创建独立通道
 	// 容量取 max(ReadDispatchChanCap, MaxConcurrentReads, 256)，留足缓冲避免无谓回压
 	if conf.EnableRWMode {
 		capN := conf.ReadDispatchChanCap
@@ -188,8 +200,10 @@ func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
 	if err != nil {
 		return err
 	}
-	// 增加事件计数
-	w.count.Add(1) // TODO 后续替换为一个计数器,设置一个开关,打开时才计数,release环境可以关闭
+	// 计数开关化：release 环境默认 statsEnabled=false 时跳过热路径 atomic.Add
+	if w.env.statsEnabled {
+		w.count.Add(1)
+	}
 
 	// 唤醒Worker
 	if w.idler != nil {
@@ -203,7 +217,7 @@ func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
 func (w *Worker) Start() {
 	w.wg.Add(1)
 	go w.run()
-	// ADR-3 / P0-3：RW 启用时启动专职的读派发流水线
+	// RW 启用时启动专职的读派发流水线
 	if w.readCh != nil {
 		w.readPipelineWg.Add(1)
 		go w.runReadPipeline()
@@ -218,10 +232,10 @@ func (w *Worker) Start() {
 //  3. 若当前没有事件，则调用 idler.Idle() 进行条件等待或退避；
 //  4. 当 closed 标记为 true 时，循环退出，并在 defer 中处理所有残留事件。
 //
-// 【ADR-3 / P0-3 重构】RW 模式下，主循环不再同步执行读 Job 的 gate spin / RLock /
+// RW 模式下，主循环不再同步执行读 Job 的 gate spin / RLock /
 // goroutine spawn——而是把读 Job 投递到 readCh 由 readPipeline goroutine 异步处理。
 // 主循环仅负责：① 写 Job 同步执行（走 execWrite，内部等待先序读注册后取 WLock）；
-// ② 读 Job 投递到 readCh（满则按 ADR-3 入队侧回压语义直接 OnJobDiscarded）；
+// ② 读 Job 投递到 readCh（满则按入队侧回压语义直接 OnJobDiscarded）；
 // ③ 系统消息（priority queue 优先返回）由主循环立即处理，不再被 read gate 阻塞。
 func (w *Worker) run() {
 	defer w.wg.Done()
@@ -229,16 +243,32 @@ func (w *Worker) run() {
 	// 退出时：先关闭 readCh 让 readPipeline 排空 + 退出，
 	// 再等待本 Worker 的 in-flight 读完成（带超时兜底），最后在 WLock 下 drain 残留消息
 	defer func() {
-		// ① 【ADR-3】关闭 readCh，等待 readPipeline 处理完通道里残留的读 Job 后退出。
+		if atomic.LoadInt64(&w.stopDeadlineNS) == 0 {
+			atomic.StoreInt64(&w.stopDeadlineNS, time.Now().Add(w.env.rw.stopTimeout).UnixNano())
+		}
+
+		stopTimedOut := false
+		// ① 关闭 readCh，等待 readPipeline 处理完通道里残留的读 Job 后退出。
 		//    readPipeline 在 launchRead 内部检测到 state==closed 时会按 drainPolicy
-		//    discardExec 这些已投递但未注册的读 Job，保证 OnJobDiscarded 对称（ADR-4）。
+		//    discardExec 这些已投递但未注册的读 Job，保证 OnJobDiscarded 对称。
 		if w.readCh != nil {
 			close(w.readCh)
-			w.readPipelineWg.Wait()
+			pipelineDone := make(chan struct{})
+			go func() {
+				w.readPipelineWg.Wait()
+				close(pipelineDone)
+			}()
+			select {
+			case <-pipelineDone:
+			case <-time.After(w.env.rw.stopTimeout):
+				stopTimedOut = true
+				w.env.logger.Errorf("Worker %d: StopTimeout (%v) exceeded while waiting read pipeline, force unsafe drain",
+					w.workerId, w.env.rw.stopTimeout)
+				<-pipelineDone
+			}
 		}
 
 		// ② 等待本 Worker 的 in-flight 读 goroutine 完成（带超时保护）
-		stopTimedOut := false
 		if w.env.rw.enabled.Load() {
 			done := make(chan struct{})
 			go func() {
@@ -269,20 +299,27 @@ func (w *Worker) run() {
 		}
 
 		// RW 启用时，Drain 必须与可能仍在飞行的读 goroutine 互斥访问 invoker。
-		// - 正常关闭（未超时）：用阻塞式 Lock，等待读 goroutine 已全部 Done，可立即拿到；
+		// - 无残留：跳过 WLock 获取，避免被其它 Worker 仍在飞行的读 goroutine 阻塞
+		//   （per-Worker stopTimeout 是独立约束，不应被全局 RW 锁竞争耦合）；
 		// - StopTimeout 超时：直接走 unsafe drain（不获取 WLock，跳过 invoker 调用），
-		//   因为此时仍有泄漏读 goroutine 持有 RLock，强行 Lock 等同于无限阻塞。
+		//   因为此时仍有泄漏读 goroutine 持有 RLock，强行 Lock 等同于无限阻塞；
+		// - 正常关闭（未超时）且有残留：用阻塞式 Lock，等待读 goroutine 已全部 Done，可立即拿到。
 		var (
 			rwLockHeld    bool
 			rwUnsafeDrain bool
 		)
+		hasResidual := w.pendingJob != nil || (w.queueManager != nil && !w.queueManager.IsEmpty())
 		if w.env.rw.enabled.Load() {
 			if stopTimedOut {
-				rwUnsafeDrain = true
-				w.env.rw.unsafeDrainEvents.Add(1) // 事件级计数：进入 unsafe drain 路径
-				w.env.logger.Errorf("Worker %d: stop timeout reached, drain in unsafe mode "+
-					"(skip invoker.OnJobDiscarded) to avoid race with leaked read goroutines", w.workerId)
-			} else {
+				if hasResidual {
+					rwUnsafeDrain = true
+					w.env.rw.unsafeDrainEvents.Add(1) // 事件级计数：进入 unsafe drain 路径
+					w.env.logger.Errorf("Worker %d: stop timeout reached with residual jobs, drain in unsafe mode "+
+						"(skip invoker.OnJobDiscarded) to avoid race with leaked read goroutines", w.workerId)
+				} else {
+					w.env.logger.Warnf("Worker %d: stop timeout reached but no residual jobs, skip unsafe drain", w.workerId)
+				}
+			} else if hasResidual {
 				w.env.rw.mu.Lock()
 				rwLockHeld = true
 			}
@@ -338,6 +375,7 @@ func (w *Worker) BeginStop() {
 	if !w.state.CompareAndSwap(workerStateRunning, workerStateClosing) {
 		return // already stopping/stopped
 	}
+	atomic.StoreInt64(&w.stopDeadlineNS, time.Now().Add(w.env.rw.stopTimeout).UnixNano())
 
 	// Wait for in-flight SubmitJob calls to finish.
 	// 阶梯退避：先 Gosched，超过阈值后改用 microsecond 级 Sleep，避免长时间 CPU 燃烧。
@@ -379,12 +417,12 @@ func (w *Worker) BeginStop() {
 // Wait 等待 worker 完全退出。
 func (w *Worker) Wait() {
 	w.wg.Wait()
-	if w.env != nil && w.env.logger != nil {
+	if w.env != nil && w.env.logger != nil && w.env.statsEnabled {
 		w.env.logger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
 	}
 }
 
-// Stop 兼容接口：BeginStop + Wait。
+// Stop 便捷方法：BeginStop + Wait。
 func (w *Worker) Stop() {
 	w.BeginStop()
 	w.Wait()
@@ -399,13 +437,12 @@ func (w *Worker) discardExec(job inf.IMailboxJob, rwUnsafe bool) {
 	ctx := job.GetContext()
 	mctx := job.GetMiddlewareContext()
 	defer func() {
-		// rwUnsafe 路径下跳过中间件 OnComplete，避免自定义中间件回写 invoker 共享字段
-		// 与泄漏读 goroutine 形成 race。内置中间件的统计损失可通过 drainDiscardTotal 感知。
+		// rwUnsafe 路径下跳过普通 OnComplete，避免自定义中间件回写 invoker 共享字段
+		// 与泄漏读 goroutine 形成 race；框架级清理仍会执行，用于释放 Sentinel entry 等内部资源。
 		if mctx != nil && !rwUnsafe {
 			w.env.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxNotRunning, nil)
 		} else if mctx != nil {
-			// rwUnsafe: 仅归还 mctx 到池，不执行中间件回调
-			w.env.middlewareChain.ReturnContext(mctx)
+			w.env.middlewareChain.ExecuteFrameworkCleanup(mctx, def.ErrMailboxNotRunning, nil)
 		}
 		// 不执行业务，直接释放 job
 		if job != nil {
@@ -421,17 +458,35 @@ func (w *Worker) discardExec(job inf.IMailboxJob, rwUnsafe bool) {
 		// 不通知业务层，避免 race；上层应通过 drainDiscardTotal 与日志感知
 		return
 	}
-	// 通知业务层 Job 被丢弃
-	w.env.invoker.OnJobDiscarded(job, def.ErrMailboxNotRunning)
+	w.safeNotifyJobDiscarded(job, def.ErrMailboxNotRunning)
 }
 
-// safeExec 在执行事件处理逻辑时提供 panic 保护（向后兼容，skipReadCtx=false）。
+func (w *Worker) safeNotifyJobDiscarded(job inf.IMailboxJob, reason error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if w.env == nil || w.env.logger == nil {
+				return
+			}
+			logger := w.env.logger
+			if job != nil && job.GetContext() != nil {
+				logger = logger.WithContext(job.GetContext())
+			}
+			logger.Errorf("Worker %d OnJobDiscarded panic: %v\ntrace:%s", w.workerId, r, debug.Stack())
+		}
+	}()
+	if w.env == nil || w.env.invoker == nil {
+		return
+	}
+	w.env.invoker.OnJobDiscarded(job, reason)
+}
+
+// safeExec 在同步执行路径中提供 panic 保护、OnComplete 回调与 Job 回收。
 func (w *Worker) safeExec(job inf.IMailboxJob) {
 	w.safeExecInternal(job, false)
 }
 
 // safeExecSkipProfiler RW 模式下读 goroutine 专用（跳过同步运行路径上共享的状态）。
-// 保留函数名不变避免调用点迁移；skipShared=true 供读并发路径使用。
+// skipShared=true 供读并发路径使用。
 func (w *Worker) safeExecSkipProfiler(job inf.IMailboxJob) {
 	w.safeExecInternal(job, true)
 }
@@ -447,7 +502,7 @@ func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipShared bool) {
 	// 读 goroutine 路径：向 context 中注入 RWContextInfo，
 	// 业务层可通过 ctx.Value(def.RWContextKey) 检测当前是否在 ReadOnly 上下文中执行。
 	// 框架层在 Service.PostJob 中检测此标记，拒绝 ReadOnly handler 的自投递。
-	// 【P1-3】复用 WorkerEnv 中预构的 RWContextInfo，避免热路径 struct 重建。
+	// 复用 WorkerEnv 中预构的 RWContextInfo，避免热路径 struct 重建。
 	if skipShared && w.env.rw.enabled.Load() {
 		ctx = context.WithValue(ctx, def.RWContextKey, w.env.rwReadCtxInfo)
 	}
@@ -528,7 +583,7 @@ func getRWMode(job inf.IMailboxJob) def.RWMode {
 }
 
 // execWithRW 根据 Job 的 RWMode 走读派发或同步写。
-// 【ADR-3 / P0-3】读 Job 不再在主循环里同步取 gate/RLock，改为投递到 readPipeline。
+// 读 Job 不再在主循环里同步取 gate/RLock，改为投递到 readPipeline。
 func (w *Worker) execWithRW(job inf.IMailboxJob) {
 	if getRWMode(job) == def.RWModeRead {
 		w.dispatchRead(job)
@@ -539,8 +594,8 @@ func (w *Worker) execWithRW(job inf.IMailboxJob) {
 
 // dispatchRead 主循环侧：把读 Job 投递到 readPipeline。
 //
-// 【ADR-3 关键】不在此处取 gate（writeRequested/readSem）/RLock/spawn，
-// 让出主循环 CPU 给后续写 Job 与系统消息（priority queue 优先返回 SysCtl 等）。
+// 不在此处取 gate（writeRequested/readSem）/RLock/spawn，
+// 让出主循环 CPU 给等待中的写 Job 与系统消息（priority queue 优先返回 SysCtl 等）。
 //
 // 顺序契约（read-vs-write）：
 //   - 同 dispatcherKey 的 Job 由 hashring 路由到同一 Worker；
@@ -549,8 +604,8 @@ func (w *Worker) execWithRW(job inf.IMailboxJob) {
 //     即"先序读已完成 inflightReads.Add + mu.RLock"，避免写抢在读 spawn 之前；
 //   - 这保证 Read1 看到 Write2 写入之前的状态，Write2 看到 Read1 完成之后的状态。
 //
-// 回压（readCh 满）：按 ADR-3 入队侧失败语义直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
-// 由 ADR-4 调用方 invoker 感知，不再让主循环热自旋。
+// 回压（readCh 满）：按入队侧失败语义直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
+// 由调用方 invoker 感知，不再让主循环热自旋。
 func (w *Worker) dispatchRead(job inf.IMailboxJob) {
 	// 先尝试非阻塞投递（绝大多数情况下 readCh 不会满）
 	select {
@@ -560,15 +615,15 @@ func (w *Worker) dispatchRead(job inf.IMailboxJob) {
 	default:
 	}
 
-	// readCh 满 = ADR-3 入队侧回压：直接丢弃 + 通知业务（OnJobDiscarded 与 ADR-4 对称）
+	// readCh 满 = 入队侧回压：直接丢弃 + 通知业务（OnJobDiscarded 对称）
 	w.env.rw.drainDiscardTotal.Add(1)
 	w.env.logger.WithContext(job.GetContext()).Warnf(
-		"Worker %d: readCh full (cap=%d), discard read job (ADR-3 backpressure)",
+		"Worker %d: readCh full (cap=%d), discard read job (read backpressure)",
 		w.workerId, cap(w.readCh))
 
 	// OnJobDiscarded 必须在 mctx 归池之前调用，避免业务读 mctx 时已被回收
 	mctx := job.GetMiddlewareContext()
-	w.env.invoker.OnJobDiscarded(job, def.ErrMailboxWorkerIsFull)
+	w.safeNotifyJobDiscarded(job, def.ErrMailboxWorkerIsFull)
 	if mctx != nil {
 		w.env.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxWorkerIsFull, nil)
 	}
@@ -577,10 +632,10 @@ func (w *Worker) dispatchRead(job inf.IMailboxJob) {
 
 // runReadPipeline 是 readPipeline goroutine 主循环。
 //
-// 【ADR-3】专职处理读 Job 的 gate spin（writeRequested / readSem）+ RLock + spawn 真正执行 goroutine。
+// 专职处理读 Job 的 gate spin（writeRequested / readSem）+ RLock + spawn 真正执行 goroutine。
 // 主循环退出时会 close(readCh)，本 goroutine 依次处理通道里残留的读 Job 后退出；
 // 残留读 Job 的处理：launchRead 内部检测到 state==closed 时按 drainPolicy 走 discardExec，
-// 与 ADR-4 OnJobDiscarded 契约保持对称。
+// 与 OnJobDiscarded 契约保持对称。
 func (w *Worker) runReadPipeline() {
 	defer w.readPipelineWg.Done()
 	for job := range w.readCh {
@@ -601,13 +656,20 @@ func (w *Worker) runReadPipeline() {
 //   - launchRead 在 stop 后**不做早退**：main run 退出时 writer 一定已释放（writeRequested→0），
 //     gate ① 立刻通过；readSem 由已 spawn 的 readFunc 归还，gate ② 至多 backoff 至 readDuration；
 //     最终所有残留读都被 spawn → main run defer 的 inflightReads.Wait（带 stopTimeout 兜底）等其完成。
-//   - 这与 ADR-3 + DrainExecute 语义一致：通道残留的读不丢；只有 stopTimeout 超时才会进入 unsafe drain 路径。
+//   - 这与 DrainExecute 语义一致：通道残留的读不丢；只有 stopTimeout 超时才会进入 unsafe drain 路径。
 func (w *Worker) launchRead(job inf.IMailboxJob) {
 	bo := idle.NewSpinBackoff(5 * time.Millisecond)
 	for {
-		// gate ①：让步 pending writer，避免写饥饿。
+		if w.state.Load() == workerStateClosed && w.stopDeadlineExceeded() {
+			w.readsLaunched.Add(1)
+			w.discardExec(job, true)
+			return
+		}
+		// gate ①：让步本 Worker 的 pending writer，避免同 Worker 读-写饥饿。
+		// 仅检查本 Worker 的 writeRequested：execWrite 与 launchRead 都是 per-Worker，
+		// 跨 Worker 的写 Job 在 mu 层面串行化，这里不需要跨 Worker 让步。
 		// stop 后 main run 已退出，无新 writer；剩余 writeRequested 会在原 execWrite 释放 WLock 后归 0。
-		if w.env.rw.writeRequested.Load() > 0 {
+		if w.writeRequested.Load() > 0 {
 			bo.Backoff()
 			continue
 		}
@@ -681,9 +743,14 @@ func (w *Worker) launchRead(job inf.IMailboxJob) {
 	}
 }
 
+func (w *Worker) stopDeadlineExceeded() bool {
+	deadline := atomic.LoadInt64(&w.stopDeadlineNS)
+	return deadline > 0 && time.Now().UnixNano() >= deadline
+}
+
 // execWrite 写操作：等待先序读注册 → mu.WLock → 独占执行。
 //
-// 【ADR-3 顺序保证】在 mu.WLock 之前必须先等待 readsLaunched.Load() 追平
+// 顺序保证：在 mu.WLock 之前必须先等待 readsLaunched.Load() 追平
 // 进入函数时刻的 readsDispatched 快照，否则 mu.WLock 可能抢在 readPipeline
 // 的 mu.RLock 之前，破坏 read-before-write 的提交顺序。
 //
@@ -696,7 +763,7 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 		bo := idle.NewSpinBackoff(5 * time.Millisecond)
 		for w.readsLaunched.Load() < target {
 			if w.state.Load() == workerStateClosed {
-				w.pendingJob = job
+				w.storePending(job)
 				return
 			}
 			bo.Backoff()
@@ -706,13 +773,13 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 	// ② 取 mu.WLock，沿用原 TryLock + 退避 + closed 兜底语义
 	w.env.rw.writeTotal.Add(1)   // 全局写计数
 	writeWaitStart := time.Now() // 写等待计时开始
-	w.env.rw.writeRequested.Add(1)
+	w.writeRequested.Add(1)
 	bo := idle.NewSpinBackoff(5 * time.Millisecond)
 	for !w.env.rw.mu.TryLock() {
 		if w.state.Load() == workerStateClosed {
-			w.env.rw.writeRequested.Add(-1)
+			w.writeRequested.Add(-1)
 			// Worker 正在停止但无法获取写锁，暂存到 pendingJob 由 Drain 处理
-			w.pendingJob = job
+			w.storePending(job)
 			return
 		}
 		bo.Backoff()
@@ -727,10 +794,33 @@ func (w *Worker) execWrite(job inf.IMailboxJob) {
 	}
 	// defer 保证 Unlock 在 Add(-1) 之前执行（LIFO）
 	// 确保 writeRequested.Add(-1) 在 Unlock 之后：
-	// 读路径看到 writeRequested==0 时 WLock 必定已释放
-	defer w.env.rw.writeRequested.Add(-1)
+	// 同 Worker 的读路径看到 writeRequested==0 时 WLock 必定已释放
+	defer w.writeRequested.Add(-1)
 	defer w.env.rw.mu.Unlock()
 	w.safeExec(job)
+}
+
+// storePending 把已出队但因 worker closed 无法执行的 Job 暂存到 pendingJob。
+//
+// 不变量断言：Worker 主循环单 goroutine 执行，两个调用点（execWrite 等读 /
+// TryLock）任一命中后立即 return，下一轮主循环 state==closed 退出 → defer drain
+// 消费 pendingJob 后置 nil；因此 storePending 永远不应看到非 nil 的旧值。
+//
+// 若发生覆盖（说明上层协议被破坏），记录 ERROR 并对老 Job 调用 OnJobDiscarded 防泄漏，
+// 比静默丢弃更易在调试期暴露问题，并保持 OnJobDiscarded 对称契约。
+func (w *Worker) storePending(job inf.IMailboxJob) {
+	if old := w.pendingJob; old != nil {
+		// 不变量被破坏：上层协议错误。记录 + 释放老 Job 防泄漏。
+		if w.env != nil && w.env.logger != nil {
+			w.env.logger.Errorf("Worker %d: pendingJob overwritten unexpectedly (state=%d), old job discarded",
+				w.workerId, w.state.Load())
+		}
+		if w.env != nil && w.env.invoker != nil {
+			w.safeNotifyJobDiscarded(old, def.ErrMailboxWorkerClosed)
+		}
+		old.Release()
+	}
+	w.pendingJob = job
 }
 
 // GetJobLen 获取队列中的任务总数

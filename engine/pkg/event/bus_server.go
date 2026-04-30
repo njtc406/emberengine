@@ -45,7 +45,7 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 				j.SetDispatcherKey(e.GetDispatcherKey())
 				j.SetPriority(def.Priority(e.GetPriority()))
 				j.SetDeadline(e.GetDeadline())
-				// 【ADR-4】PostJob 拥有 Job 所有权
+				// PostJob 拥有 Job 所有权
 				if err := ch.PostJob(j); err != nil {
 					eb.Errorf("push server event error: %v", err)
 				}

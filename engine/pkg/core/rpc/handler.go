@@ -1,8 +1,8 @@
 // Package rpc
-// @Title  title
-// @Description  desc
+// @Title  RPC 方法注册与派发
+// @Description  Service 内部 RPC 方法表的注册、查找、移除以及 RW 模式状态查询闭包注入；为 RemoveMethods 提供基于 RW 状态的防御性检查。
 // @Author  yr  2024/11/5
-// @Update  yr  2024/11/5
+// @Update  yr  2026/4/27
 package rpc
 
 import (
@@ -12,7 +12,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -35,12 +34,12 @@ type methodEntry struct {
 // 运行期 GetMethodFunc / IsReadOnly 无需加锁（static table）。
 // mu 仅保护启动阶段和 RemoveMethods 的并发安全。
 type MethodMgr struct {
-	mu       sync.RWMutex
-	rpcCnt   int
-	methods  map[string]*methodEntry // 方法名 → 条目
-	index    inf.INodeMethodIndex
-	enableRW *atomic.Bool // 引用 WorkerPool 的 enableRW，用于 RemoveMethods 防御检查
-	logger   log.ILoggerX
+	mu          sync.RWMutex
+	rpcCnt      int
+	methods     map[string]*methodEntry // 方法名 → 条目
+	index       inf.INodeMethodIndex
+	isRWEnabled func() bool // 查询 RW 模式是否启用，封装 atomic 细节，避免泄漏内部 *atomic.Bool
+	logger      log.ILoggerX
 }
 
 func NewMethodMgr(logger log.ILoggerX, index inf.INodeMethodIndex) inf.IMethodMgr {
@@ -54,9 +53,13 @@ func NewMethodMgr(logger log.ILoggerX, index inf.INodeMethodIndex) inf.IMethodMg
 	}
 }
 
-// SetEnableRW 设置 enableRW 引用，用于 RemoveMethods 防御检查
-func (m *MethodMgr) SetEnableRW(flag *atomic.Bool) {
-	m.enableRW = flag
+// SetRWStateProvider 注入 RW 模式状态查询闭包，用于 RemoveMethods 防御检查。
+//
+// 之前直接接受 *atomic.Bool 暴露内部实现，将来 RW 状态语义扩展（如增加
+// "正在切换"状态）所有持引用方都得改。改用 func() bool 闭包，调用方只需关心
+// "是否启用"语义，内部表示可任意演化。
+func (m *MethodMgr) SetRWStateProvider(provider func() bool) {
+	m.isRWEnabled = provider
 }
 
 func (m *MethodMgr) IsPrivate() bool {
@@ -97,7 +100,7 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 	// 【防御性校验】RW 模式下，运行期 GetMethodFunc()/IsReadOnly() 并发读 methodMap/readOnlyMap，
 	// 如果此时 RemoveMethods 写入 map → map concurrent read/write fatal。
 	// 正常调用时机是 shutdown 阶段（Worker 已停止），此校验防止误用。
-	if m.enableRW != nil && m.enableRW.Load() {
+	if m.isRWEnabled != nil && m.isRWEnabled() {
 		m.logger.Errorf("RemoveMethods called while RW mode is active! "+
 			"This may cause data race. Caller should ensure all Workers are stopped. names=%v", names)
 		return false

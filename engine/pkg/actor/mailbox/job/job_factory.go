@@ -1,8 +1,4 @@
-// Package mailbox
-// 模块名: 模块名
-// 功能描述: 描述
-// 作者:  yr  2026/1/29 00:52
-// 最后更新:  yr  2026/1/29 00:52
+// Package job
 package job
 
 import (
@@ -15,14 +11,21 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
 
+// runtimeDebug 控制池统计是否启用。debug=false 时使用 no-op recorder，
+// 池统计零开销；debug=true 时注册到全局 stats registry，便于排查泄漏。
 var runtimeDebug atomic.Bool
 
-var jobFactoryFrozen atomic.Bool
-var jobFactoryMu sync.Mutex // 保护 RegisterJobFactory 的并发安全
+func SetDebug(enabled bool) { runtimeDebug.Store(enabled) }
 
-func SetDebug(enabled bool) {
-	runtimeDebug.Store(enabled)
-}
+// ===== Job 工厂注册表 =====
+//
+// jobFactory 在节点启动早期由 init/手动 RegisterJobFactory 完成填充，首次
+// CreateJob 调用（或显式 FreezeJobFactory）会冻结注册表，之后不再允许变更。
+
+var (
+	jobFactoryFrozen atomic.Bool
+	jobFactoryMu     sync.Mutex
+)
 
 type Creator func() inf.IMailboxJob
 type Getter func(inf.IMailboxJob) any
@@ -32,7 +35,6 @@ type jobEntry struct {
 	getter  Getter
 }
 
-// jobFactory 静态注册表，请勿在运行时修改
 var jobFactory = map[def.MailboxJobType]jobEntry{
 	def.MailboxJobTypeRpc: {
 		creator: func() inf.IMailboxJob { return NewRpcJob() },
@@ -70,9 +72,11 @@ func RegisterJobFactory(jobType def.MailboxJobType, creator Creator, getter Gett
 }
 
 // FreezeJobFactory 显式冻结 job factory 注册表。
+//
 // 推荐调用点：Node.Start 在用户 init 完成后、业务服务启动前。
 // 用途：避免"某个包先调用 CreateJob 触发隐式冻结导致其他 init 中的
 // RegisterJobFactory 失败"的 init 顺序依赖问题。
+//
 // 重复调用安全。
 func FreezeJobFactory() {
 	if jobFactoryFrozen.Load() {
@@ -83,15 +87,9 @@ func FreezeJobFactory() {
 	jobFactoryMu.Unlock()
 }
 
-// CreateJob 按类型创建一个 job。
-// 首次调用时冻结注册表，之后不再允许注册新类型。
-// 未注册则返回 (nil, false)。
+// CreateJob 按类型创建一个 job。首次调用时冻结注册表。未注册返回 (nil, false)。
 func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
-	if !jobFactoryFrozen.Load() {
-		jobFactoryMu.Lock()
-		jobFactoryFrozen.Store(true)
-		jobFactoryMu.Unlock()
-	}
+	freezeIfNeeded()
 	entry, ok := jobFactory[jobType]
 	if !ok {
 		return nil, false
@@ -99,15 +97,9 @@ func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
 	return entry.creator(), true
 }
 
-// GetJobPayload 根据 job 的类型获取其负载。
-// 返回值需要调用方根据 jobType 断言为具体类型。
-// 未注册的类型返回 nil。
+// GetJobPayload 根据 job 类型获取其负载（any 形式）。未注册返回 nil。
 func GetJobPayload(job inf.IMailboxJob) any {
-	if !jobFactoryFrozen.Load() {
-		jobFactoryMu.Lock()
-		jobFactoryFrozen.Store(true)
-		jobFactoryMu.Unlock()
-	}
+	freezeIfNeeded()
 	entry, ok := jobFactory[job.GetType()]
 	if !ok {
 		return nil
@@ -125,154 +117,92 @@ func GetJobPayloadAs[T any](job inf.IMailboxJob) T {
 	return payload.(T)
 }
 
-// ===============================================================
+func freezeIfNeeded() {
+	if !jobFactoryFrozen.Load() {
+		jobFactoryMu.Lock()
+		jobFactoryFrozen.Store(true)
+		jobFactoryMu.Unlock()
+	}
+}
 
-var msgJobPool pool.IPool[*RpcJob]
-var msgJobPoolOnce sync.Once
+// ===== 具体 Job 对象池 =====
+//
+// 所有 Job 子类型共享相同的"池接入模式"：Reset / Ref（CAS 标记 in-use）/
+// UnRef（CAS 释放 in-use，幂等保护双重 Release）。原本每个类型的 30 行
+// `pool.NewSyncPoolWrapper(...)` 样板被合并为下面单一 `newJobPool` 模板。
+
+// poolableJob 描述池中对象必须实现的协议。所有 Job 子类型通过组合
+// `Job[T]` 自动满足（Reset/Ref/UnRef 由 Job 与 dto.DataRef 提供）。
+type poolableJob interface {
+	Reset()
+	Ref()
+	UnRef() bool
+}
+
+func newJobPool[T poolableJob](name string, ctor func() T) pool.IPool[T] {
+	recorder := pool.NewSwitchableStatsRecorder(name, runtimeDebug.Load)
+	return pool.NewSyncPoolWrapper[T](
+		ctor,
+		recorder,
+		pool.WithReset[T](func(j T) { j.Reset() }),
+		pool.WithRef[T](func(j T) { j.Ref() }),
+		pool.WithUnRef[T](func(j T) bool { return j.UnRef() }),
+	)
+}
+
+// ===== 各 Job 类型的池单例 =====
+//
+// 池在首次使用时通过 sync.Once 懒加载，可被 init 间序无关地访问。
+// 使用 helper `newJobPool[T]` 后每个池仅 3 行。
+
+var (
+	msgJobPool     pool.IPool[*RpcJob]
+	msgJobPoolOnce sync.Once
+
+	eventBusJobPool     pool.IPool[*EventBusJob]
+	eventBusJobPoolOnce sync.Once
+
+	timerJobPool     pool.IPool[*TimerJob]
+	timerJobPoolOnce sync.Once
+
+	concurrentCallbackJobPool     pool.IPool[*ConcurrentCallbackJob]
+	concurrentCallbackJobPoolOnce sync.Once
+
+	sysCtlJobPool     pool.IPool[*SysCtlJob]
+	sysCtlJobPoolOnce sync.Once
+)
 
 func getMsgJobPool() pool.IPool[*RpcJob] {
 	msgJobPoolOnce.Do(func() {
-		msgJobPool = pool.NewSyncPoolWrapper[*RpcJob](
-			func() *RpcJob {
-				return &RpcJob{}
-			},
-			func() pool.IStatsRecorder {
-				if runtimeDebug.Load() {
-					return pool.NewStatsRecorder("MsgJobPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithReset[*RpcJob](func(j *RpcJob) {
-				j.Reset()
-			}),
-			pool.WithRef[*RpcJob](func(j *RpcJob) {
-				j.Ref()
-			}),
-			pool.WithUnRef[*RpcJob](func(j *RpcJob) bool {
-				return j.UnRef()
-			}),
-		)
+		msgJobPool = newJobPool[*RpcJob]("MsgJobPool", func() *RpcJob { return &RpcJob{} })
 	})
 	return msgJobPool
 }
 
-var eventBusJobPool pool.IPool[*EventBusJob]
-var eventBusJobPoolOnce sync.Once
-
 func getEventBusJobPool() pool.IPool[*EventBusJob] {
 	eventBusJobPoolOnce.Do(func() {
-		eventBusJobPool = pool.NewSyncPoolWrapper[*EventBusJob](
-			func() *EventBusJob {
-				return &EventBusJob{}
-			},
-			func() pool.IStatsRecorder {
-				if runtimeDebug.Load() {
-					return pool.NewStatsRecorder("EventBusJobPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithReset[*EventBusJob](func(j *EventBusJob) {
-				j.Reset()
-			}),
-			pool.WithRef[*EventBusJob](func(j *EventBusJob) {
-				j.Ref()
-			}),
-			pool.WithUnRef[*EventBusJob](func(j *EventBusJob) bool {
-				return j.UnRef()
-			}),
-		)
+		eventBusJobPool = newJobPool[*EventBusJob]("EventBusJobPool", func() *EventBusJob { return &EventBusJob{} })
 	})
 	return eventBusJobPool
 }
 
-var timerJobPool pool.IPool[*TimerJob]
-var timerJobPoolOnce sync.Once
-
 func getTimerJobPool() pool.IPool[*TimerJob] {
 	timerJobPoolOnce.Do(func() {
-		timerJobPool = pool.NewSyncPoolWrapper[*TimerJob](
-			func() *TimerJob {
-				return &TimerJob{}
-			},
-			func() pool.IStatsRecorder {
-				if runtimeDebug.Load() {
-					return pool.NewStatsRecorder("TimerJobPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithReset[*TimerJob](func(j *TimerJob) {
-				j.Reset()
-			}),
-			pool.WithRef[*TimerJob](func(j *TimerJob) {
-				j.Ref()
-			}),
-			pool.WithUnRef[*TimerJob](func(j *TimerJob) bool {
-				return j.UnRef()
-			}),
-		)
+		timerJobPool = newJobPool[*TimerJob]("TimerJobPool", func() *TimerJob { return &TimerJob{} })
 	})
 	return timerJobPool
 }
 
-var concurrentCallbackJobPool pool.IPool[*ConcurrentCallbackJob]
-var concurrentCallbackJobPoolOnce sync.Once
-
 func getConcurrentCallbackJobPool() pool.IPool[*ConcurrentCallbackJob] {
 	concurrentCallbackJobPoolOnce.Do(func() {
-		concurrentCallbackJobPool = pool.NewSyncPoolWrapper[*ConcurrentCallbackJob](
-			func() *ConcurrentCallbackJob {
-				return &ConcurrentCallbackJob{}
-			},
-			func() pool.IStatsRecorder {
-				if runtimeDebug.Load() {
-					return pool.NewStatsRecorder("ConcurrentCallbackJobPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithReset[*ConcurrentCallbackJob](func(j *ConcurrentCallbackJob) {
-				j.Reset()
-			}),
-			pool.WithRef[*ConcurrentCallbackJob](func(j *ConcurrentCallbackJob) {
-				j.Ref()
-			}),
-			pool.WithUnRef[*ConcurrentCallbackJob](func(j *ConcurrentCallbackJob) bool {
-				return j.UnRef()
-			}),
-		)
+		concurrentCallbackJobPool = newJobPool[*ConcurrentCallbackJob]("ConcurrentCallbackJobPool", func() *ConcurrentCallbackJob { return &ConcurrentCallbackJob{} })
 	})
 	return concurrentCallbackJobPool
 }
 
-var sysCtlJobPool pool.IPool[*SysCtlJob]
-var sysCtlJobPoolOnce sync.Once
-
 func getSysCtlJobPool() pool.IPool[*SysCtlJob] {
 	sysCtlJobPoolOnce.Do(func() {
-		sysCtlJobPool = pool.NewSyncPoolWrapper[*SysCtlJob](
-			func() *SysCtlJob {
-				return &SysCtlJob{}
-			},
-			func() pool.IStatsRecorder {
-				if runtimeDebug.Load() {
-					return pool.NewStatsRecorder("SysCtlJobPool")
-				} else {
-					return pool.NewNoStatsRecorder()
-				}
-			}(),
-			pool.WithReset[*SysCtlJob](func(j *SysCtlJob) {
-				j.Reset()
-			}),
-			pool.WithRef[*SysCtlJob](func(j *SysCtlJob) {
-				j.Ref()
-			}),
-			pool.WithUnRef[*SysCtlJob](func(j *SysCtlJob) bool {
-				return j.UnRef()
-			}),
-		)
+		sysCtlJobPool = newJobPool[*SysCtlJob]("SysCtlJobPool", func() *SysCtlJob { return &SysCtlJob{} })
 	})
 	return sysCtlJobPool
 }

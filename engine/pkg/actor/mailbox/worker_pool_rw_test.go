@@ -87,6 +87,27 @@ func (m *mockInvoker) ExecuteJob(_ context.Context, job inf.IMailboxJob) error {
 func (m *mockInvoker) EscalateFailure(_ context.Context, _ interface{}, _ inf.IMailboxJob) {}
 func (m *mockInvoker) OnJobDiscarded(_ inf.IMailboxJob, _ error)                           {}
 
+type panicDiscardInvoker struct{ mockInvoker }
+
+func (p *panicDiscardInvoker) OnJobDiscarded(inf.IMailboxJob, error) {
+	panic("discard panic")
+}
+
+func TestWorkerSafeNotifyJobDiscardedRecovers(t *testing.T) {
+	job := newRWJob(def.RWModeWrite, "discard-panic")
+	defer job.Release()
+
+	w := &Worker{
+		workerId: 1,
+		env: &WorkerEnv{
+			logger:  &testLogger{t: t},
+			invoker: &panicDiscardInvoker{},
+		},
+	}
+
+	w.safeNotifyJobDiscarded(job, def.ErrMailboxNotRunning)
+}
+
 // newRWJob 创建一个带 RWMode 标记的测试 Job
 func newRWJob(mode def.RWMode, key string) inf.IMailboxJob {
 	j := mbjob.NewEventBusJob()
@@ -239,11 +260,11 @@ func TestRW_StopWaitsForInflightReads(t *testing.T) {
 }
 
 // ============================================================================
-// 场景 3: SetRWEnabled 动态切换
-// 验证目标: 运行中关闭 RW → 新读降级串行，老读正常完成
+// 场景 3: SetRWEnabled 只支持运行时关闭，不支持动态开启
+// 验证目标: 运行中关闭 RW → 新读降级串行；再次开启返回显式错误，避免 nil readCh 静默丢读
 // ============================================================================
 
-func TestRW_SetRWEnabledDynamicSwitch(t *testing.T) {
+func TestRW_SetRWEnabledDisableOnly(t *testing.T) {
 	logger := &testLogger{t: t}
 	readDuration := 30 * time.Millisecond
 	invoker := &mockInvoker{name: "test-svc-3", readDelay: readDuration}
@@ -292,12 +313,12 @@ func TestRW_SetRWEnabledDynamicSwitch(t *testing.T) {
 		}
 	}
 
-	// 重新开启 RW 模式
-	if err := wp.SetRWEnabled(true); err != nil {
-		t.Fatalf("SetRWEnabled(true): %v", err)
+	// 不支持运行时动态开启 RW；RW 模式需要通过配置在 Worker 创建时启用。
+	if err := wp.SetRWEnabled(true); err != ErrRWDynamicEnableUnsupported {
+		t.Fatalf("SetRWEnabled(true) err = %v, want %v", err, ErrRWDynamicEnableUnsupported)
 	}
-	if !wp.IsRWEnabled() {
-		t.Fatal("expected RW enabled")
+	if wp.IsRWEnabled() {
+		t.Fatal("expected RW still disabled")
 	}
 
 	wp.Stop()
@@ -509,11 +530,18 @@ func TestRW_DrainInflightTimeout(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// 投递一些长耗时读（会超时）
+	// 投递一些长耗时读（会占满 readSem 并超时）
 	for i := 0; i < 4; i++ {
 		job := newRWJob(def.RWModeRead, fmt.Sprintf("key-%d", i%workers))
 		if err := wp.DispatchJob(job); err != nil {
 			t.Fatalf("dispatch read: %v", err)
+		}
+	}
+	// 继续投递残留读，覆盖 readPipeline 在 Stop 时等待 readSem 的场景。
+	for i := 4; i < 20; i++ {
+		job := newRWJob(def.RWModeRead, fmt.Sprintf("key-%d", i%workers))
+		if err := wp.DispatchJob(job); err != nil {
+			t.Fatalf("dispatch residual read: %v", err)
 		}
 	}
 	// 投递一些写（在读之后）

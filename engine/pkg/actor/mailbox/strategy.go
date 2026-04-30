@@ -1,8 +1,8 @@
 // Package mailbox
 // @Title  扩容策略
-// @Description  desc
+// @Description  定义 WorkerPool 扩缩容决策所需的策略接口与几种内置实现（根据队列长度 / 利用率等信息产出目标 worker 数）。
 // @Author  yr  2025/4/24
-// @Update  yr  2025/4/24
+// @Update  yr  2026/4/27
 package mailbox
 
 import (

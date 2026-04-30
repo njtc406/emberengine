@@ -17,13 +17,12 @@ import (
 type IMailbox interface {
 	IMailboxChannel
 	Start()
-	// BeginStop 发起停止（非阻塞）：停止接收新消息并唤醒 worker 退出。
+	// BeginStop 发起停止：停止接收新消息，按 mailbox 内部依赖顺序关闭后台流程并唤醒 worker 退出。
+	// 该调用允许阻塞等待关闭编排完成；真正的队列 drain 与 worker 退出由 Wait 等待。
 	BeginStop()
 	// Wait 等待 mailbox 完全停止（阻塞）。
 	Wait()
 	// Stop 便捷方法：BeginStop + Wait。
-	// TODO 这里的改造可能是多余的，stop不应该由service自身发起,应该由外部的管理器来发起,比如node的daemon服务,服务本身收到停止消息时，如果是
-	// TODO 基础服务，那么立即向daemon服务send一条kill自己的消息，这样可以精确控制只关闭某个服务，当然也可以直接向daemon发送一条定向关闭某服务消息
 	Stop()
 	Suspend() bool // 挂起邮箱, 邮箱挂起后, 不再接收紧急以下的任何消息
 	Resume() bool  // 恢复邮箱, 邮箱恢复后, 可以接收紧急以下的消息
@@ -31,7 +30,7 @@ type IMailbox interface {
 
 type IMailboxWorker interface {
 	Start()
-	// BeginStop 发起停止（非阻塞）：停止接收新消息并让 run 循环退出。
+	// BeginStop 发起停止：停止接收新消息并让 run 循环退出。
 	BeginStop()
 	// Wait 等待 worker 完全退出。
 	Wait()
@@ -79,7 +78,7 @@ type IMailboxJob interface {
 
 // IMailboxChannel 消息接口
 //
-// 资源契约（ADR-4 / P0-4 / P0-5）：
+// 资源契约：
 //   - PostJob 拥有 Job 的所有权：返回后调用方一律不得再持有 job，无论 err 是否为 nil。
 //   - 成功路径：由 Worker 执行完毕后 Release。
 //   - 失败路径（Suspended / Middleware Reject / Dispatch 失败）：由实现方在
@@ -98,7 +97,7 @@ type IMessageInvoker interface {
 	EscalateFailure(ctx context.Context, reason interface{}, job IMailboxJob)
 	// OnJobDiscarded 当 Job 不会被业务执行时回调，业务层可用于审计或释放关联资源。
 	//
-	// 触发时机（ADR-4 对称契约）：
+	// 触发时机：
 	//   - Drain 阶段（Stop/缩容）丢弃残留 Job；
 	//   - PostJob 早期拒绝：Mailbox suspended、Middleware Reject、DispatchJob 失败；
 	//   - Service 层早期拒绝：ReadOnly handler 自投递（ErrReadOnlyPostJob）。
@@ -115,8 +114,6 @@ type IListener interface {
 	IMailboxChannel
 	IServer
 }
-
-// ================TODO 下面这些还未验证===================
 
 type IMailboxStatistics interface {
 	GetPriorityQueueLen(priority def.Priority) int

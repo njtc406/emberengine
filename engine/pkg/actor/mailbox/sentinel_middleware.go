@@ -8,7 +8,9 @@ package mailbox
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
+	"sync/atomic"
 
 	sentinel "github.com/alibaba/sentinel-golang/api"
 	"github.com/alibaba/sentinel-golang/core/base"
@@ -30,9 +32,109 @@ var (
 	sentinelInitOnce sync.Once
 	sentinelInitErr  error
 
-	// sentinelSystemRulesOnce 确保 system rules 只加载一次（全局保护资源）
-	sentinelSystemRulesOnce sync.Once
+	// Sentinel 规则按中间件实例 owner 聚合加载。
+	// Sentinel SDK 的 LoadRulesOfResource 会替换该 resource 的旧规则，因此不能由
+	// 每个 SentinelMiddleware 实例直接覆盖式加载；Start/Stop 统一进入注册表，
+	// 对同一 resource 合并所有 owner 的规则后重新加载。
+	sentinelRuleOwnerSeq atomic.Uint64
+	sentinelRulesMu      sync.Mutex
+	sentinelFlowRules    = make(map[string]map[string][]*flow.Rule)
+	sentinelBreakerRules = make(map[string]map[string][]*circuitbreaker.Rule)
+	sentinelSystemRules  = make(map[string][]*system.Rule)
 )
+
+// reloadSentinelSystemRulesLocked 合并所有 service 的 system rules 后重新加载。
+// 必须在 sentinelRulesMu 持有时调用。
+//
+// 合并策略：按 (MetricType, Strategy, TriggerCount) 三元组去重；owner key 排序后
+// 顺序稳定，相同语义规则只保留一个。
+func reloadSentinelSystemRulesLocked(logger log.ILoggerX) {
+	type ruleKey struct {
+		metric   system.MetricType
+		strategy system.AdaptiveStrategy
+		trigger  float64
+	}
+	seen := make(map[ruleKey]struct{})
+	merged := make([]*system.Rule, 0, 8)
+	owners := sortedSystemRuleOwnersLocked()
+	for _, owner := range owners {
+		for _, r := range sentinelSystemRules[owner] {
+			k := ruleKey{r.MetricType, r.Strategy, r.TriggerCount}
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			merged = append(merged, r)
+		}
+	}
+	if _, err := system.LoadRules(merged); err != nil && logger != nil {
+		logger.Errorf("Sentinel reload system rules failed (owners=%d, merged=%d): %v",
+			len(sentinelSystemRules), len(merged), err)
+	}
+}
+
+func sortedSystemRuleOwnersLocked() []string {
+	owners := make([]string, 0, len(sentinelSystemRules))
+	for owner := range sentinelSystemRules {
+		owners = append(owners, owner)
+	}
+	sort.Strings(owners)
+	return owners
+}
+
+func sortedFlowRuleOwnersLocked(resource string) []string {
+	owners := make([]string, 0, len(sentinelFlowRules))
+	for owner, byResource := range sentinelFlowRules {
+		if len(byResource[resource]) > 0 {
+			owners = append(owners, owner)
+		}
+	}
+	sort.Strings(owners)
+	return owners
+}
+
+func sortedBreakerRuleOwnersLocked(resource string) []string {
+	owners := make([]string, 0, len(sentinelBreakerRules))
+	for owner, byResource := range sentinelBreakerRules {
+		if len(byResource[resource]) > 0 {
+			owners = append(owners, owner)
+		}
+	}
+	sort.Strings(owners)
+	return owners
+}
+
+func reloadSentinelFlowRulesLocked(resource string, logger log.ILoggerX) {
+	merged := make([]*flow.Rule, 0, 8)
+	for _, owner := range sortedFlowRuleOwnersLocked(resource) {
+		merged = append(merged, cloneFlowRulesForResource(sentinelFlowRules[owner][resource], resource)...)
+	}
+	if len(merged) == 0 {
+		if err := flow.ClearRulesOfResource(resource); err != nil && logger != nil {
+			logger.Warnf("Sentinel clear flow rules failed: resource=%s err=%v", resource, err)
+		}
+		return
+	}
+	if _, err := flow.LoadRulesOfResource(resource, merged); err != nil && logger != nil {
+		logger.Errorf("Sentinel load flow rules failed: resource=%s err=%v", resource, err)
+	}
+}
+
+func reloadSentinelBreakerRulesLocked(resource string, logger log.ILoggerX) {
+	merged := make([]*circuitbreaker.Rule, 0, 8)
+	for _, owner := range sortedBreakerRuleOwnersLocked(resource) {
+		merged = append(merged, cloneCircuitBreakerRulesForResource(sentinelBreakerRules[owner][resource], resource)...)
+	}
+	if len(merged) == 0 {
+		if err := circuitbreaker.ClearRulesOfResource(resource); err != nil && logger != nil {
+			logger.Warnf("Sentinel clear circuit breaker rules failed: resource=%s err=%v", resource, err)
+		}
+		return
+	}
+	if _, err := circuitbreaker.LoadRulesOfResource(resource, merged); err != nil && logger != nil {
+		logger.Errorf("Sentinel load circuit breaker rules failed: resource=%s err=%v", resource, err)
+	}
+}
 
 // SentinelMiddleware 基于阿里 Sentinel 的限流熔断中间件
 //
@@ -51,11 +153,14 @@ var (
 type SentinelMiddleware struct {
 	logger      log.ILoggerX
 	serviceName string
+	owner       string
 
 	// 配置
-	flowRules           []*flow.Rule
-	circuitBreakerRules []*circuitbreaker.Rule
-	systemRules         []*system.Rule
+	flowRules                     []*flow.Rule
+	circuitBreakerRules           []*circuitbreaker.Rule
+	flowRulesByResource           map[string][]*flow.Rule
+	circuitBreakerRulesByResource map[string][]*circuitbreaker.Rule
+	systemRules                   []*system.Rule
 
 	// 可选：跳过检查的条件
 	skipFunc func(mctx inf.IMiddlewareContext) bool
@@ -63,6 +168,11 @@ type SentinelMiddleware struct {
 	// 细粒度资源名生成器（可选）
 	// 默认使用 serviceName，可自定义为 serviceName + jobType 等
 	resourceFunc func(mctx inf.IMiddlewareContext) string
+
+	// 规则需要加载到的静态资源列表。默认仅 serviceName；当 resourceFunc 会返回
+	// serviceName 之外的资源（如 serviceName:jobType）时，必须在这里声明这些资源，
+	// 否则 Sentinel 的精确 resource 匹配不会命中规则。
+	ruleResources []string
 }
 
 // SentinelOption 配置选项
@@ -82,17 +192,33 @@ func WithSentinelLogger(logger log.ILoggerX) SentinelOption {
 //   - opts: 可选配置（控制行为等）
 func WithFlowRule(threshold float64, opts ...FlowRuleOption) SentinelOption {
 	return func(m *SentinelMiddleware) {
-		rule := &flow.Rule{
-			Resource:               m.serviceName,
-			TokenCalculateStrategy: flow.Direct,
-			ControlBehavior:        flow.Reject, // 默认直接拒绝
-			Threshold:              threshold,
-			StatIntervalInMs:       1000, // 1秒统计周期
-		}
-		for _, opt := range opts {
-			opt(rule)
-		}
-		m.flowRules = append(m.flowRules, rule)
+		m.flowRules = append(m.flowRules, newFlowRule(m.serviceName, threshold, opts...))
+	}
+}
+
+// WithResourceFlowRule 为指定 resource 添加流控规则。
+//
+// 与 WithResourceFunc 搭配使用时，应优先使用本选项表达细粒度规则，确保
+// Sentinel.Entry(resource) 与 LoadRulesOfResource(resource, rules) 精确匹配。
+func WithResourceFlowRule(resource string, threshold float64, opts ...FlowRuleOption) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		m.addFlowRulesForResource(resource, newFlowRule(resource, threshold, opts...))
+	}
+}
+
+// WithJobTypeFlowRule 为 serviceName:jobType 添加流控规则。
+func WithJobTypeFlowRule(jobType def.MailboxJobType, threshold float64, opts ...FlowRuleOption) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		resource := sentinelJobTypeResource(m.serviceName, jobType)
+		m.addFlowRulesForResource(resource, newFlowRule(resource, threshold, opts...))
+	}
+}
+
+// WithSentinelFlowRulesForResource 直接注册完整 flow.Rule 到指定 resource。
+// 传入规则会被复制，Resource 字段由 resource 参数统一覆盖。
+func WithSentinelFlowRulesForResource(resource string, rules ...*flow.Rule) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		m.addFlowRulesForResource(resource, rules...)
 	}
 }
 
@@ -122,15 +248,30 @@ func WithWarmUp(warmUpPeriodSec uint32, coldFactor uint32) FlowRuleOption {
 //   - errorRatioThreshold: 错误率阈值（0.0-1.0）
 func WithCircuitBreakerRule(errorRatioThreshold float64) SentinelOption {
 	return func(m *SentinelMiddleware) {
-		rule := &circuitbreaker.Rule{
-			Resource:         m.serviceName,
-			Strategy:         circuitbreaker.ErrorRatio,
-			RetryTimeoutMs:   5000,  // 熔断恢复时间 5s
-			MinRequestAmount: 10,    // 最小请求数
-			StatIntervalMs:   10000, // 统计周期 10s
-			Threshold:        errorRatioThreshold,
-		}
-		m.circuitBreakerRules = append(m.circuitBreakerRules, rule)
+		m.circuitBreakerRules = append(m.circuitBreakerRules, newCircuitBreakerRule(m.serviceName, circuitbreaker.ErrorRatio, errorRatioThreshold))
+	}
+}
+
+// WithResourceCircuitBreakerRule 为指定 resource 添加错误率熔断规则。
+func WithResourceCircuitBreakerRule(resource string, errorRatioThreshold float64) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		m.addCircuitBreakerRulesForResource(resource, newCircuitBreakerRule(resource, circuitbreaker.ErrorRatio, errorRatioThreshold))
+	}
+}
+
+// WithJobTypeCircuitBreakerRule 为 serviceName:jobType 添加错误率熔断规则。
+func WithJobTypeCircuitBreakerRule(jobType def.MailboxJobType, errorRatioThreshold float64) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		resource := sentinelJobTypeResource(m.serviceName, jobType)
+		m.addCircuitBreakerRulesForResource(resource, newCircuitBreakerRule(resource, circuitbreaker.ErrorRatio, errorRatioThreshold))
+	}
+}
+
+// WithSentinelCircuitBreakerRulesForResource 直接注册完整 circuitbreaker.Rule 到指定 resource。
+// 传入规则会被复制，Resource 字段由 resource 参数统一覆盖。
+func WithSentinelCircuitBreakerRulesForResource(resource string, rules ...*circuitbreaker.Rule) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		m.addCircuitBreakerRulesForResource(resource, rules...)
 	}
 }
 
@@ -141,16 +282,19 @@ func WithCircuitBreakerRule(errorRatioThreshold float64) SentinelOption {
 //   - maxAllowedRtMs: 慢调用 RT 阈值（毫秒）
 func WithSlowRatioRule(slowRatioThreshold float64, maxAllowedRtMs uint64) SentinelOption {
 	return func(m *SentinelMiddleware) {
-		rule := &circuitbreaker.Rule{
-			Resource:         m.serviceName,
-			Strategy:         circuitbreaker.SlowRequestRatio,
-			RetryTimeoutMs:   5000,
-			MinRequestAmount: 10,
-			StatIntervalMs:   10000,
-			MaxAllowedRtMs:   maxAllowedRtMs,
-			Threshold:        slowRatioThreshold,
-		}
+		rule := newCircuitBreakerRule(m.serviceName, circuitbreaker.SlowRequestRatio, slowRatioThreshold)
+		rule.MaxAllowedRtMs = maxAllowedRtMs
 		m.circuitBreakerRules = append(m.circuitBreakerRules, rule)
+	}
+}
+
+// WithJobTypeSlowRatioRule 为 serviceName:jobType 添加慢调用熔断规则。
+func WithJobTypeSlowRatioRule(jobType def.MailboxJobType, slowRatioThreshold float64, maxAllowedRtMs uint64) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		resource := sentinelJobTypeResource(m.serviceName, jobType)
+		rule := newCircuitBreakerRule(resource, circuitbreaker.SlowRequestRatio, slowRatioThreshold)
+		rule.MaxAllowedRtMs = maxAllowedRtMs
+		m.addCircuitBreakerRulesForResource(resource, rule)
 	}
 }
 
@@ -160,15 +304,15 @@ func WithSlowRatioRule(slowRatioThreshold float64, maxAllowedRtMs uint64) Sentin
 //   - errorCountThreshold: 错误数阈值
 func WithErrorCountRule(errorCountThreshold uint64) SentinelOption {
 	return func(m *SentinelMiddleware) {
-		rule := &circuitbreaker.Rule{
-			Resource:         m.serviceName,
-			Strategy:         circuitbreaker.ErrorCount,
-			RetryTimeoutMs:   5000,
-			MinRequestAmount: 10,
-			StatIntervalMs:   10000,
-			Threshold:        float64(errorCountThreshold),
-		}
-		m.circuitBreakerRules = append(m.circuitBreakerRules, rule)
+		m.circuitBreakerRules = append(m.circuitBreakerRules, newCircuitBreakerRule(m.serviceName, circuitbreaker.ErrorCount, float64(errorCountThreshold)))
+	}
+}
+
+// WithJobTypeErrorCountRule 为 serviceName:jobType 添加错误数熔断规则。
+func WithJobTypeErrorCountRule(jobType def.MailboxJobType, errorCountThreshold uint64) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		resource := sentinelJobTypeResource(m.serviceName, jobType)
+		m.addCircuitBreakerRulesForResource(resource, newCircuitBreakerRule(resource, circuitbreaker.ErrorCount, float64(errorCountThreshold)))
 	}
 }
 
@@ -222,13 +366,72 @@ func WithResourceFunc(fn func(mctx inf.IMiddlewareContext) string) SentinelOptio
 	}
 }
 
+// WithSentinelRuleResources 声明 flow / circuit breaker 规则要加载到的资源名。
+//
+// 当 WithResourceFunc 返回动态资源时，Sentinel 不会把 serviceName 规则自动应用到
+// 子资源；调用方应把所有可能的静态资源列在这里。serviceName 始终会被自动加入。
+func WithSentinelRuleResources(resources ...string) SentinelOption {
+	return func(m *SentinelMiddleware) {
+		m.ruleResources = append(m.ruleResources, resources...)
+	}
+}
+
+func newFlowRule(resource string, threshold float64, opts ...FlowRuleOption) *flow.Rule {
+	rule := &flow.Rule{
+		Resource:               resource,
+		TokenCalculateStrategy: flow.Direct,
+		ControlBehavior:        flow.Reject,
+		Threshold:              threshold,
+		StatIntervalInMs:       1000,
+	}
+	for _, opt := range opts {
+		opt(rule)
+	}
+	return rule
+}
+
+func newCircuitBreakerRule(resource string, strategy circuitbreaker.Strategy, threshold float64) *circuitbreaker.Rule {
+	return &circuitbreaker.Rule{
+		Resource:         resource,
+		Strategy:         strategy,
+		RetryTimeoutMs:   5000,
+		MinRequestAmount: 10,
+		StatIntervalMs:   10000,
+		Threshold:        threshold,
+	}
+}
+
+func (m *SentinelMiddleware) addFlowRulesForResource(resource string, rules ...*flow.Rule) {
+	if resource == "" {
+		return
+	}
+	m.ruleResources = append(m.ruleResources, resource)
+	for _, rule := range cloneFlowRulesForResource(rules, resource) {
+		m.flowRulesByResource[resource] = append(m.flowRulesByResource[resource], rule)
+	}
+}
+
+func (m *SentinelMiddleware) addCircuitBreakerRulesForResource(resource string, rules ...*circuitbreaker.Rule) {
+	if resource == "" {
+		return
+	}
+	m.ruleResources = append(m.ruleResources, resource)
+	for _, rule := range cloneCircuitBreakerRulesForResource(rules, resource) {
+		m.circuitBreakerRulesByResource[resource] = append(m.circuitBreakerRulesByResource[resource], rule)
+	}
+}
+
 // NewSentinelMiddleware 创建 Sentinel 中间件
 func NewSentinelMiddleware(serviceName string, opts ...SentinelOption) *SentinelMiddleware {
+	owner := fmt.Sprintf("%s#%d", serviceName, sentinelRuleOwnerSeq.Add(1))
 	m := &SentinelMiddleware{
-		serviceName:         serviceName,
-		flowRules:           make([]*flow.Rule, 0),
-		circuitBreakerRules: make([]*circuitbreaker.Rule, 0),
-		systemRules:         make([]*system.Rule, 0),
+		serviceName:                   serviceName,
+		owner:                         owner,
+		flowRules:                     make([]*flow.Rule, 0),
+		circuitBreakerRules:           make([]*circuitbreaker.Rule, 0),
+		flowRulesByResource:           make(map[string][]*flow.Rule),
+		circuitBreakerRulesByResource: make(map[string][]*circuitbreaker.Rule),
+		systemRules:                   make([]*system.Rule, 0),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -253,71 +456,176 @@ func (m *SentinelMiddleware) OnStart() {
 		return
 	}
 
-	// 加载流量控制规则（按资源加载，避免覆盖其他 Service 的规则）
-	if len(m.flowRules) > 0 {
-		// 更新资源名
-		for _, rule := range m.flowRules {
-			rule.Resource = m.serviceName
-		}
-		if _, err := flow.LoadRulesOfResource(m.serviceName, m.flowRules); err != nil {
-			if m.logger != nil {
-				m.logger.Errorf("Sentinel load flow rules failed: %v", err)
+	ruleResources := m.effectiveRuleResources()
+	if m.resourceFunc != nil && len(m.ruleResources) == 0 && (len(m.flowRules) > 0 || len(m.circuitBreakerRules) > 0) && m.logger != nil {
+		m.logger.Warnf("Sentinel resourceFunc is set for service=%s, but no rule resources were declared; rules only apply to resource=%s",
+			m.serviceName, m.serviceName)
+	}
+
+	// 加载流量控制规则：按 owner 注册，再按 resource 聚合重载。
+	if len(m.flowRules) > 0 || len(m.flowRulesByResource) > 0 {
+		byResource := make(map[string][]*flow.Rule, len(ruleResources))
+		for _, resource := range ruleResources {
+			rules := m.flowRulesForResource(resource)
+			if len(rules) == 0 {
+				continue
 			}
+			byResource[resource] = rules
+		}
+		if len(byResource) > 0 {
+			sentinelRulesMu.Lock()
+			sentinelFlowRules[m.owner] = byResource
+			for resource := range byResource {
+				reloadSentinelFlowRulesLocked(resource, m.logger)
+			}
+			sentinelRulesMu.Unlock()
 		}
 	}
 
-	// 加载熔断规则（按资源加载）
-	if len(m.circuitBreakerRules) > 0 {
-		for _, rule := range m.circuitBreakerRules {
-			rule.Resource = m.serviceName
-		}
-		if _, err := circuitbreaker.LoadRulesOfResource(m.serviceName, m.circuitBreakerRules); err != nil {
-			if m.logger != nil {
-				m.logger.Errorf("Sentinel load circuit breaker rules failed: %v", err)
+	// 加载熔断规则：按 owner 注册，再按 resource 聚合重载。
+	if len(m.circuitBreakerRules) > 0 || len(m.circuitBreakerRulesByResource) > 0 {
+		byResource := make(map[string][]*circuitbreaker.Rule, len(ruleResources))
+		for _, resource := range ruleResources {
+			rules := m.circuitBreakerRulesForResource(resource)
+			if len(rules) == 0 {
+				continue
 			}
+			byResource[resource] = rules
+		}
+		if len(byResource) > 0 {
+			sentinelRulesMu.Lock()
+			sentinelBreakerRules[m.owner] = byResource
+			for resource := range byResource {
+				reloadSentinelBreakerRulesLocked(resource, m.logger)
+			}
+			sentinelRulesMu.Unlock()
 		}
 	}
 
-	// 加载系统保护规则（全局资源，仅加载一次，避免多 Service 相互覆盖）
+	// 加载系统保护规则：合并到全局表后由 reload 重新整体加载
 	if len(m.systemRules) > 0 {
-		loaded := false
-		sentinelSystemRulesOnce.Do(func() {
-			if _, err := system.LoadRules(m.systemRules); err != nil {
-				if m.logger != nil {
-					m.logger.Errorf("Sentinel load system rules failed: %v", err)
-				}
-			}
-			loaded = true
-		})
-		if !loaded && m.logger != nil {
-			m.logger.Warnf("Sentinel system rules for service=%s were ignored: "+
-				"system rules have already been loaded by another service (sync.Once)", m.serviceName)
-		}
+		sentinelRulesMu.Lock()
+		sentinelSystemRules[m.owner] = m.systemRules
+		reloadSentinelSystemRulesLocked(m.logger)
+		sentinelRulesMu.Unlock()
 	}
 
 	if m.logger != nil {
-		m.logger.Infof("SentinelMiddleware started: service=%s, flowRules=%d, breakerRules=%d, systemRules=%d",
-			m.serviceName, len(m.flowRules), len(m.circuitBreakerRules), len(m.systemRules))
+		m.logger.Infof("SentinelMiddleware started: service=%s, resources=%d, flowRules=%d, breakerRules=%d, systemRules=%d",
+			m.serviceName, len(ruleResources), m.flowRuleCount(), m.circuitBreakerRuleCount(), len(m.systemRules))
 	}
 }
 
 func (m *SentinelMiddleware) OnStop() {
-	// 卸载流量控制规则（对称 OnStart 中的 LoadRulesOfResource）
-	if len(m.flowRules) > 0 {
-		if err := flow.ClearRulesOfResource(m.serviceName); err != nil && m.logger != nil {
-			m.logger.Warnf("Sentinel clear flow rules failed: %v", err)
+	ruleResources := m.effectiveRuleResources()
+	// 卸载流量控制规则：只移除本 owner，再按 resource 聚合重载剩余规则。
+	if len(m.flowRules) > 0 || len(m.flowRulesByResource) > 0 {
+		sentinelRulesMu.Lock()
+		delete(sentinelFlowRules, m.owner)
+		for _, resource := range ruleResources {
+			reloadSentinelFlowRulesLocked(resource, m.logger)
 		}
+		sentinelRulesMu.Unlock()
 	}
-	// 卸载熔断规则
-	if len(m.circuitBreakerRules) > 0 {
-		if err := circuitbreaker.ClearRulesOfResource(m.serviceName); err != nil && m.logger != nil {
-			m.logger.Warnf("Sentinel clear circuit breaker rules failed: %v", err)
+	// 卸载熔断规则：只移除本 owner，再按 resource 聚合重载剩余规则。
+	if len(m.circuitBreakerRules) > 0 || len(m.circuitBreakerRulesByResource) > 0 {
+		sentinelRulesMu.Lock()
+		delete(sentinelBreakerRules, m.owner)
+		for _, resource := range ruleResources {
+			reloadSentinelBreakerRulesLocked(resource, m.logger)
 		}
+		sentinelRulesMu.Unlock()
 	}
-	// system rules 全局共享，由 sync.Once 控制，OnStop 不卸载
+	// 移除本 owner 的 system rules 后重新合并加载。
+	if len(m.systemRules) > 0 {
+		sentinelRulesMu.Lock()
+		delete(sentinelSystemRules, m.owner)
+		reloadSentinelSystemRulesLocked(m.logger)
+		sentinelRulesMu.Unlock()
+	}
 	if m.logger != nil {
 		m.logger.Infof("SentinelMiddleware stopped: service=%s", m.serviceName)
 	}
+}
+
+func (m *SentinelMiddleware) effectiveRuleResources() []string {
+	seen := make(map[string]struct{}, len(m.ruleResources)+len(m.flowRulesByResource)+len(m.circuitBreakerRulesByResource)+1)
+	resources := make([]string, 0, len(m.ruleResources)+1)
+	add := func(resource string) {
+		if resource == "" {
+			return
+		}
+		if _, ok := seen[resource]; ok {
+			return
+		}
+		seen[resource] = struct{}{}
+		resources = append(resources, resource)
+	}
+	add(m.serviceName)
+	for _, resource := range m.ruleResources {
+		add(resource)
+	}
+	for resource := range m.flowRulesByResource {
+		add(resource)
+	}
+	for resource := range m.circuitBreakerRulesByResource {
+		add(resource)
+	}
+	return resources
+}
+
+func (m *SentinelMiddleware) flowRulesForResource(resource string) []*flow.Rule {
+	rules := cloneFlowRulesForResource(m.flowRules, resource)
+	rules = append(rules, cloneFlowRulesForResource(m.flowRulesByResource[resource], resource)...)
+	return rules
+}
+
+func (m *SentinelMiddleware) circuitBreakerRulesForResource(resource string) []*circuitbreaker.Rule {
+	rules := cloneCircuitBreakerRulesForResource(m.circuitBreakerRules, resource)
+	rules = append(rules, cloneCircuitBreakerRulesForResource(m.circuitBreakerRulesByResource[resource], resource)...)
+	return rules
+}
+
+func (m *SentinelMiddleware) flowRuleCount() int {
+	total := len(m.flowRules)
+	for _, rules := range m.flowRulesByResource {
+		total += len(rules)
+	}
+	return total
+}
+
+func (m *SentinelMiddleware) circuitBreakerRuleCount() int {
+	total := len(m.circuitBreakerRules)
+	for _, rules := range m.circuitBreakerRulesByResource {
+		total += len(rules)
+	}
+	return total
+}
+
+func cloneFlowRulesForResource(rules []*flow.Rule, resource string) []*flow.Rule {
+	out := make([]*flow.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		cloned := *rule
+		cloned.Resource = resource
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func cloneCircuitBreakerRulesForResource(rules []*circuitbreaker.Rule, resource string) []*circuitbreaker.Rule {
+	out := make([]*circuitbreaker.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		cloned := *rule
+		cloned.Resource = resource
+		out = append(out, &cloned)
+	}
+	return out
 }
 
 func (m *SentinelMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.MiddlewareResult {
@@ -345,6 +653,14 @@ func (m *SentinelMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Middlewa
 }
 
 func (m *SentinelMiddleware) OnComplete(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
+	m.exitEntry(mctx, err, panicVal)
+}
+
+func (m *SentinelMiddleware) OnFrameworkCleanup(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
+	m.exitEntry(mctx, err, panicVal)
+}
+
+func (m *SentinelMiddleware) exitEntry(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
 	entryVal, ok := mctx.Get("sentinel_entry")
 	if !ok {
 		return
@@ -393,16 +709,43 @@ func NewSimpleSentinelMiddleware(serviceName string, qps float64, errorRatio flo
 
 // NewSentinelMiddlewareWithJobType 创建按 JobType 细分的 Sentinel 中间件
 //
-// 不同类型的 Job 使用不同的资源名，可以分别配置限流规则
+// 不同类型的 Job 使用不同的资源名，可以分别配置限流规则。
+// 内置 JobType 会自动声明为 rule resource；业务自定义 MailboxJobType 不在
+// 内置列表内，需要额外使用 WithSentinelRuleResources / WithResourceFlowRule /
+// WithSentinelFlowRulesForResource 等选项显式注册对应 resource。
 func NewSentinelMiddlewareWithJobType(serviceName string, opts ...SentinelOption) *SentinelMiddleware {
-	allOpts := append(opts, WithResourceFunc(func(mctx inf.IMiddlewareContext) string {
-		job := mctx.Job()
-		if job != nil {
-			return fmt.Sprintf("%s:%d", serviceName, job.GetType())
-		}
-		return serviceName
-	}))
+	allOpts := append([]SentinelOption{}, opts...)
+	allOpts = append(allOpts,
+		WithSentinelRuleResources(sentinelJobTypeResources(serviceName)...),
+		WithResourceFunc(func(mctx inf.IMiddlewareContext) string {
+			job := mctx.Job()
+			if job != nil {
+				return sentinelJobTypeResource(serviceName, job.GetType())
+			}
+			return serviceName
+		}),
+	)
 	return NewSentinelMiddleware(serviceName, allOpts...)
+}
+
+func sentinelJobTypeResource(serviceName string, jobType def.MailboxJobType) string {
+	return fmt.Sprintf("%s:%d", serviceName, jobType)
+}
+
+func sentinelJobTypeResources(serviceName string) []string {
+	jobTypes := []def.MailboxJobType{
+		def.MailboxJobTypeNone,
+		def.MailboxJobTypeRpc,
+		def.MailboxJobTypeEvent,
+		def.MailboxJobTypeTimer,
+		def.MailboxJobTypeConcurrentCallback,
+		def.MailboxJobTypeSysCtl,
+	}
+	resources := make([]string, 0, len(jobTypes))
+	for _, jobType := range jobTypes {
+		resources = append(resources, sentinelJobTypeResource(serviceName, jobType))
+	}
+	return resources
 }
 
 // ========== 默认跳过函数 ==========

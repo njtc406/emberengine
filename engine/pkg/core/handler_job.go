@@ -186,13 +186,26 @@ func (s *Service) handleSysCtlJob(ctx context.Context, cmd dto.SysCmd) error {
 	return s.handleSysCtl(ctx, cmd)
 }
 
-// handleSysCtl 处理系统控制命令
+// handleSysCtl 处理系统控制命令。
+// 命令通过 SysCtlRegistry 分发：
+//   - 内置命令：mailbox.suspend / mailbox.resume / service.healthcheck（见 sysctl_registry.go）；
+//   - 自定义命令：通过 Service.RegisterSysCtl(name, handler) 注册；
+//   - 未注册命令：仅记录 WARN，不返回错误（避免投递方因命令名拼写错误触发上层级联失败）。
 func (s *Service) handleSysCtl(ctx context.Context, cmd dto.SysCmd) error {
-	s.WithContext(ctx).Infof("sys ctl cmd: %s", cmd.Cmd)
-	// TODO 这里需要实现：依然需要一个注册中心来管理这些系统控制命令
-	// 1. mailbox的挂起/恢复控制
-	// 2. health check 控制
-	// 3. 其他系统控制命令
+	s.WithContext(ctx).Infof("sys ctl cmd: %s args=%v", cmd.Cmd, cmd.Args)
+	if s.sysCtlRegistry == nil {
+		s.WithContext(ctx).Warnf("sysctl registry not initialized, drop cmd=%s", cmd.Cmd)
+		return nil
+	}
+	handler, ok := s.sysCtlRegistry.lookup(cmd.Cmd)
+	if !ok {
+		s.WithContext(ctx).Warnf("sysctl cmd not registered: %s", cmd.Cmd)
+		return nil
+	}
+	if err := handler(ctx, cmd.Args); err != nil {
+		s.WithContext(ctx).Errorf("sysctl cmd[%s] handler error: %v", cmd.Cmd, err)
+		return err
+	}
 	return nil
 }
 

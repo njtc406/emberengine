@@ -8,6 +8,8 @@ package mailbox
 import (
 	"time"
 
+	"github.com/alibaba/sentinel-golang/core/circuitbreaker"
+
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
@@ -18,15 +20,20 @@ import (
 //
 // 参数：
 //   - conf: 邮箱配置
+//   - serviceName: 服务名（用于 Sentinel 资源标识；空字符串退化为 "mailbox"）
 //   - logger: 日志器
 //   - isDebug: 是否为 debug 模式
 //
 // 返回：
 //   - 中间件列表
-func CreateMiddlewaresFromConfig(conf *config.MailboxConf, logger log.ILoggerX, isDebug bool) []inf.IMailboxMiddleware {
+func CreateMiddlewaresFromConfig(conf *config.MailboxConf, serviceName string, logger log.ILoggerX, isDebug bool) []inf.IMailboxMiddleware {
 	if conf == nil || conf.MiddlewareConf == nil {
 		// 没有配置中间件，使用默认配置
 		return createDefaultMiddlewares(logger, isDebug)
+	}
+
+	if serviceName == "" {
+		serviceName = "mailbox"
 	}
 
 	mconf := conf.MiddlewareConf
@@ -46,7 +53,59 @@ func CreateMiddlewaresFromConfig(conf *config.MailboxConf, logger log.ILoggerX, 
 		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, interval, topN, maxKeys))
 	}
 
-	// 2. 限流中间件
+	// 2. 熔断中间件：配置统一映射为 Sentinel circuit breaker，资源名 = serviceName。
+	//
+	// 顺序契约：CB 排在 RateLimit 之前。RateLimit.OnReceive() 调用 limiter.Allow()
+	// 即消费 token，若链下游拒绝则 token 浪费 → 限流口径偏严；CB Open 时直接 Reject，
+	// 不再走到 RateLimit。
+	//
+	// CircuitBreakerConf 映射为 Sentinel `circuitbreaker.Rule`：
+	//   - FailureThreshold ≥ 1   → ErrorCount 策略，Threshold = MinRequestAmount = 该值
+	//   - CooldownDuration > 0   → RetryTimeoutMs
+	//   - WindowDuration   > 0   → StatIntervalMs
+	//   - SuccessThreshold / HalfOpenMaxAllowed: Sentinel 半开行为内置（单试探请求决定恢复），
+	//     不再单独配置；如需更复杂规则请直接通过用户中间件添加 SentinelMiddleware。
+	//
+	// 注意：与已注册的 SentinelMiddleware（用户自定义）共享同一资源名时，规则将合并加载。
+	if mconf.CircuitBreakerConf != nil && mconf.CircuitBreakerConf.Enable {
+		cconf := mconf.CircuitBreakerConf
+		failureThreshold := cconf.FailureThreshold
+		if failureThreshold <= 0 {
+			failureThreshold = 5
+		}
+
+		retryTimeoutMs := uint32(30000)
+		if cconf.CooldownDuration > 0 {
+			retryTimeoutMs = uint32(cconf.CooldownDuration / time.Millisecond)
+			if retryTimeoutMs == 0 {
+				retryTimeoutMs = 1
+			}
+		}
+		statIntervalMs := uint32(60000)
+		if cconf.WindowDuration > 0 {
+			statIntervalMs = uint32(cconf.WindowDuration / time.Millisecond)
+			if statIntervalMs == 0 {
+				statIntervalMs = 1
+			}
+		}
+
+		cbRule := &circuitbreaker.Rule{
+			Resource:         serviceName,
+			Strategy:         circuitbreaker.ErrorCount,
+			RetryTimeoutMs:   retryTimeoutMs,
+			MinRequestAmount: uint64(failureThreshold),
+			StatIntervalMs:   statIntervalMs,
+			Threshold:        float64(failureThreshold),
+		}
+
+		sm := NewSentinelMiddleware(serviceName,
+			WithSentinelLogger(logger),
+			func(m *SentinelMiddleware) { m.circuitBreakerRules = append(m.circuitBreakerRules, cbRule) },
+		)
+		middlewares = append(middlewares, sm)
+	}
+
+	// 3. 限流中间件放在最后：上游已 Reject 时不会走到这里，token 才不浪费。
 	if mconf.RateLimitConf != nil && mconf.RateLimitConf.Enable {
 		rconf := mconf.RateLimitConf
 		rate := rconf.Rate
@@ -70,35 +129,6 @@ func CreateMiddlewaresFromConfig(conf *config.MailboxConf, logger log.ILoggerX, 
 		}
 
 		middlewares = append(middlewares, NewRateLimitMiddleware(rate, burst, opts...))
-	}
-
-	// 3. 熔断中间件
-	if mconf.CircuitBreakerConf != nil && mconf.CircuitBreakerConf.Enable {
-		cconf := mconf.CircuitBreakerConf
-		failureThreshold := cconf.FailureThreshold
-		if failureThreshold <= 0 {
-			failureThreshold = 5
-		}
-		successThreshold := cconf.SuccessThreshold
-		if successThreshold <= 0 {
-			successThreshold = 3
-		}
-
-		opts := []CircuitBreakerOption{
-			WithCircuitBreakerLogger(logger),
-		}
-
-		if cconf.CooldownDuration > 0 {
-			opts = append(opts, WithCooldownDuration(cconf.CooldownDuration))
-		}
-		if cconf.WindowDuration > 0 {
-			opts = append(opts, WithWindowDuration(cconf.WindowDuration))
-		}
-		if cconf.HalfOpenMaxAllowed > 0 {
-			opts = append(opts, WithHalfOpenMaxAllowed(cconf.HalfOpenMaxAllowed))
-		}
-
-		middlewares = append(middlewares, NewCircuitBreakerMiddleware(failureThreshold, successThreshold, opts...))
 	}
 
 	return middlewares

@@ -7,6 +7,7 @@ package mailbox
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +24,7 @@ import (
 
 // MiddlewareContext 是 IMiddlewareContext 的默认实现。
 //
-// 并发契约（P1-5）：
+// 并发契约：
 //   - OnReceive 阶段：在调用方调用 PostJob 的 goroutine 内串行执行；
 //   - OnComplete 阶段：在 worker goroutine 中串行执行；
 //   - 跨阶段之间的 happens-before 由 mpsc 队列的 atomic 操作建立。
@@ -116,9 +117,14 @@ func (c *MiddlewareContext) Elapsed() time.Duration {
 // 使用 atomic.Pointer + Copy-on-Write 实现中间件列表管理，
 // 消除热路径上的 RWMutex 开销。
 type MiddlewareChain struct {
-	mws     atomic.Pointer[[]inf.IMailboxMiddleware] // COW 列表
-	mu      sync.Mutex                               // 仅保护写操作（Add/Remove）
-	ctxPool pool.IPool[*MiddlewareContext]           // 实例级池，per-Service 独立
+	mws          atomic.Pointer[[]inf.IMailboxMiddleware] // COW 列表
+	mu           sync.Mutex                               // 仅保护写操作（Add/Remove）
+	ctxPool      pool.IPool[*MiddlewareContext]           // 实例级池，per-Service 独立
+	panicHandler func(phase, middleware string, mctx inf.IMiddlewareContext, panicVal interface{})
+}
+
+type frameworkCleanupMiddleware interface {
+	OnFrameworkCleanup(mctx inf.IMiddlewareContext, err error, panicVal interface{})
 }
 
 // NewMiddlewareChain 创建中间件链
@@ -141,7 +147,7 @@ func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain 
 			mc.executed.Store(0)
 			mc.middlewareSnapshot = nil
 			mc.startTime = time.Time{}
-			// 【P1-5】sync.Pool Put/Get 已提供 happens-before，无需 mutex。
+			// sync.Pool Put/Get 已提供 happens-before，无需 mutex。
 			// 如果 map 扩容过大，直接重建以释放底层哈希桶内存
 			const maxRetainKeys = 64
 			if len(mc.data) > maxRetainKeys {
@@ -154,6 +160,21 @@ func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain 
 		}),
 	)
 	return c
+}
+
+func (c *MiddlewareChain) SetPanicHandler(handler func(phase, middleware string, mctx inf.IMiddlewareContext, panicVal interface{})) {
+	c.panicHandler = handler
+}
+
+func (c *MiddlewareChain) handlePanic(phase string, middleware inf.IMailboxMiddleware, mctx inf.IMiddlewareContext, panicVal interface{}) {
+	if c.panicHandler == nil {
+		return
+	}
+	name := "<nil>"
+	if middleware != nil {
+		name = middleware.Name()
+	}
+	c.panicHandler(phase, name, mctx, panicVal)
 }
 
 // Add 添加中间件（COW：创建新切片存储）
@@ -203,13 +224,17 @@ func (c *MiddlewareChain) ExecuteOnReceive(job inf.IMailboxJob, serviceName stri
 	mctx.middlewareSnapshot = middlewares
 
 	for i, m := range middlewares {
-		result := m.OnReceive(mctx)
+		result, panicVal := c.safeOnReceive(m, mctx)
+		if panicVal != nil {
+			mctx.executed.Store(int32(i + 1))
+			return dto.Reject(fmt.Errorf("mailbox middleware %s OnReceive panic: %v", m.Name(), panicVal)), mctx
+		}
 		switch result.Action {
 		case def.ActionReject:
 			mctx.executed.Store(int32(i + 1))
 			return result, mctx
 		case def.ActionSkip:
-			// 仅执行到当前中间件为止（包含当前），跳过后续中间件。
+			// 仅执行到当前中间件为止（包含当前），跳过剩余中间件。
 			mctx.executed.Store(int32(i + 1))
 			return dto.Continue(), mctx
 		case def.ActionContinue:
@@ -218,6 +243,17 @@ func (c *MiddlewareChain) ExecuteOnReceive(job inf.IMailboxJob, serviceName stri
 	}
 	mctx.executed.Store(int32(len(middlewares)))
 	return dto.Continue(), mctx
+}
+
+func (c *MiddlewareChain) safeOnReceive(m inf.IMailboxMiddleware, mctx inf.IMiddlewareContext) (result dto.MiddlewareResult, panicVal interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicVal = r
+			c.handlePanic("OnReceive", m, mctx, r)
+			result = dto.Reject(fmt.Errorf("mailbox middleware panic: %v", r))
+		}
+	}()
+	return m.OnReceive(mctx), nil
 }
 
 // ExecuteOnComplete 执行所有中间件的 OnComplete（逆序）
@@ -241,7 +277,7 @@ func (c *MiddlewareChain) ExecuteOnComplete(mctx inf.IMiddlewareContext, err err
 		}
 	}
 	for i := end - 1; i >= 0; i-- {
-		middlewares[i].OnComplete(mctx, err, panicVal)
+		c.safeOnComplete(middlewares[i], mctx, err, panicVal)
 	}
 
 	// 归还到池
@@ -250,8 +286,17 @@ func (c *MiddlewareChain) ExecuteOnComplete(mctx inf.IMiddlewareContext, err err
 	}
 }
 
+func (c *MiddlewareChain) safeOnComplete(m inf.IMailboxMiddleware, mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.handlePanic("OnComplete", m, mctx, r)
+		}
+	}()
+	m.OnComplete(mctx, err, panicVal)
+}
+
 // ReturnContext 仅归还 mctx 到池，不执行任何中间件回调。
-// 用于 rwUnsafe drain 路径：需要回收资源但不能安全执行 OnComplete。
+// 用于不需要回调的内部回收路径。
 func (c *MiddlewareChain) ReturnContext(mctx inf.IMiddlewareContext) {
 	if mctx == nil {
 		return
@@ -261,11 +306,51 @@ func (c *MiddlewareChain) ReturnContext(mctx inf.IMiddlewareContext) {
 	}
 }
 
+// ExecuteFrameworkCleanup 只执行中间件声明的框架资源清理，不调用普通 OnComplete。
+// 用于 rwUnsafe drain 路径：避免业务中间件回写共享状态，同时释放 Sentinel entry 等框架资源。
+func (c *MiddlewareChain) ExecuteFrameworkCleanup(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
+	if mctx == nil {
+		return
+	}
+	var middlewares []inf.IMailboxMiddleware
+	mc, ok := mctx.(*MiddlewareContext)
+	if ok && mc.middlewareSnapshot != nil {
+		middlewares = mc.middlewareSnapshot
+	} else {
+		middlewares = *c.mws.Load()
+	}
+	end := len(middlewares)
+	if ok {
+		if n := int(mc.executed.Load()); n >= 0 && n <= len(middlewares) {
+			end = n
+		}
+	}
+	for i := end - 1; i >= 0; i-- {
+		cleanup, cleanupOK := middlewares[i].(frameworkCleanupMiddleware)
+		if !cleanupOK {
+			continue
+		}
+		c.safeFrameworkCleanup(cleanup, middlewares[i], mctx, err, panicVal)
+	}
+	if ok {
+		c.ctxPool.Put(mc)
+	}
+}
+
+func (c *MiddlewareChain) safeFrameworkCleanup(cleanup frameworkCleanupMiddleware, m inf.IMailboxMiddleware, mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.handlePanic("OnFrameworkCleanup", m, mctx, r)
+		}
+	}()
+	cleanup.OnFrameworkCleanup(mctx, err, panicVal)
+}
+
 // Start 启动所有中间件
 func (c *MiddlewareChain) Start() {
 	middlewares := *c.mws.Load()
 	for _, m := range middlewares {
-		m.OnStart()
+		c.safeLifecycle("OnStart", m)
 	}
 }
 
@@ -274,8 +359,21 @@ func (c *MiddlewareChain) Stop() {
 	middlewares := *c.mws.Load()
 	// 逆序停止
 	for i := len(middlewares) - 1; i >= 0; i-- {
-		middlewares[i].OnStop()
+		c.safeLifecycle("OnStop", middlewares[i])
 	}
+}
+
+func (c *MiddlewareChain) safeLifecycle(phase string, m inf.IMailboxMiddleware) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.handlePanic(phase, m, nil, r)
+		}
+	}()
+	if phase == "OnStart" {
+		m.OnStart()
+		return
+	}
+	m.OnStop()
 }
 
 // Middlewares 获取中间件列表（用于调试）

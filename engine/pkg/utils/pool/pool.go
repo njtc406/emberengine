@@ -51,7 +51,11 @@ func (r *PoolStatsRegistry) GetStats() string {
 	sort.Strings(names)
 	stats := make([]string, 0, len(names))
 	for _, name := range names {
-		stats = append(stats, r.states[name].String())
+		stat := r.states[name].String()
+		if stat == "" {
+			continue
+		}
+		stats = append(stats, stat)
 	}
 	r.mu.RUnlock()
 	return fmt.Sprintf("%s", strings.Join(stats, "\n"))

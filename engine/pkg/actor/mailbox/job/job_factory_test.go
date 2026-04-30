@@ -51,6 +51,10 @@ func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
 	resetFactoryFrozenForTest()
 	const customType def.MailboxJobType = 10001
 	const customType1 def.MailboxJobType = 10002
+	t.Cleanup(func() {
+		unregisterFactoryForTest(customType)
+		unregisterFactoryForTest(customType1)
+	})
 
 	creator1 := func() inf.IMailboxJob { return &TestJob{} }
 	creator2 := func() inf.IMailboxJob { return &Test1Job{} }
@@ -75,4 +79,22 @@ func TestRegisterJobFactory_DuplicateAndReplace(t *testing.T) {
 		t.Fatalf("expected job for custom type1")
 	}
 	job1.Release()
+}
+
+func TestJobPoolDebugCanBeEnabledAfterPoolInit(t *testing.T) {
+	SetDebug(false)
+	j := NewRpcJob()
+	j.Release()
+
+	SetDebug(true)
+	defer SetDebug(false)
+
+	before := getMsgJobPool().Stats()
+	j = NewRpcJob()
+	j.Release()
+	after := getMsgJobPool().Stats()
+
+	if after.HitCount+after.MissCount <= before.HitCount+before.MissCount {
+		t.Fatalf("expected debug stats to count after SetDebug(true), before=%+v after=%+v", before, after)
+	}
 }

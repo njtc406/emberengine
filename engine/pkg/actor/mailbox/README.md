@@ -72,16 +72,11 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 - `AutoScalerStrategy`：给定当前所有 worker 的状态，判断是否需要扩容或缩容；
 - `AutoScaler`：基于策略结果、最小/最大 worker 数和冷却时间，计算新的 worker 数量。
 
-当前版本中：
+WorkerPool 通过统一调度循环触发扩缩容：
 
-- WorkerPool 内部通过一个 goroutine 定期（`ResizeCoolDown` 间隔）拉取 worker 状态并调用 `AutoScaler.ShouldResize`；
-- 所有策略共享同一个检查周期，属于“拉模式”（polling）。
-
-未来演进方向：
-
-- 将“触发时机”抽离为独立调度器（scheduler）：
-  - 自动模式：scheduler 使用 `time.Ticker` 等方式周期性调用统一的检查入口；
-  - 手动模式：外部代码在需要时显式调用检查入口（例如管理命令、监控告警）。
+- 定时触发：按 `ResizeCoolDown` 间隔拉取 worker 状态并调用 `AutoScaler.ShouldResize`；
+- 事件触发：当入队采样发现负载变化时唤醒调度循环，仍由 `AutoScaler.ShouldResize` 做最终决策；
+- 所有策略共享同一个决策入口，避免定时触发和事件触发产生两套扩缩容语义。
 
 ## 中间件与挂起机制
 
@@ -92,22 +87,46 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
   - **入队前（OnReceive）**：在 `Mailbox.PostMessage` 中调用 `middlewareChain.ExecuteOnReceive`，按注册顺序依次执行。
   - **处理后（OnComplete）**：在 `Worker.safeExec` 的 defer 中调用 `middlewareChain.ExecuteOnComplete`，按逆序执行（洋葱模型）。
 - `OnReceive` 的返回值决定是否入队：
-  - `Continue()`：继续执行后续中间件，最终入队。
+  - `Continue()`：继续执行剩余中间件，最终入队。
   - `Reject(err)`：拒绝消息入队，`PostMessage` 直接返回该错误。
-  - `Skip()`：跳过后续中间件，直接入队（用于快速路径）。
+  - `Skip()`：跳过剩余中间件，直接入队（用于快速路径）。
 - 回调一致性：
   - 只有当消息最终成功入队并被 worker 执行后，才会触发 `OnComplete`。
   - `OnComplete` 仅对实际执行过 `OnReceive` 的中间件回调。
+- panic 隔离：
+  - `MiddlewareChain` 会 recover `OnReceive` / `OnComplete` / `OnStart` / `OnStop` 中的 panic；
+  - `OnReceive` panic 会转换为 Reject error，走正常拒绝与 Job 释放流程；
+  - `OnComplete` panic 会被记录，并继续执行剩余中间件，确保 context 归池。
 
 #### 内置中间件
 
 - `DispatchKeyStatsMiddleware`：debug 辅助，统计 dispatcherKey 热点与 TopN（仅 debug 模式可配置启用）。
 - `RateLimitMiddleware`：基于令牌桶的入队限流，支持配置跳过紧急消息。
-- `CircuitBreakerMiddleware`：基于失败次数的熔断（Closed/Open/HalfOpen），在 `OnComplete` 根据执行结果推进状态。
+- `SentinelMiddleware`：基于 Sentinel 的限流 / 熔断 / 系统保护；配置中的 CircuitBreakerConf 会映射到 Sentinel circuit breaker。
+
+#### Sentinel 细粒度 resource
+
+Sentinel 按 resource 精确匹配规则。默认 resource 是 serviceName；如需按 JobType 限流或熔断，请使用 `NewSentinelMiddlewareWithJobType`，它会把运行时入口映射为 `serviceName:jobType`，并自动声明所有内置 JobType resource。
+
+```go
+mw := NewSentinelMiddlewareWithJobType("battle",
+  WithJobTypeFlowRule(def.MailboxJobTypeRpc, 1000),
+  WithJobTypeFlowRule(def.MailboxJobTypeTimer, 100),
+  WithJobTypeErrorCountRule(def.MailboxJobTypeRpc, 20),
+)
+```
+
+- `WithFlowRule` / `WithCircuitBreakerRule` 表示默认规则，会复制到 serviceName 与已声明的细粒度 resource。
+- `WithResourceFlowRule` / `WithResourceCircuitBreakerRule` 可直接给任意自定义 resource 注册规则。
+- `WithSentinelFlowRulesForResource` / `WithSentinelCircuitBreakerRulesForResource` 可传入完整 Sentinel 原生规则。
+- 若直接使用 `WithResourceFunc` 自定义动态 resource，应同时用 `WithSentinelRuleResources` 声明所有可能的静态 resource；否则启动时会打印 warn，提示规则只会作用于 serviceName。
+- 自定义 `MailboxJobType` 不会被 `NewSentinelMiddlewareWithJobType` 自动枚举；需要额外使用 `WithSentinelRuleResources("battle:1001")`，或直接用 `WithResourceFlowRule("battle:1001", ...)` / `WithSentinelFlowRulesForResource("battle:1001", ...)` 注册规则。
+
+在 `NewSentinelMiddlewareWithJobType` 下，serviceName 和每个声明的 JobType resource 都会独立计算 QPS / 熔断阈值。若期望整个 service 共享总 QPS，请使用 `NewSentinelMiddleware(serviceName, WithFlowRule(...))`，不要启用 JobType 细粒度 resource。
 
 #### 启用方式：配置 + 自定义合并
 
-- 从配置创建：使用 `CreateMiddlewaresFromConfig(conf, logger, isDebug)` 生成中间件列表。
+- 从配置创建：使用 `CreateMiddlewaresFromConfig(conf, serviceName, logger, isDebug)` 生成中间件列表。
 - 自定义注入：将你实现的 `IMailboxMiddleware` 放入 `customMiddlewares`。
 - 推荐：用 `MergeMiddlewares(configMiddlewares, customMiddlewares)` 合并（配置在前，自定义在后），然后传给 `NewMailbox`。
 
@@ -137,11 +156,20 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 
 4. **扩缩容策略从简单开始**
    - 推荐先使用 `MaxLoadStrategy` + 合理的 `ResizeCoolDown`；
-   - 再根据业务特性逐步引入 `CompositeStrategy` 或其他装饰器策略（见 `SCALING_STRATEGIES_TODO.md` 设计文档）。
+  - 再根据业务特性逐步引入 `CompositeStrategy` 或其他装饰器策略。
 
 5. **关闭时的 drain 行为**
    - 调用 `Worker.Stop()` 时，worker 会在退出前通过 `queueManager.DrainAll` 处理完队列中的所有剩余事件；
    - 这保证了在正常关闭流程中不会丢消息，但也意味着关闭时可能需要等待一段时间。
+
+6. **RW 模式只通过配置启用**
+  - `EnableRWMode=true` 必须在 mailbox / worker 创建前配置；
+  - 运行时允许 `SetRWEnabled(false)` 关闭 RW 用于降级或维护；
+  - 不支持运行时从关闭状态动态开启 RW，`SetRWEnabled(true)` 会返回 `ErrRWDynamicEnableUnsupported`。
+
+7. **停止顺序允许阻塞**
+  - Node / Service 停止需要满足“先起后退”的依赖顺序；
+  - `BeginStop` 可以阻塞等待 mailbox 内部后台流程按顺序退出，上层可按服务依赖自行设置整体 timeout。
 
 ## 相关文件
 
@@ -151,5 +179,5 @@ Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两�
 - `queue_manager.go` / `queue_manager_dual.go` / `queue_manager_priority.go`：队列管理与调度策略。
 - `scaler.go` / `strategy.go` / `strategy_factory.go`：扩缩容策略与执行器。
 - `config_example.go`：常见 Mailbox 配置示例。
-- `SCALING_STRATEGIES_TODO.md`：扩缩容策略设计与待实现列表。
+- `../../../../docs/ACTOR_REVIEW_2026_04_29.md`：2026-04-29 复审、修复记录与 Sentinel 细粒度 resource 问题说明。
 

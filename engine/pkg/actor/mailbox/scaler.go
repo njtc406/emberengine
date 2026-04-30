@@ -1,8 +1,8 @@
 // Package mailbox
 // @Title  自动扩容器
-// @Description  desc
+// @Description  根据负载策略对 WorkerPool 执行扩缩容决策，并维护冷却窗口避免抖动。
 // @Author  yr  2025/4/22
-// @Update  yr  2025/4/22
+// @Update  yr  2026/4/27
 package mailbox
 
 import (
@@ -54,13 +54,13 @@ func (s *AutoScaler) ShouldResize(current int, workers []inf.IMailboxWorker) (in
 		newSize = clamp(cur-reduce, s.conf.MinWorkerNum, s.conf.MaxWorkerNum)
 		reason = fmt.Sprintf("scale down: strategy triggered")
 	} else {
-		// 【P2-8】策略未触发任何动作：同样走过冷却，
+		// 策略未触发任何动作：同样走过冷却，
 		// 避免持续过载下策略被热评估。
 		s.lastResizeTime = now
 		return int32(current), "", false
 	}
 
-	// 【P2-8】达到边界（如 newSize == cur，被上/下限 clamp住）也均走冷却更新，
+	// 达到边界（如 newSize == cur，被上/下限 clamp住）也均走冷却更新，
 	// 避免“某黑路径上冷却时间不动”导致下一 tick 立即重复评估。
 	s.lastResizeTime = now
 	if newSize != cur {

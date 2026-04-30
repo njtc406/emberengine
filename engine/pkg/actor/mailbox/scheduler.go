@@ -1,6 +1,5 @@
 // Package mailbox
-// 模块名: 模块名
-// 功能描述: 描述
+// 多优先级队列调度器配置与调度策略实现。
 // 作者:  yr  2025/8/28 0028 0:28
 // 最后更新:  yr  2025/8/28 0028 0:28
 package mailbox
@@ -45,7 +44,7 @@ func newDefaultMultiLevelConfig() *MultiLevelConfig {
 	}
 }
 
-// DefaultWorkerConfig 返回默认配置（兼容旧版）
+// DefaultWorkerConfig 返回多优先级队列的默认 worker 配置。
 func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
 	return &config.MultiLevelWorkerConf{
 		WaitMode:        "busy",
@@ -59,21 +58,27 @@ func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
 //
 // NOTE: PriorityScheduler 不是并发安全的。
 // counters map 由单个 Worker goroutine 独占使用（每个 Worker 拥有独立的 PriorityQueueManager/Scheduler），
-// 不需要额外的锁或 atomic 保护。如果未来 QueueManager 被多 Worker 共享，需重新评估并发安全性。
+// 不需要额外的锁或 atomic 保护；该调度器的并发边界是单 Worker 独占。
 type PriorityScheduler struct {
 	strategy   def.ScheduleStrategy
 	priorities map[def.Priority]*config.PriorityConfig
 	weights    map[def.Priority]int
 	counters   map[def.Priority]int // 用于加权轮询和防饥饿
+
+	// weighted/fairness 策略下"相同最高优先级"集合的复用 buffer：
+	// 避免每次 NextJob 调用重复 allocate samePriorityQueues。
+	// 单 worker 独占 scheduler，无需锁保护。
+	samePriorityBuf []def.Priority
 }
 
 // NewPriorityScheduler 创建新的优先级调度器
 func NewPriorityScheduler(conf *config.MultiLevelWorkerConf) *PriorityScheduler {
 	scheduler := &PriorityScheduler{
-		strategy:   conf.Strategy,
-		priorities: conf.PriorityBatches,
-		weights:    make(map[def.Priority]int),
-		counters:   make(map[def.Priority]int),
+		strategy:        conf.Strategy,
+		priorities:      conf.PriorityBatches,
+		weights:         make(map[def.Priority]int),
+		counters:        make(map[def.Priority]int),
+		samePriorityBuf: make([]def.Priority, 0, len(conf.PriorityBatches)),
 	}
 
 	// 初始化权重映射
@@ -116,8 +121,8 @@ func (ps *PriorityScheduler) weightedPriorityWithOrdering(available []def.Priori
 	// 找到最高优先级（数组第一个元素）
 	highestPriority := available[0]
 
-	// 收集所有相同最高优先级的队列
-	var samePriorityQueues []def.Priority
+	// 复用预分配 buffer，避免 per-NextJob 分配
+	samePriorityQueues := ps.samePriorityBuf[:0]
 	for _, p := range available {
 		if p == highestPriority {
 			samePriorityQueues = append(samePriorityQueues, p)
@@ -166,8 +171,8 @@ func (ps *PriorityScheduler) fairnessPriorityWithOrdering(available []def.Priori
 	// 找到最高优先级（数组第一个元素）
 	highestPriority := available[0]
 
-	// 收集所有相同最高优先级的队列
-	var samePriorityQueues []def.Priority
+	// 复用预分配 buffer，避免 per-NextJob 分配
+	samePriorityQueues := ps.samePriorityBuf[:0]
 	for _, p := range available {
 		if p == highestPriority {
 			samePriorityQueues = append(samePriorityQueues, p)

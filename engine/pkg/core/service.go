@@ -1,8 +1,8 @@
 // Package core
-// @Title  title
-// @Description  desc
+// @Title  Service 服务核心实现
+// @Description  Service 的生命周期管理、Mailbox/Worker 池/中间件链初始化、Job 投递入口及 SysCtl 注册中心装配。
 // @Author  pc  2024/11/5
-// @Update  pc  2024/11/5
+// @Update  yr  2026/4/27
 package core
 
 import (
@@ -67,6 +67,8 @@ type Service struct {
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
 
 	jobRegistry *jobHandlerRegistry // Job 处理器注册表
+
+	sysCtlRegistry *sysCtlRegistry // SysCtl 命令注册中心
 
 	txHookMgr TxHookManager // 事务钩子管理器（值类型，Init 注册，写路径 WLock 串行保护）
 
@@ -320,7 +322,7 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 			isDebug = cfg.IsDebug()
 		}
 	}
-	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.ILoggerX, isDebug)
+	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.GetName(), s.ILoggerX, isDebug)
 	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
 
 	// 创建邮箱（将停机 drain 策略下发给 mailbox/workerPool）
@@ -355,6 +357,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	// 注册 Job 处理函数
 	s.initJobHandlers()
 
+	// 注册 SysCtl 命令注册中心（依赖 mailbox 已注入）
+	s.initSysCtlRegistry()
+
 	em := s.GetEndpointManager()
 	if em == nil {
 		err = fmt.Errorf("service[%s] endpoint manager is nil", s.GetName())
@@ -378,9 +383,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		methodIdx = s.nodeCtx.GetMethodIndex()
 	}
 	s.methodMgr = rpc.NewMethodMgr(s.ILoggerX, methodIdx)
-	// 将 WorkerPool 的 enableRW 引用传递给 MethodMgr，用于 RemoveMethods 防御性校验
+	// 通过 func() bool 闭包注入 RW 状态查询，避免暴露内部 *atomic.Bool
 	if rwMgr, ok := s.methodMgr.(*rpc.MethodMgr); ok {
-		rwMgr.SetEnableRW(s.mailbox.GetEnableRWPtr())
+		rwMgr.SetRWStateProvider(s.mailbox.IsRWEnabled)
 	}
 	s.IRpcHandler, err = rpc.NewHandler(s.self).Init(s.methodMgr)
 	if err != nil {
@@ -544,7 +549,7 @@ func (s *Service) PostJob(j inf.IMailboxJob) error {
 	// 通过 RWContextInfo.SourceService 区分自投递和跨服务调用：
 	// 仅当源 Service 与当前 Service 相同时才拦截，允许跨服务 RPC。
 	//
-	// 【ADR-4】PostJob 拥有 Job 所有权：早期拒绝路径同样负责 Release + OnJobDiscarded，
+	// PostJob 拥有 Job 所有权：早期拒绝路径同样负责 Release + OnJobDiscarded，
 	// 调用方在 err 返回后不再 Release。
 	if s.mailbox.IsRWEnabled() {
 		if ctx := j.GetContext(); ctx != nil {
@@ -616,7 +621,7 @@ func (s *Service) pushConcurrentCallback(ctx context.Context, evt inf.IConcurren
 	// 2. 已显式设置 RWMode，无需经过 setJobRWMode 推断；
 	// 3. 避免框架内部投递承担 PostJob 中面向用户的检查开销。
 	//
-	// 【ADR-4】PostJob 拥有 Job 所有权：err 返回时 mailbox 内部已 Release+OnJobDiscarded，
+	// PostJob 拥有 Job 所有权：err 返回时 mailbox 内部已 Release+OnJobDiscarded，
 	// 这里不再外部 Release，避免 ref-count 下溢。
 	if err := s.mailbox.PostJob(j); err != nil {
 		s.Errorf("post job error: %v", err)
@@ -634,7 +639,7 @@ func (s *Service) pushTimerCallback(ctx context.Context, t timingwheel.ITimer) e
 	// 显式标记为 Write：定时器回调通常伴随状态更新，必须独占执行。
 	j.SetRWMode(def.RWModeWrite)
 	// 框架内部投递，直接调用 mailbox.PostJob（理由同 pushConcurrentCallback）
-	// 【ADR-4】PostJob 拥有 Job 所有权，err 路径已内化 Release+OnJobDiscarded。
+	// PostJob 拥有 Job 所有权，err 路径已内化 Release+OnJobDiscarded。
 	if err := s.mailbox.PostJob(j); err != nil {
 		s.Errorf("post job error: %v", err)
 		return err

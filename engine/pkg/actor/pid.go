@@ -125,7 +125,7 @@ func MarshalPIDJSON(pid *PID) ([]byte, error) {
 // Message.SenderPid / Message.ReceiverPid）的子字段被一并 Marshal 时，
 // 直接对原 PID 调用 PrepareForMarshal 会与并发 RPC 形成对 IsMaster 字段的
 // 非原子写竞争。改用本函数获取独立 wire 副本，赋值给父级字段，可以彻底
-// 消除该破口（ADR-1 / P0-1）。
+// 消除该并发写破口。
 //
 // 调用代价：一次 proto.Clone（反射拷贝小消息），相比 RPC 序列化整体开销可忽略。
 func SnapshotForWire(pid *PID) *PID {

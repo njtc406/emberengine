@@ -1,3 +1,7 @@
+// Package mailbox
+// @Title  Dispatch Key 统计中间件
+// @Description  调试模式下采样 dispatcherKey 分布并周期性输出 TopN 与分片均衡度，使用 xxhash 全长哈希避免长公共前缀导致的分片偏置。
+// @Author  yr  2025/9/1
 package mailbox
 
 import (
@@ -6,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -65,20 +70,13 @@ func NewDispatchKeyStatsMiddleware(logger log.ILoggerX, interval time.Duration, 
 	return m
 }
 
-// shardFor 根据 key 的 fnv-like hash 定位到分段。
-// 为避免长 key 的 O(len) 哈希成本，最多采样前 32 字节（对调试统计而言
-// 分布足够均匀；dispatcherKey 通常是 uid/service 名，前若干字节已有足够熵）。
+// shardFor 根据 key 的 xxhash 哈希定位到分段。
+//
+// dispatcherKey 常见格式为 `serviceName.serviceId.partition`，前缀共享较多。
+// 使用 xxhash 全长哈希可避免依赖 key 的局部熵分布，使分段锁保持均匀分布。
+// 本中间件仅在 debug 模式启用，开销可接受。
 func (m *DispatchKeyStatsMiddleware) shardFor(key string) *dispatchKeyShard {
-	const maxHashBytes = 32
-	n := len(key)
-	if n > maxHashBytes {
-		n = maxHashBytes
-	}
-	h := uint32(2166136261)
-	for i := 0; i < n; i++ {
-		h ^= uint32(key[i])
-		h *= 16777619
-	}
+	h := xxhash.Sum64String(key)
 	return &m.shards[h&(dispatchKeyShards-1)]
 }
 
