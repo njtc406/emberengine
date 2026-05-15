@@ -40,9 +40,11 @@ func (m *panicMiddleware) OnFrameworkCleanup(inf.IMiddlewareContext, error, inte
 
 func TestMiddlewareChainRecoverOnReceive(t *testing.T) {
 	mw := &panicMiddleware{name: "panic-receive", panicReceive: true}
-	chain := NewMiddlewareChain(mw)
 	var recovered bool
-	chain.SetPanicHandler(func(_, _ string, _ inf.IMiddlewareContext, _ interface{}) { recovered = true })
+	chain := NewMiddlewareChain(
+		[]inf.IMailboxMiddleware{mw},
+		WithPanicHandler(func(_, _ string, _ inf.IMiddlewareContext, _ interface{}) { recovered = true }),
+	)
 
 	job := mbjob.NewEventBusJob()
 	defer job.Release()
@@ -65,9 +67,11 @@ func TestMiddlewareChainRecoverOnReceive(t *testing.T) {
 func TestMiddlewareChainRecoverOnCompleteAndContinue(t *testing.T) {
 	first := &panicMiddleware{name: "first", panicComplete: true}
 	second := &panicMiddleware{name: "second"}
-	chain := NewMiddlewareChain(first, second)
 	var recovered int
-	chain.SetPanicHandler(func(_, _ string, _ inf.IMiddlewareContext, _ interface{}) { recovered++ })
+	chain := NewMiddlewareChain(
+		[]inf.IMailboxMiddleware{first, second},
+		WithPanicHandler(func(_, _ string, _ inf.IMiddlewareContext, _ interface{}) { recovered++ }),
+	)
 
 	job := mbjob.NewEventBusJob()
 	defer job.Release()
@@ -90,7 +94,7 @@ func TestMiddlewareChainRecoverOnCompleteAndContinue(t *testing.T) {
 
 func TestMiddlewareChainFrameworkCleanupSkipsRegularOnComplete(t *testing.T) {
 	mw := &panicMiddleware{name: "framework-cleanup"}
-	chain := NewMiddlewareChain(mw)
+	chain := NewMiddlewareChain([]inf.IMailboxMiddleware{mw})
 
 	job := mbjob.NewEventBusJob()
 	defer job.Release()

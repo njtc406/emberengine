@@ -113,6 +113,17 @@ func (c *MiddlewareContext) Elapsed() time.Duration {
 // 中间件链实现
 // ============================================================================
 
+// MiddlewareChainOption 配置选项，仅在 NewMiddlewareChain 构造时使用。
+type MiddlewareChainOption func(*MiddlewareChain)
+
+// WithPanicHandler 设置中间件 panic 恢复回调。
+// 必须在构造时传入，构造完成后不可变更（消除运行时 data race 风险）。
+func WithPanicHandler(handler func(phase, middleware string, mctx inf.IMiddlewareContext, panicVal interface{})) MiddlewareChainOption {
+	return func(c *MiddlewareChain) {
+		c.panicHandler = handler
+	}
+}
+
 // MiddlewareChain 是 IMiddlewareChain 的默认实现
 // 使用 atomic.Pointer + Copy-on-Write 实现中间件列表管理，
 // 消除热路径上的 RWMutex 开销。
@@ -127,9 +138,13 @@ type frameworkCleanupMiddleware interface {
 	OnFrameworkCleanup(mctx inf.IMiddlewareContext, err error, panicVal interface{})
 }
 
-// NewMiddlewareChain 创建中间件链
-func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain {
+// NewMiddlewareChain 创建中间件链。
+// opts 用于传入构造期配置（如 WithPanicHandler），构造完成后不可变更。
+func NewMiddlewareChain(middlewares []inf.IMailboxMiddleware, opts ...MiddlewareChainOption) *MiddlewareChain {
 	c := &MiddlewareChain{}
+	for _, opt := range opts {
+		opt(c)
+	}
 	mws := make([]inf.IMailboxMiddleware, len(middlewares))
 	copy(mws, middlewares)
 	c.mws.Store(&mws)
@@ -160,10 +175,6 @@ func NewMiddlewareChain(middlewares ...inf.IMailboxMiddleware) *MiddlewareChain 
 		}),
 	)
 	return c
-}
-
-func (c *MiddlewareChain) SetPanicHandler(handler func(phase, middleware string, mctx inf.IMiddlewareContext, panicVal interface{})) {
-	c.panicHandler = handler
 }
 
 func (c *MiddlewareChain) handlePanic(phase string, middleware inf.IMailboxMiddleware, mctx inf.IMiddlewareContext, panicVal interface{}) {
@@ -295,17 +306,6 @@ func (c *MiddlewareChain) safeOnComplete(m inf.IMailboxMiddleware, mctx inf.IMid
 	m.OnComplete(mctx, err, panicVal)
 }
 
-// ReturnContext 仅归还 mctx 到池，不执行任何中间件回调。
-// 用于不需要回调的内部回收路径。
-func (c *MiddlewareChain) ReturnContext(mctx inf.IMiddlewareContext) {
-	if mctx == nil {
-		return
-	}
-	if mc, ok := mctx.(*MiddlewareContext); ok {
-		c.ctxPool.Put(mc)
-	}
-}
-
 // ExecuteFrameworkCleanup 只执行中间件声明的框架资源清理，不调用普通 OnComplete。
 // 用于 rwUnsafe drain 路径：避免业务中间件回写共享状态，同时释放 Sentinel entry 等框架资源。
 func (c *MiddlewareChain) ExecuteFrameworkCleanup(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
@@ -350,7 +350,7 @@ func (c *MiddlewareChain) safeFrameworkCleanup(cleanup frameworkCleanupMiddlewar
 func (c *MiddlewareChain) Start() {
 	middlewares := *c.mws.Load()
 	for _, m := range middlewares {
-		c.safeLifecycle("OnStart", m)
+		c.safeOnStart(m)
 	}
 }
 
@@ -359,20 +359,25 @@ func (c *MiddlewareChain) Stop() {
 	middlewares := *c.mws.Load()
 	// 逆序停止
 	for i := len(middlewares) - 1; i >= 0; i-- {
-		c.safeLifecycle("OnStop", middlewares[i])
+		c.safeOnStop(middlewares[i])
 	}
 }
 
-func (c *MiddlewareChain) safeLifecycle(phase string, m inf.IMailboxMiddleware) {
+func (c *MiddlewareChain) safeOnStart(m inf.IMailboxMiddleware) {
 	defer func() {
 		if r := recover(); r != nil {
-			c.handlePanic(phase, m, nil, r)
+			c.handlePanic("OnStart", m, nil, r)
 		}
 	}()
-	if phase == "OnStart" {
-		m.OnStart()
-		return
-	}
+	m.OnStart()
+}
+
+func (c *MiddlewareChain) safeOnStop(m inf.IMailboxMiddleware) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.handlePanic("OnStop", m, nil, r)
+		}
+	}()
 	m.OnStop()
 }
 

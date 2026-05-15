@@ -2,6 +2,7 @@
 
 NodeConf:
   NodeId: 1
+  NodeType: test
   # 系统状态(debug/release)
   SystemStatus: debug
   # 系统数据目录(持久化)
@@ -44,6 +45,9 @@ ServiceConf:
       ServiceName: Service3
       Type: test
       Partition: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -62,6 +66,9 @@ ServiceConf:
       ServiceName: Service2
       Type: test
       Partition: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -82,6 +89,9 @@ ServiceConf:
       Type: test
       # 服务分区ID(用于服务路由隔离)
       Partition: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       # 定时器配置
       TimerConf:
         # 定时器队列长度
@@ -104,6 +114,9 @@ ServiceConf:
       ServiceName: PprofService
       Type: test
       Partition: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         TimerSize: 1000
         TimerBucketSize: 100
@@ -123,6 +136,8 @@ SystemLogger:
   Name: "system-local"
   # 日志级别
   Level: debug
+  # 输出格式: text / json
+  OutputFormat: text
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息

@@ -1,6 +1,10 @@
 package services
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/njtc406/emberengine/engine/pkg/def"
+)
 
 // RuntimeSummary 提供 ServiceManager 的运行态摘要，用于诊断与可观测性。
 type RuntimeSummary struct {
@@ -27,4 +31,35 @@ func (sm *ServiceManager) GetRuntimeSummary() RuntimeSummary {
 		ServiceCount: len(names),
 		ServiceNames: names,
 	}
+}
+
+// mailboxMetricsProvider 鸭子类型接口，由 *mailbox.Mailbox 隐式满足。
+// 避免 services 包直接依赖 mailbox 包。
+type mailboxMetricsProvider interface {
+	GetMailboxMetrics() def.MailboxMetrics
+}
+
+// GetAggregatedMailboxMetrics 遍历所有 Service 的 Mailbox，汇总指标快照。
+func (sm *ServiceManager) GetAggregatedMailboxMetrics() def.MailboxMetrics {
+	if sm == nil {
+		return def.MailboxMetrics{}
+	}
+	var agg def.MailboxMetrics
+	for _, svc := range sm.runServices {
+		if svc == nil {
+			continue
+		}
+		mb := svc.GetMailbox()
+		if mb == nil {
+			continue
+		}
+		if provider, ok := mb.(mailboxMetricsProvider); ok {
+			m := provider.GetMailboxMetrics()
+			agg.PostTotal += m.PostTotal
+			agg.SuspendedTotal += m.SuspendedTotal
+			agg.RejectedTotal += m.RejectedTotal
+			agg.DispatchFailedTotal += m.DispatchFailedTotal
+		}
+	}
+	return agg
 }

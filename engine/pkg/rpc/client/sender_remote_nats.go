@@ -19,6 +19,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/diag"
+	"github.com/njtc406/emberengine/engine/pkg/utils/tlsx"
 )
 
 type natsSender struct {
@@ -99,6 +100,22 @@ func newNatsClient(addr string, logger log.ILoggerX, natsConf *config.NatsConf) 
 			opts = append(opts, nats.Token(natsConf.Token))
 		} else if natsConf.UserName != "" {
 			opts = append(opts, nats.UserInfo(natsConf.UserName, natsConf.Password))
+		}
+
+		// TLS 配置
+		if natsConf.Cert != "" && natsConf.CertKey != "" || natsConf.CAs != "" {
+			tlsCfg, err := tlsx.LoadClientTLS(
+				natsConf.Cert, natsConf.CertKey,
+				natsConf.CAs, natsConf.TLSServerName,
+				natsConf.InsecureSkipVerify,
+			)
+			if err != nil {
+				if logger != nil {
+					logger.Errorf("nats client TLS config error: %v", err)
+				}
+				return nil
+			}
+			opts = append(opts, nats.Secure(tlsCfg))
 		}
 	}
 

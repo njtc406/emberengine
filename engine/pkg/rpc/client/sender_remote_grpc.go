@@ -7,6 +7,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"runtime"
 	"sync/atomic"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -26,7 +28,7 @@ type grpcSender struct {
 	logger     log.ILoggerX
 }
 
-func newGrpcClient(addr string, logger log.ILoggerX, grpcConnNum int) inf.IRpcSender {
+func newGrpcClient(addr string, logger log.ILoggerX, grpcConnNum int, tlsCfg *tls.Config) inf.IRpcSender {
 	var clients []actor.GrpcListenerClient
 	var conns []*grpc.ClientConn
 	connNum := grpcConnNum
@@ -38,8 +40,15 @@ func newGrpcClient(addr string, logger log.ILoggerX, grpcConnNum int) inf.IRpcSe
 		connNum = 1
 	}
 
+	var creds credentials.TransportCredentials
+	if tlsCfg != nil {
+		creds = credentials.NewTLS(tlsCfg)
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
 	for i := 0; i < connNum; i++ {
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			if logger != nil {
 				logger.Errorf("grpcSender newGrpcClient error: %v", err)

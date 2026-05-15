@@ -24,6 +24,10 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
+// sentinelEntryKey 是 MiddlewareContext 中保存 Sentinel entry 的私有 key，
+// 使用包内不可导出常量避免与业务 key 冲突。
+const sentinelEntryKey = "__sentinel_entry__"
+
 var (
 	// ErrSentinelBlocked Sentinel 限流/熔断错误
 	ErrSentinelBlocked = errors.New("blocked by sentinel")
@@ -648,7 +652,7 @@ func (m *SentinelMiddleware) OnReceive(mctx inf.IMiddlewareContext) dto.Middlewa
 	}
 
 	// 保存 entry 用于 OnComplete
-	mctx.Set("sentinel_entry", e)
+	mctx.Set(sentinelEntryKey, e)
 	return dto.Continue()
 }
 
@@ -661,7 +665,7 @@ func (m *SentinelMiddleware) OnFrameworkCleanup(mctx inf.IMiddlewareContext, err
 }
 
 func (m *SentinelMiddleware) exitEntry(mctx inf.IMiddlewareContext, err error, panicVal interface{}) {
-	entryVal, ok := mctx.Get("sentinel_entry")
+	entryVal, ok := mctx.Get(sentinelEntryKey)
 	if !ok {
 		return
 	}

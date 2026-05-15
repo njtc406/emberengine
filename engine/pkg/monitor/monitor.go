@@ -258,17 +258,18 @@ func (rm *RpcMonitor) Add(state *CallState) {
 	method := state.Method()
 	// TODO 这里可以直接使用异步timer,但是需要评估性能,因为现在使用的是线程池
 	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(_ context.Context, tm *timingwheel.Timer, args ...interface{}) error {
-		defer func() {
-			if rm.ILoggerX != nil {
-				rm.WithContext(state.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
-					timeout.Milliseconds(), method)
-			}
-		}()
 		seqId := args[0].(uint64)
 		st := rm.remove(seqId) // 这里只需要移除monitor,不需要取消timer,timer已经触发了
 		if st == nil {
 			// 已经删除
 			return nil
+		}
+
+		// 在 Complete 之前读取 ctx 并打印日志，因为 Complete 后同步 Call
+		// 的调用方可能立即 Release → Reset，导致 state.ctx 被清空。
+		if rm.ILoggerX != nil {
+			rm.WithContext(st.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
+				timeout.Milliseconds(), method)
 		}
 
 		st.SetResult(nil, def.ErrRPCCallTimeout)

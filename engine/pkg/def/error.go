@@ -4,14 +4,44 @@ import (
 	"errors"
 )
 
-// 定义系统错误
+// ============================================================================
+// 系统错误定义
+//
+// 当前所有 sentinel 均使用 errors.New()，不含错误码。
+// 后续新增 sentinel 推荐使用 errorx.New(code, msg) 以获得错误码、错误链和
+// 结构化字段能力。
+//
+// 错误码分段规范（code 为 int，建议 4 位）：
+//
+//	分段       | 范围        | 模块
+//	-----------|-------------|---------------------------
+//	core       | 1000-1099   | core/service 生命周期
+//	mailbox    | 1100-1199   | mailbox/worker/queue
+//	rpc        | 1200-1299   | RPC 调用链 (call/send/bus)
+//	config     | 1300-1399   | 配置加载/校验
+//	cluster    | 1400-1499   | 集群/服务发现/选举
+//	event      | 1500-1599   | 事件系统
+//	node       | 1600-1699   | Node 生命周期
+//	router     | 1700-1799   | 路由
+//	sysmodule  | 1800-1899   | 内置系统模块 (gate/http/ws/db)
+//	general    | 9000-9099   | 通用/序列化/token/http
+//
+// 命名规则：
+//   - sentinel 变量名前缀为 Err，如 ErrRPCCallTimeout
+//   - msg 使用英文小写短语，不带标点
+//   - 新增 sentinel 必须在上方注册分段，避免码冲突
+//
+// 迁移说明：
+//   - 现有 errors.New() sentinel 不强制替换，只在需要跨节点识别错误码时迁移
+//   - 新增 sentinel 优先使用 errorx.New(code, msg)
+// ============================================================================
 
 var (
 	ErrModuleNotInitialized        = errors.New("module not initialized")                                  // 模块未初始化
 	ErrModuleHadRegistered         = errors.New("module had registered")                                   // 已经注册过该模块
 	ErrMailboxWorkerChannelNotInit = errors.New("mailbox worker user channel not init")                    // 邮箱工作通道未初始化
 	ErrMailboxWorkerClosed         = errors.New("mailbox worker closed")                                   // 邮箱工作线程已关闭
-	ErrEventChannelIsFull          = errors.New("111111111event channel is full")                          // 事件通道已满
+	ErrEventChannelIsFull          = errors.New("event channel is full")                                   // 事件通道已满
 	ErrMailboxNotRunning           = errors.New("mailbox not running")                                     // 邮箱未运行
 	ErrMailboxWorkerIsFull         = errors.New("mailbox worker is full")                                  // 邮箱工作线程已满
 	ErrMailboxWorkerNotFound       = errors.New("mailbox worker not found")                                // 邮箱工作线程未找到

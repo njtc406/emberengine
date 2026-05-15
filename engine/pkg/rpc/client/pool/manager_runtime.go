@@ -414,8 +414,9 @@ func (cp *ConnectionPool) cleanupConnections() {
 	}
 }
 
-// updatePoolMetrics 更新池指标
-func (cp *ConnectionPool) updatePoolMetrics() {
+// updatePoolMetrics 从连接级指标聚合一份池级快照。
+// 返回独立副本，不修改共享状态，因此只需 connMutex.RLock。
+func (cp *ConnectionPool) updatePoolMetrics() *PoolMetrics {
 	cp.connMutex.RLock()
 	defer cp.connMutex.RUnlock()
 
@@ -439,27 +440,38 @@ func (cp *ConnectionPool) updatePoolMetrics() {
 		}
 	}
 
-	cp.metrics.TotalConnections = int32(len(cp.connections))
-	cp.metrics.ActiveConnections = activeConns
-	cp.metrics.IdleConnections = idleConns
-	cp.metrics.UnhealthyConns = unhealthyConns
-	cp.metrics.TotalRequests = totalRequests
-	cp.metrics.SuccessfulRequests = successRequests
-	cp.metrics.FailedRequests = failedRequests
+	snapshot := &PoolMetrics{
+		TotalConnections:   int32(len(cp.connections)),
+		ActiveConnections:  activeConns,
+		IdleConnections:    idleConns,
+		UnhealthyConns:     unhealthyConns,
+		TotalRequests:      totalRequests,
+		SuccessfulRequests: successRequests,
+		FailedRequests:     failedRequests,
+		ScaleOperations:    atomic.LoadInt64(&cp.metrics.ScaleOperations),
+	}
+
+	// LastScaleTime 由 checkAndScale 在 scaleMutex 下写入，
+	// 读取时也需要 scaleMutex 保护。
+	cp.scaleMutex.Lock()
+	snapshot.LastScaleTime = cp.metrics.LastScaleTime
+	cp.scaleMutex.Unlock()
 
 	if len(cp.connections) > 0 {
-		cp.metrics.AvgResponseTime = totalResponseTime / int64(len(cp.connections))
+		snapshot.AvgResponseTime = totalResponseTime / int64(len(cp.connections))
 	}
 
 	if totalRequests > 0 {
-		cp.metrics.SuccessRate = float64(successRequests) / float64(totalRequests)
+		snapshot.SuccessRate = float64(successRequests) / float64(totalRequests)
 	}
+
+	return snapshot
 }
 
-// GetMetrics 获取连接池指标
+// GetMetrics 获取连接池指标快照。
+// 每次调用返回一份新的快照副本，调用方可安全持有和序列化。
 func (cp *ConnectionPool) GetMetrics() *PoolMetrics {
-	cp.updatePoolMetrics()
-	return cp.metrics
+	return cp.updatePoolMetrics()
 }
 
 // 辅助函数

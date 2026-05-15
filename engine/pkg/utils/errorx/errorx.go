@@ -288,7 +288,11 @@ func CodeFrom(err error) int {
 }
 
 // HasCode 判断错误链中是否存在指定错误码。
+// code=0 被视为"未设置"，始终返回 false。
 func HasCode(err error, code int) bool {
+	if code == 0 {
+		return false
+	}
 	for err != nil {
 		if e, ok := err.(*Error); ok && e.code == code {
 			return true

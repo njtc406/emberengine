@@ -87,8 +87,15 @@ func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcD
 			rpcJob.SetDeadline(meta.GetDeadline())
 			// PostJob 拥有 Job 所有权
 			if err := dispatcher.PostJob(rpcJob); err != nil {
+				// PostJob 失败：rpcJob 已由 Mailbox 释放（Job 与 payload 生命周期正交），
+				// 需手动释放 envelope（payload）和 state。
+				envelope.Release()
+				state.Release()
 				return err
 			}
+			// PostJob 成功：envelope 由 Worker 执行后在 handleRpcJob 的 defer 中释放。
+			// state 已完成使命（callbacks 已转移给 envelope meta），释放回池。
+			state.Release()
 			return nil
 		}
 

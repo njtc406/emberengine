@@ -117,7 +117,7 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 	}
 
 	// 根据配置创建队列管理器
-	w.queueManager = createQueueManager(conf)
+	w.queueManager = createQueueManager(conf, env.logger)
 
 	// 创建空闲控制器
 	idlerConf := conf.SchedulePolicy.IdlerConf
@@ -151,7 +151,7 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 }
 
 // createQueueManager 根据配置创建队列管理器
-func createQueueManager(conf *config.MailboxConf) IQueueManager {
+func createQueueManager(conf *config.MailboxConf, logger log.ILoggerX) IQueueManager {
 	// 确定队列模式
 	queueMode := conf.QueueMode
 	if queueMode == "" {
@@ -165,7 +165,7 @@ func createQueueManager(conf *config.MailboxConf) IQueueManager {
 
 	case QueueModePriority:
 		// 多优先级队列模式
-		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf)
+		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf, logger)
 
 	default:
 		return NewDualQueueManager()
@@ -270,16 +270,16 @@ func (w *Worker) run() {
 
 		// ② 等待本 Worker 的 in-flight 读 goroutine 完成（带超时保护）
 		if w.env.rw.enabled.Load() {
-			done := make(chan struct{})
-			go func() {
-				w.inflightReads.Wait() // per-Worker：仅等待本 Worker spawn 的读 goroutine
-				close(done)
-			}()
-			select {
-			case <-done:
-				// 本 Worker 的所有读 goroutine 正常完成
-			case <-time.After(w.env.rw.stopTimeout):
-				// 超时：标记不安全关闭，强制继续
+			deadline := time.Now().Add(w.env.rw.stopTimeout)
+			for w.inflightReadCnt.Load() != 0 && time.Now().Before(deadline) {
+				runtime.Gosched()
+				time.Sleep(time.Millisecond)
+			}
+			if w.inflightReadCnt.Load() == 0 {
+				// per-Worker：仅等待本 Worker spawn 的读 goroutine。
+				// inflightReadCnt 归零后 Wait 只用于收口 Done 的纳秒级窗口。
+				w.inflightReads.Wait()
+			} else {
 				stopTimedOut = true
 				w.env.logger.Errorf("Worker %d: StopTimeout (%v) exceeded, "+
 					"read goroutines still in-flight. "+
@@ -361,7 +361,7 @@ func (w *Worker) run() {
 			continue
 		}
 
-		if w.env.rw.enabled.Load() {
+		if w.env.rw.enabled.Load() || w.env.rw.IsDisabling() {
 			w.execWithRW(e)
 		} else {
 			w.safeExec(e) // 未启用 RW，保持原有串行行为
@@ -585,7 +585,7 @@ func getRWMode(job inf.IMailboxJob) def.RWMode {
 // execWithRW 根据 Job 的 RWMode 走读派发或同步写。
 // 读 Job 不再在主循环里同步取 gate/RLock，改为投递到 readPipeline。
 func (w *Worker) execWithRW(job inf.IMailboxJob) {
-	if getRWMode(job) == def.RWModeRead {
+	if getRWMode(job) == def.RWModeRead && w.env.rw.enabled.Load() && !w.env.rw.IsDisabling() {
 		w.dispatchRead(job)
 	} else {
 		w.execWrite(job)
@@ -607,13 +607,15 @@ func (w *Worker) execWithRW(job inf.IMailboxJob) {
 // 回压（readCh 满）：按入队侧失败语义直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
 // 由调用方 invoker 感知，不再让主循环热自旋。
 func (w *Worker) dispatchRead(job inf.IMailboxJob) {
+	w.readsDispatched.Add(1)
+
 	// 先尝试非阻塞投递（绝大多数情况下 readCh 不会满）
 	select {
 	case w.readCh <- job:
-		w.readsDispatched.Add(1)
 		return
 	default:
 	}
+	w.readsLaunched.Add(1)
 
 	// readCh 满 = 入队侧回压：直接丢弃 + 通知业务（OnJobDiscarded 对称）
 	w.env.rw.drainDiscardTotal.Add(1)
@@ -698,8 +700,8 @@ func (w *Worker) launchRead(job inf.IMailboxJob) {
 		if w.env.rw.readSem != nil {
 			<-w.env.rw.readSem
 		}
-		w.safeExec(job)
 		w.readsLaunched.Add(1)
+		w.execWrite(job)
 		return
 	}
 

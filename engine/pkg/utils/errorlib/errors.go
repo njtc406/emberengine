@@ -2,11 +2,19 @@
  * Copyright (c) 2023. YR. All rights reserved
  */
 
-// Package errorlib
-// 模块名: 错误码
-// 功能描述: 用于错误传递,上层错误捕获可以看到这个错误最初是哪里来的
-// 作者:  yr  2023/6/7 0007 0:24
-// 最后更新:  yr  2023/6/7 0007 0:24
+// Package errorlib 提供错误码机制（2023 legacy）。
+//
+// Deprecated: 新代码应使用 errorx 包 (engine/pkg/utils/errorx)。
+// errorx 提供结构化错误码、错误链、结构化字段和 proto 序列化能力。
+//
+// 迁移指引：
+//   - NewErrCode → errorx.New(code, msg)
+//   - CombineErr → errorx.CombineErrors (底层使用 errors.Join)
+//   - CError.IsCode → errors.Is / errorx.HasCode
+//   - CError.GetCode → errorx.CodeFrom
+//
+// 目前仅 CombineErr 仍有 9 处调用 (rpc/message/msgbus/bus.go)，
+// 后续将统一迁移到 errorx.CombineErrors。
 package errorlib
 
 import (
@@ -111,6 +119,10 @@ func NewErrCode(code int, args ...interface{}) CError {
 	return errCode
 }
 
+// CombineErr 将多个错误合并为一个。
+//
+// Deprecated: 使用 errorx.CombineErrors 代替，它基于 errors.Join，
+// 支持 errors.Is/As 遍历所有子错误。
 func CombineErr(errs ...error) error {
 	if len(errs) == 0 {
 		return nil

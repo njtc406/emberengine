@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -51,6 +52,7 @@ type ServiceManager struct {
 	profilerReg  *profiler.Registry
 	router       *router.Router
 	nodeCtx      inf.INodeContext
+	authorizer   *authz.Authorizer
 }
 
 type runtimeDepsAware interface {
@@ -59,6 +61,10 @@ type runtimeDepsAware interface {
 
 type nodeContextAware interface {
 	SetNodeContext(ctx inf.INodeContext)
+}
+
+type authzAware interface {
+	SetAuthorizer(a *authz.Authorizer)
 }
 
 // NewServiceManager 创建 ServiceManager。
@@ -77,6 +83,11 @@ func (sm *ServiceManager) SetRuntimeDeps(c *cluster.Cluster, em *endpoints.Endpo
 
 func (sm *ServiceManager) SetNodeContext(ctx inf.INodeContext) {
 	sm.nodeCtx = ctx
+}
+
+// SetAuthorizer 设置 RBAC 授权引擎，会在 Init 时注入到所有支持授权的服务中。
+func (sm *ServiceManager) SetAuthorizer(a *authz.Authorizer) {
+	sm.authorizer = a
 }
 
 // Init 根据配置创建并初始化所有服务。
@@ -118,6 +129,11 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 		}
 		if ctxAware, ok := svc.(nodeContextAware); ok {
 			ctxAware.SetNodeContext(sm.nodeCtx)
+		}
+		if sm.authorizer != nil {
+			if aa, ok := svc.(authzAware); ok {
+				aa.SetAuthorizer(sm.authorizer)
+			}
 		}
 		if err := svc.Init(svc, initConf, cfg); err != nil {
 			sm.WithField("service", serviceName).Errorf("Init Service failed, err: %v", err)

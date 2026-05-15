@@ -71,6 +71,9 @@ ServiceConf:
       Type: test
       Partition: 1
       ServiceId: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000

@@ -167,3 +167,114 @@ func TestCheckAndScaleDown(t *testing.T) {
 		t.Fatalf("scale down should not go below min connections, min=%d after=%d", cp.config.MinConnections, after)
 	}
 }
+
+// ============================================================================
+// P1-4.4: Pool Stop goroutine 退出验证
+// ============================================================================
+
+func TestPoolStop_Idempotent(t *testing.T) {
+	cp := newTestPoolForRuntime(t, "round_robin")
+	addConnection(cp, "c1", StateIdle, 0, 0, time.Now())
+
+	if err := cp.Start(); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	cp.Stop()
+	cp.Stop() // 第二次调用不应 panic
+}
+
+func TestPoolStop_GoroutineExit(t *testing.T) {
+	cp := newTestPoolForRuntime(t, "round_robin")
+	cp.config.HealthCheckInterval = 50 * time.Millisecond
+	addConnection(cp, "c1", StateIdle, 0, 0, time.Now())
+
+	if err := cp.Start(); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	// 等一小段让后台 goroutine 执行至少一次
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop 应该等 wg.Wait() 所有后台 goroutine 退出
+	done := make(chan struct{})
+	go func() {
+		cp.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// 正常退出
+	case <-time.After(5 * time.Second):
+		t.Fatal("Pool Stop blocked for >5s, goroutines likely not exiting")
+	}
+}
+
+func TestPoolStop_ClosesAllConnections(t *testing.T) {
+	cp := newTestPoolForRuntime(t, "round_robin")
+	s1 := &mockPoolSender{}
+	s2 := &mockPoolSender{}
+	cp.connections["c1"] = NewPoolConnection("c1", s1, nil)
+	cp.connections["c2"] = NewPoolConnection("c2", s2, nil)
+
+	if err := cp.Start(); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	cp.Stop()
+
+	if !s1.closed || !s2.closed {
+		t.Errorf("expected all senders closed: s1=%v s2=%v", s1.closed, s2.closed)
+	}
+
+	cp.connMutex.RLock()
+	remaining := len(cp.connections)
+	cp.connMutex.RUnlock()
+
+	if remaining != 0 {
+		t.Errorf("expected 0 connections after Stop, got %d", remaining)
+	}
+}
+
+func TestPoolManagerClose_StopsAllPools(t *testing.T) {
+	pm := NewPoolManager(nil)
+	pm.RegisterCreator("grpc", func(addr string) inf.IRpcSender {
+		return &mockPoolSender{}
+	})
+	pm.SetPoolConfig("grpc", DefaultPoolConfig())
+
+	// GetOrCreatePool 内部已调用 Start()
+	_, err := pm.GetOrCreatePool("10.0.0.1:9000", "grpc")
+	if err != nil {
+		t.Fatalf("create pool 1 failed: %v", err)
+	}
+	_, err = pm.GetOrCreatePool("10.0.0.2:9000", "grpc")
+	if err != nil {
+		t.Fatalf("create pool 2 failed: %v", err)
+	}
+
+	pm.Close()
+
+	// Close 后 pools 应为空
+	all := pm.GetAllPoolMetrics()
+	if len(all) != 0 {
+		t.Errorf("expected 0 pools after Close, got %d", len(all))
+	}
+}
+
+func TestPoolManagerClose_Idempotent(t *testing.T) {
+	pm := NewPoolManager(nil)
+	pm.RegisterCreator("grpc", func(addr string) inf.IRpcSender {
+		return &mockPoolSender{}
+	})
+	pm.SetPoolConfig("grpc", DefaultPoolConfig())
+
+	_, err := pm.GetOrCreatePool("10.0.0.1:9000", "grpc")
+	if err != nil {
+		t.Fatalf("create pool failed: %v", err)
+	}
+
+	pm.Close()
+	pm.Close() // 第二次不应 panic
+}

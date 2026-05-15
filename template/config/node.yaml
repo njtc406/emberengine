@@ -4,6 +4,7 @@
 
 NodeConf:
   NodeId: 1
+  NodeType: test
   # 系统状态(debug/release)
   SystemStatus: debug
   # 系统数据目录(持久化)
@@ -145,6 +146,15 @@ ServiceConf:
       RpcType: "nats"
       # 系统级线程池大小(根据业务自行调整，io密集型建议设置大一点)
       GoroutinePoolSize: 1000
+      # 停机策略配置
+      StopPolicy:
+        # 优雅窗口（期间 mailbox 挂起，仅放行必要消息如 RPC Reply / 紧急消息）
+        # 默认: 0（不挂起，直接进入 drain）
+        GraceTimeout: 0s
+        # 停机时对队列剩余消息的处理方式
+        # - "execute" : 继续执行剩余消息（默认，保持消息不丢失）
+        # - "discard" : 丢弃剩余消息（仅回收/OnComplete，不执行业务，适用于无状态服务快速停机）
+        DrainPolicy: "execute"
       # 定时器配置
       TimerConf:
         # 定时器队列长度
@@ -158,6 +168,76 @@ ServiceConf:
         # - "priority": 多优先级队列模式(支持6个优先级层级和多种调度策略)
         QueueMode: "dual"
 
+        # ========== 读写分离配置 (RW Mode) ==========
+        # 启用 Mailbox 级读写分离
+        # 开启后，标记为 ReadOnly 的 RPC 方法可跨 Worker 并发执行(RLock)，
+        # 写操作全 Service 独占串行(WLock)。
+        # 默认: false
+        EnableRWMode: false
+
+        # 整个 Service 最大并发读执行数(硬上限)
+        # 仅在 EnableRWMode=true 时生效
+        # 默认: min(NumCPU*4, 64)，0 表示使用默认值
+        MaxConcurrentReads: 0
+
+        # RW 模式下 Worker Stop 的最大等待时间
+        # 超时后 Worker 放弃等待泄漏的读 goroutine，强制继续 Drain 并退出
+        # 仅在 EnableRWMode=true 时生效
+        # 默认: 10s
+        StopTimeout: 10s
+
+        # 单个 Job 的最大执行时长（watchdog 告警，不中断执行）
+        # 仅在 EnableRWMode=true 时生效，0 表示不启用
+        # 默认: 30s
+        MaxJobExecutionTime: 30s
+
+        # 读 goroutine 池容量(仅在 EnableRWMode=true 时生效)
+        # 每个 WorkerPool 创建独立的 ants 池实现资源隔离
+        # 0 表示使用默认值(= MaxConcurrentReads)
+        ReadPoolSize: 0
+
+        # 每个 Worker 的读派发通道容量
+        # 通道满时按回压语义直接 OnJobDiscarded，避免主循环阻塞
+        # 仅在 EnableRWMode=true 时生效
+        # 0 表示使用默认值(= max(MaxConcurrentReads, 256))
+        ReadDispatchChanCap: 0
+
+        # ========== 中间件配置 ==========
+        MiddlewareConf:
+          # 是否启用 DispatchKey 统计中间件(仅 debug 模式生效)
+          # 用于统计热点 dispatcherKey，帮助发现消息分布不均问题
+          EnableDispatchKeyStats: true
+          # 统计输出间隔
+          DispatchKeyStatsInterval: 10s
+          # 统计输出 TopN
+          DispatchKeyStatsTopN: 10
+          # 统计中间件最大跟踪 key 数量
+          DispatchKeyStatsMaxKeys: 100000
+
+          # 限流中间件配置(不配置则不启用)
+          RateLimitConf:
+            Enable: false
+            # 每秒允许的请求数
+            Rate: 10000
+            # 突发流量上限(令牌桶容量)
+            Burst: 1000
+            # 是否跳过紧急及以上优先级的消息
+            SkipUrgent: true
+
+          # 熔断中间件配置(不配置则不启用)
+          CircuitBreakerConf:
+            Enable: false
+            # 触发熔断的连续失败次数
+            FailureThreshold: 5
+            # 半开状态下恢复的成功次数
+            SuccessThreshold: 3
+            # 熔断冷却时间
+            CooldownDuration: 30s
+            # 统计窗口时间
+            WindowDuration: 60s
+            # 半开状态允许的最大探测请求数
+            HalfOpenMaxAllowed: 3
+
         # 调度策略配置
         SchedulePolicy:
           # 初始工作线程数量
@@ -166,8 +246,8 @@ ServiceConf:
           # 如果直接设置为>1,表示直接开启并发模型,服务会以多线程方式运行
           InitialWorkerNum: 1
           
-          # 虚拟节点倍率(用于一致性哈希)
-          # 建议: 10-24之间，值越大消息分布越均匀，但哈希计算开销越大
+          # 虚拟节点倍率(已废弃，jump consistent hash 已取代，此字段保留仅为兼容旧配置)
+          # Deprecated: 任何值都被忽略
           VirtualWorkerRate: 16
           
           # 是否开启自动扩缩容
@@ -303,6 +383,8 @@ SystemLogger:
   PrefixName: "app"
   # 日志级别
   Level: debug
+  # 输出格式: text / json
+  OutputFormat: text
   # 是否打印到标准输出(默认不打印,可以被Init时的状态覆盖)
   Stdout: false
   # 是否打印调用文件信息

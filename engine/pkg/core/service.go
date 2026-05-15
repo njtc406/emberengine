@@ -16,6 +16,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/engine/pkg/config"
@@ -75,6 +76,7 @@ type Service struct {
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
 	initErr          error
+	authorizer       *authz.Authorizer // 可选：RBAC 授权引擎
 }
 
 type profilerRegistryAdapter struct {
@@ -104,6 +106,11 @@ func (s *Service) SetRuntimeDeps(c *cluster.Cluster, em *endpoints.EndpointManag
 	s.endpointManager = em
 	s.profilerRegistry = pr
 	s.router = rt
+}
+
+// SetAuthorizer 注入 RBAC 授权引擎。
+func (s *Service) SetAuthorizer(a *authz.Authorizer) {
+	s.authorizer = a
 }
 
 type loggerReleasable interface {
@@ -392,6 +399,12 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 		initErr := fmt.Errorf("service[%s] register rpc methods failed: %w", s.GetName(), err)
 		s.Errorf("service[%s] register rpc methods failed: %v", s.GetName(), err)
 		return initErr
+	}
+	// 注入 RBAC 授权引擎
+	if s.authorizer != nil {
+		if h, ok := s.IRpcHandler.(*rpc.Handler); ok {
+			h.SetAuthorizer(s.authorizer)
+		}
 	}
 
 	if s.src != nil {

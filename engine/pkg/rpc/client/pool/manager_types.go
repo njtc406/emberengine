@@ -161,17 +161,26 @@ func DefaultPoolConfig() *PoolConfig {
 	}
 }
 
-// PoolMetrics 连接池指标
+// PoolMetrics 连接池指标快照。
+//
+// 所有字段由 ConnectionPool.updatePoolMetrics() 在 connMutex.RLock 下计算，
+// GetMetrics() 返回的是指针——调用方应在读取后尽快复制或序列化，不应跨
+// goroutine 长期持有。
+//
+// 字段单位约定：
+//   - 计数类 (TotalRequests 等)：累计值，单调递增
+//   - 时间类 (AvgResponseTime)：纳秒
+//   - 比率类 (SuccessRate)：0.0 ~ 1.0
 type PoolMetrics struct {
-	TotalConnections   int32     `json:"total_connections"`
-	ActiveConnections  int32     `json:"active_connections"`
-	IdleConnections    int32     `json:"idle_connections"`
-	UnhealthyConns     int32     `json:"unhealthy_connections"`
-	TotalRequests      int64     `json:"total_requests"`
-	SuccessfulRequests int64     `json:"successful_requests"`
-	FailedRequests     int64     `json:"failed_requests"`
-	AvgResponseTime    int64     `json:"avg_response_time_ns"`
-	SuccessRate        float64   `json:"success_rate"`
-	LastScaleTime      time.Time `json:"last_scale_time"`
-	ScaleOperations    int64     `json:"scale_operations"`
+	TotalConnections   int32     `json:"total_connections"`     // 当前连接总数（含所有状态）
+	ActiveConnections  int32     `json:"active_connections"`    // 处于 StateActive 的连接数
+	IdleConnections    int32     `json:"idle_connections"`      // 处于 StateIdle 的连接数
+	UnhealthyConns     int32     `json:"unhealthy_connections"` // 处于 StateUnhealthy 的连接数
+	TotalRequests      int64     `json:"total_requests"`        // 累计请求总数
+	SuccessfulRequests int64     `json:"successful_requests"`   // 累计成功请求数
+	FailedRequests     int64     `json:"failed_requests"`       // 累计失败请求数
+	AvgResponseTime    int64     `json:"avg_response_time_ns"`  // 所有连接平均响应时间（纳秒）
+	SuccessRate        float64   `json:"success_rate"`          // 请求成功率 [0.0, 1.0]
+	LastScaleTime      time.Time `json:"last_scale_time"`       // 最近一次扩缩容操作时间
+	ScaleOperations    int64     `json:"scale_operations"`      // 累计扩缩容操作次数
 }

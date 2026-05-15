@@ -1,18 +1,22 @@
 package node
 
 import (
+	"crypto/tls"
 	"fmt"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	etcddiscovery "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/metrics"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/plugins"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
@@ -29,6 +33,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/pid"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/title"
+	"github.com/njtc406/emberengine/engine/pkg/utils/tlsx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
 	"github.com/njtc406/emberengine/engine/pkg/utils/version"
 
@@ -103,6 +108,9 @@ type Node struct {
 
 	// 路由器
 	Router *router.Router
+
+	// RBAC 授权引擎
+	Authorizer *authz.Authorizer
 
 	// 停止标志（防止 Stop() 重复调用）
 	stopped atomic.Bool
@@ -234,6 +242,15 @@ func (n *Node) GetMethodIndex() inf.INodeMethodIndex {
 	return n.MethodIndex
 }
 
+func (n *Node) IsReady() bool {
+	return !n.startTime.IsZero() && !n.stopped.Load()
+}
+
+func (n *Node) GetRuntimeMetricsText() string {
+	snapshot := n.GetRuntimeSnapshot()
+	return metrics.SnapshotToText(snapshot.ToSnapshotInfo())
+}
+
 // 编译期检查：确保 Node 实现了 INodeContext
 var _ inf.INodeContext = (*Node)(nil)
 
@@ -322,6 +339,9 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	appendCleanup(&cleanups, "release async pool", true, func() { n.AntsPool.Release() })
 
 	twConf := n.Config.NodeConf.TimingWheelConf
+	if twConf == nil {
+		twConf = &config.TimingWheelConf{}
+	}
 	interval := twConf.Interval
 	if interval <= 0 {
 		interval = time.Second
@@ -379,7 +399,23 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	if n.Config != nil && n.Config.NodeConf != nil {
 		grpcConnNum = n.Config.NodeConf.GrpcSenderConnNum
 	}
-	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger, n.RpcMonitor, natsConf, grpcConnNum)
+
+	// 构建 gRPC 客户端 TLS 配置（从第一个 gRPC RPCServer 的证书字段获取）
+	var grpcClientTLS *tls.Config
+	if n.Config != nil && n.Config.ClusterConf != nil {
+		for _, srv := range n.Config.ClusterConf.RPCServers {
+			if srv.Type == def.RpcTypeGrpc && srv.Cert != "" && srv.CertKey != "" {
+				var err error
+				grpcClientTLS, err = tlsx.LoadClientTLS(srv.Cert, srv.CertKey, srv.CAs, "", false)
+				if err != nil {
+					n.Logger.Errorf("node.Init: load gRPC client TLS: %v", err)
+				}
+				break
+			}
+		}
+	}
+
+	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger, n.RpcMonitor, natsConf, grpcConnNum, grpcClientTLS)
 	remoteMsgHandler := remotehandler.NewHandler(n.RpcMonitor, n.Logger, n.DeDuplicator)
 	appendCleanup(&cleanups, "close sender manager", true, func() { n.SenderMgr.Close() })
 
@@ -434,11 +470,17 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	}
 
 	// ==============================
-	// 7. 服务（最后启动 — 依赖以上所有组件）
+	// 7. RBAC 授权引擎（服务启动前创建）
+	// ==============================
+	n.Authorizer = authz.NewAuthorizer()
+
+	// ==============================
+	// 8. 服务（最后启动 — 依赖以上所有组件）
 	// ==============================
 	n.ServiceMgr = services.NewServiceManager(n.Logger)
 	n.ServiceMgr.SetRuntimeDeps(n.Cluster, n.Cluster.GetEndpointManager(), n.ProfilerRegistry, n.Router)
 	n.ServiceMgr.SetNodeContext(n)
+	n.ServiceMgr.SetAuthorizer(n.Authorizer)
 	if err := n.ServiceMgr.Init(n.Config.ServiceConf); err != nil {
 		return nil, fmt.Errorf("service manager init: %w", err)
 	}

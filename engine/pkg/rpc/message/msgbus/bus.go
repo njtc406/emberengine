@@ -29,6 +29,7 @@ type MessageBusFactory struct {
 	logger     log.ILoggerX
 	rpcMonitor *monitor.RpcMonitor
 	rpcTimeout time.Duration
+	metrics    rpcMetricsCollector
 }
 
 func NewMessageBusFactory(poolSize int, logger log.ILoggerX, rm *monitor.RpcMonitor, timeout time.Duration) *MessageBusFactory {
@@ -61,6 +62,11 @@ func (f *MessageBusFactory) Put(mb *MessageBus) {
 		return
 	}
 	f.pool.Put(mb)
+}
+
+// GetRpcMetrics 返回当前 RPC 聚合指标快照。
+func (f *MessageBusFactory) GetRpcMetrics() RpcMetrics {
+	return f.metrics.snapshot()
 }
 
 // newBusPool 创建 MessageBus 对象池实例
@@ -224,7 +230,7 @@ func assignCallResponse(out interface{}, resp interface{}, isMulti bool, multiOu
 	return assignSingleOutCached(singleOutElem, singleOutType, resp)
 }
 
-func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, out interface{}) error {
+func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, out interface{}) (callErr error) {
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
 		return mb.err
@@ -234,6 +240,18 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	}
 	if mb.receiver == nil {
 		return fmt.Errorf("receiver is nil")
+	}
+
+	// RPC metrics: call in-flight & total
+	if mb.factory != nil {
+		mb.factory.metrics.callTotal.Add(1)
+		mb.factory.metrics.callInFlight.Add(1)
+		defer func() {
+			mb.factory.metrics.callInFlight.Add(-1)
+			if callErr != nil {
+				mb.factory.metrics.callErrors.Add(1)
+			}
+		}()
 	}
 
 	var (
@@ -385,8 +403,18 @@ func (mb *MessageBus) callInternal(ctx context.Context, method string, in, out i
 	return mb.call(ctx, data, priority, dispatchKey, out)
 }
 
-func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64,
-	error) {
+func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (_ uint64,
+	asyncErr error) {
+	// RPC metrics: async call total & errors
+	if mb.factory != nil {
+		mb.factory.metrics.asyncCallTotal.Add(1)
+		defer func() {
+			if asyncErr != nil {
+				mb.factory.metrics.asyncCallErrors.Add(1)
+			}
+		}()
+	}
+
 	var timeout time.Duration
 	rpcTimeoutValue := mb.getRpcTimeout()
 	if ctx != nil {
@@ -529,12 +557,22 @@ func (mb *MessageBus) asyncCallInternal(ctx context.Context, data inf.IEnvelopeD
 }
 
 // send 内部发送方法
-func (mb *MessageBus) send(ctx context.Context, method string, priority def.Priority, dispatchKey string, in interface{}) error {
+func (mb *MessageBus) send(ctx context.Context, method string, priority def.Priority, dispatchKey string, in interface{}) (sendErr error) {
 	if mb.err != nil {
 		return mb.err
 	}
 	if mb.receiver == nil {
 		return fmt.Errorf("receiver is nil")
+	}
+
+	// RPC metrics: send total & errors
+	if mb.factory != nil {
+		mb.factory.metrics.sendTotal.Add(1)
+		defer func() {
+			if sendErr != nil {
+				mb.factory.metrics.sendErrors.Add(1)
+			}
+		}()
 	}
 
 	var deadline time.Time

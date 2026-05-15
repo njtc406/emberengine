@@ -7,13 +7,13 @@ package mailbox
 
 import (
 	"fmt"
-	"log/slog"
 	"sort"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
 
@@ -31,10 +31,11 @@ type PriorityQueueManager struct {
 	totalBatchLimit  int                                     // 单次处理的总批次限制
 	fallbackPriority def.Priority                            // 未注册优先级的 fallback 目标
 	fallbackWarned   atomic.Bool                             // fallback 日志 warn-once 标记
+	logger           log.ILoggerX
 }
 
 // NewPriorityQueueManager 创建多优先级队列管理器
-func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueManager {
+func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILoggerX) *PriorityQueueManager {
 	// 使用默认配置
 	if conf == nil {
 		conf = DefaultMultiLevelQueueConf()
@@ -44,6 +45,7 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf) *PriorityQueueMan
 		queues:           make(map[def.Priority]queue[inf.IMailboxJob]),
 		batchSizes:       make(map[def.Priority]int),
 		sortedPriorities: make([]def.Priority, 0, len(conf.PriorityBatches)),
+		logger:           logger,
 	}
 
 	// 确保配置至少包含一个优先级队列，避免空配置导致运行时丢消息
@@ -113,8 +115,10 @@ func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 		e.SetPriority(m.fallbackPriority)
 		// warn-once: 提示未注册的优先级发生了 fallback
 		if m.fallbackWarned.CompareAndSwap(false, true) {
-			slog.Warn("PriorityQueueManager: unregistered priority fallback",
-				"requested", int(priority), "fallback", int(m.fallbackPriority))
+			if m.logger != nil {
+				m.logger.Warnf("PriorityQueueManager: unregistered priority fallback: requested=%d fallback=%d",
+					priority, m.fallbackPriority)
+			}
 		}
 	}
 

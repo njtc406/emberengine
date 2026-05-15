@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -149,15 +150,21 @@ func (m *MethodMgr) IsReadOnly(name string) bool {
 // Handler 用于处理 RPC 调用
 type Handler struct {
 	inf.IModule
-	mgr       inf.IMethodMgr
-	methods   []string
-	methodIdx inf.INodeMethodIndex
+	mgr        inf.IMethodMgr
+	methods    []string
+	methodIdx  inf.INodeMethodIndex
+	authorizer *authz.Authorizer // 可选：RBAC 授权引擎（nil 时不检查）
 }
 
 func NewHandler(owner inf.IModule) *Handler {
 	return &Handler{
 		IModule: owner,
 	}
+}
+
+// SetAuthorizer 注入 RBAC 授权引擎。
+func (h *Handler) SetAuthorizer(a *authz.Authorizer) {
+	h.authorizer = a
 }
 
 func (h *Handler) Init(hd inf.IMethodMgr) (inf.IRpcHandler, error) {
@@ -418,6 +425,20 @@ func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) err
 		}
 		h.doResponse(ctx, envelope)
 	}()
+
+	// RBAC 授权检查
+	if a := h.authorizer; a != nil && a.IsEnabled() {
+		caller := authz.PrincipalFromPID(meta.GetSenderPid())
+		targetService := h.GetService().GetPid().GetName()
+		if err := a.Authorize(caller, targetService, data.GetMethod()); err != nil {
+			h.WithContext(ctx).
+				WithField("caller", caller.String()).
+				WithField("method", data.GetMethod()).
+				Warnf("authz denied: %v", err)
+			data.SetError(fmt.Errorf("authorization denied: %w", err))
+			return nil
+		}
+	}
 
 	call, ok := h.mgr.GetMethodFunc(data.GetMethod())
 	if !ok {

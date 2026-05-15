@@ -2,6 +2,7 @@
 
 NodeConf:
   NodeId: 1
+  NodeType: test
   # 系统状态(debug/release)
   SystemStatus: release
   # 系统数据目录(持久化)
@@ -67,6 +68,10 @@ ServiceConf:
       # 服务分区ID(用于服务路由隔离)
       Partition: 10001
       RpcType: "nats"
+      # 停机策略配置
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       # 定时器配置
       TimerConf:
         # 定时器队列长度
@@ -79,6 +84,33 @@ ServiceConf:
         # - "priority": 多优先级队列模式(支持6个优先级层级和多种调度策略)
         QueueMode: "dual"
 
+        # ========== 读写分离配置 ==========
+        EnableRWMode: false
+        MaxConcurrentReads: 0
+        StopTimeout: 10s
+        MaxJobExecutionTime: 30s
+        ReadPoolSize: 0
+        ReadDispatchChanCap: 0
+
+        # ========== 中间件配置 ==========
+        MiddlewareConf:
+          EnableDispatchKeyStats: true
+          DispatchKeyStatsInterval: 10s
+          DispatchKeyStatsTopN: 10
+          DispatchKeyStatsMaxKeys: 100000
+          RateLimitConf:
+            Enable: false
+            Rate: 10000
+            Burst: 1000
+            SkipUrgent: true
+          CircuitBreakerConf:
+            Enable: false
+            FailureThreshold: 5
+            SuccessThreshold: 3
+            CooldownDuration: 30s
+            WindowDuration: 60s
+            HalfOpenMaxAllowed: 3
+
         # 调度策略配置
         SchedulePolicy:
           # 初始工作线程数量
@@ -87,8 +119,7 @@ ServiceConf:
           # 如果直接设置为>1,表示直接开启并发模型,服务会以多线程方式运行
           InitialWorkerNum: 100
 
-          # 虚拟节点倍率(用于一致性哈希)
-          # 建议: 10-24之间，值越大消息分布越均匀，但哈希计算开销越大
+          # 虚拟节点倍率(已废弃，jump consistent hash 已取代，值被忽略)
           VirtualWorkerRate: 20
 
           # 是否开启自动扩缩容
@@ -147,6 +178,9 @@ ServiceConf:
       ServiceName: PprofService
       Type: test
       Partition: 10001
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
 #    - ClassName: PprofService
 #      ServiceName: PprofService
 #      Type: test

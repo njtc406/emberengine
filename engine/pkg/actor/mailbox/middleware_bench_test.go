@@ -89,7 +89,7 @@ func BenchmarkRateLimitMiddleware_WithSkip(b *testing.B) {
 
 // BenchmarkMiddlewareChain_Empty 空中间件链
 func BenchmarkMiddlewareChain_Empty(b *testing.B) {
-	chain := NewMiddlewareChain()
+	chain := NewMiddlewareChain(nil)
 	ctx := context.Background()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -105,7 +105,7 @@ func BenchmarkMiddlewareChain_Empty(b *testing.B) {
 // BenchmarkMiddlewareChain_Single 单个中间件
 func BenchmarkMiddlewareChain_Single(b *testing.B) {
 	m := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10, 0)
-	chain := NewMiddlewareChain(m)
+	chain := NewMiddlewareChain([]inf.IMailboxMiddleware{m})
 	ctx := context.Background()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -122,7 +122,7 @@ func BenchmarkMiddlewareChain_Single(b *testing.B) {
 func BenchmarkMiddlewareChain_Multiple(b *testing.B) {
 	stats := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10, 0)
 	rateLimit := NewRateLimitMiddleware(100000, 10000)
-	chain := NewMiddlewareChain(stats, rateLimit)
+	chain := NewMiddlewareChain([]inf.IMailboxMiddleware{stats, rateLimit})
 	ctx := context.Background()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -139,7 +139,7 @@ func BenchmarkMiddlewareChain_Multiple(b *testing.B) {
 func BenchmarkMiddlewareChain_OnComplete(b *testing.B) {
 	stats := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10, 0)
 	rateLimit := NewRateLimitMiddleware(100000, 10000)
-	chain := NewMiddlewareChain(stats, rateLimit)
+	chain := NewMiddlewareChain([]inf.IMailboxMiddleware{stats, rateLimit})
 	ctx := context.Background()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -228,7 +228,7 @@ func BenchmarkMiddlewareContext_SetGet(b *testing.B) {
 func BenchmarkRealisticWorkload(b *testing.B) {
 	stats := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10, 0)
 	rateLimit := NewRateLimitMiddleware(100000, 10000)
-	chain := NewMiddlewareChain(stats, rateLimit)
+	chain := NewMiddlewareChain([]inf.IMailboxMiddleware{stats, rateLimit})
 	ctx := context.Background()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -251,7 +251,7 @@ func BenchmarkRealisticWorkload(b *testing.B) {
 // BenchmarkHighThroughputScenario 高吞吐场景
 func BenchmarkHighThroughputScenario(b *testing.B) {
 	stats := NewDispatchKeyStatsMiddleware(nil, 10*time.Second, 10, 0)
-	chain := NewMiddlewareChain(stats)
+	chain := NewMiddlewareChain([]inf.IMailboxMiddleware{stats})
 	ctx := context.Background()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

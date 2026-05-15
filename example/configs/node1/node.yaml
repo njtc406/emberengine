@@ -67,6 +67,9 @@ ServiceConf:
       Type: test
       Partition: 1
       ServiceId: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -130,6 +133,9 @@ ServiceConf:
       # 服务分区ID(用于服务路由隔离)
       Partition: 1
       RpcType: "rpcx"
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       # 定时器配置
       TimerConf:
         # 定时器队列长度

@@ -6,6 +6,7 @@
 package mailbox
 
 import (
+	"runtime"
 	"sync/atomic"
 
 	job2 "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
@@ -110,5 +111,6 @@ func (p *CompositeSuspendPolicy) AddPolicy(policy inf.ISuspendPolicy) {
 		if p.policies.CompareAndSwap(old, &newSlice) {
 			return
 		}
+		runtime.Gosched()
 	}
 }

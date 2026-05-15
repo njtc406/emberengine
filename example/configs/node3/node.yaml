@@ -2,6 +2,7 @@
 
 NodeConf:
   NodeId: 1
+  NodeType: test
   # 系统状态(debug/release)
   SystemStatus: debug
   # 系统数据目录(持久化)
@@ -66,6 +67,9 @@ ServiceConf:
       Type: test
       Partition: 1
       ServiceId: 2
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000

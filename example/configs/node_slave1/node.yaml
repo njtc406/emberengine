@@ -2,6 +2,7 @@
 
 NodeConf:
   NodeId: 1
+  NodeType: test
   # 系统状态(debug/release)
   SystemStatus: debug
   # 系统数据目录(持久化)
@@ -58,6 +59,9 @@ ServiceConf:
       # 服务分区ID(用于服务路由隔离)
       Partition: 2
       RpcType: "grpc"
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       IsPrimarySecondaryMode: true
       WorkerConf:
         # 用户消息队列大小(默认128)
@@ -94,6 +98,8 @@ SystemLogger:
   Name: "system-slaver1"
   # 日志级别
   Level: debug
+  # 输出格式: text / json
+  OutputFormat: text
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息

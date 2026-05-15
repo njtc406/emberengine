@@ -335,6 +335,65 @@ func TestRW_SetRWEnabledDisableOnly(t *testing.T) {
 	t.Logf("OK: reads=%d, writes=%d", rc, wc)
 }
 
+func TestRW_SetRWEnabledWaitsReadPipelineResidual(t *testing.T) {
+	logger := &testLogger{t: t}
+	readDuration := 40 * time.Millisecond
+	invoker := &mockInvoker{name: "test-svc-disable-residual", readDelay: readDuration}
+
+	conf := newRWConf(2, 1)
+	conf.ReadDispatchChanCap = 8
+	wp, err := NewWorkerPool(conf, logger, invoker)
+	if err != nil {
+		t.Fatalf("NewWorkerPool: %v", err)
+	}
+	if err := wp.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer wp.Stop()
+
+	const readN = 3
+	for i := 0; i < readN; i++ {
+		job := newRWJob(def.RWModeRead, "same-key")
+		if err := wp.DispatchJob(job); err != nil {
+			t.Fatalf("dispatch read: %v", err)
+		}
+	}
+
+	snap := wp.snap.Load()
+	if snap == nil || snap.ring == nil {
+		t.Fatal("expected worker snapshot")
+	}
+	workerID, ok := snap.ring.Get("same-key")
+	if !ok {
+		t.Fatal("expected dispatcher key to resolve")
+	}
+	worker, ok := snap.workers[workerID].(*Worker)
+	if !ok || worker == nil {
+		t.Fatalf("expected concrete worker for id=%d", workerID)
+	}
+	deadline := time.Now().Add(time.Second)
+	for worker.readsDispatched.Load() < readN && time.Now().Before(deadline) {
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
+	if got := worker.readsDispatched.Load(); got < readN {
+		t.Fatalf("readsDispatched = %d, want at least %d", got, readN)
+	}
+	if got := invoker.readCount.Load(); got == readN {
+		t.Fatal("test setup failed: no residual reads left before disabling")
+	}
+
+	if err := wp.SetRWEnabled(false); err != nil {
+		t.Fatalf("SetRWEnabled(false): %v", err)
+	}
+	if got := invoker.readCount.Load(); got != readN {
+		t.Fatalf("SetRWEnabled(false) returned before readPipeline residual finished: reads=%d want=%d", got, readN)
+	}
+	if worker.readsLaunched.Load() != worker.readsDispatched.Load() {
+		t.Fatalf("read pipeline not drained: launched=%d dispatched=%d", worker.readsLaunched.Load(), worker.readsDispatched.Load())
+	}
+}
+
 // ============================================================================
 // 场景 4: readSem 满载退避
 // 验证目标: MaxConcurrentReads=2，投 10 个读 → 最多 2 个并行

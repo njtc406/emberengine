@@ -137,4 +137,12 @@ type INodeContext interface {
 
 	// GetMethodIndex 返回方法前缀索引（窄接口）
 	GetMethodIndex() INodeMethodIndex
+
+	// ── 可观测性 ──
+
+	// IsReady 返回节点是否已就绪，可接收流量
+	IsReady() bool
+
+	// GetRuntimeMetricsText 返回 Prometheus exposition text 格式的运行时指标
+	GetRuntimeMetricsText() string
 }

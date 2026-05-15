@@ -1,6 +1,7 @@
 # EmberEngine 下一步目标规划
 
 > **编制时间**: 2026-03-13  
+> **最后更新**: 2026-05-13  
 > **基准分支**: `v2-dev-node-fix`  
 > **编制依据**: 全项目源码分析、ARCHITECTURE_REVIEW.md、ROADMAP.md、DESIGN_MULTI_NODE*.md、DESIGN_ISSUES_FIXLIST.md、TODO_SERVICE_CONTAINER.md
 
@@ -18,11 +19,11 @@
 | **集群/服务发现** | ⭐⭐⭐⭐ | etcd Watch + 健康检查 + 指数退避重连 + 主从选举守卫 | 缺少灰度路由、缺少节点级健康端点 |
 | **事件系统** | ⭐⭐⭐⭐ | 三级事件 (Global/Server/Specific)、NATS 跨节点、限流批处理 | 已拆分完成，缺少 metrics |
 | **错误处理** | ⭐⭐⭐⭐ | panic→error 全面改造、errorlib 基础能力 | errorlib.Is 签名问题（P3-03）待确认清理 |
-| **配置体系** | ⭐⭐⭐ | 结构化配置树完整、硬编码已配置化 | 缺少配置校验、缺少完整配置文档 |
-| **可观测性** | ⭐⭐ | 基础 Profiler + 诊断 Snapshot | **最大短板**：无 Prometheus metrics、无分布式追踪、无 health endpoint |
-| **测试覆盖** | ⭐⭐ | 45 个测试文件，核心路径已覆盖 | core/node/rpc-remote 等模块覆盖率仍低 |
-| **安全能力** | ⭐ | TLS 支持初步、JWT 工具存在 | **第二大短板**：无服务间认证、无授权体系、无审计 |
-| **文档体系** | ⭐⭐ | 设计文档详尽 (6 份)、README 基础 | 严重缺少 API 文档、使用指南、配置说明 |
+| **配置体系** | ⭐⭐⭐⭐ | 结构化配置树完整、硬编码已配置化，binding tags + validator 校验已就位 | 配置校验边界值待深化、缺少热加载 |
+| **可观测性** | ⭐⭐⭐⭐ | Prometheus text 全链路指标（Node/RPC/Mailbox/Event/Pool）、/health+/ready+/metrics 端点、TraceID 贯通验证 | OTel SDK 接入待 P3 |
+| 测试覆盖 | ⭐⭐⭐⭐½ | 70+ 测试文件，P0-P3 全链路覆盖（RPC/Handler/Router/Monitor），race 门禁全绿 | sysModule/sysService/cluster 等模块覆盖率仍可提升 |
+| **安全能力** | ⭐⭐⭐ | gRPC/NATS mTLS 已落地、tlsx 工具包(12 tests)、RBAC 授权引擎(24 tests)、RPC Handler 拦截集成、JWT 工具存在 | 缺少审计日志、etcd 策略存储、证书生成工具 |
+| **文档体系** | ⭐⭐⭐½ | 设计文档详尽、QUICK_START + SERVICE_DEV_GUIDE + CONFIG_REFERENCE 已完成 | 缺少架构图、API 参考、部署运维指南 |
 
 ### 1.2 已完成里程碑回顾
 
@@ -35,6 +36,9 @@
 | 设计漏洞修复清单 | ✅ | idle.Controller、leadership.Guard、MultiBus CallMode、CircuitBreaker |
 | Phase 3 修复清单 (P3-01~P3-17) | ✅ | 17 项全部完成 |
 | 架构审查修复 (NEW-01~NEW-14) | ✅ | profilerAdapter 统一、eventBus 拆分、配置化参数、泛型 GetModule 等 |
+| Actor 目录重整（2026Q2 审计） | ✅ | Mailbox RW 分离、洋葱中间件、panicRateLimiter、死代码清理、CPU spin 修复、race 修复 |
+| 配置基线回归测试 | ✅ | 全部 template/config + example/configs 通过 Config.Load 自动化验证；补齐 NodeType、StopPolicy、OutputFormat、RW Mode、MiddlewareConf |
+| P1 基础能力建设 | ✅ | errorx 契约收敛 + PoolMetrics MVP + 核心测试 +35 tests + 优雅关闭顺序固定 |
 
 ### 1.3 当前技术债残余
 
@@ -54,69 +58,19 @@
 
 > **目标**: 夯实测试、补齐可观测性基础、清理剩余技术债
 
-#### A-1 可观测性基础建设 🔥 **最高优先级**
+#### A-1 可观测性基础建设 ✅ 已完成
 
-**背景**: 当前框架几乎"裸跑"，生产出问题后排查极其困难。可观测性是从"能用"到"能运维"的关键跨越。
+**背景**: 当前框架几乎“裸跑”，生产出问题后排查极其困难。可观测性是从“能用”到“能运维”的关键跨越。
 
-**目标**:
-1. 集成 Prometheus metrics 暴露
-2. 提供 /health 和 /ready 端点
-3. 基于现有 xcontext.traceId 接入 OpenTelemetry
+**完成概要**:
+1. ✅ Prometheus metrics 基础层：统一 sample model + MetricDesc + text 输出
+2. ✅ /health、/ready、/metrics HTTP 端点（HealthService）
+3. ✅ RPC Call/AsyncCall/Send 指标埋点（total/errors/in-flight/duration）
+4. ✅ Mailbox/Event atomic counter 指标埋点
+5. ✅ TraceID 全链路贯通验证 + tracing.ITracer/ISpan 接口预留
+6. ✅ OTel SDK 接入边界已规划，留 P3 实装
 
-**Metrics 核心指标清单**:
-
-```
-RPC 指标:
-├── ember_rpc_requests_total{service, method, status}       # 请求总数
-├── ember_rpc_request_duration_seconds{service, method}     # 延迟直方图
-├── ember_rpc_in_flight{service}                            # 当前进行中请求
-└── ember_rpc_errors_total{service, method, error_code}     # 错误计数
-
-Mailbox 指标:
-├── ember_mailbox_queue_size{service, priority}             # 队列深度
-├── ember_mailbox_job_duration_seconds{service, job_type}   # Job 处理耗时
-├── ember_mailbox_workers_active{service}                   # 活跃 Worker 数
-└── ember_mailbox_dropped_total{service, reason}            # 丢弃消息数
-
-连接池指标:
-├── ember_pool_connections_active{pool_name}                # 活跃连接
-├── ember_pool_hit_total{pool_name}                         # 命中数
-└── ember_pool_miss_total{pool_name}                        # 未命中数
-
-事件指标:
-├── ember_event_published_total{event_type}                 # 发布事件数
-├── ember_event_delivered_total{event_type}                 # 投递事件数
-└── ember_event_throttled_total{event_type}                 # 被限流事件数
-
-Node 级指标:
-├── ember_node_uptime_seconds                               # 运行时长
-├── ember_node_services_total                               # 服务数量
-└── ember_node_goroutines                                   # goroutine 数
-```
-
-**架构方案**:
-- 新建 `engine/pkg/metrics/` 包，封装 `prometheus/client_golang`
-- Node 持有 `*metrics.Registry`，通过 INodeContext 注入各子系统
-- 各子系统（RPC/Mailbox/Pool/Event）通过 Collector 接口上报
-- `sysService/metricsservice` 暴露 `/metrics` HTTP 端点
-
-**Health/Ready 端点**:
-- `/health` — Node 存活检查（进程 OK 即返回 200）
-- `/ready` — 就绪检查（所有 Service 状态 = Running）
-- 可通过 `sysService/healthservice` 实现或直接集成到 pprofservice
-
-**实施任务拆分**:
-
-| 序号 | 任务 | 具体文件/包 |
-|------|------|------------|
-| A-1-1 | 创建 metrics 包，定义 Collector 接口和 Prometheus Registry 封装 | `engine/pkg/metrics/` |
-| A-1-2 | Node 持有 metrics.Registry，通过 INodeContext 注入 | `node/node.go`, `interfaces/` |
-| A-1-3 | RPC 调用链埋点（MessageBus.call/asyncCall/send） | `rpc/message/msgbus/bus.go` |
-| A-1-4 | Mailbox/WorkerPool 埋点（队列深度、处理耗时、丢弃数） | `actor/mailbox/worker_pool.go`, `worker.go` |
-| A-1-5 | 连接池埋点（命中率、活跃连接） | `rpc/client/pool/manager_runtime.go` |
-| A-1-6 | 事件系统埋点 | `event/bus_*.go` |
-| A-1-7 | 创建 HealthService（/health, /ready, /metrics） | `sysService/healthservice/` |
-| A-1-8 | OpenTelemetry Tracer 接入（基于 xcontext.traceId） | `rpc/message/msgbus/`, `utils/xcontext/` |
+> 独立开发文档：[P2_OBSERVABILITY_DEV_PLAN.md](P2_OBSERVABILITY_DEV_PLAN.md)
 
 ---
 
@@ -128,14 +82,14 @@ Node 级指标:
 
 | 优先级 | 包 | 当前状态 | 目标 |
 |--------|----|----------|------|
-| P0 | `core/service.go` | 有基础测试 | 补齐 Init失败回滚、Start/Stop 生命周期、并发停止 |
-| P0 | `rpc/message/msgbus/` | 有 bench 测试 | 补齐 Call/AsyncCall/Send 正常 + 超时 + 错误路径 |
-| P0 | `node/node.go` | 仅有 diagnostics 测试 | 新增 smoke test（最小 Node 启动/停止） |
+| P0 | `core/service.go` | 有基础测试 | ✅ P1-3 已补齐 Init失败回滚、Start/Stop 生命周期、并发停止 |
+| P0 | `rpc/message/msgbus/` | 有 bench 测试 | ✅ P1-3 已补齐 MultiBus AsyncCall/Send 空值/错误聚合 |
+| P0 | `node/node.go` | 仅有 diagnostics 测试 | ✅ P1-4 已新增 Node Stop 幂等/并发/逆序清理 7 tests |
 | P1 | `cluster/endpoints/` | 有基础测试 | 补齐并发 Add/Remove、临时连接 TTL 清理 |
 | P1 | `actor/mailbox/worker_pool.go` | 有 bench 测试 | 补齐扩缩容、Drain、Suspend/Resume 路径 |
-| P1 | `event/` | 无测试 | 新增 EventBus Init/Publish/Subscribe 基础覆盖 |
-| P2 | `services/services.go` | 有基础测试 | 补齐 Init 锁行为、StopAll 逆序 |
-| P2 | `rpc/remote/` | 无测试 | 新增 handler 请求分发基础覆盖 |
+| P1 | `event/` | 无测试 | ✅ P1-3 已新增 handler error/Destroy/并发/重复名/nil trigger 6 tests |
+| P2 | `services/services.go` | 有基础测试 | ✅ P1-3 已补齐 StopAll 幂等/空列表/Start 空列表 3 tests |
+| P2 | `rpc/remote/` | 无测试 | ✅ P3-2 已新增 Remote Handler 去重/回复匹配/错误解析 8 tests |
 
 **额外要求**:
 - 逐步扩大 `go test -race` 范围至 `core/`, `rpc/`, `cluster/`, `event/`
@@ -149,8 +103,8 @@ Node 级指标:
 |------|------|----------|
 | A-3-1 | errorlib.Is 签名修正 | 确认 P3-03 是否已修复，若未修复则重命名为 `IsCode(int) bool` |
 | A-3-2 | Service 状态机化 | 引入显式状态机替代 atomic int32，统一状态转换规则 |
-| A-3-3 | go vet 零告警 | 确保 `go vet ./...` 零告警（含 example 目录） |
-| A-3-4 | race 检测通过 | `go test -race ./engine/pkg/...` 全部通过 |
+| A-3-3 | go vet 零告警 | ✅ 已完成——`go vet ./...` 零告警（含 example 目录） |
+| A-3-4 | race 检测通过 | ✅ 已完成——actor/core/rpc/event/services/node/pool 全部 `-race -count=2` 通过 |
 
 ---
 
@@ -197,13 +151,13 @@ engine/pkg/authz/
 
 | 序号 | 任务 | 说明 |
 |------|------|------|
-| B-1-1 | mTLS 基座：gRPC channel 强制 TLS，NATS TLS 完善 | 扩展 config，补齐证书配置 |
-| B-1-2 | 身份提取中间件：从 TLS peer cert 提取 principal | gRPC interceptor / NATS handler |
-| B-1-3 | RBAC 引擎实现：角色定义、策略匹配、拒绝/允许决策 | `authz/rbac.go` |
-| B-1-4 | 策略存储与分发：etcd 存储 + watch 更新 + 本地缓存 | `authz/policy.go` |
-| B-1-5 | RPC Handler 拦截集成：在 handler.go 方法分发前执行授权检查 | `rpc/remote/handler/` |
-| B-1-6 | 审计日志：高权限操作记录 | `authz/audit.go` |
-| B-1-7 | 开发工具：自签证书生成脚本 | `tools/cert/` |
+| B-1-1 | mTLS 基座：gRPC channel 强制 TLS，NATS TLS 完善 | ✅ 已完成 — tlsx 工具包 + server/client TLS 集成 |
+| B-1-2 | 身份提取中间件：从 PID 提取 principal | ✅ 已完成 — PrincipalFromPID(ServiceType/ServiceName/NodeUid) |
+| B-1-3 | RBAC 引擎实现：角色定义、策略匹配、拒绝/允许决策 | ✅ 已完成 — authz/authz.go (24 tests) |
+| B-1-4 | 策略存储与分发：etcd 存储 + watch 更新 + 本地缓存 | 📋 已规划 — 见 P5_POLICY_DISTRIBUTION_DEV_PLAN.md |
+| B-1-5 | RPC Handler 拦截集成：在 handler.go 方法分发前执行授权检查 | ✅ 已完成 — core/rpc/handler.go HandleRequest |
+| B-1-6 | 审计日志：高权限操作记录 | ⏳ 待实施 |
+| B-1-7 | 开发工具：自签证书生成脚本 | ⏳ 待实施 |
 
 ---
 
@@ -248,7 +202,7 @@ func (e *Error) Unwrap() error        { return e.Cause }
 
 | 序号 | 任务 | 说明 |
 |------|------|------|
-| B-3-1 | 配置校验层 | 在 Config.Load() 后执行结构化校验（必填字段、范围检查、枚举校验） |
+| B-3-1 | 配置校验层 | 🔄 部分完成——binding tags + go-playground/validator 已就位，需深化边界值测试 |
 | B-3-2 | 完整配置文档 | 生成配置项说明文档（字段名、类型、默认值、示例、约束） |
 | B-3-3 | 敏感配置支持 | 密码/Token 支持环境变量引用或加密存储 |
 | B-3-4 | 配置热加载 | 部分配置项支持运行时更新（如日志级别、限流阈值） |
@@ -282,12 +236,12 @@ func (e *Error) Unwrap() error        { return e.Cause }
 
 | 序号 | 文档 | 说明 |
 |------|------|------|
-| C-3-1 | **快速入门指南** | 从零创建 Node + Service + Module，5 分钟跑通 |
+| C-3-1 | **快速入门指南** | ✅ 已完成 — docs/QUICK_START.md |
 | C-3-2 | **API 参考文档** | GoDoc + 补充示例和使用注意事项 |
 | C-3-3 | **架构设计指南** | C4 模型图 + 数据流图 + 时序图 |
-| C-3-4 | **配置完整说明** | 每个配置项的作用、默认值、示例 |
+| C-3-4 | **配置完整说明** | ✅ 已完成 — docs/CONFIG_REFERENCE.md（22 节） |
 | C-3-5 | **性能调优指南** | WorkerPool 参数调优、连接池配置、pprof 使用 |
-| C-3-6 | **Service 开发指南** | 如何编写 Service、挂载 Module、注册 RPC 方法、处理事件 |
+| C-3-6 | **Service 开发指南** | ✅ 已完成 — docs/SERVICE_DEV_GUIDE.md |
 | C-3-7 | **部署运维指南** | 单机/集群部署、主从配置、监控接入、日志管理 |
 
 #### C-4 生态扩展
@@ -328,13 +282,13 @@ func (e *Error) Unwrap() error        { return e.Cause }
 | **正面** | 身份不可伪造、运维可配置、审计可追溯 |
 | **负面** | 证书管理增加运维复杂度、RBAC 策略需要管理平台 |
 | **替代方案** | Token 签名（适合 NATS 异步场景，可作为 mTLS 的补充） |
-| **状态** | 📋 待实施 |
+| **状态** | ✅ mTLS 已完成，✅ RBAC 已完成，📋 策略存储已规划，⏳ 审计日志待实施 |
 
 ### 3.3 架构风险提示
 
 | 风险 | 级别 | 说明 | 缓解措施 |
 |------|------|------|----------|
-| **无认证的生产暴露** | 🔴 高 | 内网不等于安全，横向移动可调用任意 RPC | Phase B-1 mTLS + RBAC |
+| **无认证的生产暴露** | � 中 | 内网不等于安全，横向移动可调用任意 RPC | mTLS ✅ + RBAC ✅，剩余审计日志待实施 |
 | **可观测性缺失** | 🔴 高 | 问题定位只能靠日志 grep，线上事故恢复时间长 | Phase A-1 metrics + tracing |
 | **测试覆盖不足** | 🟡 中 | 核心路径改动可能引入回归 | Phase A-2 补齐测试 + race 检测 |
 | **单点 etcd 依赖** | 🟡 中 | etcd 不可用则集群服务发现失效 | 本地缓存兜底 + 多 etcd 节点 |
@@ -345,18 +299,18 @@ func (e *Error) Unwrap() error        { return e.Cause }
 ## 四、里程碑时间线
 
 ```
-2026-03 ─── 当前 ───────────────────────────────────
+2026-03 ─── 开始 ───────────────────────
 
 Phase A: 稳固基座
 ├── A-1  可观测性基础 (metrics + health + tracing 骨架)
-├── A-2  测试覆盖提升 (核心链路 ≥ 60%)
-└── A-3  技术债清理 (go vet 零告警, race 全通过)
+├── A-2  测试覆盖提升 (核心链路 ≥ 60%) — P1 已完成大部分
+└── A-3  技术债清理 (go vet 零告警 ✅, race 全通过 ✅)
 
-2026-05 ─── Phase A 完成 ──────────────────────────
+2026-05-13 ── P0+P1 完成 ───────────────
 
 Phase B: 生产就绪
 ├── B-1  服务间认证授权 (mTLS + RBAC + 审计)
-├── B-2  结构化错误码 (errorx)
+├── B-2  结构化错误码 (errorx) — P1-1 已完成基础，待 RPC wire error 扩展
 └── B-3  配置系统增强 (校验 + 文档 + 热加载)
 
 2026-07 ─── Phase B 完成 ──────────────────────────
@@ -379,12 +333,12 @@ Phase C: 生态完善
 | 1 | A-1-1~A-1-3 | Metrics 包创建 + RPC 埋点 | 可观测性零到一，投入产出比最高 |
 | 2 | A-1-7 | Health/Ready/Metrics HTTP 端点 | 运维基础能力，K8s 探针必需 |
 | 3 | A-2 (P0) | core/service + msgbus + node smoke test | 防止核心链路回归 |
-| 4 | A-3-3~A-3-4 | go vet 零告警 + race 检测通过 | CI 基线质量保障 |
+| 4 | A-3-3~A-3-4 | go vet 零告警 + race 检测通过 | CI 基线质量保障（A-3-3 ✅，A-3-4 🔄） |
 | 5 | A-1-4~A-1-6 | Mailbox/Pool/Event 指标埋点 | 完整可观测性闭环 |
-| 6 | B-1-1~B-1-2 | mTLS 底座 + 身份提取 | 安全基座，后续 RBAC 依赖 |
+| 6 | B-1-1~B-1-2 | mTLS 底座 + 身份提取 | ✅ 已完成 |
 | 7 | B-2 | errorx 结构化错误码 | RPC 跨节点错误传播的基础 |
 | 8 | A-1-8 | OpenTelemetry 接入 | 分布式调用链追踪 |
-| 9 | B-1-3~B-1-5 | RBAC 引擎 + 策略分发 + RPC 拦截 | 安全闭环 |
+| 9 | B-1-3~B-1-5 | RBAC 引擎 + 策略分发 + RPC 拦截 | ✅ B-1-3/B-1-5 已完成，📋 B-1-4 策略存储已规划 |
 | 10 | C-3-1 | 快速入门文档 | 降低上手门槛，推广框架 |
 
 ---
@@ -395,6 +349,7 @@ Phase C: 生态完善
 |----------|------|-------------|
 | ARCHITECTURE_REVIEW.md | 已完成的全面分析 | 本文档的分析基础 |
 | ROADMAP.md | P0-P3 规划 | 本文档继承并细化其 P1-P3 任务 |
+| P2_OBSERVABILITY_DEV_PLAN.md | P2 待实施 | 可观测性 MVP 的具体实施计划 |
 | DESIGN_MULTI_NODE.md | Phase 1-4 已完成 | 历史里程碑，已归档 |
 | DESIGN_MULTI_NODE_PHASE3_FIXLIST.md | 17 项全部完成 | 历史修复清单，已归档 |
 | DESIGN_ISSUES_FIXLIST.md | 主要项已修复 | 历史修复清单，已归档 |
@@ -409,3 +364,15 @@ Phase C: 生态完善
 ---
 
 *本文档基于 2026-03-13 全项目源码分析与历史设计文档综合编制。建议每次 Phase 完成后回顾更新。*
+
+*2026-05-12 更新：Actor 目录重整和配置基线回归已完成，配置体系评分升至 ⭐⭐⭐⭐，测试覆盖升至 ⭐⭐⭐，时间线已调整。*
+
+*2026-05-14 更新：P3 RPC/Cluster 韧性增强全部完成，测试覆盖升至 ⭐⭐⭐⭐½（新增 31 tests：RPC 调用链 13 + Handler 8 + Router 7 + Monitor shutdown 3），rpc/remote 从 0 测试提升至 8 tests。*
+
+*2026-05-14 更新：P4 文档产品化完成，新增 CONFIG_REFERENCE.md（22 节配置参数参考）、QUICK_START.md（快速开始指南）、SERVICE_DEV_GUIDE.md（Service 开发指南）、node_concurrency/README.md（压测说明）、example/ReadMe.md（示例总览重写）。*
+
+*2026-05-14 更新：P5 mTLS 安全底座完成。新增 tlsx 工具包（LoadServerTLS/LoadClientTLS，12 tests），gRPC server/client 支持基于配置的 mTLS，NATS client sender 集成 TLS。安全能力从 ⭐ 升至 ⭐⭐。*
+
+*2026-05-14 更新：P5 RBAC 授权引擎完成（authz 包 24 tests + Principal 身份模型 + RPC Handler 拦截集成），安全能力升至 ⭐⭐⭐。B-1 任务进度：mTLS(B-1-1 ✅) + 身份提取(B-1-2 ✅) + RBAC 引擎(B-1-3 ✅) + RPC 拦截(B-1-5 ✅)，剩余：策略存储(B-1-4)、审计日志(B-1-6)、证书工具(B-1-7)。*
+
+*2026-05-14 更新：P5 策略存储与分发完成拆分规划，新增 P5_POLICY_DISTRIBUTION_DEV_PLAN.md，拆为 P5-10~P5-15：PolicySnapshot、LocalPolicyStore、PolicyWatcher、EtcdPolicyStore、配置模板与全量验证。*

@@ -91,12 +91,23 @@ func (c *Config) parseNodeConfig(confPath string) error {
 		return fmt.Errorf("unmarshal node config: %w", err)
 	}
 
+	// 提前校验必需的顶层配置段，防止后续字段访问 nil panic
+	if c.NodeConf == nil {
+		return fmt.Errorf("config validation: NodeConf is required")
+	}
+	if c.ServiceConf == nil {
+		return fmt.Errorf("config validation: ServiceConf is required")
+	}
+	if c.SystemLogger == nil {
+		return fmt.Errorf("config validation: SystemLogger is required")
+	}
+
 	// 绑定环境变量
 	c.runtimeViper.SetEnvPrefix("EMBER_")
 	c.runtimeViper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	c.runtimeViper.AutomaticEnv()
 
-	if c.ServiceConf.OpenRemote {
+	if c.ServiceConf != nil && c.ServiceConf.OpenRemote {
 		viper.RemoteConfig = &remote.Config{
 			Endpoints: c.ClusterConf.ETCDConf.Endpoints,
 			Username:  c.ClusterConf.ETCDConf.UserName,
@@ -141,7 +152,7 @@ func (c *Config) initDir() error {
 
 // parseStartService 解析启动的服务
 func (c *Config) parseStartService() error {
-	if !c.ServiceConf.OpenRemote {
+	if c.ServiceConf == nil || !c.ServiceConf.OpenRemote {
 		return nil
 	}
 
@@ -182,7 +193,7 @@ func (c *Config) parseServiceConf(confPath string) error {
 		parser := viper.New()
 		parser.SetConfigType("yaml")
 		var err error
-		if c.ServiceConf.OpenRemote {
+		if c.ServiceConf != nil && c.ServiceConf.OpenRemote {
 			fileName := fmt.Sprintf("%s.%s", v.ConfName, v.ConfType)
 			if err = parser.AddRemoteProvider("etcd3",
 				c.ClusterConf.ETCDConf.Endpoints[0],

@@ -19,8 +19,9 @@ import (
 // RWController 管理 RW 读写分离的全部状态。
 // 由 WorkerPool 持有，Worker 通过引用访问。
 type RWController struct {
-	enabled atomic.Bool  // 是否启用 RW 模式（atomic：支持运行时动态开关）
-	mu      sync.RWMutex // 全 Service 共享读写锁，所有 Worker 引用
+	enabled   atomic.Bool  // 是否启用 RW 模式（atomic：支持运行时动态开关）
+	disabling atomic.Bool  // 是否正在关闭 RW；关闭期间新 Job 走写锁串行路径
+	mu        sync.RWMutex // 全 Service 共享读写锁，所有 Worker 引用
 	// 写请求等待计数由 Worker.writeRequested 按 Worker 维护；跨 Worker 的读写互斥由 mu 串行化。
 	readSem        chan struct{} // 全 Service 读并发信号量（nil = 不限制）
 	stopTimeout    time.Duration // Stop 时等待 in-flight 读 goroutine 的最大时间
@@ -70,6 +71,18 @@ func newRWController(conf *config.MailboxConf) (*RWController, error) {
 // IsEnabled 返回当前 RW 模式是否启用
 func (rw *RWController) IsEnabled() bool {
 	return rw.enabled.Load()
+}
+
+func (rw *RWController) IsDisabling() bool {
+	return rw.disabling.Load()
+}
+
+func (rw *RWController) BeginDisable() {
+	rw.disabling.Store(true)
+}
+
+func (rw *RWController) EndDisable() {
+	rw.disabling.Store(false)
 }
 
 // Disable 关闭 RW 模式（§10.14 安全协议）。

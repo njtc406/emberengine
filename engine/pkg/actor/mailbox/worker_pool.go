@@ -23,8 +23,8 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
 
-// ErrRWDisableTimeout SetRWEnabled(false) 超时，有泄漏的读 goroutine
-var ErrRWDisableTimeout = errors.New("RW disable timeout: leaked read goroutines prevent safe switch")
+// ErrRWDisableTimeout 表示 SetRWEnabled(false) 未能在超时内排空 readPipeline 或 in-flight 读。
+var ErrRWDisableTimeout = errors.New("RW disable timeout: read pipeline or in-flight reads prevent safe switch")
 
 // ErrRWDynamicEnableUnsupported 表示 RW 模式只支持通过配置在 Worker 创建时启用。
 var ErrRWDynamicEnableUnsupported = errors.New("RW dynamic enable unsupported: enable RW mode in mailbox config before start")
@@ -45,14 +45,21 @@ type panicRateLimiter struct {
 	intervalN int64        // 每补一个 token 的时间间隔（纳秒）
 }
 
-func (l *panicRateLimiter) Allow() bool {
-	if l.burstCap <= 0 {
-		// 默认配置：5 token / 秒，桶容量 5
-		l.burstCap = 5
-		l.intervalN = int64(time.Second / 5)
-		l.tokens.Store(l.burstCap)
-		l.lastNS.Store(time.Now().UnixNano())
+// newPanicRateLimiter 创建限速器，构造时完成初始化，消除 Allow 的 lazy init 竞争。
+func newPanicRateLimiter(burstCap int64) *panicRateLimiter {
+	if burstCap <= 0 {
+		burstCap = 5
 	}
+	l := &panicRateLimiter{
+		burstCap:  burstCap,
+		intervalN: int64(time.Second) / burstCap,
+	}
+	l.tokens.Store(burstCap)
+	l.lastNS.Store(time.Now().UnixNano())
+	return l
+}
+
+func (l *panicRateLimiter) Allow() bool {
 	now := time.Now().UnixNano()
 	last := l.lastNS.Load()
 	if delta := now - last; delta >= l.intervalN {
@@ -145,7 +152,7 @@ type WorkerPool struct {
 	// 如果走 p.wg 会导致 BeginStop 的 p.wg.Wait() 与 watchdog 形成死锁。
 
 	// panic 堆栈采集限速器，避免 panic storm 场景下 debug.Stack() 成为 CPU 热点。
-	panicStackLimiter panicRateLimiter
+	panicStackLimiter *panicRateLimiter
 }
 
 func (p *WorkerPool) SetDrainPolicy(policy DrainPolicy) {
@@ -159,16 +166,16 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 	conf = fixConf(conf)
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := &WorkerPool{
-		conf:            conf,
-		invoker:         invoker,
-		middlewareChain: NewMiddlewareChain(middlewares...),
-		ctx:             ctx,
-		cancel:          cancel,
-		logger:          logger,
-		statsInterval:   10 * time.Second,
-		scaleTrigger:    make(chan struct{}, 1),
+		conf:              conf,
+		invoker:           invoker,
+		ctx:               ctx,
+		cancel:            cancel,
+		logger:            logger,
+		statsInterval:     10 * time.Second,
+		scaleTrigger:      make(chan struct{}, 1),
+		panicStackLimiter: newPanicRateLimiter(5),
 	}
-	pool.middlewareChain.SetPanicHandler(func(phase, middleware string, mctx inf.IMiddlewareContext, panicVal interface{}) {
+	pool.middlewareChain = NewMiddlewareChain(middlewares, WithPanicHandler(func(phase, middleware string, mctx inf.IMiddlewareContext, panicVal interface{}) {
 		if pool.logger == nil {
 			return
 		}
@@ -176,12 +183,12 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 		// CPU 热点；用 token-bucket 限速堆栈采集，超额只记 panic 信息不带堆栈。
 		if pool.panicStackLimiter.Allow() {
 			pool.logger.Errorf("mailbox middleware panic: phase=%s middleware=%s service=%s panic=%v\ntrace:%s",
-				phase, middleware, invoker.GetServiceName(), panicVal, debug.Stack())
+				phase, middleware, pool.invoker.GetServiceName(), panicVal, debug.Stack())
 		} else {
 			pool.logger.Errorf("mailbox middleware panic: phase=%s middleware=%s service=%s panic=%v (stack suppressed by rate limit)",
-				phase, middleware, invoker.GetServiceName(), panicVal)
+				phase, middleware, pool.invoker.GetServiceName(), panicVal)
 		}
-	})
+	}))
 
 	// ---- RW 控制器初始化 ----
 	rw, err := newRWController(conf)
@@ -603,9 +610,12 @@ func (p *WorkerPool) IsRWEnabled() bool {
 //
 // 关闭时通过 rwMu.Lock() + RLock-after-check 协议保证切换窗口无数据竞争。
 //
-// Disable 返回后再显式 inflightReads.Wait()（per-Worker，带 stopTimeout 兜底），
-// 保证「SetRWEnabled(false) 成功返回 ⇒ 所有读 goroutine 已彻底退出（含 defer 链最后的 inflightReads.Done）」
+// Disable 前先进入 disabling 屏障：新 Job 不再投递 readPipeline，已投递读任务必须全部完成
+// readsLaunched 配对；Disable 返回后再显式 inflightReads.Wait()（per-Worker，带 stopTimeout 兜底），
+// 保证「SetRWEnabled(false) 成功返回 ⇒ readPipeline 无残留业务执行，且所有读 goroutine 已彻底退出」
 // 的强契约：
+//   - BeginDisable 后主循环把新读/写统一送入 execWrite，以 WLock 串行化切换窗口；
+//   - waitReadPipelinesDrained 确保此前已进入 readCh 的读任务完成注册或降级；
 //   - Disable 内部 TryLock+WLock 翻转 enabled，返回时 RLock 已全部释放（RWMutex 语义保证）；
 //   - 但 readFunc 的 defer 链顺序是 RUnlock → inflightReadCnt.Add(-1) → inflightReads.Done()，
 //     RUnlock 之后 Done 之前仍有数纳秒级窗口，外部观察者（如希望立刻转移 invoker 状态）会看到
@@ -615,8 +625,18 @@ func (p *WorkerPool) IsRWEnabled() bool {
 //
 // 失败回滚：若任一 Worker 等待超时，重新 Enable() 恢复原状态，避免半切换。
 func (p *WorkerPool) SetRWEnabled(enabled bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if !enabled && p.rw.IsEnabled() {
+		p.rw.BeginDisable()
+		if err := p.waitReadPipelinesDrained(p.rw.stopTimeout); err != nil {
+			p.rw.EndDisable()
+			p.logger.Errorf("SetRWEnabled(false): waitReadPipelinesDrained failed: %v", err)
+			return err
+		}
 		if err := p.rw.Disable(); err != nil {
+			p.rw.EndDisable()
 			return err
 		}
 		// 显式等待 per-Worker inflightReads 完整归零（含 defer 链尾）。
@@ -625,14 +645,48 @@ func (p *WorkerPool) SetRWEnabled(enabled bool) error {
 		if err := p.waitInflightReadsDone(p.rw.stopTimeout); err != nil {
 			// 回滚：恢复 RW 模式，避免外部观察到"已 Disable 但 inflightReads 仍 >0"的半切换状态。
 			p.rw.Enable()
+			p.rw.EndDisable()
 			p.logger.Errorf("SetRWEnabled(false): waitInflightReadsDone failed: %v, rolled back to enabled", err)
 			return err
 		}
+		p.rw.EndDisable()
 		p.logger.Warnf("RW mode disabled at runtime")
 	} else if enabled && !p.rw.IsEnabled() {
 		return ErrRWDynamicEnableUnsupported
 	}
 	return nil
+}
+
+func (p *WorkerPool) waitReadPipelinesDrained(timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	snap := p.snap.Load()
+	if snap == nil || snap.count == 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		allDone := true
+		for _, w := range snap.workers {
+			mw, ok := w.(*Worker)
+			if !ok {
+				continue
+			}
+			if mw.readsLaunched.Load() < mw.readsDispatched.Load() {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return ErrRWDisableTimeout
+		}
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // waitInflightReadsDone 等待所有 Worker 的 inflightReads 计数归零，带超时兜底。

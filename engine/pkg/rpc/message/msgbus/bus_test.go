@@ -237,3 +237,63 @@ func TestMultiBusCallWithOptAllSuccess(t *testing.T) {
 		t.Fatalf("expected nil when all buses succeed in CallModeAll, got %v", err)
 	}
 }
+
+// --- P1-3.3: 错误传播补充测试 ---
+
+func TestMultiBusAsyncCallEmpty(t *testing.T) {
+	var m MultiBus
+	_, err := m.AsyncCall(context.Background(), "Api", nil, nil)
+	if !errors.Is(err, def.ErrSelectEmptyResult) {
+		t.Fatalf("expected ErrSelectEmptyResult, got %v", err)
+	}
+}
+
+func TestMultiBusAsyncCallWithOptEmpty(t *testing.T) {
+	var m MultiBus
+	_, err := m.AsyncCallWithOpt(context.Background(), dto.WithMethod("Api"))
+	if !errors.Is(err, def.ErrSelectEmptyResult) {
+		t.Fatalf("expected ErrSelectEmptyResult, got %v", err)
+	}
+}
+
+func TestMultiBusSendEmpty(t *testing.T) {
+	var m MultiBus
+	err := m.Send(context.Background(), "Api", nil)
+	if err != nil {
+		t.Fatalf("Send on empty MultiBus should return nil, got %v", err)
+	}
+}
+
+func TestMultiBusSendWithOptEmpty(t *testing.T) {
+	var m MultiBus
+	err := m.SendWithOpt(context.Background(), dto.WithMethod("Api"))
+	if err != nil {
+		t.Fatalf("SendWithOpt on empty MultiBus should return nil, got %v", err)
+	}
+}
+
+func TestMultiBusSendAggregatesErrors(t *testing.T) {
+	b1 := &fakeInternalBus{sendErr: errors.New("e1")}
+	b2 := &fakeInternalBus{sendErr: nil}
+	b3 := &fakeInternalBus{sendErr: errors.New("e3")}
+	m := MultiBus{b1, b2, b3}
+
+	err := m.Send(context.Background(), "Api", nil)
+	if err == nil {
+		t.Fatal("expected combined error")
+	}
+	if !strings.Contains(err.Error(), "e1") || !strings.Contains(err.Error(), "e3") {
+		t.Fatalf("expected combined errors containing e1 and e3, got %v", err)
+	}
+}
+
+func TestMultiBusSendAllSuccess(t *testing.T) {
+	b1 := &fakeInternalBus{}
+	b2 := &fakeInternalBus{}
+	m := MultiBus{b1, b2}
+
+	err := m.Send(context.Background(), "Api", nil)
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}

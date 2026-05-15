@@ -184,3 +184,34 @@ func TestServiceManagerGetRuntimeSummary(t *testing.T) {
 		t.Fatalf("expected sorted names [alpha beta], got %#v", summary.ServiceNames)
 	}
 }
+
+// --- P1-3.5: services 停止顺序补充测试 ---
+
+func TestServiceManagerStopAllIdempotent(t *testing.T) {
+	sm := newTestServiceManager(t)
+	s1 := &testManagedService{}
+	s2 := &testManagedService{}
+	sm.runServices = []inf.IService{s1, s2}
+
+	sm.StopAll()
+	sm.StopAll() // 二次调用不应 panic
+
+	if s1.stopCount != 2 || s2.stopCount != 2 {
+		t.Fatalf("StopAll called twice: s1.stopCount=%d s2.stopCount=%d", s1.stopCount, s2.stopCount)
+	}
+}
+
+func TestServiceManagerStopAllEmpty(t *testing.T) {
+	sm := newTestServiceManager(t)
+	// runServices 为空
+	sm.StopAll() // 不应 panic
+}
+
+func TestServiceManagerStartEmpty(t *testing.T) {
+	sm := newTestServiceManager(t)
+	// runServices 为空
+	err := sm.Start()
+	if err != nil {
+		t.Fatalf("Start with no services should succeed, got %v", err)
+	}
+}
