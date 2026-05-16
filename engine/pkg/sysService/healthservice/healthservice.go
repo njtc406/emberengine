@@ -7,6 +7,7 @@ package healthservice
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -37,7 +38,8 @@ type HealthService struct {
 	core.Service
 
 	server *http.Server
-	once   sync.Once // Stop 幂等
+	ln     net.Listener // 同步绑定的监听器
+	once   sync.Once    // Stop 幂等
 }
 
 func (hs *HealthService) getConf() *config.HealthConf {
@@ -62,9 +64,14 @@ func (hs *HealthService) OnInit() error {
 }
 
 func (hs *HealthService) OnStart() error {
+	ln, err := net.Listen("tcp", hs.getConf().Addr)
+	if err != nil {
+		return fmt.Errorf("health server listen on %s: %w", hs.getConf().Addr, err)
+	}
+	hs.ln = ln
 	go func() {
-		if err := hs.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			hs.WithField("addr", hs.getConf().Addr).Errorf("health server ListenAndServe: %v", err)
+		if err := hs.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			hs.WithField("addr", hs.getConf().Addr).Errorf("health server Serve: %v", err)
 		}
 	}()
 	hs.WithField("addr", hs.getConf().Addr).Info("health service started")

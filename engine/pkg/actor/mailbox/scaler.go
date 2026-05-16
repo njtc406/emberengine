@@ -6,7 +6,6 @@
 package mailbox
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -47,12 +46,12 @@ func (s *AutoScaler) ShouldResize(current int, workers []inf.IMailboxWorker) (in
 		// 指数增长扩容
 		add := int32(math.Ceil(float64(cur) * s.conf.GrowthFactor))
 		newSize = clamp(cur+add, s.conf.MinWorkerNum, s.conf.MaxWorkerNum)
-		reason = fmt.Sprintf("scale up: strategy triggered")
+		reason = "scale up: strategy triggered"
 	} else if s.Strategy.ShouldScaleDown(workers, s.conf.MinWorkerNum) {
 		// 比例缩减容
 		reduce := int32(math.Floor(float64(cur) * s.conf.ShrinkFactor))
 		newSize = clamp(cur-reduce, s.conf.MinWorkerNum, s.conf.MaxWorkerNum)
-		reason = fmt.Sprintf("scale down: strategy triggered")
+		reason = "scale down: strategy triggered"
 	} else {
 		// 策略未触发任何动作：同样走过冷却，
 		// 避免持续过载下策略被热评估。

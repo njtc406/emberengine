@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -153,7 +154,7 @@ type Handler struct {
 	mgr        inf.IMethodMgr
 	methods    []string
 	methodIdx  inf.INodeMethodIndex
-	authorizer *authz.Authorizer // 可选：RBAC 授权引擎（nil 时不检查）
+	authorizer atomic.Pointer[authz.Authorizer] // 可选：RBAC 授权引擎（nil 时不检查）
 }
 
 func NewHandler(owner inf.IModule) *Handler {
@@ -162,9 +163,9 @@ func NewHandler(owner inf.IModule) *Handler {
 	}
 }
 
-// SetAuthorizer 注入 RBAC 授权引擎。
+// SetAuthorizer 注入 RBAC 授权引擎。运行期可安全调用。
 func (h *Handler) SetAuthorizer(a *authz.Authorizer) {
-	h.authorizer = a
+	h.authorizer.Store(a)
 }
 
 func (h *Handler) Init(hd inf.IMethodMgr) (inf.IRpcHandler, error) {
@@ -427,7 +428,7 @@ func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) err
 	}()
 
 	// RBAC 授权检查
-	if a := h.authorizer; a != nil && a.IsEnabled() {
+	if a := h.authorizer.Load(); a != nil && a.IsEnabled() {
 		caller := authz.PrincipalFromPID(meta.GetSenderPid())
 		targetService := h.GetService().GetPid().GetName()
 		if err := a.Authorize(caller, targetService, data.GetMethod()); err != nil {

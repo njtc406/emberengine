@@ -17,18 +17,19 @@
 - [8. ETCDConf — etcd 连接](#8-etcdconf--etcd-连接)
 - [9. RPCServer — RPC 服务器](#9-rpcserver--rpc-服务器)
 - [10. DiscoveryConf — 服务发现](#10-discoveryconf--服务发现)
-- [11. ServiceConf — 服务列表](#11-serviceconf--服务列表)
-- [12. ServiceInitConf — 单个服务配置](#12-serviceinitconf--单个服务配置)
-- [13. StopPolicyConf — 停机策略](#13-stoppolicyconf--停机策略)
-- [14. MailboxConf — 邮箱配置](#14-mailboxconf--邮箱配置)
-- [15. WorkerSchedulePolicy — 调度策略](#15-workerschedulepolicy--调度策略)
-- [16. WorkerIdlerConf — 空闲控制](#16-workeridlerconf--空闲控制)
-- [17. MultiLevelQueueConf — 多优先级队列](#17-multilevelqueueconf--多优先级队列)
-- [18. MailboxMiddlewareConf — 中间件](#18-mailboxmiddlewareconf--中间件)
-- [19. RateLimitConf — 限流](#19-ratelimitconf--限流)
-- [20. CircuitBreakerConf — 熔断](#20-circuitbreakerconf--熔断)
-- [21. ServiceLogConf — 服务日志](#21-servicelogconf--服务日志)
-- [22. SystemLogger — 系统日志](#22-systemlogger--系统日志)
+- [11. AuthzConf — RBAC 授权策略](#11-authzconf--rbac-授权策略)
+- [12. ServiceConf — 服务列表](#12-serviceconf--服务列表)
+- [13. ServiceInitConf — 单个服务配置](#13-serviceinitconf--单个服务配置)
+- [14. StopPolicyConf — 停机策略](#14-stoppolicyconf--停机策略)
+- [15. MailboxConf — 邮箱配置](#15-mailboxconf--邮箱配置)
+- [16. WorkerSchedulePolicy — 调度策略](#16-workerschedulepolicy--调度策略)
+- [17. WorkerIdlerConf — 空闲控制](#17-workeridlerconf--空闲控制)
+- [18. MultiLevelQueueConf — 多优先级队列](#18-multilevelqueueconf--多优先级队列)
+- [19. MailboxMiddlewareConf — 中间件](#19-mailboxmiddlewareconf--中间件)
+- [20. RateLimitConf — 限流](#20-ratelimitconf--限流)
+- [21. CircuitBreakerConf — 熔断](#21-circuitbreakerconf--熔断)
+- [22. ServiceLogConf — 服务日志](#22-servicelogconf--服务日志)
+- [23. SystemLogger — 系统日志](#23-systemlogger--系统日志)
 
 ---
 
@@ -141,6 +142,7 @@ YAML 路径：`ClusterConf.*`
 | `EventChannelSize` | int | 1024 | Cluster 事件通道缓冲区大小 |
 | `DiscoveryType` | string | `etcd` | 服务发现类型 |
 | `RemoteConfPath` | string | — | 远程配置路径（需配合 etcd） |
+| `AuthzConf` | object | nil | RBAC 授权策略加载与分发配置，默认不启用 |
 
 ---
 
@@ -198,7 +200,43 @@ YAML 路径：`ClusterConf.DiscoveryConf.RecoveryConf.*`
 
 ---
 
-## 11. ServiceConf — 服务列表
+## 11. AuthzConf — RBAC 授权策略
+
+YAML 路径：`ClusterConf.AuthzConf.*`
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `Enable` | bool | false | 是否启用 RBAC 授权检查，默认关闭以保持向后兼容 |
+| `Source` | string | `local` | 策略来源：`local` / `etcd` |
+| `FailOpen` | bool | false | 初始策略加载失败时是否放行；生产建议保持 false（fail-closed） |
+| `InitialLoadTimeout` | duration | 3s | 初始策略加载超时时间 |
+| `LocalPolicyPath` | string | — | 本地策略文件路径，`Source=local` 时使用 |
+| `EtcdPolicyPrefix` | string | `/ember/authz/policies` | etcd 策略路径前缀，`Source=etcd` 时使用 |
+| `WatchRetryInterval` | duration | 5s | 策略 watch 重连间隔 |
+
+策略文件示例：
+
+```yaml
+version: 1
+revision: 2026051601
+roles:
+  game:
+    permissions:
+      - DataService.Get*
+      - CacheService.*
+bindings:
+  GameService:
+    serviceTypes:
+      - game
+    roles:
+      - game
+```
+
+生产建议：启用 `Enable=true` 前应先验证策略快照可加载；`FailOpen=true` 只建议在开发或应急恢复场景使用。
+
+---
+
+## 12. ServiceConf — 服务列表
 
 YAML 路径：`ServiceConf.*`
 
@@ -211,7 +249,7 @@ YAML 路径：`ServiceConf.*`
 
 ---
 
-## 12. ServiceInitConf — 单个服务配置
+## 13. ServiceInitConf — 单个服务配置
 
 YAML 路径：`ServiceConf.StartServices[*]`
 
@@ -229,7 +267,7 @@ YAML 路径：`ServiceConf.StartServices[*]`
 
 ---
 
-## 13. StopPolicyConf — 停机策略
+## 14. StopPolicyConf — 停机策略
 
 YAML 路径：`ServiceConf.StartServices[*].StopPolicy.*`
 
@@ -240,7 +278,7 @@ YAML 路径：`ServiceConf.StartServices[*].StopPolicy.*`
 
 ---
 
-## 14. MailboxConf — 邮箱配置
+## 15. MailboxConf — 邮箱配置
 
 YAML 路径：`ServiceConf.StartServices[*].Mailbox.*`
 
@@ -256,7 +294,7 @@ YAML 路径：`ServiceConf.StartServices[*].Mailbox.*`
 
 ---
 
-## 15. WorkerSchedulePolicy — 调度策略
+## 16. WorkerSchedulePolicy — 调度策略
 
 YAML 路径：`ServiceConf.StartServices[*].Mailbox.SchedulePolicy.*`
 
@@ -295,7 +333,7 @@ YAML 路径：`...SchedulePolicy.ScalingStrategy.*`
 
 ---
 
-## 16. WorkerIdlerConf — 空闲控制
+## 17. WorkerIdlerConf — 空闲控制
 
 YAML 路径：`...SchedulePolicy.IdlerConf.*`
 
@@ -309,7 +347,7 @@ YAML 路径：`...SchedulePolicy.IdlerConf.*`
 
 ---
 
-## 17. MultiLevelQueueConf — 多优先级队列
+## 18. MultiLevelQueueConf — 多优先级队列
 
 YAML 路径：`...SchedulePolicy.MultiLevelQueueConf.*`
 
@@ -333,7 +371,7 @@ YAML 路径：`...SchedulePolicy.MultiLevelQueueConf.*`
 
 ---
 
-## 18. MailboxMiddlewareConf — 中间件
+## 19. MailboxMiddlewareConf — 中间件
 
 YAML 路径：`...Mailbox.MiddlewareConf.*`
 
@@ -346,7 +384,7 @@ YAML 路径：`...Mailbox.MiddlewareConf.*`
 
 ---
 
-## 19. RateLimitConf — 限流
+## 20. RateLimitConf — 限流
 
 YAML 路径：`...MiddlewareConf.RateLimitConf.*`
 
@@ -359,7 +397,7 @@ YAML 路径：`...MiddlewareConf.RateLimitConf.*`
 
 ---
 
-## 20. CircuitBreakerConf — 熔断
+## 21. CircuitBreakerConf — 熔断
 
 YAML 路径：`...MiddlewareConf.CircuitBreakerConf.*`
 
@@ -374,7 +412,7 @@ YAML 路径：`...MiddlewareConf.CircuitBreakerConf.*`
 
 ---
 
-## 21. ServiceLogConf — 服务日志
+## 22. ServiceLogConf — 服务日志
 
 YAML 路径：`ServiceConf.StartServices[*].LogConf.*`
 
@@ -386,7 +424,7 @@ YAML 路径：`ServiceConf.StartServices[*].LogConf.*`
 
 ---
 
-## 22. SystemLogger — 系统日志
+## 23. SystemLogger — 系统日志
 
 YAML 路径：`SystemLogger.*`
 

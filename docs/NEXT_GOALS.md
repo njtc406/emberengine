@@ -22,7 +22,7 @@
 | **配置体系** | ⭐⭐⭐⭐ | 结构化配置树完整、硬编码已配置化，binding tags + validator 校验已就位 | 配置校验边界值待深化、缺少热加载 |
 | **可观测性** | ⭐⭐⭐⭐ | Prometheus text 全链路指标（Node/RPC/Mailbox/Event/Pool）、/health+/ready+/metrics 端点、TraceID 贯通验证 | OTel SDK 接入待 P3 |
 | 测试覆盖 | ⭐⭐⭐⭐½ | 70+ 测试文件，P0-P3 全链路覆盖（RPC/Handler/Router/Monitor），race 门禁全绿 | sysModule/sysService/cluster 等模块覆盖率仍可提升 |
-| **安全能力** | ⭐⭐⭐ | gRPC/NATS mTLS 已落地、tlsx 工具包(12 tests)、RBAC 授权引擎(24 tests)、RPC Handler 拦截集成、JWT 工具存在 | 缺少审计日志、etcd 策略存储、证书生成工具 |
+| **安全能力** | ⭐⭐⭐½ | gRPC/NATS mTLS 已落地、tlsx 工具包(12 tests)、RBAC 授权引擎(24 tests)、策略存储与分发(20 tests)、RPC Handler 拦截集成、JWT 工具 | 缺少审计日志、证书轮转工具 |
 | **文档体系** | ⭐⭐⭐½ | 设计文档详尽、QUICK_START + SERVICE_DEV_GUIDE + CONFIG_REFERENCE 已完成 | 缺少架构图、API 参考、部署运维指南 |
 
 ### 1.2 已完成里程碑回顾
@@ -154,7 +154,7 @@ engine/pkg/authz/
 | B-1-1 | mTLS 基座：gRPC channel 强制 TLS，NATS TLS 完善 | ✅ 已完成 — tlsx 工具包 + server/client TLS 集成 |
 | B-1-2 | 身份提取中间件：从 PID 提取 principal | ✅ 已完成 — PrincipalFromPID(ServiceType/ServiceName/NodeUid) |
 | B-1-3 | RBAC 引擎实现：角色定义、策略匹配、拒绝/允许决策 | ✅ 已完成 — authz/authz.go (24 tests) |
-| B-1-4 | 策略存储与分发：etcd 存储 + watch 更新 + 本地缓存 | 📋 已规划 — 见 P5_POLICY_DISTRIBUTION_DEV_PLAN.md |
+| B-1-4 | 策略存储与分发：etcd 存储 + watch 更新 + 本地缓存 | ✅ 已完成 — PolicySnapshot/LocalStore/EtcdStore/Watcher (20 tests) |
 | B-1-5 | RPC Handler 拦截集成：在 handler.go 方法分发前执行授权检查 | ✅ 已完成 — core/rpc/handler.go HandleRequest |
 | B-1-6 | 审计日志：高权限操作记录 | ⏳ 待实施 |
 | B-1-7 | 开发工具：自签证书生成脚本 | ⏳ 待实施 |
@@ -282,7 +282,7 @@ func (e *Error) Unwrap() error        { return e.Cause }
 | **正面** | 身份不可伪造、运维可配置、审计可追溯 |
 | **负面** | 证书管理增加运维复杂度、RBAC 策略需要管理平台 |
 | **替代方案** | Token 签名（适合 NATS 异步场景，可作为 mTLS 的补充） |
-| **状态** | ✅ mTLS 已完成，✅ RBAC 已完成，📋 策略存储已规划，⏳ 审计日志待实施 |
+| **状态** | ✅ mTLS 已完成，✅ RBAC 已完成，✅ 策略存储与分发已完成，⏳ 审计日志待实施 |
 
 ### 3.3 架构风险提示
 
@@ -338,7 +338,7 @@ Phase C: 生态完善
 | 6 | B-1-1~B-1-2 | mTLS 底座 + 身份提取 | ✅ 已完成 |
 | 7 | B-2 | errorx 结构化错误码 | RPC 跨节点错误传播的基础 |
 | 8 | A-1-8 | OpenTelemetry 接入 | 分布式调用链追踪 |
-| 9 | B-1-3~B-1-5 | RBAC 引擎 + 策略分发 + RPC 拦截 | ✅ B-1-3/B-1-5 已完成，📋 B-1-4 策略存储已规划 |
+| 9 | B-1-3~B-1-5 | RBAC 引擎 + 策略分发 + RPC 拦截 | ✅ B-1-3/B-1-4/B-1-5 全部完成 |
 | 10 | C-3-1 | 快速入门文档 | 降低上手门槛，推广框架 |
 
 ---
@@ -375,4 +375,6 @@ Phase C: 生态完善
 
 *2026-05-14 更新：P5 RBAC 授权引擎完成（authz 包 24 tests + Principal 身份模型 + RPC Handler 拦截集成），安全能力升至 ⭐⭐⭐。B-1 任务进度：mTLS(B-1-1 ✅) + 身份提取(B-1-2 ✅) + RBAC 引擎(B-1-3 ✅) + RPC 拦截(B-1-5 ✅)，剩余：策略存储(B-1-4)、审计日志(B-1-6)、证书工具(B-1-7)。*
 
-*2026-05-14 更新：P5 策略存储与分发完成拆分规划，新增 P5_POLICY_DISTRIBUTION_DEV_PLAN.md，拆为 P5-10~P5-15：PolicySnapshot、LocalPolicyStore、PolicyWatcher、EtcdPolicyStore、配置模板与全量验证。*
+*2026-05-14 更新：P5 策略存储与分发完成拆分规划，新增 P5_POLICY_DISTRIBUTION_DEV_PLAN.md，拆为 P5-10~P5-15。*
+
+*2026-05-16 更新：P5-10~P5-15 策略存储与分发全部完成。新增 policy.go/store.go/watcher.go/etcd_store.go + 20 tests、AuthzConf 配置、模板示例。安全能力升至 ⭐⭐⭐½。*

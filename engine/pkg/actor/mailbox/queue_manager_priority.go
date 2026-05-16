@@ -36,10 +36,8 @@ type PriorityQueueManager struct {
 
 // NewPriorityQueueManager 创建多优先级队列管理器
 func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILoggerX) *PriorityQueueManager {
-	// 使用默认配置
-	if conf == nil {
-		conf = DefaultMultiLevelQueueConf()
-	}
+	// 使用规范化副本，不修改调用方原始配置
+	conf = normalizeMultiLevelQueueConf(conf)
 
 	m := &PriorityQueueManager{
 		queues:           make(map[def.Priority]queue[inf.IMailboxJob]),
@@ -48,15 +46,8 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILogge
 		logger:           logger,
 	}
 
-	// 确保配置至少包含一个优先级队列，避免空配置导致运行时丢消息
-	if len(conf.PriorityBatches) == 0 {
-		conf.PriorityBatches = map[def.Priority]*config.PriorityConfig{
-			def.PriorityNormal: {BatchSize: 8},
-		}
-	}
-
-	// 初始化调度器
-	m.scheduler = NewPriorityScheduler(&config.MultiLevelWorkerConf{
+	// 初始化调度器（conf 已由 normalizeMultiLevelQueueConf 深拷贝，直接使用内部构造器避免二次拷贝）
+	m.scheduler = newPrioritySchedulerFromNormalized(&config.MultiLevelWorkerConf{
 		Strategy:        conf.Strategy,
 		PriorityBatches: conf.PriorityBatches,
 	})

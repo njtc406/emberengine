@@ -206,11 +206,11 @@ etcd 路径建议：
 
 ## 成功标准
 
-- [ ] `Authorizer` 能从 `PolicySnapshot` 原子应用 roles/bindings/enabled。
-- [ ] 本地策略文件可加载，默认 disabled 行为保持不变。
-- [ ] etcd snapshot 路径可加载，watch 更新后授权结果可变化。
-- [ ] 无效策略不会覆盖旧策略。
-- [ ] RBAC enabled 且初始策略加载失败时默认 fail-closed。
-- [ ] watcher Stop 幂等且无 goroutine 泄漏。
-- [ ] 新增 authz/policy/watcher/store 测试通过。
-- [ ] `go test ./... -count=1`、`go vet ./...`、`go build ./...` 全绿。
+- [x] `Authorizer` 能从 `PolicySnapshot` 原子应用 roles/bindings。
+- [x] 本地策略文件可加载，默认 disabled 行为保持不变。
+- [x] etcd snapshot 路径可加载，watch 更新后授权结果可变化。
+- [x] 无效策略不会覆盖旧策略。
+- [x] RBAC enabled 且初始策略加载失败时默认 fail-closed。
+- [x] watcher Stop 幂等且无 goroutine 泄漏。
+- [x] 新增 authz/policy/watcher/store 测试通过。
+- [x] `go test ./... -count=1`、`go vet ./...`、`go build ./...` 全绿。

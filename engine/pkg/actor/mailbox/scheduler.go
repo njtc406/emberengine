@@ -36,14 +36,6 @@ func DefaultMultiLevelQueueConf() *config.MultiLevelQueueConf {
 	}
 }
 
-func newDefaultMultiLevelConfig() *MultiLevelConfig {
-	return &MultiLevelConfig{
-		Enabled:    true,
-		Strategy:   def.StrategyAbsolute,
-		Priorities: newDefaultPriorityMap(),
-	}
-}
-
 // DefaultWorkerConfig 返回多优先级队列的默认 worker 配置。
 func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
 	return &config.MultiLevelWorkerConf{
@@ -52,6 +44,55 @@ func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
 		TotalBatchLimit: 32,
 		PriorityBatches: newDefaultPriorityMap(),
 	}
+}
+
+// clonePriorityBatches 深拷贝优先级配置 map（map + struct 双层拷贝）。
+func clonePriorityBatches(src map[def.Priority]*config.PriorityConfig) map[def.Priority]*config.PriorityConfig {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[def.Priority]*config.PriorityConfig, len(src))
+	for priority, pc := range src {
+		if pc == nil {
+			dst[priority] = &config.PriorityConfig{}
+			continue
+		}
+		dst[priority] = &config.PriorityConfig{BatchSize: pc.BatchSize, Weight: pc.Weight}
+	}
+	return dst
+}
+
+// normalizeMultiLevelQueueConf 返回 conf 的规范化副本，不修改调用方原始配置。
+func normalizeMultiLevelQueueConf(conf *config.MultiLevelQueueConf) *config.MultiLevelQueueConf {
+	if conf == nil {
+		return DefaultMultiLevelQueueConf()
+	}
+	normalized := &config.MultiLevelQueueConf{
+		Strategy:        conf.Strategy,
+		TotalBatchLimit: conf.TotalBatchLimit,
+		PriorityBatches: clonePriorityBatches(conf.PriorityBatches),
+	}
+	if len(normalized.PriorityBatches) == 0 {
+		normalized.PriorityBatches = newDefaultPriorityMap()
+	}
+	return normalized
+}
+
+// normalizeMultiLevelWorkerConf 返回 conf 的规范化副本，不修改调用方原始配置。
+func normalizeMultiLevelWorkerConf(conf *config.MultiLevelWorkerConf) *config.MultiLevelWorkerConf {
+	if conf == nil {
+		return DefaultWorkerConfig()
+	}
+	normalized := &config.MultiLevelWorkerConf{
+		WaitMode:        conf.WaitMode,
+		Strategy:        conf.Strategy,
+		TotalBatchLimit: conf.TotalBatchLimit,
+		PriorityBatches: clonePriorityBatches(conf.PriorityBatches),
+	}
+	if len(normalized.PriorityBatches) == 0 {
+		normalized.PriorityBatches = newDefaultPriorityMap()
+	}
+	return normalized
 }
 
 // PriorityScheduler 多级优先级调度器
@@ -73,6 +114,12 @@ type PriorityScheduler struct {
 
 // NewPriorityScheduler 创建新的优先级调度器
 func NewPriorityScheduler(conf *config.MultiLevelWorkerConf) *PriorityScheduler {
+	return newPrioritySchedulerFromNormalized(normalizeMultiLevelWorkerConf(conf))
+}
+
+// newPrioritySchedulerFromNormalized 从已规范化的配置构造调度器，不做二次深拷贝。
+// 调用方须保证 conf 已是独立副本（由 normalizeMultiLevelWorkerConf 生成）。
+func newPrioritySchedulerFromNormalized(conf *config.MultiLevelWorkerConf) *PriorityScheduler {
 	scheduler := &PriorityScheduler{
 		strategy:        conf.Strategy,
 		priorities:      conf.PriorityBatches,

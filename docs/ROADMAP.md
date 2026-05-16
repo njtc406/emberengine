@@ -13,7 +13,7 @@
 | 可观测性 | ⭐⭐⭐⭐ | Prometheus text metrics 全链路（Node/RPC/Mailbox/Event/Pool）、/health+/ready+/metrics 端点、TraceID 贯通验证、tracing 接口预留 |
 | 运维友好度 | ⭐⭐⭐½ | StopPolicy/DrainPolicy 已落地，全局关闭顺序已固定并有测试保护（10步逆序清理） |
 | 测试覆盖 | ⭐⭐⭐⭐ | 70+ 测试文件，P0-P2 全链路覆盖（actor/core/config/event/cluster/node/pool/services/rpc/metrics/tracing），-race 门禁全绿 |
-| 安全能力 | ⭐⭐⭐ | gRPC/NATS mTLS 已落地、tlsx 工具包(12 tests)、RBAC 授权引擎(24 tests)、RPC Handler 拦截集成、JWT 工具 | 缺少策略存储分发、审计日志、证书工具 |
+| 安全能力 | ⭐⭐⭐½ | gRPC/NATS mTLS 已落地、tlsx 工具包(12 tests)、RBAC 授权引擎(24 tests)、策略存储与分发(20 tests)、RPC Handler 拦截集成、JWT 工具；缺少审计日志、证书轮转工具 |
 
 ---
 
@@ -187,7 +187,7 @@ Envelope 所有权规则：
 |--------|------|------|
 | mTLS 安全底座 | gRPC server/client mTLS + NATS client TLS + tlsx 工具包 | ✅ |
 | RBAC 授权引擎 | Principal 身份模型 + 内存角色/权限策略 + RPC Handler 拦截 | ✅ |
-| 策略存储与分发 | 本地策略文件 + etcd 策略快照/watch + Authorizer 原子热更新 | 📋 已规划 |
+| 策略存储与分发 | 本地策略文件 + etcd 策略快照/watch + Authorizer 原子热更新 | ✅ |
 | 审计日志 | 高权限操作记录、审计事件广播 | ⏳ |
 | 灰度与运维 | Endpoint metadata、灰度路由、健康权重、ready 接入 router | ⏳ |
 | 插件系统 | 等生命周期和扩展点稳定后再实装 PluginManager | ⏳ |
@@ -254,7 +254,7 @@ Envelope 所有权规则：
 - [ ] 性能调优指南
 
 ### 当前推进决策
-- 优先级：P0 ✅ → P1 ✅ → P2 ✅ → Phase 3 ✅ → Phase 4 ✅ → Phase 5 mTLS/RBAC ✅ → 下一步 P5 策略存储与分发
+- 优先级：P0 ✅ → P1 ✅ → P2 ✅ → Phase 3 ✅ → Phase 4 ✅ → Phase 5 mTLS/RBAC/策略分发 ✅ → 下一步：审计日志、灰度路由
 - Actor 后续不做大重构；重点是跨模块契约和验证闭环
 - Metrics 首版复用已有 snapshot/metrics 数据源，Prometheus text 输出已建立，OTel 留 P3
 - IService 瘦身、PluginManager 实装、安全认证属于后续生产化阶段

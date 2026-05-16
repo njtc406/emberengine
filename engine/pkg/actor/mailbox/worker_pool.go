@@ -80,6 +80,7 @@ func (l *panicRateLimiter) Allow() bool {
 		if l.tokens.CompareAndSwap(cur, cur-1) {
 			return true
 		}
+		runtime.Gosched()
 	}
 }
 

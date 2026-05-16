@@ -19,10 +19,11 @@ type GateService struct {
 }
 
 type WSServerConf struct {
-	Router       string `binding:"required"`
-	JWTSecret    string
-	LittleEndian bool //是否小端序
-	HttpConf     *httpx.Conf
+	Router         string `binding:"required"`
+	JWTSecret      string
+	LittleEndian   bool     //是否小端序
+	AllowedOrigins []string // WebSocket 允许的 Origin 列表；为空时默认同源；包含 "*" 允许所有
+	HttpConf       *httpx.Conf
 }
 
 type TcpServerConf struct {

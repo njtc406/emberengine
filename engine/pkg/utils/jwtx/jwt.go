@@ -7,6 +7,7 @@ package jwtx
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -61,6 +62,9 @@ func (p *Provider) ParseJwtToken(tokenStr string) (*EmberClaims, error) {
 	}
 	claims := &EmberClaims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("jwtx: unexpected signing method: %v", token.Header["alg"])
+		}
 		return secret, nil
 	})
 	if err != nil {

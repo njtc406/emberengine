@@ -60,6 +60,7 @@ type Authorizer struct {
 	roles    map[string]*Role    // roleName → Role
 	bindings map[string][]string // serviceType → []roleName
 	enabled  bool                // 是否启用授权检查（false 时全部放行）
+	revision int64               // 当前策略快照的 revision
 }
 
 // NewAuthorizer 创建新的授权引擎。默认不启用，需调用 Enable(true) 开启。
@@ -91,8 +92,11 @@ func (a *Authorizer) IsEnabled() bool {
 //   - "ServiceName.MethodPrefix*" 表示前缀匹配
 //   - "ServiceName.ExactMethod" 表示精确匹配
 func (a *Authorizer) AddRole(name string, permissions []string) {
+	perms := make([]string, len(permissions))
+	copy(perms, permissions)
+
 	a.mu.Lock()
-	a.roles[name] = &Role{Name: name, Permissions: permissions}
+	a.roles[name] = &Role{Name: name, Permissions: perms}
 	a.mu.Unlock()
 }
 
@@ -179,4 +183,80 @@ func removeStr(slice []string, item string) []string {
 		}
 	}
 	return slice
+}
+
+// ApplySnapshot 原子应用策略快照到 Authorizer。
+// 先校验快照合法性，校验通过后在写锁内整体替换 roles/bindings/revision。
+// 不修改 enabled 状态（由外部配置控制）。
+func (a *Authorizer) ApplySnapshot(snapshot *PolicySnapshot) error {
+	if snapshot == nil {
+		return fmt.Errorf("authz: snapshot is nil")
+	}
+	if err := snapshot.Validate(); err != nil {
+		return err
+	}
+	snapshot.Normalize()
+
+	// 构建新的 roles 和 bindings
+	newRoles := make(map[string]*Role, len(snapshot.Roles))
+	for name, pr := range snapshot.Roles {
+		perms := make([]string, len(pr.Permissions))
+		copy(perms, pr.Permissions)
+		newRoles[name] = &Role{Name: name, Permissions: perms}
+	}
+
+	newBindings := make(map[string][]string)
+	for _, binding := range snapshot.Bindings {
+		for _, svcType := range binding.ServiceTypes {
+			for _, roleName := range binding.Roles {
+				newBindings[svcType] = appendUnique(newBindings[svcType], roleName)
+			}
+		}
+	}
+
+	a.mu.Lock()
+	a.roles = newRoles
+	a.bindings = newBindings
+	a.revision = snapshot.Revision
+	a.mu.Unlock()
+
+	return nil
+}
+
+// Snapshot 返回当前 Authorizer 中策略的只读快照。
+func (a *Authorizer) Snapshot() *PolicySnapshot {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	snap := &PolicySnapshot{
+		Revision: a.revision,
+		Roles:    make(map[string]*PolicyRole, len(a.roles)),
+		Bindings: make(map[string]*PolicyBinding),
+	}
+
+	for name, role := range a.roles {
+		perms := make([]string, len(role.Permissions))
+		copy(perms, role.Permissions)
+		snap.Roles[name] = &PolicyRole{Permissions: perms}
+	}
+
+	// 反转 bindings: serviceType→[]roleName → 按 roleName 分组
+	// 简化实现：每个 serviceType 生成一个 binding
+	for svcType, roleNames := range a.bindings {
+		roles := make([]string, len(roleNames))
+		copy(roles, roleNames)
+		snap.Bindings[svcType] = &PolicyBinding{
+			ServiceTypes: []string{svcType},
+			Roles:        roles,
+		}
+	}
+
+	return snap
+}
+
+// Revision 返回当前策略快照的 revision。
+func (a *Authorizer) Revision() int64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.revision
 }

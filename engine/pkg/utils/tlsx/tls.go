@@ -42,10 +42,20 @@ func LoadServerTLS(certFile, keyFile, caFile string) (*tls.Config, error) {
 // caFile 为 CA 证书路径；serverName 用于 SNI 校验。
 // insecureSkipVerify 仅用于开发/测试，生产环境应为 false。
 func LoadClientTLS(certFile, keyFile, caFile, serverName string, insecureSkipVerify bool) (*tls.Config, error) {
+	// 安全护栏：同时配置 CA 和 insecureSkipVerify 是矛盾的，拒绝这种配置
+	if insecureSkipVerify && caFile != "" {
+		return nil, fmt.Errorf("tlsx.LoadClientTLS: insecureSkipVerify=true conflicts with caFile=%q; "+
+			"either trust the CA or skip verification, not both", caFile)
+	}
 	cfg := &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		ServerName:         serverName,
 		InsecureSkipVerify: insecureSkipVerify, // #nosec G402 -- 由调用方控制，仅开发环境使用
+	}
+
+	// 校验 cert/key 必须同时配置或同时为空
+	if (certFile != "") != (keyFile != "") {
+		return nil, fmt.Errorf("tlsx.LoadClientTLS: certFile and keyFile must both be set or both be empty (got certFile=%q, keyFile=%q)", certFile, keyFile)
 	}
 
 	// 加载客户端证书（用于 mTLS）

@@ -17,7 +17,7 @@
 6. **P5-10~P5-15 策略存储与分发**：本地策略文件、etcd snapshot/watch、Authorizer 原子热更新
 
 > **后续阶段**（本轮不实施，记录为待办）：
-> - 策略存储与分发（本地策略 + etcd watch）
+>
 > - 审计日志
 > - 灰度路由（Endpoint metadata + version/weight 路由）
 > - 插件系统（PluginManager 生命周期）
@@ -37,12 +37,12 @@
 | P5-7 | RPC Handler 授权拦截 | ✅ 已完成 | HandleRequest 方法分发前执行 RBAC 检查 |
 | P5-8 | authz 单元测试 | ✅ 已完成 | 24 tests 全通过（Principal/Enable/Wildcard/Prefix/Exact/Multi-role/Remove/Unbind） |
 | P5-9 | RBAC 全量验证 + 文档回填 | ✅ 已完成 | go test ./... 全绿，ROADMAP/NEXT_GOALS/P5_PLAN 已更新 |
-| P5-10 | 策略模型与 Authorizer 快照 | 📋 已规划 | PolicySnapshot + ApplySnapshot 原子替换 |
-| P5-11 | 本地策略文件加载 | 📋 已规划 | LocalPolicyStore，单机/测试最小可用路径 |
-| P5-12 | PolicyWatcher 生命周期 | 📋 已规划 | 初始加载、watch 更新、Stop 幂等、错误保留旧快照 |
-| P5-13 | etcd 策略存储与分发 | 📋 已规划 | snapshot 路径 + prefix watch + revision 单调更新 |
-| P5-14 | 配置模板与测试 | 📋 已规划 | AuthzConf、模板默认 disabled、fake store/kv 测试 |
-| P5-15 | 全量验证 + 文档回填 | 📋 已规划 | build/vet/test 全绿，ROADMAP/NEXT_GOALS/CONFIG_REFERENCE 回填 |
+| P5-10 | 策略模型与 Authorizer 快照 | ✅ 已完成 | PolicySnapshot + ApplySnapshot 原子替换 |
+| P5-11 | 本地策略文件加载 | ✅ 已完成 | LocalPolicyStore，单机/测试最小可用路径 |
+| P5-12 | PolicyWatcher 生命周期 | ✅ 已完成 | 初始加载、watch 更新、Stop 幂等、错误保留旧快照 |
+| P5-13 | etcd 策略存储与分发 | ✅ 已完成 | EtcdPolicyStore + KVClient 抽象 + fake 测试 |
+| P5-14 | 配置模板与测试 | ✅ 已完成 | AuthzConf、模板默认 disabled、fake store/kv 测试 |
+| P5-15 | 全量验证 + 文档回填 | ✅ 已完成 | build/vet/test 全绿，文档已更新 |
 
 > P5-10~P5-15 详细拆分见：[P5_POLICY_DISTRIBUTION_DEV_PLAN.md](P5_POLICY_DISTRIBUTION_DEV_PLAN.md)
 
@@ -117,6 +117,9 @@ func LoadClientTLS(certFile, keyFile, caFile, serverName string) (*tls.Config, e
 - [x] `go test ./...` 全量通过
 - [x] TLS 工具函数有完整单元测试（12 tests）
 - [x] RBAC 授权引擎有完整单元测试（24 tests）
+- [x] 策略分发有完整单元测试（20 tests：PolicySnapshot/LocalStore/EtcdStore/Watcher）
 - [x] 无 TLS 配置时行为不变（向后兼容）
 - [x] RBAC 未启用时行为不变（默认禁用）
+- [x] 策略校验失败保留旧快照（原子替换语义）
+- [x] fail-closed/fail-open 双路径覆盖
 - [x] ROADMAP/NEXT_GOALS 状态更新

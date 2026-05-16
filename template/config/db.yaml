@@ -1,8 +1,8 @@
 # TODO 需要支持集群配置和多数据来源配置
 # 数据库配置
 MysqlConf:
-  UserName: root
-  Passwd: 123456
+  UserName: ${MYSQL_USER:root}
+  Passwd: ${MYSQL_PASSWORD}  # 请通过环境变量设置，禁止使用默认密码
   Net: tcp
   Addr: 192.168.145.188:3306
   DBNamePrefix: login

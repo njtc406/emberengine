@@ -7,7 +7,6 @@ package httplib
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -27,13 +26,10 @@ func CheckUrl(u string) string {
 func Request(method, addr, api string, body interface{}, resData interface{}) error {
 	removeUrl := CheckUrl(addr) + api
 
-	fmt.Println("-->req url: ", removeUrl)
-
 	var bodyReader io.Reader
 	if body != nil {
 		bodyBytes, err := json.Marshal(body)
 		if err != nil {
-			fmt.Println("json marshal failed:", err)
 			return def.ErrJsonMarshalFailed
 		}
 		bodyReader = strings.NewReader(string(bodyBytes))
@@ -43,13 +39,11 @@ func Request(method, addr, api string, body interface{}, resData interface{}) er
 	}
 	req, err := http.NewRequest(method, removeUrl, bodyReader)
 	if err != nil {
-		fmt.Println("http create request failed:", err)
 		return def.ErrHttpCreateRequestFailed
 	}
 
 	res, err := client.Do(req)
 	if err != nil {
-		fmt.Println("http request failed:", err)
 		return def.ErrHttpRequestFailed
 	}
 
@@ -58,16 +52,12 @@ func Request(method, addr, api string, body interface{}, resData interface{}) er
 
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
-		fmt.Println("read response body failed:", err)
 		return def.ErrHttpReadResponseFailed
 	}
 
 	if err = json.Unmarshal(resBody, &resData); err != nil {
-		fmt.Println("json unmarshal failed:", err)
 		return def.ErrJsonUnmarshalFailed
 	}
-
-	fmt.Println("resData:", resData)
 
 	return nil
 }

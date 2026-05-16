@@ -210,7 +210,7 @@ func TestPoolMetrics_AfterStop(t *testing.T) {
 	// 停止后 GetMetrics 不应 panic
 	m := pool.GetMetrics()
 	if m == nil {
-		t.Error("GetMetrics after Stop should not be nil")
+		t.Fatal("GetMetrics after Stop should not be nil")
 	}
 	// 停止后连接被清除
 	if m.TotalConnections != 0 {

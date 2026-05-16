@@ -23,7 +23,7 @@ ClusterConf:
     # etcd用户名
     UserName: root
     # etcd密码
-    Password: 123456
+    Password: 123456  # 仅用于示例，生产环境请使用环境变量
     NoLogger: true
   RPCServers:
     # 监听地址

@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,10 +23,46 @@ type WSServer struct {
 	HTTPTimeout     time.Duration
 	CertFile        string
 	KeyFile         string
+	AllowedOrigins  []string // 允许的 Origin 列表；为空时使用默认同源策略；包含 "*" 时允许所有来源
 	NewAgent        func(*WSConn) Agent
 	ln              net.Listener
 	handler         *WSHandler
 	messageType     int
+}
+
+// checkOrigin 根据 AllowedOrigins 配置生成 CheckOrigin 函数。
+// 空列表或包含 "*" 时允许所有来源（向后兼容 / 开发模式）；
+// 否则仅允许与列表中某项 scheme+host 匹配的请求。
+func (server *WSServer) checkOrigin() func(r *http.Request) bool {
+	if len(server.AllowedOrigins) == 0 {
+		// 默认同源策略
+		return nil // gorilla/websocket 默认同源检查
+	}
+	for _, o := range server.AllowedOrigins {
+		if o == "*" {
+			return func(_ *http.Request) bool { return true }
+		}
+	}
+	allowed := make(map[string]struct{}, len(server.AllowedOrigins))
+	for _, o := range server.AllowedOrigins {
+		o = strings.TrimRight(strings.ToLower(strings.TrimSpace(o)), "/")
+		if o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // 非浏览器请求无 Origin
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		normalized := strings.ToLower(u.Scheme + "://" + u.Host)
+		_, ok := allowed[normalized]
+		return ok
+	}
 }
 
 type WSHandler struct {
@@ -176,7 +214,7 @@ func (server *WSServer) Start() {
 		messageType:     server.messageType,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: server.HTTPTimeout,
-			CheckOrigin:      func(_ *http.Request) bool { return true },
+			CheckOrigin:      server.checkOrigin(),
 		},
 	}
 

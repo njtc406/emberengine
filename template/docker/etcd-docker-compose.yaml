@@ -14,7 +14,7 @@ services:
       - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster #在启动期间用于 etcd 集群的初始化集群记号
       - ETCD_INITIAL_CLUSTER=etcd=http://etcd:2380 #为启动初始化集群配置
       - ETCD_INITIAL_CLUSTER_STATE=new #初始化集群状态(“new” or “existing”)。在初始化静态(initial static)或者 DNS 启动 (DNS bootstrapping) 期间为所有成员设置为 new 。如果这个选项被设置为 existing , etcd 将试图加入已有的集群
-      - ETCD_ROOT_PASSWORD=123456 #密码
+      - ETCD_ROOT_PASSWORD=${ETCD_ROOT_PASSWORD:?请设置 ETCD_ROOT_PASSWORD 环境变量}
     ports:
       - 172.26.28.98:2379:2379
       - 172.26.28.98:2380:2380

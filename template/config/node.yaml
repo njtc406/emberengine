@@ -85,9 +85,9 @@ ClusterConf:
       - 192.168.145.188:2379
     DialTimeout: 3s
     # etcd用户名
-    UserName: root
+    UserName: ${ETCD_USER:root}
     # etcd密码
-    Password: 123456
+    Password: ${ETCD_PASSWORD}  # 请通过环境变量设置，禁止使用默认密码
     # 是否开启日志
     NoLogger: true
   RPCServers:
@@ -128,6 +128,22 @@ ClusterConf:
       VerboseLogCount: 5
       # 日志输出间隔（之后每N次输出一次），默认 10
       LogInterval: 10
+
+  # RBAC 授权配置（默认不启用）
+  # AuthzConf:
+  #   Enable: false
+  #   # 策略来源: local | etcd
+  #   Source: local
+  #   # 初始加载失败时是否放行（默认 fail-closed）
+  #   FailOpen: false
+  #   # 初始策略加载超时
+  #   InitialLoadTimeout: 3s
+  #   # 本地策略文件路径（Source=local 时使用）
+  #   LocalPolicyPath: ./configs/authz_policy.yaml
+  #   # etcd 策略路径前缀（Source=etcd 时使用）
+  #   EtcdPolicyPrefix: /ember/authz/policies
+  #   # watch 重连间隔
+  #   WatchRetryInterval: 5s
 
 ServiceConf:
   OpenRemote: false

@@ -9,8 +9,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -219,7 +221,7 @@ func (gs *GinServer) customLoggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		p := c.Request.URL.Path
-		rawQuery := c.Request.URL.RawQuery
+		rawQuery := sanitizeQuery(c.Request.URL.RawQuery)
 		c.Next()
 		// 构建日志消息
 		entry := gs.logger.WithFields(log.Fields{
@@ -246,4 +248,37 @@ func (gs *GinServer) customLoggerMiddleware() gin.HandlerFunc {
 			entry.Info("Request completed successfully")
 		}
 	}
+}
+
+// sensitiveQueryKeys 包含需要在日志中脱敏的查询参数名称。
+var sensitiveQueryKeys = map[string]struct{}{
+	"token":        {},
+	"secret":       {},
+	"password":     {},
+	"passwd":       {},
+	"access_token": {},
+	"api_key":      {},
+	"apikey":       {},
+}
+
+// sanitizeQuery 对 URL 查询字符串中的敏感参数进行脱敏处理。
+func sanitizeQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "[parse_error]"
+	}
+	redacted := false
+	for key := range values {
+		if _, ok := sensitiveQueryKeys[strings.ToLower(key)]; ok {
+			values.Set(key, "[REDACTED]")
+			redacted = true
+		}
+	}
+	if !redacted {
+		return rawQuery // 无敏感参数，原样返回避免重编码
+	}
+	return values.Encode()
 }

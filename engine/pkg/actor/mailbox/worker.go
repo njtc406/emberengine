@@ -262,9 +262,9 @@ func (w *Worker) run() {
 			case <-pipelineDone:
 			case <-time.After(w.env.rw.stopTimeout):
 				stopTimedOut = true
-				w.env.logger.Errorf("Worker %d: StopTimeout (%v) exceeded while waiting read pipeline, force unsafe drain",
+				w.env.logger.Errorf("Worker %d: StopTimeout (%v) exceeded while waiting read pipeline, force continue without waiting",
 					w.workerId, w.env.rw.stopTimeout)
-				<-pipelineDone
+				// 硬超时：不再阻塞等待 pipelineDone，直接继续后续清理流程
 			}
 		}
 

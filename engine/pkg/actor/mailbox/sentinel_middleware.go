@@ -177,6 +177,10 @@ type SentinelMiddleware struct {
 	// serviceName 之外的资源（如 serviceName:jobType）时，必须在这里声明这些资源，
 	// 否则 Sentinel 的精确 resource 匹配不会命中规则。
 	ruleResources []string
+
+	// jobTypeResourceMode 标记是否使用了 WithJobType*Rule。
+	// 为 true 时，NewSentinelMiddleware 会自动安装 job-type resourceFunc（如果用户未自定义）。
+	jobTypeResourceMode bool
 }
 
 // SentinelOption 配置选项
@@ -213,6 +217,7 @@ func WithResourceFlowRule(resource string, threshold float64, opts ...FlowRuleOp
 // WithJobTypeFlowRule 为 serviceName:jobType 添加流控规则。
 func WithJobTypeFlowRule(jobType def.MailboxJobType, threshold float64, opts ...FlowRuleOption) SentinelOption {
 	return func(m *SentinelMiddleware) {
+		m.jobTypeResourceMode = true
 		resource := sentinelJobTypeResource(m.serviceName, jobType)
 		m.addFlowRulesForResource(resource, newFlowRule(resource, threshold, opts...))
 	}
@@ -266,6 +271,7 @@ func WithResourceCircuitBreakerRule(resource string, errorRatioThreshold float64
 // WithJobTypeCircuitBreakerRule 为 serviceName:jobType 添加错误率熔断规则。
 func WithJobTypeCircuitBreakerRule(jobType def.MailboxJobType, errorRatioThreshold float64) SentinelOption {
 	return func(m *SentinelMiddleware) {
+		m.jobTypeResourceMode = true
 		resource := sentinelJobTypeResource(m.serviceName, jobType)
 		m.addCircuitBreakerRulesForResource(resource, newCircuitBreakerRule(resource, circuitbreaker.ErrorRatio, errorRatioThreshold))
 	}
@@ -295,6 +301,7 @@ func WithSlowRatioRule(slowRatioThreshold float64, maxAllowedRtMs uint64) Sentin
 // WithJobTypeSlowRatioRule 为 serviceName:jobType 添加慢调用熔断规则。
 func WithJobTypeSlowRatioRule(jobType def.MailboxJobType, slowRatioThreshold float64, maxAllowedRtMs uint64) SentinelOption {
 	return func(m *SentinelMiddleware) {
+		m.jobTypeResourceMode = true
 		resource := sentinelJobTypeResource(m.serviceName, jobType)
 		rule := newCircuitBreakerRule(resource, circuitbreaker.SlowRequestRatio, slowRatioThreshold)
 		rule.MaxAllowedRtMs = maxAllowedRtMs
@@ -315,6 +322,7 @@ func WithErrorCountRule(errorCountThreshold uint64) SentinelOption {
 // WithJobTypeErrorCountRule 为 serviceName:jobType 添加错误数熔断规则。
 func WithJobTypeErrorCountRule(jobType def.MailboxJobType, errorCountThreshold uint64) SentinelOption {
 	return func(m *SentinelMiddleware) {
+		m.jobTypeResourceMode = true
 		resource := sentinelJobTypeResource(m.serviceName, jobType)
 		m.addCircuitBreakerRulesForResource(resource, newCircuitBreakerRule(resource, circuitbreaker.ErrorCount, float64(errorCountThreshold)))
 	}
@@ -410,9 +418,7 @@ func (m *SentinelMiddleware) addFlowRulesForResource(resource string, rules ...*
 		return
 	}
 	m.ruleResources = append(m.ruleResources, resource)
-	for _, rule := range cloneFlowRulesForResource(rules, resource) {
-		m.flowRulesByResource[resource] = append(m.flowRulesByResource[resource], rule)
-	}
+	m.flowRulesByResource[resource] = append(m.flowRulesByResource[resource], cloneFlowRulesForResource(rules, resource)...)
 }
 
 func (m *SentinelMiddleware) addCircuitBreakerRulesForResource(resource string, rules ...*circuitbreaker.Rule) {
@@ -420,9 +426,7 @@ func (m *SentinelMiddleware) addCircuitBreakerRulesForResource(resource string, 
 		return
 	}
 	m.ruleResources = append(m.ruleResources, resource)
-	for _, rule := range cloneCircuitBreakerRulesForResource(rules, resource) {
-		m.circuitBreakerRulesByResource[resource] = append(m.circuitBreakerRulesByResource[resource], rule)
-	}
+	m.circuitBreakerRulesByResource[resource] = append(m.circuitBreakerRulesByResource[resource], cloneCircuitBreakerRulesForResource(rules, resource)...)
 }
 
 // NewSentinelMiddleware 创建 Sentinel 中间件
@@ -440,6 +444,21 @@ func NewSentinelMiddleware(serviceName string, opts ...SentinelOption) *Sentinel
 	for _, opt := range opts {
 		opt(m)
 	}
+
+	// 当使用了 WithJobType*Rule 时，自动安装 job-type resource 映射。
+	// 仅在 resourceFunc 未被用户/NewSentinelMiddlewareWithJobType 设置时执行，
+	// 避免与已有 ruleResources 重复追加（effectiveRuleResources 会去重，但减少冗余分配）。
+	if m.jobTypeResourceMode && m.resourceFunc == nil {
+		m.ruleResources = append(m.ruleResources, sentinelJobTypeResources(serviceName)...)
+		m.resourceFunc = func(mctx inf.IMiddlewareContext) string {
+			job := mctx.Job()
+			if job != nil {
+				return sentinelJobTypeResource(serviceName, job.GetType())
+			}
+			return serviceName
+		}
+	}
+
 	return m
 }
 

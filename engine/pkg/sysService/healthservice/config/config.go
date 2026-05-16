@@ -15,7 +15,7 @@ type HealthConf struct {
 
 // SetHealthConfDefault 设置默认值
 func SetHealthConfDefault(parser *viper.Viper) {
-	parser.SetDefault("Addr", "0.0.0.0:9090")
+	parser.SetDefault("Addr", "127.0.0.1:9090")
 	parser.SetDefault("ReadHeaderTimeout", 10*time.Second)
 	parser.SetDefault("IdleTimeout", 30*time.Second)
 }

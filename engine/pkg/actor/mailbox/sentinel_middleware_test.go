@@ -1,12 +1,14 @@
 package mailbox
 
 import (
+	"context"
 	"testing"
 
 	"github.com/alibaba/sentinel-golang/core/circuitbreaker"
 	"github.com/alibaba/sentinel-golang/core/flow"
 	"github.com/alibaba/sentinel-golang/core/system"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
 func TestSentinelJobTypeRulesLoadToRuntimeResources(t *testing.T) {
@@ -207,5 +209,108 @@ func assertSystemRuleCount(t *testing.T, want int) {
 	t.Helper()
 	if rules := system.GetRules(); len(rules) != want {
 		t.Fatalf("system rules = %d, want %d: %+v", len(rules), want, rules)
+	}
+}
+
+// ========== R4-M2: WithJobType*Rule 自动启用 job-type resource 模式 ==========
+
+func TestWithJobTypeFlowRule_AutoEnablesResourceFunc(t *testing.T) {
+	serviceName := "svc-auto-jobtype"
+	customType := def.MailboxJobType(100)
+	resources := append([]string{serviceName}, sentinelJobTypeResources(serviceName)...)
+	resources = append(resources, sentinelJobTypeResource(serviceName, customType))
+	clearSentinelTestRules(resources...)
+	defer clearSentinelTestRules(resources...)
+
+	m := NewSentinelMiddleware(serviceName,
+		WithJobTypeFlowRule(customType, 500),
+	)
+
+	// 验证 jobTypeResourceMode 被设置
+	if !m.jobTypeResourceMode {
+		t.Fatal("jobTypeResourceMode should be true after WithJobTypeFlowRule")
+	}
+
+	// 验证 resourceFunc 被自动安装
+	if m.resourceFunc == nil {
+		t.Fatal("resourceFunc should be auto-installed when jobTypeResourceMode is true")
+	}
+
+	// 验证 effectiveRuleResources 包含 custom type resource
+	effective := m.effectiveRuleResources()
+	customResource := sentinelJobTypeResource(serviceName, customType)
+	found := false
+	for _, r := range effective {
+		if r == customResource {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("effectiveRuleResources should contain %s, got %v", customResource, effective)
+	}
+}
+
+func TestWithJobTypeCircuitBreakerRule_AutoEnablesResourceFunc(t *testing.T) {
+	m := NewSentinelMiddleware("svc-cb",
+		WithJobTypeCircuitBreakerRule(def.MailboxJobTypeRpc, 0.5),
+	)
+	if !m.jobTypeResourceMode {
+		t.Fatal("jobTypeResourceMode should be true after WithJobTypeCircuitBreakerRule")
+	}
+	if m.resourceFunc == nil {
+		t.Fatal("resourceFunc should be auto-installed")
+	}
+}
+
+func TestWithJobTypeSlowRatioRule_AutoEnablesResourceFunc(t *testing.T) {
+	m := NewSentinelMiddleware("svc-slow",
+		WithJobTypeSlowRatioRule(def.MailboxJobTypeTimer, 0.8, 1000),
+	)
+	if !m.jobTypeResourceMode {
+		t.Fatal("jobTypeResourceMode should be true after WithJobTypeSlowRatioRule")
+	}
+	if m.resourceFunc == nil {
+		t.Fatal("resourceFunc should be auto-installed")
+	}
+}
+
+func TestWithJobTypeErrorCountRule_AutoEnablesResourceFunc(t *testing.T) {
+	m := NewSentinelMiddleware("svc-err",
+		WithJobTypeErrorCountRule(def.MailboxJobTypeEvent, 10),
+	)
+	if !m.jobTypeResourceMode {
+		t.Fatal("jobTypeResourceMode should be true after WithJobTypeErrorCountRule")
+	}
+	if m.resourceFunc == nil {
+		t.Fatal("resourceFunc should be auto-installed")
+	}
+}
+
+func TestPlainFlowRule_DoesNotEnableJobTypeMode(t *testing.T) {
+	m := NewSentinelMiddleware("svc-plain",
+		WithFlowRule(1000),
+	)
+	if m.jobTypeResourceMode {
+		t.Fatal("jobTypeResourceMode should be false with plain WithFlowRule")
+	}
+	if m.resourceFunc != nil {
+		t.Fatal("resourceFunc should remain nil with plain WithFlowRule")
+	}
+}
+
+func TestCustomResourceFunc_NotOverridden(t *testing.T) {
+	customFn := func(mctx inf.IMiddlewareContext) string { return "custom" }
+	m := NewSentinelMiddleware("svc-custom",
+		WithResourceFunc(customFn),
+		WithJobTypeFlowRule(def.MailboxJobTypeRpc, 100),
+	)
+	if m.resourceFunc == nil {
+		t.Fatal("resourceFunc should not be nil")
+	}
+	// resourceFunc 应该是用户自定义的，而非被覆盖
+	mctx := NewMiddlewareContext(context.Background(), nil, "svc-custom")
+	if m.resourceFunc(mctx) != "custom" {
+		t.Fatal("user-defined resourceFunc should not be overridden by jobTypeResourceMode")
 	}
 }

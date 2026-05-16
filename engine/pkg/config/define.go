@@ -66,6 +66,18 @@ type ClusterConf struct {
 	DiscoveryType    string         `binding:""`         // 服务发现类型(默认etcd)
 	RemoteConfPath   string         `binding:""`         // 远程配置路径(开启了远程配置才会使用,且必须配置etcd)(暂未使用)
 	DiscoveryConf    *DiscoveryConf `binding:""`         // 服务发现配置(目前先直接配置,后续会支持多种服务发现方式)
+	AuthzConf        *AuthzConf     `binding:""`         // RBAC 授权配置(默认不启用)
+}
+
+// AuthzConf RBAC 策略分发配置
+type AuthzConf struct {
+	Enable             bool          `binding:""` // 是否启用 RBAC 授权(默认false)
+	Source             string        `binding:""` // 策略来源: local | etcd (默认local)
+	FailOpen           bool          `binding:""` // 初始加载失败时是否放行(默认false，fail-closed)
+	InitialLoadTimeout time.Duration `binding:""` // 初始策略加载超时(默认3s)
+	LocalPolicyPath    string        `binding:""` // 本地策略文件路径
+	EtcdPolicyPrefix   string        `binding:""` // etcd 策略路径前缀(默认/ember/authz/policies)
+	WatchRetryInterval time.Duration `binding:""` // watch 重连间隔(默认5s)
 }
 
 type ServiceConf struct {
