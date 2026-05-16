@@ -126,10 +126,10 @@ func (slf *Profiler) check(pElem *Element) (*Record, time.Duration) {
 }
 
 func (slf *Profiler) pushRecordLog(record *Record) {
-	if slf.record.Len() >= DefaultMaxRecordNum {
-		front := slf.stack.Front()
+	if slf.record.Len() >= slf.maxRecordNum {
+		front := slf.record.Front()
 		if front != nil {
-			slf.stack.Remove(front)
+			slf.record.Remove(front)
 		}
 	}
 

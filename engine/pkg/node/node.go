@@ -417,6 +417,10 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 
 	n.SenderMgr = client.NewSenderManager(n.PoolManager, n.Logger, n.RpcMonitor, natsConf, grpcConnNum, grpcClientTLS)
 	remoteMsgHandler := remotehandler.NewHandler(n.RpcMonitor, n.Logger, n.DeDuplicator)
+
+	// RPC 服务启动前注入 Authorizer，避免远程请求在启动窗口内绕过统一授权检查。
+	n.Authorizer = authz.NewAuthorizer()
+	remoteMsgHandler.SetAuthorizer(n.Authorizer)
 	appendCleanup(&cleanups, "close sender manager", true, func() { n.SenderMgr.Close() })
 
 	// 方法前缀索引
@@ -470,11 +474,6 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	}
 
 	// ==============================
-	// 7. RBAC 授权引擎（服务启动前创建）
-	// ==============================
-	n.Authorizer = authz.NewAuthorizer()
-
-	// ==============================
 	// 8. 服务（最后启动 — 依赖以上所有组件）
 	// ==============================
 	n.ServiceMgr = services.NewServiceManager(n.Logger)
@@ -509,7 +508,14 @@ func (n *Node) Stop() {
 		step := n.stopCleanups[i]
 		n.Infof("stopping: %s", step.name)
 		if step.fn != nil {
-			step.fn()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						n.Errorf("stop step %q panicked: %v", step.name, r)
+					}
+				}()
+				step.fn()
+			}()
 		}
 	}
 	n.stopCleanups = nil

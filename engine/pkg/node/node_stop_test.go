@@ -7,6 +7,7 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/stretchr/testify/assert"
 )
 
 // ============================================================================
@@ -92,16 +93,10 @@ func TestNodeStop_CleanupPanicDoesNotBlockOthers(t *testing.T) {
 		{name: "panic-cleanup", fn: func() { panic("cleanup panic") }, includeInStop: true},
 	}
 
-	// 需要 recover 来防止 panic 传播
-	func() {
-		defer func() { recover() }()
-		n.Stop()
-	}()
+	n.Stop()
 
-	// 注意：当前实现中 cleanup panic 会终止后续 cleanup 执行，
-	// 因为 Stop 没有 per-step recover。这个测试记录当前行为。
-	// 如果 secondCalled == true，说明已有 recover 保护。
-	_ = secondCalled
+	// per-step recover 保护：panic-cleanup 不影响 ok-cleanup 执行
+	assert.True(t, secondCalled, "second cleanup should execute even if earlier one panics")
 }
 
 func TestNodeStop_EmptyCleanups(t *testing.T) {

@@ -6,8 +6,9 @@
 package cluster
 
 import (
-	"context"
 	"fmt"
+	"hash/fnv"
+	"sync"
 
 	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
@@ -39,13 +40,13 @@ type Cluster struct {
 
 	// 事件
 	eventProcessor *event.Processor
-	eventChannel   chan inf.IEvent
-}
 
-// ctxEvent 包装 ctx 和 event
-type ctxEvent struct {
-	ctx context.Context
-	ev  inf.IEvent
+	// sharded worker pool
+	workerCount int
+	shards      []chan inf.IEvent
+	workerWg    sync.WaitGroup
+	shardMu     sync.RWMutex
+	closeOnce   sync.Once
 }
 
 func (c *Cluster) Init(clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager, rpcHandler *remotehandler.Handler, natsConf *config.NatsConf, busFactory *msgbus.MessageBusFactory) error {
@@ -58,9 +59,18 @@ func (c *Cluster) Init(clusterConf *config.ClusterConf, logger log.ILoggerX, sen
 	if clusterConf != nil && clusterConf.EventChannelSize > 0 {
 		eventChannelSize = clusterConf.EventChannelSize
 	}
-	c.eventChannel = make(chan inf.IEvent, eventChannelSize)
 	c.eventProcessor = event.NewTrigger()
 	c.eventProcessor.Init(nil)
+
+	// worker pool 配置
+	c.workerCount = 1
+	if clusterConf != nil && clusterConf.EventWorkerCount > 1 {
+		c.workerCount = clusterConf.EventWorkerCount
+	}
+	c.shards = make([]chan inf.IEvent, c.workerCount)
+	for i := range c.shards {
+		c.shards[i] = make(chan inf.IEvent, eventChannelSize)
+	}
 
 	var err error
 	c.endpoints, err = endpoints.NewEndpointManager().InitWithDeps(c.eventProcessor, clusterConf, c.ILoggerX, senderMgr, rpcHandler, natsConf, busFactory)
@@ -83,23 +93,40 @@ func (c *Cluster) Init(clusterConf *config.ClusterConf, logger log.ILoggerX, sen
 }
 
 func (c *Cluster) Start() error {
-	if c.discovery != nil {
-		c.discovery.Start()
-	}
-
 	if err := c.endpoints.Start(); err != nil {
 		return err
 	}
-	go c.run()
+
+	// 启动 shard workers
+	for i := 0; i < c.workerCount; i++ {
+		c.workerWg.Add(1)
+		go c.shardWorker(i)
+	}
+
+	if c.discovery != nil {
+		c.discovery.Start()
+	}
 	return nil
 }
 
 func (c *Cluster) Close() {
-	close(c.closed)
-	c.endpoints.Stop()
-	if c.discovery != nil {
-		c.discovery.Close()
-	}
+	c.closeOnce.Do(func() {
+		close(c.closed)
+		if c.discovery != nil {
+			c.discovery.Close()
+		}
+		if c.endpoints != nil {
+			c.endpoints.Stop()
+		}
+
+		c.shardMu.Lock()
+		for i := range c.shards {
+			close(c.shards[i])
+		}
+		c.shardMu.Unlock()
+
+		c.workerWg.Wait()
+	})
 }
 
 func (c *Cluster) PushEvent(data inf.IEvent) error {
@@ -109,28 +136,68 @@ func (c *Cluster) PushEvent(data inf.IEvent) error {
 	select {
 	case <-data.GetContext().Done():
 		return data.GetContext().Err()
-	case c.eventChannel <- data: // 发送成功则里面释放(需要阻塞等待,不能丢弃事件)
-		//default:
-		//	return def.ErrEventChannelIsFull
+	case <-c.closed:
+		return fmt.Errorf("cluster closed")
+	default:
 	}
 
+	shard := c.shardIndex(data)
+	c.shardMu.RLock()
+	defer c.shardMu.RUnlock()
+	select {
+	case <-c.closed:
+		return fmt.Errorf("cluster closed")
+	default:
+	}
+
+	select {
+	case <-data.GetContext().Done():
+		return data.GetContext().Err()
+	case c.shards[shard] <- data:
+	case <-c.closed:
+		return fmt.Errorf("cluster closed")
+	}
 	return nil
 }
 
-func (c *Cluster) run() {
-	for {
-		select {
-		case evt, ok := <-c.eventChannel:
-			if !ok {
-				c.Error("cluster event channel closed")
-				return
-			}
-			c.eventProcessor.Trigger(evt.GetContext(), evt.GetEventType(), evt.GetData())
-		case <-c.closed:
-			c.Info("cluster closed")
-			return
+// shardWorker 处理单个 shard 的事件队列。
+func (c *Cluster) shardWorker(idx int) {
+	defer c.workerWg.Done()
+	for evt := range c.shards[idx] {
+		c.eventProcessor.Trigger(evt.GetContext(), evt.GetEventType(), evt.GetData())
+	}
+}
+
+// shardIndex 根据事件数据计算分片 index。
+// 同一 key 的事件始终路由到同一 shard，保证顺序语义。
+func (c *Cluster) shardIndex(evt inf.IEvent) int {
+	if c.workerCount <= 1 {
+		return 0
+	}
+	key := eventShardKey(evt)
+	if key == "" {
+		return 0 // 无法提取 key 的事件固定到 shard 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return int(h.Sum32()) % c.workerCount
+}
+
+// eventShardKey 从事件数据中提取用于分片的 key。
+func eventShardKey(evt inf.IEvent) string {
+	if evt == nil {
+		return ""
+	}
+	// DiscoveryEvent 数据为 *mvccpb.KeyValue，用 etcd Key 作为分片依据
+	type keyProvider interface {
+		GetKey() []byte
+	}
+	if data := evt.GetData(); data != nil {
+		if kp, ok := data.(keyProvider); ok {
+			return string(kp.GetKey())
 		}
 	}
+	return ""
 }
 
 func (c *Cluster) IsClusterMode() bool {

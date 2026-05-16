@@ -23,8 +23,12 @@ type PolicyWatcher struct {
 
 // PolicyWatcherConfig 用于构造 PolicyWatcher。
 type PolicyWatcherConfig struct {
-	Store         PolicyStore
-	Authorizer    *Authorizer
+	Store      PolicyStore
+	Authorizer *Authorizer
+	// FailOpen 控制初始策略加载失败时的行为。
+	// false（默认）= fail-closed，加载失败则阻断启动，拒绝所有请求。
+	// true = fail-open，加载失败仅记录警告，放行所有请求。
+	// ⚠️ 生产环境强烈建议保持默认 fail-closed，否则攻击者可利用策略加载失败的窗口期绕过授权。
 	FailOpen      bool
 	RetryInterval time.Duration
 }

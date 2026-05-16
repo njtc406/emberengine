@@ -8,8 +8,10 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -24,13 +26,37 @@ type Handler struct {
 	rpcMonitor *monitor.RpcMonitor
 	logger     log.ILoggerX
 	dedup      inf.IDeDuplicator
+	authorizer *authz.Authorizer
 }
 
 func NewHandler(rm *monitor.RpcMonitor, logger log.ILoggerX, dedup inf.IDeDuplicator) *Handler {
 	return &Handler{rpcMonitor: rm, logger: logger, dedup: dedup}
 }
 
+// SetAuthorizer 注入授权引擎（可选，nil 或未启用时跳过授权检查）。
+func (h *Handler) SetAuthorizer(a *authz.Authorizer) {
+	h.authorizer = a
+}
+
+// authorizeRequest 在 dispatch 前校验调用方是否有权访问目标服务的方法。
+// 返回 nil 表示允许，非 nil 表示拒绝。
+func (h *Handler) authorizeRequest(req *actor.Message) error {
+	if h.authorizer == nil || !h.authorizer.IsEnabled() {
+		return nil
+	}
+	sender := req.GetSenderPid()
+	receiver := req.GetReceiverPid()
+	if sender == nil || receiver == nil {
+		return fmt.Errorf("authz: missing sender or receiver pid")
+	}
+	principal := authz.PrincipalFromPID(sender)
+	return h.authorizer.Authorize(principal, receiver.GetName(), req.GetMethod())
+}
+
 func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
+	if req == nil {
+		return errors.New("rpc request is nil")
+	}
 	// proto 反序列化后同步 PID 的 MasterFlag 原子字段，避免 IsMasterNode() 读取到 false
 	if p := req.GetSenderPid(); p != nil {
 		p.SyncMasterFlag()
@@ -72,7 +98,11 @@ func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message
 		// 去重只对“有ReqId”的请求有意义（通常是 NeedResp=true 的 call/asyncCall）。
 		// fire-and-forget 的 send 使用 ReqId=0，跳过去重以减少热路径开销。
 		if req.ReqId != 0 {
-			senderServiceUid := req.GetSenderPid().GetServiceUid()
+			senderPid := req.GetSenderPid()
+			if senderPid == nil {
+				return errors.New("rpc request sender pid is nil")
+			}
+			senderServiceUid := senderPid.GetServiceUid()
 			// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
 			dedupIns := h.dedup
 			if dedupIns == nil {
@@ -85,7 +115,24 @@ func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message
 				return nil
 			}
 		}
-
+		// 授权检查：在 payload decode 之前拦截未授权请求，避免消耗反序列化成本
+		if err := h.authorizeRequest(req); err != nil {
+			if l := h.logger; l != nil {
+				sender, receiver := "<nil>", "<nil>"
+				if p := req.GetSenderPid(); p != nil {
+					sender = p.GetServiceUid()
+				}
+				if p := req.GetReceiverPid(); p != nil {
+					receiver = p.GetName()
+				}
+				l.Warnf("rpc authz denied: sender=%s receiver=%s method=%s reqId=%d err=%v",
+					sender, receiver, req.GetMethod(), req.ReqId, err)
+			}
+			return err
+		}
+		if sf == nil {
+			return errors.New("rpc sender factory is nil")
+		}
 		// 调用：Request 为空时无需解码 Any（nil payload 的 send 是常见场景）
 		var request interface{}
 		if req.Request != nil {
@@ -126,7 +173,12 @@ func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message
 		envelope.SetMeta(meta)
 		envelope.SetData(data)
 
-		err := sf.GetDispatcher(req.ReceiverPid).DeliverRequest(ctx, envelope)
+		dispatcher := sf.GetDispatcher(req.ReceiverPid)
+		if dispatcher == nil {
+			envelope.Release()
+			return errors.New("rpc receiver dispatcher is nil")
+		}
+		err := dispatcher.DeliverRequest(ctx, envelope)
 		if err != nil {
 			envelope.Release()
 			return err

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -348,4 +349,133 @@ func TestRequest_DeliverFails(t *testing.T) {
 	err := h.RpcMessageHandler(sf, msg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mailbox full")
+}
+
+// ---------------------------------------------------------------------------
+// D1: Authorization middleware tests
+// ---------------------------------------------------------------------------
+
+func TestAuthz_Disabled_AllowsAll(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{
+		dispatchers: map[string]inf.IRpcDispatcher{
+			receiverPid.GetServiceUid(): receiver,
+		},
+	}
+
+	// Authorizer exists but not enabled → all requests pass
+	a := authz.NewAuthorizer()
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+	h.SetAuthorizer(a)
+
+	msg := &actor.Message{
+		SenderPid:   testPID("Sender"),
+		ReceiverPid: receiverPid,
+		ReqId:       0,
+		Method:      "AnyMethod",
+		NeedResp:    false,
+	}
+
+	err := h.RpcMessageHandler(sf, msg)
+	require.NoError(t, err)
+	assert.Len(t, receiver.delivered, 1)
+}
+
+func TestAuthz_NilAuthorizer_AllowsAll(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{
+		dispatchers: map[string]inf.IRpcDispatcher{
+			receiverPid.GetServiceUid(): receiver,
+		},
+	}
+
+	// No authorizer set → pass-through
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+
+	msg := &actor.Message{
+		SenderPid:   testPID("Sender"),
+		ReceiverPid: receiverPid,
+		ReqId:       0,
+		Method:      "AnyMethod",
+		NeedResp:    false,
+	}
+
+	err := h.RpcMessageHandler(sf, msg)
+	require.NoError(t, err)
+	assert.Len(t, receiver.delivered, 1)
+}
+
+func TestAuthz_Enabled_Denied(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{
+		dispatchers: map[string]inf.IRpcDispatcher{
+			receiverPid.GetServiceUid(): receiver,
+		},
+	}
+
+	// Enable authz but don't grant any permissions to senderPid's ServiceType
+	a := authz.NewAuthorizer()
+	a.Enable(true)
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+	h.SetAuthorizer(a)
+
+	msg := &actor.Message{
+		SenderPid:   testPID("Sender"),
+		ReceiverPid: receiverPid,
+		ReqId:       0,
+		Method:      "RpcSecret",
+		NeedResp:    false,
+	}
+
+	err := h.RpcMessageHandler(sf, msg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authz")
+	assert.Len(t, receiver.delivered, 0)
+}
+
+func TestAuthz_Enabled_Allowed(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{
+		dispatchers: map[string]inf.IRpcDispatcher{
+			receiverPid.GetServiceUid(): receiver,
+		},
+	}
+
+	// Setup: sender PID has ServiceType "GameService" (from testPID helper)
+	// Grant GameService access to Receiver.*
+	a := authz.NewAuthorizer()
+	a.Enable(true)
+	a.AddRole("game", []string{receiverPid.GetName() + ".*"})
+	a.BindRole("game", testPID("Sender").GetServiceType())
+
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+	h.SetAuthorizer(a)
+
+	msg := &actor.Message{
+		SenderPid:   testPID("Sender"),
+		ReceiverPid: receiverPid,
+		ReqId:       0,
+		Method:      "RpcSum",
+		NeedResp:    false,
+	}
+
+	err := h.RpcMessageHandler(sf, msg)
+	require.NoError(t, err)
+	assert.Len(t, receiver.delivered, 1)
 }
