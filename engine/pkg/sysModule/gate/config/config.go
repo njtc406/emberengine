@@ -6,9 +6,19 @@
 package config
 
 import (
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/viper"
 )
+
+// RestartPolicy 配置 Gate 监听失败后的重启策略。
+type RestartPolicy struct {
+	Enable         bool          `binding:""`      // 是否启用重启(默认true)
+	MaxRestart     int           `binding:"min=0"` // 最大重启次数(默认5)
+	InitialBackoff time.Duration `binding:"min=0"` // 初始退避时间(默认500ms)
+	MaxBackoff     time.Duration `binding:"min=0"` // 最大退避时间(默认10s)
+}
 
 type GateService struct {
 	Type           string         `binding:"required,oneof=ws http tcp udp"`
@@ -16,6 +26,7 @@ type GateService struct {
 	HttpServerConf *httpx.Conf    `binding:""`
 	TcpServerConf  *TcpServerConf `binding:""`
 	UdpServerConf  *UdpServerConf `binding:""`
+	RestartPolicy  *RestartPolicy `binding:""` // 重启策略(默认启用,最多重启5次)
 }
 
 type WSServerConf struct {

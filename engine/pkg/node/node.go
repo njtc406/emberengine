@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"runtime/debug"
@@ -111,6 +112,9 @@ type Node struct {
 
 	// RBAC 授权引擎
 	Authorizer *authz.Authorizer
+
+	// 策略 Watcher（从 local/etcd 加载策略并持续 watch）
+	policyWatcher *authz.PolicyWatcher
 
 	// 停止标志（防止 Stop() 重复调用）
 	stopped atomic.Bool
@@ -421,6 +425,57 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	// RPC 服务启动前注入 Authorizer，避免远程请求在启动窗口内绕过统一授权检查。
 	n.Authorizer = authz.NewAuthorizer()
 	remoteMsgHandler.SetAuthorizer(n.Authorizer)
+
+	// 根据 AuthzConf 配置启用 RBAC 授权并启动策略加载
+	if authzCfg := n.Config.ClusterConf.AuthzConf; authzCfg != nil && authzCfg.Enable {
+		n.Authorizer.Enable(true)
+
+		var store authz.PolicyStore
+		switch authzCfg.Source {
+		case "etcd":
+			prefix := authzCfg.EtcdPolicyPrefix
+			if prefix == "" {
+				prefix = "/ember/authz/policies"
+			}
+			etcdCfg := n.Config.ClusterConf.ETCDConf
+			etcdClient, err := authz.NewEtcdClientForAuthz(
+				etcdCfg.Endpoints, etcdCfg.DialTimeout,
+				etcdCfg.UserName, etcdCfg.Password,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("authz: create etcd client: %w", err)
+			}
+			store = authz.NewEtcdPolicyStore(authz.NewEtcdKVAdapter(etcdClient, true), prefix)
+		default: // "local" 或空
+			if authzCfg.LocalPolicyPath != "" {
+				store = authz.NewLocalPolicyStore(authzCfg.LocalPolicyPath)
+			}
+		}
+
+		if store != nil {
+			retryInterval := authzCfg.WatchRetryInterval
+			if retryInterval <= 0 {
+				retryInterval = 5 * time.Second
+			}
+			n.policyWatcher = authz.NewPolicyWatcher(authz.PolicyWatcherConfig{
+				Store:         store,
+				Authorizer:    n.Authorizer,
+				FailOpen:      authzCfg.FailOpen,
+				RetryInterval: retryInterval,
+			})
+			watchCtx := context.Background()
+			if authzCfg.InitialLoadTimeout > 0 {
+				var cancel context.CancelFunc
+				watchCtx, cancel = context.WithTimeout(watchCtx, authzCfg.InitialLoadTimeout)
+				defer cancel()
+			}
+			if err := n.policyWatcher.Start(watchCtx); err != nil {
+				return nil, fmt.Errorf("authz policy watcher start: %w", err)
+			}
+			appendCleanup(&cleanups, "stop authz policy watcher", true, func() { n.policyWatcher.Stop() })
+		}
+	}
+
 	appendCleanup(&cleanups, "close sender manager", true, func() { n.SenderMgr.Close() })
 
 	// 方法前缀索引

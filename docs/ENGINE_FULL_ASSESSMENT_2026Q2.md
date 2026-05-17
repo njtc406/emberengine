@@ -39,7 +39,7 @@ EmberEngine 是一个**面向高性能、高并发场景的工业级微服务 Ac
 | 完整性 | **7.5/10** | 核心功能完备，部分模块有 TODO |
 | 文档质量 | **8.0/10** | 设计文档丰富，但代码注释有少量过时 |
 
-**总体评级**: 🟢 **生产可用（Production-Ready）**，建议在修复高优先级问题后用于生产环境。
+**总体评级**: 🟢 **内部网络生产可用（Internal Production-Ready）**。框架默认面向受控内网/VPC/安全组隔离环境；跨不可信网络或多租户网络部署时，应开启增强安全模式（RBAC + mTLS 或 PID 签名）。
 
 ---
 
@@ -50,16 +50,16 @@ EmberEngine 是一个**面向高性能、高并发场景的工业级微服务 Ac
 | 包 | 评分 | 亮点 | 主要问题 |
 |:---|:---|:---|:---|
 | `actor/mailbox` | 9.5 | RW 模式、COW 快照、中间件池 | 并发路径深，调试难度大 |
-| `node` | 9.5 | 栈式清理、Hook 系统、诊断 | Stop 超时控制已修复 |
+| `node` | 9.5 | 栈式清理、Hook 系统、诊断 | Stop panic 防护已修复；按设计不设置超时 |
 | `core` | 8.5 | 泛型 Handler、生命周期管理 | Service 结构体过大 |
 | `authz` | 9.0 | RBAC 引擎、ETCD 策略同步 | failOpen 已加固，PID 真实性待设计 |
 | `interfaces` | 9.0 | 接口隔离、资源契约文档 | IRWModeJob 类型断言频繁 |
 | `def` | 9.0 | 优先级设计、常量化 | 系统常量和业务默认值混放 |
 | `rpc` | 8.5 | 多后端、连接池、熔断 | 锁竞争、连接泄露风险 |
 | `router` | 9.0 | 策略分离、灵活性高 | 依赖 Repository 索引性能 |
-| `cluster` | 8.0 | 选主、服务发现 | 单协程事件处理瓶颈 |
+| `cluster` | 8.0 | 选主、服务发现 | sharded worker 已落地，仍需压测背压策略 |
 | `services` | 9.0 | 依赖注入、优雅停机 | daemon 大量 TODO |
-| `sysModule` | 8.5 | 多协议适配、模块化 | Gate Supervisor 设计待实施 |
+| `sysModule` | 8.5 | 多协议适配、模块化 | Gate Supervisor 核心已落地，配置/Health/metrics 待接入 |
 | `sysService` | 8.0 | 运维端点解耦 | 配置加载模式不统一 |
 | `log` | 7.5 | Zap 封装、Node 级隔离 | 自定义 TraceLevel 兼容性 |
 | `metrics` | 8.0 | Prometheus 导出 | 缺少 Histogram/Summary |
@@ -122,18 +122,18 @@ func (slf *Profiler) pushRecordLog(record *Record) {
 - **问题**: RPC 请求反序列化后直接分发给业务处理器，未在框架层统一注入 authz 校验
 - **风险**: 业务开发者可能遗漏在 handler 中添加授权检查，导致未授权访问
 - **优先级**: 🟠 P1
-- **修复**: Handler 新增 `authorizer` 字段和 `SetAuthorizer()` 方法，在 dedup 之后、payload decode 之前调用 `authorizeRequest()` 拦截未授权请求。Node 启动时通过 `remoteMsgHandler.SetAuthorizer(n.Authorizer)` 注入。新增 4 个测试用例。
+- **修复**: Handler 新增 `authorizer` 字段和 `SetAuthorizer()` 方法，在 dedup 之后、payload decode 之前调用 `authorizeRequest()` 拦截未授权请求。Node 在远端 RPC 服务启动前创建并注入 Authorizer，避免启动窗口绕过。新增 4 个测试用例。
+- **剩余优化**: ✅ `AuthzConf` / `PolicyWatcher` 已接入 Node 启动流程，支持 local/etcd 策略来源，初始加载失败默认 fail-closed。
 
-#### **B4 — authz 信任 PID 真实性但无签名验证**
+### 🟡 中（建议在下一迭代修复）
+
+#### **B4 — authz 信任 PID 真实性但无签名验证** ⚠️ 按部署边界处理
 
 - **文件**: `engine/pkg/authz/authz.go:37`
 - **问题**: `PrincipalFromPID` 完全信任传入的 PID 对象。如果传输层（如未启用 mTLS）未验证 PID 真实性，攻击者可伪造 PID 绕过授权
-- **风险**: 在未启用 mTLS 的部署场景下存在授权绕过
-- **优先级**: 🟠 P1
-
----
-
-### 🟡 中（建议在下一迭代修复）
+- **风险**: 在跨不可信网络、跨租户网络或节点可被非受信客户端直连的场景下存在授权绕过；在受控内网/VPC/安全组隔离环境下风险较低
+- **优先级**: 🟡 P2（内部网络默认模式可后置；增强安全模式建议实现）
+- **建议**: 不强制默认开启 PID 签名。保留扩展点，按部署模式选择：内部网络模式不启用；跨网络/高安全模式启用 mTLS peer identity 校验或 HMAC 签名。
 
 #### **B5 — profiler record 列表无限增长** ✅ 已修复
 
@@ -155,14 +155,16 @@ func (slf *Profiler) pushRecordLog(record *Record) {
 - **文件**: `engine/pkg/cluster/cluster.go:53`
 - **问题**: 事件处理器 `run` 使用单 goroutine，若某个订阅者处理缓慢，会拖慢整个集群状态同步
 - **优先级**: 🟡 P2
-- **修复**: 引入 sharded worker pool，`PushEvent` 按事件 key（etcd Key）哈希直接写入对应 shard channel，N 个 worker 并行处理。新增 `EventWorkerCount` 配置（默认 1 向后兼容）。
+- **修复**: 引入 sharded worker pool，`PushEvent` 按事件 key（etcd Key）哈希直接写入对应 shard channel，N 个 worker 并行处理。新增 `EventWorkerCount` 配置（默认 1 向后兼容）。关闭路径加入 `closeOnce` + shard 读写锁，避免并发 Close/PushEvent 触发 send-on-closed-channel。
+- **剩余优化**: 仍需压测 shard 队列背压、热点 key 倾斜和 worker 数配置建议。
 
 #### **B8 — Gate 模块的 Listen Goroutine 无健康检查** ✅ 已修复
 
 - **文件**: `engine/pkg/sysModule/gate/`（Gate.Start 方法）
 - **问题**: 网关监听 goroutine 异常退出后无自动重启机制，可能导致服务静默失联
 - **优先级**: 🟡 P2
-- **修复**: 引入 `superviseServe` 循环，支持错误分类（永久/临时）、指数退避重启、可配置 `RestartPolicy`（MaxRestart/InitialBackoff/MaxBackoff）。暴露 `IsServing()`/`LastServeError()`/`RestartCount()` 健康状态。新增 7 个测试用例。
+- **修复**: 引入 `superviseServe` 循环，支持错误分类（永久/临时/正常关闭）、指数退避重启、`ListenAndServe` panic 捕获，并暴露 `IsServing()`/`LastServeError()`/`RestartCount()` 健康状态。`RestartPolicy` 已接入 `GateService` 配置。新增 11 个测试用例。
+- **剩余优化**: HealthService `/ready` 汇总和 metrics 指标尚未落地。
 
 #### **B9 — MsgEnvelope 的 RWMutex 在高频路径竞争**
 
@@ -186,17 +188,19 @@ func (slf *Profiler) pushRecordLog(record *Record) {
 - **说明**: 已修复，需要持续关注类似模式
 - **优先级**: 🟢 P3
 
-#### **B12 — httpx 缺少默认安全响应头**
+#### **B12 — httpx 缺少默认安全响应头** ✅ 已修复
 
-- **文件**: `engine/pkg/utils/httpx/gin.go`
+- **文件**: `engine/pkg/utils/httpx/gin.go`, `engine/pkg/utils/httpx/security_headers.go`
 - **问题**: 未默认设置 HSTS、CSP、X-Content-Type-Options 等安全响应头
 - **优先级**: 🟢 P3
+- **修复**: 新增 `SecurityHeaders` 中间件，默认设置 X-Content-Type-Options/X-XSS-Protection/X-Frame-Options/Referrer-Policy/CSP，HSTS 可配置开启。支持通过 `SecurityHeadersConf` 配置开关/覆盖/关闭。GinServer.Init 默认注入。新增 5 个测试用例。
 
-#### **B13 — jwtx 全局 Secret 可运行时修改**
+#### **B13 — jwtx 全局 Secret 可运行时修改** ✅ 已修复
 
-- **文件**: `engine/pkg/utils/jwtx/jwt.go:79`
+- **文件**: `engine/pkg/utils/jwtx/jwt.go`, `engine/pkg/utils/jwtx/keyring.go`, `engine/pkg/utils/jwtx/keyring_provider.go`
 - **问题**: `SetDefaultSecret` 可在运行期随意更改，可能导致已签发 Token 全部失效
 - **优先级**: 🟢 P3
+- **修复**: 引入 `KeyRing` + `KeyRingProvider`，签发 token 写入 kid，校验按 kid 查找 key，支持平滑轮换。secret 最小长度 16 bytes，防御性拷贝。`SetDefaultSecret`/`SetDefaultProvider` 标记为 Deprecated。新增 12 个测试用例。
 
 #### **B14 — Service 结构体过大**
 
@@ -219,17 +223,17 @@ func (slf *Profiler) pushRecordLog(record *Record) {
 | 建议 | 涉及文件 | 预期收益 | 状态 |
 |:---|:---|:---|:---|
 | 修复 B1 profiler bug | `profiler/profiler.go` | 消除 Panic 风险和内存泄漏 | ✅ 已修复 |
-| RPC 层注入统一授权中间件 | `rpc/remote/handler/` | 杜绝授权遗漏 | 待实施 |
+| RPC 层注入统一授权中间件 | `rpc/remote/handler/` | 杜绝授权遗漏 | ✅ 核心已修复，策略加载已接入 |
 | authz 默认 fail-closed | `authz/watcher.go` | 安全加固 | ✅ 已修复 |
-| Node Stop 增加超时控制 | `node/node.go` | 优雅停机可靠性 | ✅ 已修复 |
-| Gate goroutine 健康检查 | `sysModule/gate/` | 网关可用性 | 待实施 |
+| Node Stop panic 防护 | `node/node.go` | 优雅停机可靠性 | ✅ 已修复（无超时设计） |
+| Gate goroutine 健康检查 | `sysModule/gate/` | 网关可用性 | ✅ 已修复（含配置化，Health/metrics 待完善） |
 
 ### 4.2 中期（3-6 个月）
 
 | 建议 | 涉及文件 | 预期收益 |
 |:---|:---|:---|
 | Repository 迁移 go-memdb | `cluster/endpoints/repository/` | 路由查询性能提升 |
-| Cluster 事件处理器异步化 | `cluster/cluster.go` | 状态同步性能 |
+| Cluster 事件处理器异步化 | `cluster/cluster.go` | 状态同步性能（核心已落地，需压测调参） |
 | PID 零拷贝序列化 | `actor/pid.go` | 大规模 RPC 吞吐提升 |
 | MsgEnvelope 锁优化 | `rpc/message/msgenvelope/` | 高频场景性能 |
 
@@ -257,25 +261,26 @@ func (slf *Profiler) pushRecordLog(record *Record) {
    - 测试: 已新增 profiler_test.go（3 个测试用例）
 ```
 
-### 阶段 2：安全加固（本周） ✅ 已完成
+### 阶段 2：安全加固（本周） ✅ 内部网络模式已满足，增强安全待选做
 
 ```
 2. B3: RPC handler 注入统一授权中间件 ✅
    - 文件: engine/pkg/rpc/remote/handler/handler.go
    - 改动: 新增 authorizer 字段 + SetAuthorizer + authorizeRequest，在 dedup 后 decode 前拦截
-   - 注入: node.go 中 Authorizer 创建后调用 remoteMsgHandler.SetAuthorizer()
+   - 注入: node.go 在远端 RPC 服务启动前创建 Authorizer 并调用 remoteMsgHandler.SetAuthorizer()
    - 测试: 新增 4 个测试用例
 
 3. B2: authz failOpen 默认值审查 ✅
    - 文件: engine/pkg/authz/watcher.go
    - 改动: 确认默认 fail-closed，增加安全警告注释
 
-4. B4: PID 签名（可选，视 mTLS 部署情况）
+4. B4: PID 真实性验证（增强安全模式，可选）
    - 文件: engine/pkg/authz/authz.go
-   - 改动: 如果未全局启用 mTLS，增加 PID HMAC 签名
+   - 改动: 如果跨不可信网络部署，增加 mTLS peer identity 校验或 PID HMAC 签名
+   - 状态: 内部网络默认模式暂不强制；跨网络/高安全部署前再实现
 ```
 
-### 阶段 3：可靠性提升（本迭代） ✅ 已完成
+### 阶段 3：可靠性提升（本迭代） ✅ 核心已完成
 
 ```
 5. B6: Node Stop panic 防护 ✅
@@ -288,7 +293,9 @@ func (slf *Profiler) pushRecordLog(record *Record) {
 
 7. B8: Gate goroutine supervisor ✅
    - 改动: superviseServe 循环 + 错误分类 + 指数退避重启 + 健康状态暴露
-   - 测试: 新增 7 个测试用例
+   - 测试: 新增 11 个测试用例
+   - 配置: RestartPolicy 已接入 GateService 配置
+   - 待完善: HealthService ready 汇总、metrics 指标
 ```
 
 ---
@@ -300,18 +307,72 @@ func (slf *Profiler) pushRecordLog(record *Record) {
 - [x] B3 RPC 授权中间件已注入（4 个测试通过）
 - [x] B6 Node Stop per-step panic recover
 - [x] B7 Cluster 事件 sharded worker pool
-- [x] B8 Gate supervisor（7 个测试通过）
+- [x] B8 Gate supervisor（11 个测试通过）
+- [x] B12 httpx 安全响应头（5 个测试通过）
+- [x] B13 jwtx KeyRing + kid（12 个测试通过）
+- [x] B9/B10 Benchmark 已补充（7 个 benchmark）
 - [x] 所有 `go build ./...` 和 `go vet ./...` 通过
 - [x] 所有 `go test ./...` 通过
-- [x] 无新增 data race 问题
+- [ ] `go test -race ./...` 通过（当前环境缺少 GCC，无法启用 CGO/-race；已通过 `go build/vet/test ./...` 全量验证）
 
 ---
 
-## 七、待细化设计方案
+## 七、部署安全模式建议
+
+EmberEngine 当前主要面向内部网络部署，不建议默认套用公网零信任模型。推荐把安全能力做成分层开关：框架提供统一入口和增强能力，默认配置服务于受控内网的易用性。
+
+| 模式 | 适用场景 | 默认策略 |
+|:---|:---|:---|
+| 内部网络默认模式 | 同一 VPC/内网、安全组隔离、节点由同一团队控制 | Authz 默认关闭；保留统一授权入口；不强制 PID 签名；不强制 mTLS |
+| 增强安全模式 | 跨团队共享集群、跨机房、重要业务服务 | Authz 可配置开启；策略 fail-closed；建议启用 mTLS peer identity 校验 |
+| 跨不可信网络模式 | 节点可能被非受信客户端直连、多租户或公网边界 | Authz 必须开启；mTLS 或 PID HMAC 签名至少开启一种；策略加载失败拒绝启动或拒绝请求 |
+
+**结论**：严格 auth 机制需要保留为框架能力，但不必默认全开。B3 的统一授权入口属于基础护栏，应保留；B4 的 PID 真实性验证属于增强安全能力，可按部署边界选择实现。
+
+---
+
+## 八、复核后的剩余问题与优化建议
+
+### 8.1 仍未修复 / 未完全落地
+
+1. **B4：PID 真实性验证未实现（P2，增强安全模式）**
+   - 现状：`authz.PrincipalFromPID` 仍信任 wire message 中的 `SenderPid`。
+   - 判断：框架主要用于受控内部网络，默认不强制 PID 签名是合理取舍。
+   - 建议：保留为增强安全能力；跨不可信网络、跨团队共享集群或节点可被非受信客户端直连时，再接入 mTLS peer identity 校验或 message-level HMAC 签名。
+
+2. **Authz 策略加载已接入 Node（P2）** ✅ 已修复
+   - 现状：Node 启动流程在创建 Authorizer 后，根据 `ClusterConf.AuthzConf` 配置决定是否 `Enable(true)` 并启动 `PolicyWatcher`。
+   - 实现：支持 `local`（本地 YAML 文件）和 `etcd`（etcd KV watch）两种策略来源；etcd 模式创建独立客户端避免与 Discovery 耦合；初始加载失败默认 fail-closed；PolicyWatcher 注册到 stopCleanups 保证优雅停机。
+   - 新增文件：`engine/pkg/authz/etcd_kv_adapter.go`（EtcdKVAdapter + NewEtcdClientForAuthz）。
+
+3. **B8 Gate Supervisor 配置化已完成（P2）** ✅ 已修复
+   - 现状：`GateService` 配置已增加 `RestartPolicy` 字段（Enable/MaxRestart/InitialBackoff/MaxBackoff）；Gate.Start 从配置读取并应用。`isPermanentError` 补充了 `net.AddrError` 识别；新增 `isNormalShutdown` 识别 `net.ErrClosed` 和 "use of closed network connection"（避免正常关闭触发重启）。新增 4 个测试用例（isPermanentError/isNormalShutdown/NormalShutdownError/RestartPolicyFromConfig），Gate 测试总计 11 个。
+   - 剩余：HealthService `/ready` 汇总和 metrics 指标（gate_serving/gate_restart_total）尚未落地。
+
+4. **B9/B10 Benchmark 已补充，当前性能可接受（P2）** ✅ Benchmark 已落地
+   - B9：`MsgEnvelope` RWMutex 开销经 benchmark 验证：SetGet 约 57ns/op（单线程），并发读约 112ns/op，零内存分配。当前开销在合理范围内，不急于优化。
+   - B10：`PID` SnapshotForWire 约 329ns/op，单次分配 192B；并发约 91ns/op。对比完整 Marshal 路径 938ns/op，Clone 占约 35%。
+   - 建议：当 RPC QPS 达到百万级时再考虑手写轻量 copy 替代 proto.Clone；当前并发场景扩展性良好。
+   - 新增文件：`engine/pkg/rpc/message/msgenvelope/benchmark_test.go`（7 个 benchmark）。
+
+5. **B12/B13 已修复（P3）** ✅
+   - B12：httpx 已默认注入安全响应头中间件（X-Content-Type-Options/X-XSS-Protection/X-Frame-Options/Referrer-Policy/CSP），HSTS 可配置，业务可覆盖。
+   - B13：jwtx 新增 KeyRing + KeyRingProvider，支持多 key 平滑轮换，旧接口标记 Deprecated。
+
+### 8.2 当前实现的优化建议
+
+- **Cluster**：补充慢 handler / 同 key 顺序 / 热点 key 倾斜 / Close 并发的测试与 benchmark；生产默认 `EventWorkerCount` 可从 1 逐步调到 4/8。
+- **RPC Handler**：授权拒绝目前通过返回 error 传回 transport，后续可统一封装为框架级 error code，便于调用方区分业务错误和授权错误。
+- **Gate**：`isPermanentError` 已补充 `net.AddrError` 识别；新增 `isNormalShutdown` 识别 `net.ErrClosed` 和 `use of closed network connection`，降低误报。✅
+- **文档/CI**：把 `go test -race ./...` 或至少关键包 race 测试加入发布前检查；安全说明应明确区分“内部网络默认模式”和“跨不可信网络增强模式”。
+
+---
+
+## 九、待细化设计方案
 
 本节把已识别但不宜仓促改动的架构项拆成可实施设计。总体原则：安全项默认 fail-closed，可靠性项默认不丢关键状态，性能项先压测再替换热路径实现。
 
-### D1 — B3：RPC Handler 统一授权中间件设计
+### D1 — B3：RPC Handler 统一授权中间件设计（核心已实现）
 
 **目标**：把服务间授权从业务 handler 下沉到 RPC 框架入口，保证所有远端请求在投递到目标服务前都经过一致的 RBAC 校验。
 
@@ -348,10 +409,12 @@ func (h *Handler) SetAuthorizer(a *authz.Authorizer) {
 }
 ```
 
-3. 在 `node.Start` 创建 `n.Authorizer` 后注入到 remote handler。当前 `remoteMsgHandler := remotehandler.NewHandler(...)` 早于 `n.Authorizer = authz.NewAuthorizer()`，需要调整为以下顺序之一：
+3. 在 `node.Start` 中 RPC 服务启动前创建 `n.Authorizer` 并注入 remote handler，避免启动窗口绕过。历史设计有两种方案：
 
 - 方案 A：提前创建 `n.Authorizer`，再创建 `remoteMsgHandler` 并注入；
 - 方案 B：保留创建顺序，在创建 Authorizer 后调用 `remoteMsgHandler.SetAuthorizer(n.Authorizer)`。
+
+当前实现采用方案 A 的思路：提前创建 Authorizer，并在 Cluster/RPC 监听启动前注入。
 
 4. 授权逻辑：
 
@@ -370,7 +433,7 @@ func (h *Handler) authorizeRequest(req *actor.Message) error {
 }
 ```
 
-5. reply 消息不做业务授权：reply 只是完成本地 monitor state，应按 `ReqId` 匹配；普通请求必须授权。
+5. reply 消息不做业务授权：reply 只是完成本地 monitor state，应按 `ReqId` 匹配；普通请求在 Authz 启用后必须授权。
 
 6. 拒绝策略：
 
@@ -392,24 +455,30 @@ func (h *Handler) authorizeRequest(req *actor.Message) error {
 - 风险：handler 初始化顺序调整影响 cluster init。缓解：使用 `SetAuthorizer` 后置注入，保持构造函数兼容。
 - 风险：错误响应格式不统一。缓解：复用 `errorx.Marshal` / 现有 RPC error path。
 
-### D2 — B4：PID 真实性验证设计
+### D2 — B4：PID 真实性验证设计（增强安全模式，可选）
 
-**目标**：避免仅凭 wire message 中的 `SenderPid` 建立 Principal，降低 PID 伪造导致的授权绕过风险。
+**目标**：在跨不可信网络、跨团队共享集群或高安全业务场景下，避免仅凭 wire message 中的 `SenderPid` 建立 Principal，降低 PID 伪造导致的授权绕过风险。内部网络默认模式下不强制启用。
 
 **推荐分层**：
 
-1. **强推荐基线：mTLS 绑定节点身份**
+1. **内部网络默认模式：不强制 PID 签名**
+   - 依赖 VPC/安全组/内网边界隔离；
+   - Authz 默认关闭，可按业务配置开启；
+   - 保留统一授权入口，避免业务层遗漏授权检查；
+   - 文档中明确：该模式不适合跨不可信网络。
+
+2. **增强安全模式：mTLS 绑定节点身份**
    - gRPC/rpcx/NATS 连接必须支持 TLS；
    - 证书 SAN/CN 映射到 `NodeUid` 或受信任节点名；
    - RPC handler 从 transport context 获取 peer identity，与 `SenderPid.NodeUid` 对比。
 
-2. **可选增强：PID wire 签名**
+3. **跨协议增强：PID wire 签名**
    - 新增 `PIDSignature` 或 message-level `AuthSignature`；
    - 签名内容建议包含：`sender.ServiceUid`、`sender.NodeUid`、`receiver.ServiceUid`、`method`、`reqId`、`deadline`；
    - 使用 HMAC-SHA256 或节点私钥签名；密钥从配置/环境注入，不进入代码仓库；
    - `deadline` 参与签名，防止长期重放。
 
-3. **防重放协同**
+4. **防重放协同**
    - 现有 dedup 使用 `senderServiceUid + reqId`；
    - 签名校验应在 dedup 前后都可工作，推荐顺序：基础字段校验 → 签名校验 → dedup → authz → decode → dispatch。
 
@@ -432,16 +501,19 @@ type PrincipalVerifier interface {
 ```yaml
 Authz:
   Enable: true
-  PrincipalVerifyMode: mtls # none | mtls | hmac | mtls+hmac
+   PrincipalVerifyMode: none # none | mtls | hmac | mtls+hmac
   FailOpen: false
 ```
 
+默认值建议为 `none`，匹配内部网络部署；当 `Enable=true` 且部署模式声明为 `untrusted` 时，应要求 `PrincipalVerifyMode != none`。
+
 **成功标准**：
 
-- authz 开启时，远端请求不能只靠伪造 `SenderPid.ServiceType` 获得权限；
-- 本地/测试模式仍可显式使用 `none`，但生产配置校验给出警告或拒绝启动。
+- 内部网络默认模式下，不引入额外签名开销；
+- 增强安全模式下，远端请求不能只靠伪造 `SenderPid.ServiceType` 获得权限；
+- 本地/测试模式仍可显式使用 `none`；跨不可信网络模式若未配置 mTLS/HMAC，应给出警告或拒绝启动。
 
-### D3 — B7：Cluster 事件处理器异步化设计
+### D3 — B7：Cluster 事件处理器异步化设计（核心已实现）
 
 **目标**：避免单个慢订阅者阻塞集群状态同步，同时保持服务上下线事件的顺序语义。
 
@@ -468,10 +540,10 @@ ClusterEventQueueSize   int // 默认复用 EventChannelSize
 - 节点级事件：`NodeUid`；
 - 无法提取 key：固定 shard 0，保证保守顺序。
 
-3. 数据流：
+3. 数据流（最终实现简化为直接分片）：
 
 ```text
-discovery -> Cluster.PushEvent -> main eventChannel -> dispatcher -> shard queue -> worker -> eventProcessor.Trigger
+discovery -> Cluster.PushEvent -> shard queue -> worker -> eventProcessor.Trigger
 ```
 
 4. 背压策略：
@@ -482,10 +554,11 @@ discovery -> Cluster.PushEvent -> main eventChannel -> dispatcher -> shard queue
 
 5. 关闭流程：
 
-- `Close()` 先关闭 `closed`；
-- dispatcher 停止接收新事件；
-- 关闭 shard queues；
-- 等待 workers 退出，设置超时兜底。
+- `Close()` 通过 `closeOnce` 保证幂等；
+- 先关闭 `closed`，让新事件快速返回错误；
+- 停止 discovery/endpoints，减少事件来源；
+- 通过 shard 锁关闭 shard queues；
+- 等待 workers 退出。
 
 **测试策略**：
 
@@ -494,7 +567,7 @@ discovery -> Cluster.PushEvent -> main eventChannel -> dispatcher -> shard queue
 - Close 时无 goroutine 泄漏；
 - 队列满时行为符合配置。
 
-### D4 — B8：Gate Listen Goroutine 健康检查与重启设计
+### D4 — B8：Gate Listen Goroutine 健康检查与重启设计（核心已实现）
 
 **目标**：避免 `ListenAndServe` 异常退出后 Gate 静默失联。
 
@@ -547,9 +620,9 @@ Gate:
 
 5. 健康状态：
 
-- `Gate` 暴露 `IsServing()` / `LastServeError()`；
-- HealthService `/ready` 汇总 Gate 状态；
-- metrics 增加 `gate_serving`、`gate_restart_total`、`gate_last_error_timestamp`。
+- `Gate` 暴露 `IsServing()` / `LastServeError()` / `RestartCount()`；
+- HealthService `/ready` 汇总 Gate 状态；（待实现）
+- metrics 增加 `gate_serving`、`gate_restart_total`、`gate_last_error_timestamp`。（待实现）
 
 **测试策略**：
 
@@ -658,7 +731,7 @@ type KeyRing struct {
 
 ---
 
-## 八、附录：审查方法说明
+## 十、附录：审查方法说明
 
 本次评估采用四维度并行审查：
 

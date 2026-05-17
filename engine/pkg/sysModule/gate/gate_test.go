@@ -213,3 +213,78 @@ func TestStart_NilConf(t *testing.T) {
 	err := g.Start(nil)
 	require.Error(t, err)
 }
+
+func TestIsPermanentError(t *testing.T) {
+	assert.True(t, isPermanentError(&net.OpError{Op: "listen", Err: errors.New("address already in use")}))
+	assert.True(t, isPermanentError(&net.AddrError{Err: "invalid address"}))
+	assert.False(t, isPermanentError(errors.New("temporary glitch")))
+	assert.False(t, isPermanentError(nil))
+}
+
+func TestIsNormalShutdown(t *testing.T) {
+	assert.True(t, isNormalShutdown(net.ErrClosed))
+	assert.True(t, isNormalShutdown(errors.New("use of closed network connection")))
+	assert.False(t, isNormalShutdown(errors.New("some other error")))
+	assert.False(t, isNormalShutdown(nil))
+}
+
+func TestSupervisor_NormalShutdownError_NoRestart(t *testing.T) {
+	adapter := &mockAdapter{
+		errFunc: func(_ int64) error { return net.ErrClosed },
+	}
+
+	policy := RestartPolicy{
+		Enable:         true,
+		MaxRestart:     5,
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	g := newTestGate(adapter, policy)
+	g.ctx, g.cancel = context.WithCancel(context.Background())
+	g.serveDone = make(chan struct{})
+
+	go g.superviseServe(nil)
+
+	select {
+	case <-g.serveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("supervisor did not stop on normal shutdown error")
+	}
+
+	assert.Equal(t, int64(1), adapter.callCount.Load())
+}
+
+func TestStart_RestartPolicyFromConfig(t *testing.T) {
+	adapter := &mockAdapter{
+		errFunc: func(_ int64) error { return nil },
+	}
+
+	g := NewGate()
+	g.adapter = adapter
+
+	conf := &config.GateService{
+		Type:         "ws",
+		WSServerConf: &config.WSServerConf{Router: "/ws"},
+		RestartPolicy: &config.RestartPolicy{
+			Enable:         false,
+			MaxRestart:     10,
+			InitialBackoff: 2 * time.Second,
+			MaxBackoff:     30 * time.Second,
+		},
+	}
+
+	err := g.Start(conf)
+	require.NoError(t, err)
+
+	// Wait for serveDone
+	select {
+	case <-g.serveDone:
+	case <-time.After(2 * time.Second):
+	}
+
+	assert.Equal(t, false, g.restartPolicy.Enable)
+	assert.Equal(t, 10, g.restartPolicy.MaxRestart)
+	assert.Equal(t, 2*time.Second, g.restartPolicy.InitialBackoff)
+	assert.Equal(t, 30*time.Second, g.restartPolicy.MaxBackoff)
+}

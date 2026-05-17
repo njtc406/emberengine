@@ -85,21 +85,6 @@ func init() {
 	defaultProvider = NewProvider(os.Getenv("EMBER_JWT_SECRET"))
 }
 
-func SetDefaultSecret(secret string) {
-	providerLock.Lock()
-	defaultProvider = NewProvider(secret)
-	providerLock.Unlock()
-}
-
-func SetDefaultProvider(p *Provider) {
-	if p == nil {
-		return
-	}
-	providerLock.Lock()
-	defaultProvider = p
-	providerLock.Unlock()
-}
-
 func GetDefaultProvider() *Provider {
 	providerLock.RLock()
 	p := defaultProvider

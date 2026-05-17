@@ -8,7 +8,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
@@ -19,15 +18,12 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/profiler"
 	"github.com/njtc406/emberengine/engine/pkg/router"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 )
@@ -38,6 +34,15 @@ var (
 	_ inf.IMessageInvoker = (*Service)(nil)
 	_ inf.IService        = (*Service)(nil)
 )
+
+// runtimeDeps 运行时依赖包（由 ServiceManager 在 Init 前注入）
+type runtimeDeps struct {
+	nodeCtx          inf.INodeContext
+	cluster          *cluster.Cluster
+	endpointManager  *endpoints.EndpointManager
+	profilerRegistry *profiler.Registry
+	router           *router.Router
+}
 
 type Service struct {
 	Module
@@ -56,14 +61,8 @@ type Service struct {
 	eventProcessor *event.Processor // 事件管理器
 
 	profiler inf.IProfiler // 性能监控
-	nodeCtx  inf.INodeContext
 
-	cluster          *cluster.Cluster
-	endpointManager  *endpoints.EndpointManager
-	profilerRegistry *profiler.Registry
-	router           *router.Router
-
-	msgHooks []MsgHookFun // 消息钩子函数(在消息处理之前调用) TODO 这个实际上已经在mailbox中做了,这里暂时废弃
+	deps runtimeDeps // 运行时依赖（由 ServiceManager 在 Init 前注入）
 
 	mailboxMiddlewares []inf.IMailboxMiddleware // 邮箱中间件
 
@@ -79,33 +78,11 @@ type Service struct {
 	authorizer       *authz.Authorizer // 可选：RBAC 授权引擎
 }
 
-type profilerRegistryAdapter struct {
-	registry *profiler.Registry
-}
-
-func (a *profilerRegistryAdapter) RegProfiler(name string, logger log.ILoggerX) inf.IProfiler {
-	if a == nil || a.registry == nil {
-		return nil
-	}
-	p := a.registry.RegProfiler(name, logger)
-	if p == nil {
-		return nil
-	}
-	return profiler.NewAdapter(p)
-}
-
-func (a *profilerRegistryAdapter) UnRegProfiler(name string) {
-	if a == nil || a.registry == nil {
-		return
-	}
-	a.registry.UnRegProfiler(name)
-}
-
 func (s *Service) SetRuntimeDeps(c *cluster.Cluster, em *endpoints.EndpointManager, pr *profiler.Registry, rt *router.Router) {
-	s.cluster = c
-	s.endpointManager = em
-	s.profilerRegistry = pr
-	s.router = rt
+	s.deps.cluster = c
+	s.deps.endpointManager = em
+	s.deps.profilerRegistry = pr
+	s.deps.router = rt
 }
 
 // SetAuthorizer 注入 RBAC 授权引擎。
@@ -113,308 +90,31 @@ func (s *Service) SetAuthorizer(a *authz.Authorizer) {
 	s.authorizer = a
 }
 
-type loggerReleasable interface {
-	Close() error
-}
-
-func releaseServiceLogger(logger log.ILoggerX) {
-	if releasable, ok := logger.(loggerReleasable); ok {
-		_ = releasable.Close()
-	}
-}
-
-func (s *Service) rollbackInitResources() {
-	if s.ITimerScheduler != nil {
-		s.ITimerScheduler.Stop()
-		s.ITimerScheduler = nil
-	}
-	if s.IConcurrent != nil {
-		s.IConcurrent.Close()
-		s.IConcurrent = nil
-	}
-	s.mailbox = nil
-	s.eventProcessor = nil
-	s.eventHandler = nil
-	s.methodMgr = nil
-	s.IRpcHandler = nil
-	s.pid = nil
-	if s.enableLogging && s.logger != nil {
-		releaseServiceLogger(s.logger)
-	}
-	s.logger = nil
-	s.ILoggerX = nil
-}
-
 func (s *Service) SetNodeContext(ctx inf.INodeContext) {
-	s.nodeCtx = ctx
+	s.deps.nodeCtx = ctx
 }
 
 func (s *Service) GetNodeContext() inf.INodeContext {
-	return s.nodeCtx
+	return s.deps.nodeCtx
 }
 
 func (s *Service) GetEndpointManager() inf.INodeEndpointManager {
-	if s.endpointManager != nil {
-		return s.endpointManager
+	if s.deps.endpointManager != nil {
+		return s.deps.endpointManager
 	}
-	if s.nodeCtx != nil {
-		return s.nodeCtx.GetEndpointManager()
+	if s.deps.nodeCtx != nil {
+		return s.deps.nodeCtx.GetEndpointManager()
 	}
 	return nil
 }
 
 func (s *Service) GetRouter() inf.INodeRouter {
-	if s.router != nil {
-		return s.router
+	if s.deps.router != nil {
+		return s.deps.router
 	}
-	if s.nodeCtx != nil {
-		return s.nodeCtx.GetRouter()
+	if s.deps.nodeCtx != nil {
+		return s.deps.nodeCtx.GetRouter()
 	}
-	return nil
-}
-
-func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
-	if serviceInitConf.Type == "" {
-		serviceInitConf.Type = "Normal"
-	}
-	if serviceInitConf.StopGraceTimeout < 0 {
-		serviceInitConf.StopGraceTimeout = 0
-	}
-	if serviceInitConf.StopPolicy != nil {
-		if serviceInitConf.StopPolicy.GraceTimeout < 0 {
-			serviceInitConf.StopPolicy.GraceTimeout = 0
-		}
-	}
-	if serviceInitConf.RpcType == "" {
-		// 优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
-		serviceInitConf.RpcType = def.RpcTypeNats
-	}
-	if serviceInitConf.LogConf == nil {
-		serviceInitConf.LogConf = &config.ServiceLogConf{
-			Enable: false,
-			Config: nil,
-		}
-	}
-
-	if serviceInitConf.TimerConf == nil {
-		serviceInitConf.TimerConf = &config.TimerConf{
-			TimerSize:       def.DefaultTimerSize,
-			TimerBucketSize: def.DefaultTimerBucketSize,
-		}
-	} else {
-		if serviceInitConf.TimerConf.TimerSize <= 0 {
-			serviceInitConf.TimerConf.TimerSize = def.DefaultTimerSize
-		}
-		if serviceInitConf.TimerConf.TimerBucketSize <= 0 {
-			serviceInitConf.TimerConf.TimerBucketSize = def.DefaultTimerBucketSize
-		}
-	}
-	// 事件通道大小
-	if serviceInitConf.EventChanSize <= 0 {
-		serviceInitConf.EventChanSize = def.DefaultEventChanSize
-	}
-
-	return serviceInitConf
-}
-
-func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{}) (err error) {
-	s.initErr = nil
-	defer func() {
-		if err != nil {
-			s.initErr = err
-			s.rollbackInitResources()
-		}
-	}()
-	var baseLogger log.ILoggerX
-	var baseConcreteLogger *log.Logger
-	if s.nodeCtx != nil {
-		baseLogger = s.nodeCtx.GetLogger()
-		if l, ok := baseLogger.(*log.Logger); ok {
-			baseConcreteLogger = l
-		}
-	}
-	if baseLogger == nil {
-		return fmt.Errorf("service init requires node context logger")
-	}
-
-	if svc == nil {
-		err = fmt.Errorf("service impl is nil")
-		baseLogger.Errorf("service impl is nil, trace: %s", debug.Stack())
-		return
-	}
-	if !atomic.CompareAndSwapInt32(&s.status, def.SvcStatusUnknown, def.SvcStatusInit) {
-		return nil
-	}
-
-	if s.name == "" {
-		s.name = reflect.Indirect(reflect.ValueOf(svc)).Type().Name()
-	}
-
-	// 整理配置参数
-	if serviceInitConf == nil {
-		err = fmt.Errorf("service init conf is nil")
-		baseLogger.WithField("sName", s.GetName()).Error("service init conf is nil")
-		return
-	}
-	serviceInitConf = fixConf(serviceInitConf)
-	//baseLogger.Debugf("service[%s] init conf: %+v", s.GetName(), serviceInitConf)
-	// 初始化服务数据
-	s.src = svc.(inf.IService)
-	s.cfg = cfg
-
-	// 初始化日志
-	if serviceInitConf.LogConf.Enable {
-		// 配置了独立日志
-		s.enableLogging = true
-		// 更新日志文件的前缀名称为服务名称
-		if serviceInitConf.LogConf.Config.PrefixName == "" {
-			serviceInitConf.LogConf.Config.PrefixName = s.GetName()
-		}
-		l, loggerErr := log.NewDefaultLogger(serviceInitConf.LogConf.Config)
-		if loggerErr != nil {
-			err = fmt.Errorf("service[%s] create logger error: %w", s.GetName(), loggerErr)
-			baseLogger.Errorf("service[%s] create logger error: %v", s.GetName(), loggerErr)
-			return
-		}
-		s.logger = l
-	} else {
-		s.logger = baseConcreteLogger
-		if s.logger == nil {
-			l, loggerErr := log.NewDefaultLogger(nil)
-			if loggerErr != nil {
-				err = fmt.Errorf("service[%s] create fallback logger error: %w", s.GetName(), loggerErr)
-				baseLogger.Errorf("service[%s] create fallback logger error: %v", s.GetName(), loggerErr)
-				return
-			}
-			s.logger = l
-		}
-	}
-	s.ILoggerX = s.logger.WithFields(log.Fields{
-		"sName":     s.GetName(),
-		"partition": serviceInitConf.Partition,
-	})
-	s.isPrimarySecondaryMode = serviceInitConf.IsPrimarySecondaryMode
-	// StopPolicy 优先，其次兼容旧的 StopGraceTimeout
-	stopGraceTimeout := serviceInitConf.StopGraceTimeout
-	drainPolicy := mailbox.DrainExecute
-	if serviceInitConf.StopPolicy != nil {
-		stopGraceTimeout = serviceInitConf.StopPolicy.GraceTimeout
-		drainPolicy = mailbox.ParseDrainPolicy(serviceInitConf.StopPolicy.DrainPolicy)
-	}
-	if stopGraceTimeout < 0 {
-		stopGraceTimeout = 0
-	}
-	s.stopGraceTimeout = stopGraceTimeout
-
-	// 创建定时器调度器
-	tw := s.nodeCtx.GetTimingWheel()
-	if tw == nil {
-		err = fmt.Errorf("service[%s] timing wheel is nil", s.GetName())
-		s.Errorf("service[%s] timing wheel is nil", s.GetName())
-		return
-	}
-	var schedulerErr error
-	s.ITimerScheduler, schedulerErr = timingwheel.NewJobScheduler(s.GetName(), serviceInitConf.TimerConf.TimerSize, serviceInitConf.TimerConf.TimerBucketSize,
-		tw, s.ILoggerX)
-	if schedulerErr != nil {
-		err = fmt.Errorf("service[%s] create timer scheduler error: %w", s.GetName(), schedulerErr)
-		s.Errorf("service[%s] create timer scheduler error: %v", s.GetName(), schedulerErr)
-		return
-	}
-
-	// 根据配置创建中间件，并与用户自定义中间件合并
-	isDebug := false
-	if s.nodeCtx != nil {
-		if cfg := s.nodeCtx.GetConfig(); cfg != nil {
-			isDebug = cfg.IsDebug()
-		}
-	}
-	configMiddlewares := mailbox.CreateMiddlewaresFromConfig(serviceInitConf.Mailbox, s.GetName(), s.ILoggerX, isDebug)
-	allMiddlewares := mailbox.MergeMiddlewares(configMiddlewares, s.mailboxMiddlewares)
-
-	// 创建邮箱（将停机 drain 策略下发给 mailbox/workerPool）
-	s.mailbox, err = mailbox.NewMailbox(serviceInitConf.Mailbox, s.ILoggerX, s, allMiddlewares, mailbox.WithDrainPolicy(drainPolicy))
-	if err != nil {
-		return
-	}
-
-	// 初始化根模块
-	s.self = svc.(inf.IModule)
-	s.root = s.self
-	s.rootContains = make(map[uint32]inf.IModule)
-	s.moduleIdSeed = def.DefaultModuleIdSeed
-	s.moduleName = s.name
-
-	// 创建事件处理器
-	s.eventProcessor = event.NewTrigger()
-	s.eventProcessor.Init(s)
-	if s.nodeCtx != nil {
-		if bus := s.nodeCtx.GetEventBus(); bus != nil {
-			if b, ok := bus.(*event.Bus); ok {
-				s.eventProcessor.SetEventBus(b)
-			}
-		}
-	}
-	// 注册事件管理器
-	s.eventHandler = event.NewTriggerHandler()
-	s.eventHandler.Init(s.eventProcessor)
-
-	s.IConcurrent = concurrent.NewTaskScheduler(s.ILoggerX)
-
-	// 注册 Job 处理函数
-	s.initJobHandlers()
-
-	// 注册 SysCtl 命令注册中心（依赖 mailbox 已注入）
-	s.initSysCtlRegistry()
-
-	em := s.GetEndpointManager()
-	if em == nil {
-		err = fmt.Errorf("service[%s] endpoint manager is nil", s.GetName())
-		s.Errorf("service[%s] endpoint manager is nil", s.GetName())
-		return
-	}
-	s.pid = em.CreatePid(serviceInitConf.Partition, serviceInitConf.ServiceId, serviceInitConf.Type, s.name, serviceInitConf.Version, serviceInitConf.RpcType)
-	if s.pid == nil {
-		err = fmt.Errorf("service[%s] create pid error", s.GetName())
-		s.logger.Errorf("service[%s] create pid error", s.GetName())
-		return
-	}
-	s.ILoggerX = s.ILoggerX.WithFields(log.Fields{
-		"sUid":    s.pid.GetServiceUid(),
-		"version": s.pid.GetVersion(),
-	})
-
-	// 初始化根节点rpc处理器
-	var methodIdx inf.INodeMethodIndex
-	if s.nodeCtx != nil {
-		methodIdx = s.nodeCtx.GetMethodIndex()
-	}
-	s.methodMgr = rpc.NewMethodMgr(s.ILoggerX, methodIdx)
-	// 通过 func() bool 闭包注入 RW 状态查询，避免暴露内部 *atomic.Bool
-	if rwMgr, ok := s.methodMgr.(*rpc.MethodMgr); ok {
-		rwMgr.SetRWStateProvider(s.mailbox.IsRWEnabled)
-	}
-	s.IRpcHandler, err = rpc.NewHandler(s.self).Init(s.methodMgr)
-	if err != nil {
-		initErr := fmt.Errorf("service[%s] register rpc methods failed: %w", s.GetName(), err)
-		s.Errorf("service[%s] register rpc methods failed: %v", s.GetName(), err)
-		return initErr
-	}
-	// 注入 RBAC 授权引擎
-	if s.authorizer != nil {
-		if h, ok := s.IRpcHandler.(*rpc.Handler); ok {
-			h.SetAuthorizer(s.authorizer)
-		}
-	}
-
-	if s.src != nil {
-		if err := s.src.OnInit(); err != nil {
-			initErr := fmt.Errorf("service[%s] onInit error: %w", s.GetName(), err)
-			s.Errorf("service[%s] onInit error: %v", s.GetName(), err)
-			return initErr
-		}
-	}
-
 	return nil
 }
 
@@ -439,9 +139,9 @@ func (s *Service) Start() error {
 		}
 	}
 
-	isCluster := s.cluster != nil && s.cluster.IsClusterMode()
-	if !isCluster && s.nodeCtx != nil {
-		isCluster = s.nodeCtx.IsClusterMode()
+	isCluster := s.deps.cluster != nil && s.deps.cluster.IsClusterMode()
+	if !isCluster && s.deps.nodeCtx != nil {
+		isCluster = s.deps.nodeCtx.IsClusterMode()
 	}
 	if !s.isPrimarySecondaryMode || s.IsPrivate() || !isCluster {
 		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
@@ -700,43 +400,6 @@ func (s *Service) OnRelease() {}
 
 func (s *Service) IsClosed() bool {
 	return atomic.LoadInt32(&s.status) > def.SvcStatusRunning
-}
-
-func (s *Service) OpenProfiler() {
-	var reg inf.INodeProfilerRegistry
-	if s.profilerRegistry != nil {
-		reg = &profilerRegistryAdapter{registry: s.profilerRegistry}
-	} else if s.nodeCtx != nil {
-		reg = s.nodeCtx.GetProfilerRegistry()
-	}
-	if reg == nil {
-		s.Error("profiler registry is nil")
-		return
-	}
-	s.profiler = reg.RegProfiler(s.pid.GetServiceUid(), s.ILoggerX)
-	if s.profiler == nil {
-		s.Error("profiler reg fail")
-		return
-	}
-}
-
-func (s *Service) GetProfiler() inf.IProfiler {
-	return s.profiler
-}
-
-func (s *Service) closeProfiler() {
-	if s.profiler != nil {
-		var reg inf.INodeProfilerRegistry
-		if s.profilerRegistry != nil {
-			reg = &profilerRegistryAdapter{registry: s.profilerRegistry}
-		} else if s.nodeCtx != nil {
-			reg = s.nodeCtx.GetProfilerRegistry()
-		}
-		if reg != nil {
-			reg.UnRegProfiler(s.pid.GetServiceUid())
-		}
-		s.profiler = nil
-	}
 }
 
 func (s *Service) GetServiceCfg() interface{} {

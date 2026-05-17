@@ -42,6 +42,8 @@ type Conf struct {
 	Account map[string]string
 	// 证书文件
 	CAFile *CAFile
+	// 安全响应头配置(nil 表示使用默认配置)
+	SecurityHeaders *SecurityHeadersConf
 }
 
 func (c *Conf) GetHttpDir() string {
@@ -91,6 +93,7 @@ func (gs *GinServer) Init(logger log.ILoggerX, systemMod string, conf *Conf) err
 	gs.handler.Use(
 		gzip.Gzip(gzip.DefaultCompression),
 		gs.customLoggerMiddleware(),
+		gs.securityHeadersMiddleware(),
 		gin.Recovery(),
 	)
 	// 自定义中间件
@@ -215,6 +218,14 @@ func (gs *GinServer) WithMiddleware(middleware ...gin.HandlerFunc) *GinServer {
 func (gs *GinServer) SetRouter(router *router_center.GroupHandlerPool) *GinServer {
 	gs.router = router
 	return gs
+}
+
+func (gs *GinServer) securityHeadersMiddleware() gin.HandlerFunc {
+	conf := DefaultSecurityHeadersConf()
+	if gs.conf != nil && gs.conf.SecurityHeaders != nil {
+		conf = *gs.conf.SecurityHeaders
+	}
+	return SecurityHeaders(conf)
 }
 
 func (gs *GinServer) customLoggerMiddleware() gin.HandlerFunc {

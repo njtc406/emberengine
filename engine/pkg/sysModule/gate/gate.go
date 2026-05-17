@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -76,6 +77,16 @@ func (g *Gate) Start(conf *config.GateService) error {
 		return fmt.Errorf("gate service conf error")
 	}
 
+	// 从配置加载 RestartPolicy
+	if conf.RestartPolicy != nil {
+		g.restartPolicy = RestartPolicy{
+			Enable:         conf.RestartPolicy.Enable,
+			MaxRestart:     conf.RestartPolicy.MaxRestart,
+			InitialBackoff: conf.RestartPolicy.InitialBackoff,
+			MaxBackoff:     conf.RestartPolicy.MaxBackoff,
+		}
+	}
+
 	var sConf interface{}
 	switch conf.Type {
 	case "ws":
@@ -122,6 +133,11 @@ func (g *Gate) superviseServe(sConf interface{}) {
 
 		// 无错误（正常 shutdown）不重启
 		if err == nil {
+			return
+		}
+
+		// 正常关闭导致的错误不重启
+		if isNormalShutdown(err) {
 			return
 		}
 
@@ -189,6 +205,23 @@ func isPermanentError(err error) bool {
 		if opErr.Op == "listen" {
 			return true
 		}
+	}
+	// 地址格式错误
+	var addrErr *net.AddrError
+	if errors.As(err, &addrErr) {
+		return true
+	}
+	return false
+}
+
+// isNormalShutdown 判断是否为正常关闭导致的错误（不应重启）。
+func isNormalShutdown(err error) bool {
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	// 兼容 Go 低版本中 "use of closed network connection" 错误
+	if err != nil && strings.Contains(err.Error(), "use of closed network connection") {
+		return true
 	}
 	return false
 }
