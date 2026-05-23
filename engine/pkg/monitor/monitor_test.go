@@ -65,3 +65,16 @@ func TestRpcMonitor_Remove(t *testing.T) {
 		t.Error("remove failed")
 	}
 }
+
+func TestRpcMonitor_GenSeqMonotonic(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	first := rm.GenSeq()
+	second := rm.GenSeq()
+	third := rm.GenSeq()
+
+	if first != 1 || second != 2 || third != 3 {
+		t.Fatalf("expected simple monotonic sequence 1,2,3 got %d,%d,%d", first, second, third)
+	}
+}

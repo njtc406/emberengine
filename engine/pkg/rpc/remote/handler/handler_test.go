@@ -51,11 +51,12 @@ func testPID(name string) *actor.PID {
 
 // mockDedup implements IDeDuplicator for testing.
 type mockDedup struct {
-	seen map[string]map[uint64]bool
+	seen    map[string]map[uint64]bool
+	seenKey map[string]bool
 }
 
 func newMockDedup() *mockDedup {
-	return &mockDedup{seen: make(map[string]map[uint64]bool)}
+	return &mockDedup{seen: make(map[string]map[uint64]bool), seenKey: make(map[string]bool)}
 }
 
 func (d *mockDedup) Seen(serviceUid string, id uint64) bool {
@@ -66,6 +67,14 @@ func (d *mockDedup) Seen(serviceUid string, id uint64) bool {
 		return true
 	}
 	d.seen[serviceUid][id] = true
+	return false
+}
+
+func (d *mockDedup) SeenKey(key string) bool {
+	if d.seenKey[key] {
+		return true
+	}
+	d.seenKey[key] = true
 	return false
 }
 
@@ -237,14 +246,14 @@ func TestRequest_DedupHit(t *testing.T) {
 	h := NewHandler(rm, newTestLogger(t), dedup)
 
 	senderPid := testPID("Sender")
-	reqId := rm.GenSeq()
 	msg := &actor.Message{
-		SenderPid:   senderPid,
-		ReceiverPid: receiverPid,
-		Reply:       false,
-		ReqId:       reqId,
-		Method:      "RpcSum",
-		NeedResp:    true,
+		SenderPid:      senderPid,
+		ReceiverPid:    receiverPid,
+		Reply:          false,
+		ReqId:          rm.GenSeq(),
+		Method:         "RpcSum",
+		NeedResp:       true,
+		IdempotencyKey: "rpc:sum:42",
 	}
 
 	// First call: should be delivered
@@ -252,8 +261,17 @@ func TestRequest_DedupHit(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, receiver.delivered, 1)
 
-	// Second call with same reqId: should be deduped
-	err = h.RpcMessageHandler(sf, msg)
+	// Second call with a different ReqId but the same idempotency key: should be deduped.
+	msg2 := &actor.Message{
+		SenderPid:      senderPid,
+		ReceiverPid:    receiverPid,
+		Reply:          false,
+		ReqId:          rm.GenSeq(),
+		Method:         "RpcSum",
+		NeedResp:       true,
+		IdempotencyKey: "rpc:sum:42",
+	}
+	err = h.RpcMessageHandler(sf, msg2)
 	require.NoError(t, err)
 	assert.Len(t, receiver.delivered, 1) // still 1, second was dropped
 }
@@ -272,23 +290,84 @@ func TestRequest_SendSkipsDedup(t *testing.T) {
 	}
 
 	h := NewHandler(rm, newTestLogger(t), newMockDedup())
-
 	senderPid := testPID("Sender")
+
 	msg := &actor.Message{
 		SenderPid:   senderPid,
 		ReceiverPid: receiverPid,
 		Reply:       false,
-		ReqId:       0, // send uses ReqId=0
+		ReqId:       0,
 		Method:      "FireEvent",
 		NeedResp:    false,
 	}
 
-	// Two sends with ReqId=0 should both be delivered
+	// Two sends without idempotency key should both be delivered.
 	err := h.RpcMessageHandler(sf, msg)
 	require.NoError(t, err)
 	err = h.RpcMessageHandler(sf, msg)
 	require.NoError(t, err)
 	assert.Len(t, receiver.delivered, 2)
+}
+
+func TestRequest_SameReqIDWithoutIdempotencyKeyNotDeduped(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{dispatchers: map[string]inf.IRpcDispatcher{receiverPid.GetServiceUid(): receiver}}
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+
+	reqID := rm.GenSeq()
+	msg := &actor.Message{
+		SenderPid:   testPID("Sender"),
+		ReceiverPid: receiverPid,
+		Reply:       false,
+		ReqId:       reqID,
+		Method:      "RpcSum",
+		NeedResp:    true,
+	}
+
+	err := h.RpcMessageHandler(sf, msg)
+	require.NoError(t, err)
+	err = h.RpcMessageHandler(sf, msg)
+	require.NoError(t, err)
+	assert.Len(t, receiver.delivered, 2)
+}
+
+func TestRequest_DedupKeyDoesNotAppendSenderPid(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{dispatchers: map[string]inf.IRpcDispatcher{receiverPid.GetServiceUid(): receiver}}
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+
+	msg1 := &actor.Message{
+		SenderPid:      testPID("Sender1"),
+		ReceiverPid:    receiverPid,
+		Reply:          false,
+		ReqId:          rm.GenSeq(),
+		Method:         "RpcSum",
+		NeedResp:       true,
+		IdempotencyKey: "order:create:9",
+	}
+	msg2 := &actor.Message{
+		SenderPid:      testPID("Sender2"),
+		ReceiverPid:    receiverPid,
+		Reply:          false,
+		ReqId:          rm.GenSeq(),
+		Method:         "RpcSum",
+		NeedResp:       true,
+		IdempotencyKey: "order:create:9",
+	}
+
+	err := h.RpcMessageHandler(sf, msg1)
+	require.NoError(t, err)
+	err = h.RpcMessageHandler(sf, msg2)
+	require.NoError(t, err)
+	assert.Len(t, receiver.delivered, 1)
 }
 
 func TestRequest_DedupNil(t *testing.T) {
@@ -308,17 +387,40 @@ func TestRequest_DedupNil(t *testing.T) {
 	h := NewHandler(rm, newTestLogger(t), nil)
 
 	msg := &actor.Message{
-		SenderPid:   testPID("Sender"),
-		ReceiverPid: receiverPid,
-		Reply:       false,
-		ReqId:       rm.GenSeq(), // non-zero triggers dedup check
-		Method:      "RpcSum",
-		NeedResp:    true,
+		SenderPid:      testPID("Sender"),
+		ReceiverPid:    receiverPid,
+		Reply:          false,
+		ReqId:          rm.GenSeq(),
+		Method:         "RpcSum",
+		NeedResp:       true,
+		IdempotencyKey: "rpc:sum:dedup-nil",
 	}
 
 	err := h.RpcMessageHandler(sf, msg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deduplicator is nil")
+	assert.Len(t, receiver.delivered, 0)
+}
+
+func TestRequest_SenderPidRequired(t *testing.T) {
+	rm, cleanup := newTestMonitor(t)
+	defer cleanup()
+
+	receiverPid := testPID("Receiver")
+	receiver := &mockDispatcher{pid: receiverPid}
+	sf := &mockSenderFactory{dispatchers: map[string]inf.IRpcDispatcher{receiverPid.GetServiceUid(): receiver}}
+	h := NewHandler(rm, newTestLogger(t), newMockDedup())
+
+	msg := &actor.Message{
+		ReceiverPid: receiverPid,
+		Reply:       false,
+		Method:      "FireEvent",
+		NeedResp:    false,
+	}
+
+	err := h.RpcMessageHandler(sf, msg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sender pid is nil")
 	assert.Len(t, receiver.delivered, 0)
 }
 

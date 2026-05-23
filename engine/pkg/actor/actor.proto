@@ -40,6 +40,7 @@ message Message {
   // === 上下文元数据（仅用于 tracing/metadata） ===
   map<string, string> ContextHeaders  = 13; // 上下文头（traceId 等）
   int64 Deadline                      = 14; // 事件处理截止时间(单位: 纳秒)
+  string IdempotencyKey               = 15; // 业务幂等键（由调用方显式传入）
 }
 
 service GrpcListener {

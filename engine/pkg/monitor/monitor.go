@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
@@ -67,8 +66,7 @@ type RpcMonitor struct {
 	closed       atomic.Bool
 	ctx          context.Context
 	cancel       context.CancelFunc
-	epoch        uint64 // 启动纳秒时间戳左移44位，作为ID高位前缀（周期约1ms，不可能重启冲突）
-	seq          uint64 // 自增序列号（低44位，支持约339天@60万QPS）
+	seq          uint64
 	buckets      []*waitBucket
 	bucketMask   uint64
 	sd           timingwheel.ITimerScheduler
@@ -115,9 +113,6 @@ func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf, logger log.ILoggerX, tw 
 	rm.ctx = ctx
 	rm.cancel = cancel
 	rm.closed.Store(false)
-	// 高20位: 纳秒时间戳低20位（周期约1ms，不可能在同一纳秒重启）
-	// 低44位: 序列号，2^44 / 60万QPS ≈ 339天
-	rm.epoch = uint64(time.Now().UnixNano()&0xFFFFF) << 44
 	rm.seq = 0
 	// Buckets are sharded to reduce lock contention.
 	// BucketCount must be power-of-two; otherwise we round up.
@@ -234,17 +229,8 @@ func (rm *RpcMonitor) isClosed() bool {
 	return rm.closed.Load()
 }
 
-const seqMask = uint64(0xFFFFFFFFFFF) // 低44位掩码
-
 func (rm *RpcMonitor) GenSeq() uint64 {
-	// 高20位是启动纳秒时间戳，低44位是自增序列
-	// 重启后纳秒时间戳不同，ID自然不会冲突
-	seq := atomic.AddUint64(&rm.seq, 1) & seqMask
-	if seq == 0 {
-		// seq溢出归零（总共约17.6万亿个数,除以qps*86400=可循环天数），刷新epoch避免ID冲突
-		rm.epoch = uint64(time.Now().UnixNano()&0xFFFFF) << 44
-	}
-	return rm.epoch | seq
+	return atomic.AddUint64(&rm.seq, 1)
 }
 
 func (rm *RpcMonitor) Add(state *CallState) {
@@ -268,8 +254,7 @@ func (rm *RpcMonitor) Add(state *CallState) {
 		// 在 Complete 之前读取 ctx 并打印日志，因为 Complete 后同步 Call
 		// 的调用方可能立即 Release → Reset，导致 state.ctx 被清空。
 		if rm.ILoggerX != nil {
-			rm.WithContext(st.ctx).Debugf("RPC call takes more than %v seconds,method is %s",
-				timeout.Milliseconds(), method)
+			rm.WithContext(st.ctx).Debugf("RPC call takes more than %s,method is %s", timeout, method)
 		}
 
 		st.SetResult(nil, def.ErrRPCCallTimeout)

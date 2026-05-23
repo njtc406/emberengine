@@ -101,7 +101,7 @@ func TestCallFailsFastForInvalidOutBeforeRpcMonitor(t *testing.T) {
 	data.SetMethod("RpcSum")
 	data.SetNeedResponse(true)
 
-	err := mb.call(context.Background(), data, def.PriorityNormal, "", 123)
+	err := mb.call(context.Background(), data, def.PriorityNormal, "", "", 123)
 	if err == nil {
 		t.Fatalf("expected out validation error")
 	}
@@ -117,7 +117,7 @@ func TestCallValidOutReturnsRpcMonitorError(t *testing.T) {
 	data.SetNeedResponse(true)
 	out := 0
 
-	err := mb.call(context.Background(), data, def.PriorityNormal, "", &out)
+	err := mb.call(context.Background(), data, def.PriorityNormal, "", "", &out)
 	if err == nil {
 		t.Fatalf("expected rpc monitor not initialized error")
 	}
@@ -135,12 +135,12 @@ type fakeInternalBus struct {
 }
 
 func (f *fakeInternalBus) Call(ctx context.Context, method string, in, out interface{}) error {
-	return f.callInternal(ctx, method, in, out, def.PriorityNormal, "", true)
+	return f.callInternal(ctx, method, in, out, def.PriorityNormal, "", "", true)
 }
 
 func (f *fakeInternalBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
 	option := dto.NewBusOption(opts...)
-	return f.callInternal(ctx, option.Method, option.In, option.Out, option.Priority, option.DispatchKey, !option.NotRecycle)
+	return f.callInternal(ctx, option.Method, option.In, option.Out, option.Priority, option.DispatchKey, option.IdempotencyKey, !option.NotRecycle)
 }
 
 func (f *fakeInternalBus) AsyncCall(ctx context.Context, method string, in interface{}, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (dto.CancelRpc, error) {
@@ -167,12 +167,12 @@ func (f *fakeInternalBus) SendWithOpt(ctx context.Context, opts ...dto.BusOption
 
 func (f *fakeInternalBus) Release() {}
 
-func (f *fakeInternalBus) callInternal(ctx context.Context, method string, in, out interface{}, priority def.Priority, dispatchKey string, recycle bool) error {
+func (f *fakeInternalBus) callInternal(ctx context.Context, method string, in, out interface{}, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool) error {
 	f.callCount++
 	return f.callErr
 }
 
-func (f *fakeInternalBus) asyncCallInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, recycle bool, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error) {
+func (f *fakeInternalBus) asyncCallInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error) {
 	if f.asyncErr != nil {
 		return 0, f.asyncErr
 	}
@@ -182,7 +182,7 @@ func (f *fakeInternalBus) asyncCallInternal(ctx context.Context, data inf.IEnvel
 	return f.asyncReqID, nil
 }
 
-func (f *fakeInternalBus) sendInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, recycle bool) error {
+func (f *fakeInternalBus) sendInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool) error {
 	return f.sendErr
 }
 

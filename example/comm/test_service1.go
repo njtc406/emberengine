@@ -39,7 +39,7 @@ func (s *Service1) OnInit() error {
 		// 调用Service2.APITest2
 		ctxWithTimeout, cancel := xcontext.NewWithTimeout(nil, time.Second)
 		defer cancel()
-		//// 获取消息总线
+		//// 获取消息总线（如果复用bus，需要注意后面调用时，剩余的deadline可能已经比较少，适用于需要控制执行总时长的地方）
 		bus := s.Select(rpc.WithName(ServiceNameTest2), rpc.WithPartition(1))
 		defer bus.Release()
 		//
@@ -157,21 +157,21 @@ func (s *Service1) OnInit() error {
 	////
 	//////rpc test demo
 	////
-	//s.AfterFunc(time.Second*1, "rpc test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
-	//		s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
-	//	}
-	//	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*1000)
-	//	defer cancel()
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("2")).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
-	//		s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
-	//	}
-	//	s.WithContext(ctxWithTimeout).Debugf("==========================================11")
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Send(ctx, "RPCTest2", nil); err != nil {
-	//		s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
-	//	}
-	//	return nil
-	//})
+	s.AfterFunc(time.Second*1, "rpc test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
+			s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		}
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*1000)
+		defer cancel()
+		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("2")).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
+			s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		}
+		s.WithContext(ctxWithTimeout).Debugf("==========================================11")
+		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Send(ctx, "RPCTest2", nil); err != nil {
+			s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
+		}
+		return nil
+	})
 	//s.AfterFunc(time.Second*8, "rpc test demo1", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 	//	out := &msg.Msg_Test_Resp{}
 	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, out); err != nil {

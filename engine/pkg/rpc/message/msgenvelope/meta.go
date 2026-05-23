@@ -159,13 +159,14 @@ type Meta struct {
 	dto.DataRef
 	locker sync.RWMutex
 
-	senderPid   *actor.PID         // 发送者
-	receiverPid *actor.PID         // 接收者
-	sender      inf.IRpcDispatcher // 发送者客户端(用于回复)
-	reqID       uint64             // 请求ID(主要用于monitor区分不同的call)
-	deadline    int64              // 超时时间(单位: 纳秒)
-	callbacks   dto.CompletionFuncs
-	cbParams    []interface{}
+	senderPid      *actor.PID         // 发送者
+	receiverPid    *actor.PID         // 接收者
+	sender         inf.IRpcDispatcher // 发送者客户端(用于回复)
+	reqID          uint64             // 请求ID(主要用于monitor区分不同的call)
+	deadline       int64              // 超时时间(单位: 纳秒)
+	idempotencyKey string             // 业务幂等键
+	callbacks      dto.CompletionFuncs
+	cbParams       []interface{}
 }
 
 func (e *Meta) Reset() {
@@ -174,6 +175,7 @@ func (e *Meta) Reset() {
 	e.sender = nil
 	e.reqID = 0
 	e.deadline = 0
+	e.idempotencyKey = ""
 	e.callbacks = nil
 	e.cbParams = nil
 }
@@ -205,6 +207,12 @@ func (e *Meta) SetDeadline(deadline int64) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.deadline = deadline
+}
+
+func (e *Meta) SetIdempotencyKey(key string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.idempotencyKey = key
 }
 
 func (e *Meta) SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{}) {
@@ -242,6 +250,12 @@ func (e *Meta) GetDeadline() int64 {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
 	return e.deadline
+}
+
+func (e *Meta) GetIdempotencyKey() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.idempotencyKey
 }
 
 func (e *Meta) GetCallback() (callback dto.CompletionFuncs, cbParams []interface{}) {

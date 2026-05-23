@@ -73,7 +73,7 @@ func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob
 
 	deadline := mJob.GetDeadline()
 	if deadline > 0 {
-		deadlineTime := time.Unix(deadline, 0)
+		deadlineTime := time.Unix(0, deadline)
 		timeout := deadlineTime.Sub(timelib.Now())
 		if timeout <= 0 {
 			return def.ErrJobTimeout

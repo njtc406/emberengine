@@ -95,22 +95,20 @@ func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message
 			return nil
 		}
 	} else {
-		// 去重只对“有ReqId”的请求有意义（通常是 NeedResp=true 的 call/asyncCall）。
-		// fire-and-forget 的 send 使用 ReqId=0，跳过去重以减少热路径开销。
-		if req.ReqId != 0 {
-			senderPid := req.GetSenderPid()
-			if senderPid == nil {
-				return errors.New("rpc request sender pid is nil")
-			}
-			senderServiceUid := senderPid.GetServiceUid()
+		senderPid := req.GetSenderPid()
+		if senderPid == nil {
+			return errors.New("rpc request sender pid is nil")
+		}
+
+		if key := req.GetIdempotencyKey(); key != "" {
 			// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
 			dedupIns := h.dedup
 			if dedupIns == nil {
 				return errors.New("deduplicator is nil")
 			}
-			if dedupIns.Seen(senderServiceUid, req.ReqId) {
+			if dedupIns.SeenKey(key) {
 				if l := h.logger; l != nil {
-					l.Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
+					l.Errorf("duplicate idempotency key:%s rpc request: %s", key, req.String())
 				}
 				return nil
 			}
@@ -162,12 +160,12 @@ func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message
 
 		meta := msgenvelope.NewMeta()
 		meta.SetReceiverPid(req.ReceiverPid)
+		meta.SetSenderPid(req.SenderPid)
 		meta.SetReqId(req.ReqId)
 		meta.SetDeadline(req.Deadline)
+		meta.SetIdempotencyKey(req.IdempotencyKey)
 
 		if req.NeedResp {
-			// 需要回复的才设置sender
-			meta.SetSenderPid(req.SenderPid)
 			meta.SetDispatcher(sf.GetDispatcher(req.SenderPid))
 		}
 		envelope.SetMeta(meta)

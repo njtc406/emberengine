@@ -117,6 +117,67 @@ func (d *errorDispatcher) GetPid() *actor.PID    { return d.pid }
 func (d *errorDispatcher) Close()                {}
 func (d *errorDispatcher) IsClosed() bool        { return false }
 
+type protoCaptureDispatcher struct {
+	pid *actor.PID
+	msg *actor.Message
+	err error
+}
+
+func (d *protoCaptureDispatcher) PostJob(job inf.IMailboxJob) error { return nil }
+
+func (d *protoCaptureDispatcher) DeliverRequest(ctx context.Context, envelope inf.IEnvelope) error {
+	d.msg, d.err = envelope.ToProtoMsg(ctx)
+	envelope.Release()
+	return d.err
+}
+
+func (d *protoCaptureDispatcher) DeliverResponse(_ context.Context, envelope inf.IEnvelope) error {
+	envelope.Release()
+	return nil
+}
+
+func (d *protoCaptureDispatcher) SetPid(pid *actor.PID) { d.pid = pid }
+func (d *protoCaptureDispatcher) GetPid() *actor.PID    { return d.pid }
+func (d *protoCaptureDispatcher) Close()                {}
+func (d *protoCaptureDispatcher) IsClosed() bool        { return false }
+
+type captureReplyDispatcher struct {
+	pid     *actor.PID
+	monitor *monitor.RpcMonitor
+	reply   interface{}
+	msg     *actor.Message
+	err     error
+}
+
+func (d *captureReplyDispatcher) PostJob(job inf.IMailboxJob) error { return nil }
+
+func (d *captureReplyDispatcher) DeliverRequest(ctx context.Context, envelope inf.IEnvelope) error {
+	d.msg, d.err = envelope.ToProtoMsg(ctx)
+	if d.err != nil {
+		envelope.Release()
+		return d.err
+	}
+	if reqID := envelope.GetMeta().GetReqId(); reqID != 0 {
+		state := d.monitor.Remove(reqID)
+		if state != nil {
+			state.SetResult(d.reply, nil)
+			state.Complete()
+		}
+	}
+	envelope.Release()
+	return nil
+}
+
+func (d *captureReplyDispatcher) DeliverResponse(_ context.Context, envelope inf.IEnvelope) error {
+	envelope.Release()
+	return nil
+}
+
+func (d *captureReplyDispatcher) SetPid(pid *actor.PID) { d.pid = pid }
+func (d *captureReplyDispatcher) GetPid() *actor.PID    { return d.pid }
+func (d *captureReplyDispatcher) Close()                {}
+func (d *captureReplyDispatcher) IsClosed() bool        { return false }
+
 func testPID(name string) *actor.PID {
 	return actor.NewPID("127.0.0.1:0", "node1", 1, "svc1", "GameService", name, 1, "grpc")
 }
@@ -151,6 +212,49 @@ func TestCall_NormalReply(t *testing.T) {
 	assert.Equal(t, int64(1), m.CallTotal)
 	assert.Equal(t, int64(0), m.CallErrors)
 	assert.Equal(t, int64(0), m.CallInFlight) // call completed
+}
+
+func TestCallWithOpt_PropagatesIdempotencyKey(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	sender := &mockDispatcher{pid: testPID("Sender")}
+	receiver := &captureReplyDispatcher{
+		pid:     testPID("Receiver"),
+		monitor: env.monitor,
+		reply:   7,
+	}
+
+	mb := env.factory.New(sender, receiver, nil)
+	var out int
+	err := mb.CallWithOpt(context.Background(),
+		dto.WithMethod("RpcSum"),
+		dto.WithOut(&out),
+		dto.WithIdempotencyKey("order:create:1"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, receiver.msg)
+	assert.Equal(t, "order:create:1", receiver.msg.IdempotencyKey)
+	assert.NotZero(t, receiver.msg.ReqId)
+	assert.NotNil(t, receiver.msg.SenderPid)
+	assert.NotZero(t, receiver.msg.Deadline)
+}
+
+func TestCall_NilContextPropagatesDefaultDeadline(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	sender := &mockDispatcher{pid: testPID("Sender")}
+	receiver := &captureReplyDispatcher{
+		pid:     testPID("Receiver"),
+		monitor: env.monitor,
+		reply:   1,
+	}
+
+	mb := env.factory.New(sender, receiver, nil)
+	var out int
+	err := mb.Call(nil, "RpcSum", nil, &out)
+	require.NoError(t, err)
+	require.NotNil(t, receiver.msg)
+	assert.NotZero(t, receiver.msg.Deadline)
 }
 
 func TestCall_Timeout(t *testing.T) {
@@ -321,6 +425,69 @@ func TestAsyncCall_DeliverRequestFails(t *testing.T) {
 	assert.Equal(t, int64(1), m.AsyncCallErrors)
 }
 
+func TestAsyncCallWithOpt_PropagatesIdempotencyKey(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	sender := &execDispatcher{pid: testPID("Sender")}
+	receiver := &captureReplyDispatcher{
+		pid:     testPID("Receiver"),
+		monitor: env.monitor,
+		reply:   "ok",
+	}
+
+	mb := env.factory.New(sender, receiver, nil)
+	_, err := mb.AsyncCallWithOpt(context.Background(),
+		dto.WithMethod("RpcAsync"),
+		dto.WithCallbacks(func(ctx context.Context, data interface{}, err error, params ...interface{}) {}),
+		dto.WithIdempotencyKey("job:run:1"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, receiver.msg)
+	assert.Equal(t, "job:run:1", receiver.msg.IdempotencyKey)
+	assert.NotZero(t, receiver.msg.ReqId)
+	assert.NotZero(t, receiver.msg.Deadline)
+}
+
+func TestAsyncCallWithOpt_PropagatesDeadline(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	sender := &execDispatcher{pid: testPID("Sender")}
+	receiver := &captureReplyDispatcher{
+		pid:     testPID("Receiver"),
+		monitor: env.monitor,
+		reply:   "ok",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	mb := env.factory.New(sender, receiver, nil)
+	_, err := mb.AsyncCallWithOpt(ctx,
+		dto.WithMethod("RpcAsync"),
+		dto.WithCallbacks(func(ctx context.Context, data interface{}, err error, params ...interface{}) {}),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, receiver.msg)
+	assert.NotZero(t, receiver.msg.Deadline)
+}
+
+func TestAsyncCallWithNilContext_PropagatesDefaultDeadline(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	sender := &execDispatcher{pid: testPID("Sender")}
+	receiver := &captureReplyDispatcher{
+		pid:     testPID("Receiver"),
+		monitor: env.monitor,
+		reply:   "ok",
+	}
+
+	mb := env.factory.New(sender, receiver, nil)
+	_, err := mb.AsyncCall(nil, "RpcAsync", nil, nil, func(ctx context.Context, data interface{}, err error, params ...interface{}) {})
+	require.NoError(t, err)
+	require.NotNil(t, receiver.msg)
+	assert.NotZero(t, receiver.msg.Deadline)
+}
+
 // ---------------------------------------------------------------------------
 // P3-1: Send tests
 // ---------------------------------------------------------------------------
@@ -336,12 +503,58 @@ func TestSend_Normal(t *testing.T) {
 	}
 
 	mb := env.factory.New(sender, receiver, nil)
-	err := mb.SendWithOpt(context.Background(), dto.WithMethod("FireEvent"), dto.WithIn("data"))
+	err := mb.SendWithOpt(context.Background(), dto.WithMethod("FireEvent"), dto.WithIn(nil))
 	require.NoError(t, err)
 
 	m := env.factory.GetRpcMetrics()
 	assert.Equal(t, int64(1), m.SendTotal)
 	assert.Equal(t, int64(0), m.SendErrors)
+}
+
+func TestSend_ProtoHasSenderPidWithoutReqID(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	senderPid := testPID("Sender")
+	sender := &mockDispatcher{pid: senderPid}
+	receiverPid := testPID("Receiver")
+	receiver := &protoCaptureDispatcher{pid: receiverPid}
+
+	mb := env.factory.New(sender, receiver, nil)
+	err := mb.SendWithOpt(context.Background(), dto.WithMethod("FireEvent"), dto.WithIn(nil))
+	require.NoError(t, err)
+	require.NoError(t, receiver.err)
+	require.NotNil(t, receiver.msg)
+	assert.Zero(t, receiver.msg.ReqId)
+	require.NotNil(t, receiver.msg.SenderPid)
+	assert.Equal(t, senderPid.GetServiceUid(), receiver.msg.SenderPid.GetServiceUid())
+	assert.Equal(t, receiverPid.GetServiceUid(), receiver.msg.ReceiverPid.GetServiceUid())
+	assert.False(t, receiver.msg.NeedResp)
+}
+
+func TestSendWithOpt_PropagatesIdempotencyKey(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	sender := &mockDispatcher{pid: testPID("Sender")}
+	receiver := &protoCaptureDispatcher{pid: testPID("Receiver")}
+
+	mb := env.factory.New(sender, receiver, nil)
+	err := mb.SendWithOpt(context.Background(),
+		dto.WithMethod("FireEvent"),
+		dto.WithIdempotencyKey("notify:user:1"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, receiver.msg)
+	assert.Equal(t, "notify:user:1", receiver.msg.IdempotencyKey)
+	assert.Zero(t, receiver.msg.ReqId)
+}
+
+func TestSend_SenderNil(t *testing.T) {
+	env := newTestEnv(t, time.Second)
+
+	mb := env.factory.New(nil, &mockDispatcher{pid: testPID("R")}, nil)
+	err := mb.SendWithOpt(context.Background(), dto.WithMethod("Fire"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sender is nil")
 }
 
 func TestSend_ReceiverNil(t *testing.T) {

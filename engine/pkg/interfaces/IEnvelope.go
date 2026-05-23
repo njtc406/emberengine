@@ -48,6 +48,7 @@ type IEnvelopeMeta interface {
 	SetDispatcher(client IRpcDispatcher)
 	SetReqId(reqId uint64)
 	SetDeadline(deadline int64)
+	SetIdempotencyKey(key string)
 	SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{})
 
 	// Get
@@ -57,6 +58,7 @@ type IEnvelopeMeta interface {
 	GetDispatcher() IRpcDispatcher
 	GetReqId() uint64
 	GetDeadline() int64
+	GetIdempotencyKey() string
 	GetCallback() (dto.CompletionFuncs, []interface{})
 }
 

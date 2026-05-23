@@ -92,6 +92,10 @@ func NewTTLDeDuplicator(ttl, cleanTTL time.Duration) *TTLDeDuplicator {
 // 如果没见过，会立即插入一条标记
 func (d *TTLDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	key := reqIdKey(serviceUid, id)
+	return d.SeenKey(key)
+}
+
+func (d *TTLDeDuplicator) SeenKey(key string) bool {
 	_, found := d.reqCache.Get(key)
 	if found {
 		return true
@@ -124,6 +128,17 @@ func (d *LRUDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	defer d.mu.Unlock()
 
 	key := reqIdKey(serviceUid, id)
+	return d.seenKeyLocked(key)
+}
+
+func (d *LRUDeDuplicator) SeenKey(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.seenKeyLocked(key)
+}
+
+func (d *LRUDeDuplicator) seenKeyLocked(key string) bool {
 	if _, err := d.cache.Get(key); err == nil {
 		return true
 	}

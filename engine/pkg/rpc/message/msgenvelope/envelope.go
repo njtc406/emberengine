@@ -196,6 +196,7 @@ func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 	msg.ReqId = e.meta.GetReqId()
 	msg.NeedResp = e.data.NeedResponse()
 	msg.Deadline = e.meta.GetDeadline()
+	msg.IdempotencyKey = e.meta.GetIdempotencyKey()
 
 	var anyData *anypb.Any
 

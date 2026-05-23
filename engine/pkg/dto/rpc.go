@@ -94,6 +94,7 @@ type BusOption struct {
 	CallMode       int32 // 调用模式: CallModeAny(任意返回即返回) 或 CallModeAll(所有返回后才返回)
 	Priority       def.Priority
 	DispatchKey    string // 分发key,用于将job分发给不同的worker
+	IdempotencyKey string // 业务幂等键
 }
 
 func (o *BusOption) Reset() {
@@ -105,6 +106,7 @@ func (o *BusOption) Reset() {
 	o.CallbackParams = nil
 	o.NotRecycle = false
 	o.CallMode = CallModeAny // 默认为任意模式
+	o.IdempotencyKey = ""
 }
 
 func NewBusOption(builders ...BusOptionBuilder) *BusOption {
@@ -163,4 +165,8 @@ func WithPriority(priority def.Priority) BusOptionBuilder {
 
 func WithDispatchKey(key string) BusOptionBuilder {
 	return func(opt *BusOption) { opt.DispatchKey = key }
+}
+
+func WithIdempotencyKey(key string) BusOptionBuilder {
+	return func(opt *BusOption) { opt.IdempotencyKey = key }
 }

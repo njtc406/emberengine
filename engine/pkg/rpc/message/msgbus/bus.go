@@ -230,7 +230,7 @@ func assignCallResponse(out interface{}, resp interface{}, isMulti bool, multiOu
 	return assignSingleOutCached(singleOutElem, singleOutType, resp)
 }
 
-func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, out interface{}) (callErr error) {
+func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, out interface{}) (callErr error) {
 	if mb.err != nil {
 		// 这里可能是从MultiBus中产生的
 		return mb.err
@@ -277,15 +277,13 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	}
 
 	var timeout time.Duration
-	var deadline time.Time
-	var ok bool
 	rpcTimeoutValue := mb.getRpcTimeout()
+	deadline := timelib.Now().Add(rpcTimeoutValue)
+	ok := false
 	if ctx != nil {
 		deadline, ok = ctx.Deadline()
 		if ok {
 			timeout = time.Until(deadline)
-		} else {
-			deadline = timelib.Now().Add(rpcTimeoutValue)
 		}
 	}
 
@@ -314,6 +312,7 @@ func (mb *MessageBus) call(ctx context.Context, data inf.IEnvelopeData, priority
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	meta.SetDeadline(deadline.UnixNano())
+	meta.SetIdempotencyKey(idempotencyKey)
 	envelope.SetMeta(meta)
 
 	// getLogger().WithContext(newCtx).Debugf("call envelope: %+v", envelope)
@@ -365,7 +364,7 @@ func (mb *MessageBus) Call(ctx context.Context, method string, in, out interface
 	data.SetRequest(in)
 	data.SetResponse(nil)
 	data.SetNeedResponse(true)
-	return mb.call(ctx, data, def.PriorityNormal, "", out)
+	return mb.call(ctx, data, def.PriorityNormal, "", "", out)
 }
 
 func (mb *MessageBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
@@ -384,11 +383,11 @@ func (mb *MessageBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuil
 	data.SetResponse(nil)
 	data.SetNeedResponse(true)
 
-	return mb.call(option.Ctx, data, option.Priority, option.DispatchKey, option.Out)
+	return mb.call(option.Ctx, data, option.Priority, option.DispatchKey, option.IdempotencyKey, option.Out)
 }
 
 // callInternal 供MultiBus使用的内部方法（会自动释放）
-func (mb *MessageBus) callInternal(ctx context.Context, method string, in, out interface{}, priority def.Priority, dispatchKey string, recycle bool) error {
+func (mb *MessageBus) callInternal(ctx context.Context, method string, in, out interface{}, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool) error {
 	if recycle {
 		defer ReleaseMessageBus(mb)
 	}
@@ -400,10 +399,10 @@ func (mb *MessageBus) callInternal(ctx context.Context, method string, in, out i
 	data.SetRequest(in)
 	data.SetResponse(nil)
 	data.SetNeedResponse(true)
-	return mb.call(ctx, data, priority, dispatchKey, out)
+	return mb.call(ctx, data, priority, dispatchKey, idempotencyKey, out)
 }
 
-func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (_ uint64,
+func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (_ uint64,
 	asyncErr error) {
 	// RPC metrics: async call total & errors
 	if mb.factory != nil {
@@ -417,12 +416,12 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 
 	var timeout time.Duration
 	rpcTimeoutValue := mb.getRpcTimeout()
+	deadline := timelib.Now().Add(rpcTimeoutValue)
+	ok := false
 	if ctx != nil {
-		deadline, ok := ctx.Deadline()
+		deadline, ok = ctx.Deadline()
 		if ok {
 			timeout = time.Until(deadline)
-		} else {
-			deadline = timelib.Now().Add(rpcTimeoutValue)
 		}
 	}
 
@@ -455,6 +454,8 @@ func (mb *MessageBus) asyncCall(ctx context.Context, data inf.IEnvelopeData, pri
 	meta.SetSenderPid(mb.sender.GetPid())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
+	meta.SetDeadline(deadline.UnixNano())
+	meta.SetIdempotencyKey(idempotencyKey)
 
 	envelope.SetMeta(meta)
 
@@ -494,7 +495,7 @@ func (mb *MessageBus) AsyncCall(ctx context.Context, method string, in interface
 	data.SetResponse(nil)
 	data.SetNeedResponse(true)
 
-	reqId, err := mb.asyncCall(ctx, data, def.PriorityNormal, "", param, callbacks...)
+	reqId, err := mb.asyncCall(ctx, data, def.PriorityNormal, "", "", param, callbacks...)
 	if err != nil {
 		return dto.EmptyCancelRpc, err
 	}
@@ -527,7 +528,7 @@ func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptio
 	data.SetResponse(nil)
 	data.SetNeedResponse(true)
 
-	reqId, err := mb.asyncCall(option.Ctx, data, option.Priority, option.DispatchKey, option.CallbackParams, option.Callbacks...)
+	reqId, err := mb.asyncCall(option.Ctx, data, option.Priority, option.DispatchKey, option.IdempotencyKey, option.CallbackParams, option.Callbacks...)
 	if err != nil {
 		return dto.EmptyCancelRpc, err
 	}
@@ -539,7 +540,7 @@ func (mb *MessageBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptio
 }
 
 // asyncCallInternal 供MultiBus使用的内部方法，recycle参数控制是否释放Bus
-func (mb *MessageBus) asyncCallInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, recycle bool, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error) {
+func (mb *MessageBus) asyncCallInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool, param *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error) {
 	if recycle {
 		defer ReleaseMessageBus(mb)
 	}
@@ -553,13 +554,16 @@ func (mb *MessageBus) asyncCallInternal(ctx context.Context, data inf.IEnvelopeD
 		return 0, def.ErrCallbacksIsEmpty
 	}
 
-	return mb.asyncCall(ctx, data, priority, dispatchKey, param, callbacks...)
+	return mb.asyncCall(ctx, data, priority, dispatchKey, idempotencyKey, param, callbacks...)
 }
 
 // send 内部发送方法
-func (mb *MessageBus) send(ctx context.Context, method string, priority def.Priority, dispatchKey string, in interface{}) (sendErr error) {
+func (mb *MessageBus) send(ctx context.Context, method string, priority def.Priority, dispatchKey string, idempotencyKey string, in interface{}) (sendErr error) {
 	if mb.err != nil {
 		return mb.err
+	}
+	if mb.sender == nil {
+		return fmt.Errorf("sender is nil")
 	}
 	if mb.receiver == nil {
 		return fmt.Errorf("receiver is nil")
@@ -599,15 +603,11 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 	envelope.SetDispatchKey(dispatchKey)
 
 	meta := msgenvelope.NewMeta()
-	mt, err := mb.requireRpcMonitor(ctx)
-	if err != nil {
-		envelope.Release()
-		return err
-	}
-	meta.SetReqId(mt.GenSeq()) // 必须创建reqId，否则会导致重复调用
+	meta.SetSenderPid(mb.sender.GetPid())
 	meta.SetReceiverPid(mb.receiver.GetPid())
 	meta.SetDispatcher(mb.sender)
 	meta.SetDeadline(deadline.UnixNano())
+	meta.SetIdempotencyKey(idempotencyKey)
 	envelope.SetMeta(meta)
 
 	// 调用后 envelope 所有权转移，由对端 mailbox 或 sender 负责 Release
@@ -621,7 +621,7 @@ func (mb *MessageBus) send(ctx context.Context, method string, priority def.Prio
 // Send 无返回调用
 func (mb *MessageBus) Send(ctx context.Context, method string, in interface{}) error {
 	defer ReleaseMessageBus(mb)
-	return mb.send(ctx, method, def.PriorityNormal, "", in)
+	return mb.send(ctx, method, def.PriorityNormal, "", "", in)
 }
 
 func (mb *MessageBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
@@ -630,11 +630,11 @@ func (mb *MessageBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuil
 	if !option.NotRecycle {
 		defer ReleaseMessageBus(mb)
 	}
-	return mb.send(option.Ctx, option.Method, option.Priority, option.DispatchKey, option.In)
+	return mb.send(option.Ctx, option.Method, option.Priority, option.DispatchKey, option.IdempotencyKey, option.In)
 }
 
 // sendInternal 供MultiBus使用的内部方法，recycle参数控制是否释放Bus
-func (mb *MessageBus) sendInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, recycle bool) error {
+func (mb *MessageBus) sendInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool) error {
 	if recycle {
 		defer ReleaseMessageBus(mb)
 	}
@@ -645,7 +645,7 @@ func (mb *MessageBus) sendInternal(ctx context.Context, data inf.IEnvelopeData, 
 		return fmt.Errorf("receiver is nil")
 	}
 
-	return mb.send(ctx, data.GetMethod(), priority, dispatchKey, data.GetRequest())
+	return mb.send(ctx, data.GetMethod(), priority, dispatchKey, idempotencyKey, data.GetRequest())
 }
 
 func (mb *MessageBus) Release() {
@@ -654,9 +654,9 @@ func (mb *MessageBus) Release() {
 
 type internalBus interface {
 	inf.IBus
-	callInternal(ctx context.Context, method string, in, out interface{}, priority def.Priority, dispatchKey string, recycle bool) error
-	asyncCallInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, recycle bool, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error)
-	sendInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, recycle bool) error
+	callInternal(ctx context.Context, method string, in, out interface{}, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool) error
+	asyncCallInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool, params *dto.AsyncCallParams, callbacks ...dto.CompletionFunc) (uint64, error)
+	sendInternal(ctx context.Context, data inf.IEnvelopeData, priority def.Priority, dispatchKey string, idempotencyKey string, recycle bool) error
 }
 
 // MultiBus 多节点调用
@@ -710,7 +710,7 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 	// 注意：call方法只在成功时才会修改out，失败时不会修改，因此这里是安全的
 	var errs []error
 	for _, bus := range m {
-		if err := bus.callInternal(ctx, method, in, out, def.PriorityNormal, "", true); err != nil {
+		if err := bus.callInternal(ctx, method, in, out, def.PriorityNormal, "", "", true); err != nil {
 			errs = append(errs, err)
 		} else {
 			return nil // 找到一个成功的就返回
@@ -734,7 +734,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 		var errs []error
 		successCount := 0
 		for _, bus := range m {
-			if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, option.Priority, option.DispatchKey, !option.NotRecycle); err != nil {
+			if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, option.Priority, option.DispatchKey, option.IdempotencyKey, !option.NotRecycle); err != nil {
 				errs = append(errs, err)
 			} else {
 				successCount++
@@ -751,7 +751,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 		// 注意：call方法只在成功时才会修改out，失败时不会修改，因此这里是安全的
 		var errs []error
 		for _, bus := range m {
-			if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, option.Priority, option.DispatchKey, !option.NotRecycle); err != nil {
+			if err := bus.callInternal(option.Ctx, option.Method, option.In, option.Out, option.Priority, option.DispatchKey, option.IdempotencyKey, !option.NotRecycle); err != nil {
 				errs = append(errs, err)
 			} else {
 				return nil // 找到一个成功的就返回
@@ -775,7 +775,7 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 	var errs []error
 	var reqIds []uint64
 	for _, bus := range m {
-		if reqId, err := bus.asyncCallInternal(ctx, data, def.PriorityNormal, "", true, param, callbacks...); err != nil {
+		if reqId, err := bus.asyncCallInternal(ctx, data, def.PriorityNormal, "", "", true, param, callbacks...); err != nil {
 			errs = append(errs, err)
 		} else {
 			reqIds = append(reqIds, reqId)
@@ -811,7 +811,7 @@ func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBui
 	var errs []error
 	var reqIds []uint64
 	for _, bus := range m {
-		if reqId, err := bus.asyncCallInternal(option.Ctx, data, option.Priority, option.DispatchKey, !option.NotRecycle, option.CallbackParams, option.Callbacks...); err != nil {
+		if reqId, err := bus.asyncCallInternal(option.Ctx, data, option.Priority, option.DispatchKey, option.IdempotencyKey, !option.NotRecycle, option.CallbackParams, option.Callbacks...); err != nil {
 			errs = append(errs, err)
 		} else {
 			reqIds = append(reqIds, reqId)
@@ -845,7 +845,7 @@ func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error
 	envelopeData.SetResponse(nil)
 	envelopeData.SetNeedResponse(false)
 	for _, bus := range m {
-		if err := bus.sendInternal(ctx, envelopeData, def.PriorityNormal, "", true); err != nil {
+		if err := bus.sendInternal(ctx, envelopeData, def.PriorityNormal, "", "", true); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -868,7 +868,7 @@ func (m MultiBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 	envelopeData.SetResponse(nil)
 	envelopeData.SetNeedResponse(false)
 	for _, bus := range m {
-		if err := bus.sendInternal(option.Ctx, envelopeData, option.Priority, option.DispatchKey, !option.NotRecycle); err != nil {
+		if err := bus.sendInternal(option.Ctx, envelopeData, option.Priority, option.DispatchKey, option.IdempotencyKey, !option.NotRecycle); err != nil {
 			errs = append(errs, err)
 		}
 	}
