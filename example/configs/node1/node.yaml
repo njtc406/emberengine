@@ -64,6 +64,7 @@ ServiceConf:
     - ClassName: Service2
       ServiceName: Service2
       RpcType: "nats"
+      Visibility: "node"
       Type: test
       Partition: 1
       ServiceId: 1
@@ -128,6 +129,7 @@ ServiceConf:
     - ClassName: Service1
       ServiceName: Service1
       ServiceId: 1
+      Visibility: "node"
       # 服务类型
       Type: test
       # 服务分区ID(用于服务路由隔离)

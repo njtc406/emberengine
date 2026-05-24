@@ -66,6 +66,7 @@ ServiceConf:
       Type: test
       Partition: 10001
       RpcType: "nats"
+      Visibility: "cluster"
       # 停机策略配置
       StopPolicy:
         GraceTimeout: 0s

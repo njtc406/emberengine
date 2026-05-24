@@ -45,6 +45,7 @@ ServiceConf:
       ServiceName: Service3
       Type: test
       Partition: 1
+      Visibility: "node"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"
@@ -66,6 +67,7 @@ ServiceConf:
       ServiceName: Service2
       Type: test
       Partition: 1
+      Visibility: "node"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"
@@ -89,6 +91,7 @@ ServiceConf:
       Type: test
       # 服务分区ID(用于服务路由隔离)
       Partition: 1
+      Visibility: "node"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"

@@ -68,6 +68,7 @@ ServiceConf:
     - ClassName: Service3
       ServiceName: Service3
       RpcType: "nats"
+      Visibility: "cluster"
       Type: test
       Partition: 1
       ServiceId: 1
