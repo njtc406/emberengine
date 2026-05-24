@@ -39,11 +39,51 @@ const (
 	SvcStatusUnknown  int32 = iota // 未运行
 	SvcStatusInit                  // 初始化
 	SvcStatusStarting              // 启动中
-	SvcStatusRunning               // 运行中
+	SvcStatusRunning               // 运行中（已进入集群缓存，但不可被普通路由选中）
+	SvcStatusReady                 // 已就绪（可被普通路由选中）
 	SvcStatusClosing               // 关闭中
 	SvcStatusClosed                // 关闭
 	SvcStatusRetire                // 退休
 )
+
+type ServiceVisibility int32
+
+const (
+	ServiceVisibilityAuto    ServiceVisibility = -1
+	ServiceVisibilityCluster ServiceVisibility = 1
+	ServiceVisibilityNode    ServiceVisibility = 2
+	ServiceVisibilityPrivate ServiceVisibility = 3
+)
+
+func ParseServiceVisibility(value string) (ServiceVisibility, bool) {
+	switch value {
+	case "", "private", "Private", "PRIVATE":
+		return ServiceVisibilityPrivate, true
+	case "auto", "Auto", "AUTO":
+		return ServiceVisibilityAuto, true
+	case "cluster", "Cluster", "CLUSTER":
+		return ServiceVisibilityCluster, true
+	case "node", "Node", "NODE":
+		return ServiceVisibilityNode, true
+	default:
+		return ServiceVisibilityPrivate, false
+	}
+}
+
+func (v ServiceVisibility) String() string {
+	switch v {
+	case ServiceVisibilityAuto:
+		return "auto"
+	case ServiceVisibilityCluster:
+		return "cluster"
+	case ServiceVisibilityNode:
+		return "node"
+	case ServiceVisibilityPrivate:
+		return "private"
+	default:
+		return "unknown"
+	}
+}
 
 const (
 	DefaultModuleIdSeed = 1_000_000 // 默认的moduleId开始序号

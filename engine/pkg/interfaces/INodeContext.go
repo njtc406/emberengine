@@ -48,6 +48,7 @@ type INodeTimingWheel interface {
 type INodeEndpointManager interface {
 	CreatePid(partition int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID
 	AddService(svc IService)
+	ServiceReady(svc IService)
 	RemoveService(svc IService)
 	ToPrivateService(svc IService)
 }

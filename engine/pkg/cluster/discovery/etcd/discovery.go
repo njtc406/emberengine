@@ -199,8 +199,8 @@ func (e *EtcdDiscovery) onRegister(ctx context.Context, svc inf.IService) error 
 		return fmt.Errorf("etcd discovery not started")
 	}
 	pid := svc.GetPid()
-	if _, ok := e.watchers.Load(pid.GetServiceUid()); ok {
-		return fmt.Errorf("service[%s] watcher already exists", svc.GetName())
+	if v, ok := e.watchers.Load(pid.GetServiceUid()); ok {
+		return v.registerService()
 	}
 	w := newWatcher(svc, e)
 	e.watchers.Store(pid.GetServiceUid(), w)

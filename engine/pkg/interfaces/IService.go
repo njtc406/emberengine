@@ -8,6 +8,7 @@ package interfaces
 import (
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
@@ -38,6 +39,8 @@ type IServiceHandler interface {
 	GetServiceCfg() interface{}
 	GetMailbox() IMailbox
 	IsPrivate() bool
+	IsRemoteCallable() bool
+	GetVisibility() def.ServiceVisibility
 	IsPrimarySecondaryMode() bool
 	GetRpcHandler() IRpcHandler
 	GetNodeContext() INodeContext
@@ -48,6 +51,7 @@ type IIdentifiable interface {
 	IServer
 	INamed
 	IsClosed() bool // 服务是否已经关闭
+	GetStatus() int32
 }
 
 type IServiceProfiler interface {

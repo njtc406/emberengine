@@ -12,8 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
@@ -23,7 +25,6 @@ import (
 	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	"go.etcd.io/etcd/api/v3/mvccpb"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type EndpointManager struct {
@@ -114,20 +115,19 @@ func (em *EndpointManager) updateServiceInfo(ctx context.Context, kv *mvccpb.Key
 		return fmt.Errorf("key is nil")
 	}
 
-	var pid actor.PID
-	if err := protojson.Unmarshal(kv.Value, &pid); err != nil {
+	pid, status, visibility, err := disc.UnmarshalServiceEntry(kv.Value)
+	if err != nil {
 		em.WithContext(ctx).Errorf("unmarshal pid error: %v", err)
 		return fmt.Errorf("unmarshal pid error: %v", err)
 	}
-	pid.SyncMasterFlag() // proto 反序列化后同步 MasterFlag 原子字段
 
 	if pid.GetNodeUid() == em.nodeUid {
 		em.WithContext(ctx).Debugf("endpointmgr ignore local service -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
 		// 本地服务,忽略
-		return fmt.Errorf("ignore local service")
+		return nil
 	}
 	em.WithContext(ctx).Infof("endpointmgr add remote service: %s, key: %s", pid.String(), string(kv.Key))
-	em.repository.Add(string(kv.Key), client.NewDispatcher(em.senderMgr, &pid, nil))
+	em.repository.AddWithMeta(string(kv.Key), client.NewDispatcher(em.senderMgr, pid, nil), status, visibility)
 	return nil
 }
 
@@ -155,10 +155,10 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	}()
 
 	// 先加入本地集群
-	em.repository.Add("", client.NewDispatcher(em.senderMgr, pid, svc.GetMailbox()))
+	em.repository.AddWithMeta("", client.NewDispatcher(em.senderMgr, pid, svc.GetMailbox()), svc.GetStatus(), svc.GetVisibility())
 
-	// 私有服务不发布,没有开启集群也不发布
-	if svc.IsPrivate() || !em.isClusterMode {
+	// 只有显式集群可见服务才发布,没有开启集群也不发布
+	if svc.GetVisibility() != def.ServiceVisibilityCluster || !em.isClusterMode {
 		return
 	}
 
@@ -171,11 +171,24 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	return
 }
 
+func (em *EndpointManager) ServiceReady(svc inf.IService) {
+	pid := svc.GetPid()
+	if pid == nil {
+		em.Errorf("service ready error: pid is nil")
+		return
+	}
+	em.repository.UpdateStatus(pid.GetServiceUid(), svc.GetStatus())
+	if svc.GetVisibility() != def.ServiceVisibilityCluster || !em.isClusterMode {
+		return
+	}
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceReg, svc)
+}
+
 func (em *EndpointManager) RemoveService(svc inf.IService) {
 	pid := svc.GetPid()
 	em.repository.Remove(pid.GetServiceUid())
 
-	if svc.IsPrivate() {
+	if svc.GetVisibility() != def.ServiceVisibilityCluster || !em.isClusterMode || em.eventProcessor == nil {
 		return
 	}
 
@@ -186,6 +199,13 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 }
 
 func (em *EndpointManager) ToPrivateService(svc inf.IService) {
+	if svc == nil || svc.GetPid() == nil {
+		return
+	}
+	em.repository.UpdateVisibility(svc.GetPid().GetServiceUid(), def.ServiceVisibilityPrivate)
+	if !em.isClusterMode || em.eventProcessor == nil {
+		return
+	}
 	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())
 }
 
@@ -194,6 +214,16 @@ func (em *EndpointManager) GetRepository() *repository.Repository {
 }
 
 func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
+	if em.repository == nil || pid == nil {
+		return nil
+	}
+	if pid.GetNodeUid() == em.nodeUid {
+		cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
+		if cli == nil || !em.repository.IsRemoteCallable(pid.GetServiceUid()) {
+			return nil
+		}
+		return cli
+	}
 	cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
 	if cli == nil {
 		// 有一种情况下可能是空的,就是调用者是私有服务,那么此时就单独创建一个,放入临时仓库

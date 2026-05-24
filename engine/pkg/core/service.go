@@ -55,6 +55,7 @@ type Service struct {
 	cfg                    interface{}  // 服务配置
 	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 	isPrimarySecondaryMode bool         // 是否是主从模式
+	visibility             def.ServiceVisibility
 
 	mailbox *mailbox.Mailbox // 邮箱
 
@@ -135,6 +136,7 @@ func (s *Service) Start() error {
 	// 主从服务需要在onstart中处理
 	if s.src != nil {
 		if err := s.src.OnStart(); err != nil {
+			s.rollbackStart(nil, false)
 			return err
 		}
 	}
@@ -143,28 +145,53 @@ func (s *Service) Start() error {
 	if !isCluster && s.deps.nodeCtx != nil {
 		isCluster = s.deps.nodeCtx.IsClusterMode()
 	}
-	if !s.isPrimarySecondaryMode || s.IsPrivate() || !isCluster {
+	if !s.isPrimarySecondaryMode || s.GetVisibility() != def.ServiceVisibilityCluster || !isCluster {
 		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
 		s.pid.SetMaster(true)
 	}
 
+	s.setStatus(def.SvcStatusRunning)
+
 	// 所有服务都注册到服务列表
 	em := s.GetEndpointManager()
 	if em == nil {
+		s.rollbackStart(nil, false)
 		return fmt.Errorf("service[%s] endpoint manager is nil", s.GetName())
 	}
 	em.AddService(s)
 	//s.Infof("register service[%s] pid: %s", s.GetName(), s.pid.String())
 
-	s.setStatus(def.SvcStatusRunning) // 到这里服务已经准备启动完成,可以正常处理请求了
-
 	if s.src != nil {
 		if err := s.src.OnStarted(); err != nil { // 这个阶段服务已经加入集群,需要集群操作的可以放这里完成
+			s.rollbackStart(em, true)
 			return err
 		}
 	}
 
+	s.setStatus(def.SvcStatusReady)
+	em.ServiceReady(s)
+
 	return nil
+}
+
+func (s *Service) rollbackStart(em inf.INodeEndpointManager, registered bool) {
+	if registered && em != nil {
+		em.RemoveService(s)
+	}
+	if s.mailbox != nil {
+		s.mailbox.Stop()
+	}
+	if s.ITimerScheduler != nil {
+		s.ITimerScheduler.Stop()
+	}
+	if s.IConcurrent != nil {
+		s.IConcurrent.Close()
+	}
+	s.releaseWithEndpoint(false)
+	if s.enableLogging && s.logger != nil {
+		releaseServiceLogger(s.logger)
+	}
+	atomic.StoreInt32(&s.status, def.SvcStatusClosed)
 }
 
 func (s *Service) startListenCallback() {
@@ -234,6 +261,10 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) release() {
+	s.releaseWithEndpoint(true)
+}
+
+func (s *Service) releaseWithEndpoint(removeEndpoint bool) {
 	defer func() {
 		if err := recover(); err != nil {
 			s.Errorf("release error: %v", err)
@@ -246,8 +277,10 @@ func (s *Service) release() {
 	s.closeProfiler()
 
 	// 服务关闭,从服务移除(等待其他释放完再移除,防止在释放的时候有同步调用,例如db等,会导致调用失败)
-	if em := s.GetEndpointManager(); em != nil {
-		em.RemoveService(s)
+	if removeEndpoint {
+		if em := s.GetEndpointManager(); em != nil {
+			em.RemoveService(s)
+		}
 	}
 }
 
@@ -399,7 +432,11 @@ func (s *Service) OnStarted() error {
 func (s *Service) OnRelease() {}
 
 func (s *Service) IsClosed() bool {
-	return atomic.LoadInt32(&s.status) > def.SvcStatusRunning
+	return atomic.LoadInt32(&s.status) >= def.SvcStatusClosing
+}
+
+func (s *Service) GetStatus() int32 {
+	return atomic.LoadInt32(&s.status)
 }
 
 func (s *Service) GetServiceCfg() interface{} {
@@ -427,7 +464,8 @@ func (s *Service) setStatus(status int32) {
 }
 
 func (s *Service) isRunning() bool {
-	return atomic.LoadInt32(&s.status) == def.SvcStatusRunning
+	status := atomic.LoadInt32(&s.status)
+	return status == def.SvcStatusRunning || status == def.SvcStatusReady
 }
 
 func (s *Service) GetServiceName() string {
@@ -447,7 +485,19 @@ func (s *Service) OnJobDiscarded(job inf.IMailboxJob, reason error) {
 }
 
 func (s *Service) IsPrivate() bool {
-	return s.methodMgr.IsPrivate()
+	return s.GetVisibility() == def.ServiceVisibilityPrivate
+}
+
+func (s *Service) IsRemoteCallable() bool {
+	visibility := s.GetVisibility()
+	return visibility == def.ServiceVisibilityCluster || visibility == def.ServiceVisibilityNode
+}
+
+func (s *Service) GetVisibility() def.ServiceVisibility {
+	if s.visibility == 0 {
+		return def.ServiceVisibilityPrivate
+	}
+	return s.visibility
 }
 
 func (s *Service) GetLogger() log.ILoggerX {

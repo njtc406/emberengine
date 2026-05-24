@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -32,7 +33,7 @@ type ILeaseManager interface {
 type IServiceRegistry interface {
 	ServiceKey(pid *actor.PID) string
 	MasterKey(group string) string
-	RegisterService(ctx context.Context, pid *actor.PID, leaseRef LeaseRef) error
+	RegisterService(ctx context.Context, pid *actor.PID, status int32, visibility def.ServiceVisibility, leaseRef LeaseRef) error
 }
 
 // IMasterElection 主选举接口

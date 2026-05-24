@@ -7,6 +7,7 @@ import (
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -20,18 +21,18 @@ func (r *etcdServiceRegistry) MasterKey(group string) string {
 	return path.Join(r.d.conf.MasterPath, group)
 }
 
-func (r *etcdServiceRegistry) RegisterService(ctx context.Context, pid *actor.PID, leaseRef disc.LeaseRef) error {
+func (r *etcdServiceRegistry) RegisterService(ctx context.Context, pid *actor.PID, status int32, visibility def.ServiceVisibility, leaseRef disc.LeaseRef) error {
 	id, ok := leaseRef.(clientv3.LeaseID)
 	if !ok || !isEtcdClientConnected(r.d.client) {
 		return fmt.Errorf("etcd client not connected or invalid leaseRef")
 	}
-	// 走 MarshalPIDJSON 唯一出口：内部 Clone + PrepareForMarshal，
+	// 走 MarshalServiceEntry 唯一出口：内部通过 MarshalPIDJSON Clone + PrepareForMarshal，
 	// 与并发 RPC 序列化、运行时 SetMaster 完全不竞争 IsMaster 字段。
-	pidData, err := actor.MarshalPIDJSON(pid)
+	entryData, err := disc.MarshalServiceEntry(pid, status, visibility)
 	if err != nil {
-		return fmt.Errorf("marshal pid failed: %w", err)
+		return err
 	}
-	_, err = r.d.client.Put(ctx, r.ServiceKey(pid), string(pidData), clientv3.WithLease(id))
+	_, err = r.d.client.Put(ctx, r.ServiceKey(pid), string(entryData), clientv3.WithLease(id))
 	return err
 }
 

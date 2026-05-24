@@ -379,7 +379,7 @@ func (w *watcher) registerService() error {
 	if pid == nil {
 		return fmt.Errorf("service PID is nil")
 	}
-	return w.d.registry.RegisterService(w.ctx, pid, w.leaseRef)
+	return w.d.registry.RegisterService(w.ctx, pid, w.svc.GetStatus(), w.svc.GetVisibility(), w.leaseRef)
 }
 
 func (w *watcher) startWatchMaster(masterKey string) {

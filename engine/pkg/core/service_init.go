@@ -49,6 +49,7 @@ func (s *Service) rollbackInitResources() {
 	s.methodMgr = nil
 	s.IRpcHandler = nil
 	s.pid = nil
+	s.visibility = def.ServiceVisibilityPrivate
 	if s.enableLogging && s.logger != nil {
 		releaseServiceLogger(s.logger)
 	}
@@ -94,6 +95,23 @@ func fixConf(serviceInitConf *config.ServiceInitConf) *config.ServiceInitConf {
 		serviceInitConf.EventChanSize = def.DefaultEventChanSize
 	}
 	return serviceInitConf
+}
+
+func (s *Service) initVisibility(conf *config.ServiceInitConf) error {
+	visibility, ok := def.ParseServiceVisibility(conf.Visibility)
+	if !ok {
+		return fmt.Errorf("service[%s] invalid visibility[%s]", s.GetName(), conf.Visibility)
+	}
+	if visibility == def.ServiceVisibilityAuto {
+		if s.methodMgr != nil && !s.methodMgr.IsPrivate() {
+			s.visibility = def.ServiceVisibilityCluster
+			return nil
+		}
+		s.visibility = def.ServiceVisibilityPrivate
+		return nil
+	}
+	s.visibility = visibility
+	return nil
 }
 
 // Init 编排方法：依次调用子初始化方法完成 Service 运行时装配。
@@ -173,6 +191,9 @@ func (s *Service) Init(svc interface{}, serviceInitConf *config.ServiceInitConf,
 	}
 	// 10. RPC
 	if err = s.initRPC(); err != nil {
+		return
+	}
+	if err = s.initVisibility(serviceInitConf); err != nil {
 		return
 	}
 

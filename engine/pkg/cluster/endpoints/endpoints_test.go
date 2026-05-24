@@ -5,13 +5,30 @@ import (
 	"testing"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/remote"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+type endpointTestService struct {
+	inf.IService
+	pid        *actor.PID
+	mailbox    inf.IMailbox
+	visibility def.ServiceVisibility
+	status     int32
+}
+
+func (s *endpointTestService) GetPid() *actor.PID                   { return s.pid }
+func (s *endpointTestService) GetMailbox() inf.IMailbox             { return s.mailbox }
+func (s *endpointTestService) GetVisibility() def.ServiceVisibility { return s.visibility }
+func (s *endpointTestService) GetStatus() int32                     { return s.status }
+func (s *endpointTestService) GetName() string                      { return s.pid.GetName() }
 
 func newTestEndpointManager(t *testing.T) *EndpointManager {
 	t.Helper()
@@ -47,8 +64,8 @@ func TestUpdateServiceInfoIgnoreLocalNode(t *testing.T) {
 	kv := &mvccpb.KeyValue{Key: []byte("k-local"), Value: b}
 
 	err = em.updateServiceInfo(context.Background(), kv)
-	if err == nil {
-		t.Fatalf("expected ignore local service error")
+	if err != nil {
+		t.Fatalf("ignore local service should not be treated as error: %v", err)
 	}
 	if got := em.repository.SelectByServiceUid(pid.GetServiceUid()); got != nil {
 		t.Fatalf("local service should not be added as remote")
@@ -80,6 +97,36 @@ func TestUpdateAndRemoveRemoteServiceInfo(t *testing.T) {
 	}
 }
 
+func TestUpdateRemoteServiceInfoWithServiceEntryStatus(t *testing.T) {
+	em := newTestEndpointManager(t)
+	pid := actor.NewPID("", "remote-node", 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	b, err := disc.MarshalServiceEntry(pid, def.SvcStatusRunning, def.ServiceVisibilityCluster)
+	if err != nil {
+		t.Fatalf("marshal service entry failed: %v", err)
+	}
+	key := "k-remote-entry"
+	if err := em.updateServiceInfo(context.Background(), &mvccpb.KeyValue{Key: []byte(key), Value: b}); err != nil {
+		t.Fatalf("update remote service failed: %v", err)
+	}
+	if got := em.repository.SelectByServiceUid(pid.GetServiceUid()); got == nil {
+		t.Fatalf("expected remote service to be added")
+	}
+	if em.repository.IsSelectable(pid.GetServiceUid()) {
+		t.Fatalf("running service entry should not be selectable")
+	}
+
+	b, err = disc.MarshalServiceEntry(pid, def.SvcStatusReady, def.ServiceVisibilityCluster)
+	if err != nil {
+		t.Fatalf("marshal ready service entry failed: %v", err)
+	}
+	if err := em.updateServiceInfo(context.Background(), &mvccpb.KeyValue{Key: []byte(key), Value: b}); err != nil {
+		t.Fatalf("update ready service failed: %v", err)
+	}
+	if !em.repository.IsSelectable(pid.GetServiceUid()) {
+		t.Fatalf("ready service entry should be selectable")
+	}
+}
+
 func TestGetDispatcherCreatesTmpWhenMissing(t *testing.T) {
 	em := newTestEndpointManager(t)
 	pid := actor.NewPID("", "remote-node", 1, "svc-tmp", "logic", "TmpSvc", 1, def.RpcTypeLocal)
@@ -90,6 +137,57 @@ func TestGetDispatcherCreatesTmpWhenMissing(t *testing.T) {
 	}
 	if got := em.repository.SelectByServiceUid(pid.GetServiceUid()); got == nil {
 		t.Fatalf("expected temp dispatcher stored in repository tmp map")
+	}
+}
+
+func TestToPrivateServiceUpdatesLocalVisibility(t *testing.T) {
+	em := newTestEndpointManager(t)
+	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	svc := &endpointTestService{
+		pid:        pid,
+		visibility: def.ServiceVisibilityCluster,
+		status:     def.SvcStatusReady,
+	}
+
+	em.repository.AddWithMeta("", client.NewDispatcher(nil, pid, nil), def.SvcStatusReady, def.ServiceVisibilityCluster)
+	if !em.repository.IsRemoteCallable(pid.GetServiceUid()) {
+		t.Fatalf("expected cluster service to be remote callable")
+	}
+
+	em.ToPrivateService(svc)
+	if em.repository.IsRemoteCallable(pid.GetServiceUid()) {
+		t.Fatalf("expected ToPrivateService to make service not remote callable")
+	}
+}
+
+func TestRemoveServiceWithoutEventProcessorDoesNotPanic(t *testing.T) {
+	em := newTestEndpointManager(t)
+	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	svc := &endpointTestService{
+		pid:        pid,
+		visibility: def.ServiceVisibilityCluster,
+		status:     def.SvcStatusReady,
+	}
+	em.repository.AddWithMeta("", client.NewDispatcher(nil, pid, nil), def.SvcStatusReady, def.ServiceVisibilityCluster)
+
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatalf("RemoveService should not panic without eventProcessor: %v", err)
+		}
+	}()
+	em.RemoveService(svc)
+}
+
+func TestGetDispatcherLocalMissingOrPrivateReturnsNil(t *testing.T) {
+	em := newTestEndpointManager(t)
+	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	if got := em.GetDispatcher(pid); got != nil {
+		t.Fatalf("expected missing local service dispatcher to be nil")
+	}
+
+	em.repository.AddWithMeta("", client.NewDispatcher(nil, pid, nil), def.SvcStatusReady, def.ServiceVisibilityPrivate)
+	if got := em.GetDispatcher(pid); got != nil {
+		t.Fatalf("expected private local service dispatcher to be nil")
 	}
 }
 

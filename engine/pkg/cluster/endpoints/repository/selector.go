@@ -10,7 +10,6 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
 
 func (r *Repository) newMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *msgbus.MessageBus {
@@ -23,7 +22,8 @@ func (r *Repository) newMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcD
 func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 	v, ok := r.mapPID.Load(serviceUid)
 	if ok {
-		sender := v.(inf.IRpcDispatcher)
+		info := v.(*serviceInfo)
+		sender := info.getDispatcher()
 		if sender != nil && !actor.IsRetired(sender.GetPid()) {
 			return sender
 		}
@@ -31,10 +31,9 @@ func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 		tmpV, ok := r.tmpMapPid.Load(serviceUid)
 		if ok {
 			tmp := tmpV.(*tmpInfo)
-			tmp.latest = timelib.Now()
-			sender := tmp.dispatcher
+			tmp.touch()
+			sender := tmp.getDispatcher()
 			if sender != nil {
-				r.tmpMapPid.Store(serviceUid, tmp)
 				return sender
 			}
 		}
@@ -110,10 +109,14 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var returnList msgbus.MultiBus
 	r.mapPID.Range(func(key, value any) bool {
-		c := value.(inf.IRpcDispatcher)
+		info := value.(*serviceInfo)
+		c := info.getDispatcher()
+		if c == nil {
+			return true
+		}
 		pid := c.GetPid()
-		if pid.IsMasterNode() && rule(pid) {
-			returnList = append(returnList, r.newMessageBus(s, value.(inf.IRpcDispatcher), nil))
+		if r.isSelectableInfo(info) && pid.IsMasterNode() && rule(pid) {
+			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 		return true
 	})
@@ -123,8 +126,8 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 
 func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
 	s := r.SelectByServiceUid(sender.GetServiceUid())
-	r.mapNodeLock.RLock(sender.GetServiceUid())
-	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
+	r.mapNodeLock.RLock(indexLockKey)
+	defer r.mapNodeLock.RUnlock(indexLockKey)
 
 	param := &inf.SelectParam{}
 	for _, build := range options {
@@ -139,7 +142,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 	var returnList msgbus.MultiBus
 	for serviceUid, _ := range nameUidMap {
 		c := r.SelectByServiceUid(serviceUid)
-		if c == nil {
+		if c == nil || !r.IsSelectable(serviceUid) {
 			continue
 		}
 		cPid := c.GetPid()
@@ -156,8 +159,8 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, ser
 	if serviceType == "" && serviceName == "" {
 		return msgbus.MultiBus{}
 	}
-	r.mapNodeLock.RLock(sender.GetServiceUid())
-	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
+	r.mapNodeLock.RLock(indexLockKey)
+	defer r.mapNodeLock.RUnlock(indexLockKey)
 
 	var list msgbus.MultiBus
 	var serviceList []string
@@ -198,7 +201,7 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, ser
 
 	for _, serviceUid := range serviceList {
 		c := r.SelectByServiceUid(serviceUid)
-		if c == nil {
+		if c == nil || !r.IsSelectable(serviceUid) {
 			continue
 		}
 		cPid := c.GetPid()
@@ -214,8 +217,10 @@ func (r *Repository) SelectByFilterAndChoice(sender *actor.PID, filter func(pid 
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var tmpList []*actor.PID
 	r.mapPID.Range(func(key, value any) bool {
-		if filter(value.(inf.IRpcDispatcher).GetPid()) {
-			tmpList = append(tmpList, value.(inf.IRpcDispatcher).GetPid())
+		info := value.(*serviceInfo)
+		dispatcher := info.getDispatcher()
+		if dispatcher != nil && r.isSelectableInfo(info) && filter(dispatcher.GetPid()) {
+			tmpList = append(tmpList, dispatcher.GetPid())
 		}
 		return true
 	})
