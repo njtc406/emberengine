@@ -145,8 +145,9 @@ func (s *Service) Start() error {
 	if !isCluster && s.deps.nodeCtx != nil {
 		isCluster = s.deps.nodeCtx.IsClusterMode()
 	}
-	if !s.isPrimarySecondaryMode || s.GetVisibility() != def.ServiceVisibilityCluster || !isCluster {
-		// 没有开启主从模式或者私有服务或者没有开启集群,那么直接是主服务
+	if !s.isPrimarySecondaryMode || !isCluster {
+		// 没有开启主从模式或者没有开启集群/主从通道,那么直接是主服务。
+		// visibility 只控制服务发现发布，不参与主从选举语义。
 		s.pid.SetMaster(true)
 	}
 
@@ -485,7 +486,7 @@ func (s *Service) OnJobDiscarded(job inf.IMailboxJob, reason error) {
 }
 
 func (s *Service) IsPrivate() bool {
-	return s.GetVisibility() == def.ServiceVisibilityPrivate
+	return s.GetVisibility() != def.ServiceVisibilityCluster
 }
 
 func (s *Service) IsRemoteCallable() bool {
@@ -495,7 +496,7 @@ func (s *Service) IsRemoteCallable() bool {
 
 func (s *Service) GetVisibility() def.ServiceVisibility {
 	if s.visibility == 0 {
-		return def.ServiceVisibilityPrivate
+		return def.ServiceVisibilityNode
 	}
 	return s.visibility
 }

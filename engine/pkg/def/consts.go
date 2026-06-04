@@ -49,37 +49,27 @@ const (
 type ServiceVisibility int32
 
 const (
-	ServiceVisibilityAuto    ServiceVisibility = -1
 	ServiceVisibilityCluster ServiceVisibility = 1
 	ServiceVisibilityNode    ServiceVisibility = 2
-	ServiceVisibilityPrivate ServiceVisibility = 3
 )
 
 func ParseServiceVisibility(value string) (ServiceVisibility, bool) {
 	switch value {
-	case "", "private", "Private", "PRIVATE":
-		return ServiceVisibilityPrivate, true
-	case "auto", "Auto", "AUTO":
-		return ServiceVisibilityAuto, true
+	case "", "node", "Node", "NODE":
+		return ServiceVisibilityNode, true
 	case "cluster", "Cluster", "CLUSTER":
 		return ServiceVisibilityCluster, true
-	case "node", "Node", "NODE":
-		return ServiceVisibilityNode, true
 	default:
-		return ServiceVisibilityPrivate, false
+		return ServiceVisibilityNode, false
 	}
 }
 
 func (v ServiceVisibility) String() string {
 	switch v {
-	case ServiceVisibilityAuto:
-		return "auto"
 	case ServiceVisibilityCluster:
 		return "cluster"
 	case ServiceVisibilityNode:
 		return "node"
-	case ServiceVisibilityPrivate:
-		return "private"
 	default:
 		return "unknown"
 	}

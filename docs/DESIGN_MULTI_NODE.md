@@ -69,7 +69,7 @@
 | `INodeContext` 组件访问器覆盖扩展（`*Any`） | ✅ 已完成 | 增加 `GetClusterAny/GetEventBusAny/GetRouterAny...` 等访问器，避免包循环依赖并减少对 `Node` 具体类型依赖 |
 | `INodeContext` 调用侧替换（`core/service`/`daemon`/`rpc selector`） | ✅ 已完成 | 已从 `Get*Any()` 过渡到窄接口访问，临时 `nodeLike/provider` 断言链路已收敛 |
 | panic/fatal 全面改造为 error 透传（按 §7.4） | ✅ 已完成 | 运行时代码已收敛至白名单语义（`deque` 边界断言、`worker_pool` 参数断言、`log` 显式语义入口） |
-| `INodeContext` 覆盖面与全组件注入一致性 | ✅ 已完成 | 运行时关键链路已统一走窄接口；`core/module` 私有化回收路径已通过 `INodeEndpointManager.ToPrivateService` 收口 |
+| `INodeContext` 覆盖面与全组件注入一致性 | ✅ 已完成 | 运行时关键链路已统一走窄接口；`core/module` 节点内可见回收路径已通过 `INodeEndpointManager.ToNodeService` 收口 |
 
 ### 0.2 本次更新记录
 
@@ -120,7 +120,7 @@
 - 2026-03-04：完成 logger 接口化第三阶段：`interfaces/IService.GetLogger()` 改为 `log.ILoggerX`，并同步完成 `core/module`、`core/service`、`cluster/discovery/etcd/watcher`、`sysModule/gate/protocol_adapter/session/*` 的签名与调用侧迁移。当前 `go build ./...` 已通过。
 - 2026-03-04：完成 logger 接口化第四阶段：`utils/network/ws*`、`utils/httpx/gin`、`sysModule/mysqlmodule`、`sysModule/redismodule` 已统一为 `log.ILoggerX`；`mysqlmodule` 保留对 `*log.Logger` 的窄兼容断言仅用于 gorm writer 输出桥接。当前 `go build ./...` 已通过。
 - 2026-03-04：完成 `IService` 契约补齐：`GetNodeContext()/GetRouter()` 升级为接口正式方法，`core/rpc/selector` 与 `gate/protocol_adapter/ws` 去除临时 provider 断言链路。当前 `go build ./...` 已通过。
-- 2026-03-04：完成 `INodeContext` 覆盖面收口：`INodeEndpointManager` 补齐 `ToPrivateService(svc)`，`core/module` 释放链路不再依赖具体 `EndpointManager` 类型或临时能力断言，统一走 `IService -> INodeContext -> INodeEndpointManager`。当前 `go build ./...` 已通过。
+- 2026-03-04：完成 `INodeContext` 覆盖面收口：`INodeEndpointManager` 补齐 `ToNodeService(svc)`，`core/module` 释放链路不再依赖具体 `EndpointManager` 类型或临时能力断言，统一走 `IService -> INodeContext -> INodeEndpointManager`。当前 `go build ./...` 已通过。
 
 ## 一、现状分析
 
@@ -2384,7 +2384,7 @@ type INodeEndpointManager interface {
     CreatePid(partition int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID
     AddService(svc IService)
     RemoveService(svc IService)
-    ToPrivateService(svc IService)
+    ToNodeService(svc IService)
 }
 
 // INodeEventBus 事件总线窄接口

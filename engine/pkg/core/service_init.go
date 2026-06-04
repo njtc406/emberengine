@@ -49,7 +49,7 @@ func (s *Service) rollbackInitResources() {
 	s.methodMgr = nil
 	s.IRpcHandler = nil
 	s.pid = nil
-	s.visibility = def.ServiceVisibilityPrivate
+	s.visibility = def.ServiceVisibilityNode
 	if s.enableLogging && s.logger != nil {
 		releaseServiceLogger(s.logger)
 	}
@@ -101,14 +101,6 @@ func (s *Service) initVisibility(conf *config.ServiceInitConf) error {
 	visibility, ok := def.ParseServiceVisibility(conf.Visibility)
 	if !ok {
 		return fmt.Errorf("service[%s] invalid visibility[%s]", s.GetName(), conf.Visibility)
-	}
-	if visibility == def.ServiceVisibilityAuto {
-		if s.methodMgr != nil && !s.methodMgr.IsPrivate() {
-			s.visibility = def.ServiceVisibilityCluster
-			return nil
-		}
-		s.visibility = def.ServiceVisibilityPrivate
-		return nil
 	}
 	s.visibility = visibility
 	return nil

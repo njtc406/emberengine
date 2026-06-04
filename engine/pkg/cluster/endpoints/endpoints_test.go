@@ -18,10 +18,11 @@ import (
 
 type endpointTestService struct {
 	inf.IService
-	pid        *actor.PID
-	mailbox    inf.IMailbox
-	visibility def.ServiceVisibility
-	status     int32
+	pid                    *actor.PID
+	mailbox                inf.IMailbox
+	visibility             def.ServiceVisibility
+	status                 int32
+	isPrimarySecondaryMode bool
 }
 
 func (s *endpointTestService) GetPid() *actor.PID                   { return s.pid }
@@ -29,6 +30,7 @@ func (s *endpointTestService) GetMailbox() inf.IMailbox             { return s.m
 func (s *endpointTestService) GetVisibility() def.ServiceVisibility { return s.visibility }
 func (s *endpointTestService) GetStatus() int32                     { return s.status }
 func (s *endpointTestService) GetName() string                      { return s.pid.GetName() }
+func (s *endpointTestService) IsPrimarySecondaryMode() bool         { return s.isPrimarySecondaryMode }
 
 func newTestEndpointManager(t *testing.T) *EndpointManager {
 	t.Helper()
@@ -140,7 +142,7 @@ func TestGetDispatcherCreatesTmpWhenMissing(t *testing.T) {
 	}
 }
 
-func TestToPrivateServiceUpdatesLocalVisibility(t *testing.T) {
+func TestToNodeServiceUpdatesLocalVisibility(t *testing.T) {
 	em := newTestEndpointManager(t)
 	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
 	svc := &endpointTestService{
@@ -154,9 +156,33 @@ func TestToPrivateServiceUpdatesLocalVisibility(t *testing.T) {
 		t.Fatalf("expected cluster service to be remote callable")
 	}
 
-	em.ToPrivateService(svc)
-	if em.repository.IsRemoteCallable(pid.GetServiceUid()) {
-		t.Fatalf("expected ToPrivateService to make service not remote callable")
+	em.ToNodeService(svc)
+	if !em.repository.IsRemoteCallable(pid.GetServiceUid()) {
+		t.Fatalf("expected node service to remain remote callable by pid")
+	}
+}
+
+func TestToNodeServicePrimarySecondaryKeepsElectionWatcher(t *testing.T) {
+	em := newTestEndpointManager(t)
+	em.isClusterMode = true
+	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	svc := &endpointTestService{
+		pid:                    pid,
+		visibility:             def.ServiceVisibilityCluster,
+		status:                 def.SvcStatusReady,
+		isPrimarySecondaryMode: true,
+	}
+	em.repository.AddWithMeta("", client.NewDispatcher(nil, pid, nil), def.SvcStatusReady, def.ServiceVisibilityCluster)
+
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatalf("ToNodeService should not trigger unregister path for primary-secondary service: %v", err)
+		}
+	}()
+	em.ToNodeService(svc)
+
+	if !em.repository.IsRemoteCallable(pid.GetServiceUid()) {
+		t.Fatalf("expected primary-secondary node service to remain remote callable by pid")
 	}
 }
 
@@ -178,16 +204,16 @@ func TestRemoveServiceWithoutEventProcessorDoesNotPanic(t *testing.T) {
 	em.RemoveService(svc)
 }
 
-func TestGetDispatcherLocalMissingOrPrivateReturnsNil(t *testing.T) {
+func TestGetDispatcherLocalMissingReturnsNilAndNodeReturnsDispatcher(t *testing.T) {
 	em := newTestEndpointManager(t)
 	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
 	if got := em.GetDispatcher(pid); got != nil {
 		t.Fatalf("expected missing local service dispatcher to be nil")
 	}
 
-	em.repository.AddWithMeta("", client.NewDispatcher(nil, pid, nil), def.SvcStatusReady, def.ServiceVisibilityPrivate)
-	if got := em.GetDispatcher(pid); got != nil {
-		t.Fatalf("expected private local service dispatcher to be nil")
+	em.repository.AddWithMeta("", client.NewDispatcher(nil, pid, nil), def.SvcStatusReady, def.ServiceVisibilityNode)
+	if got := em.GetDispatcher(pid); got == nil {
+		t.Fatalf("expected node local service dispatcher")
 	}
 }
 

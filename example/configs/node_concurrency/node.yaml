@@ -68,6 +68,7 @@ ServiceConf:
       # 服务分区ID(用于服务路由隔离)
       Partition: 10001
       RpcType: "nats"
+      Visibility: "cluster"
       # 停机策略配置
       StopPolicy:
         GraceTimeout: 0s

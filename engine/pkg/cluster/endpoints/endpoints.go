@@ -157,8 +157,9 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	// 先加入本地集群
 	em.repository.AddWithMeta("", client.NewDispatcher(em.senderMgr, pid, svc.GetMailbox()), svc.GetStatus(), svc.GetVisibility())
 
-	// 只有显式集群可见服务才发布,没有开启集群也不发布
-	if svc.GetVisibility() != def.ServiceVisibilityCluster || !em.isClusterMode {
+	// cluster visibility 控制服务发现发布；主从模式即使是 node visibility，
+	// 也需要启动主从 watcher 参与独立的主从选举通道。
+	if (svc.GetVisibility() != def.ServiceVisibilityCluster && !svc.IsPrimarySecondaryMode()) || !em.isClusterMode {
 		return
 	}
 
@@ -167,8 +168,6 @@ func (em *EndpointManager) AddService(svc inf.IService) {
 	// 这是同步执行的
 	// 将服务信息发布到集群
 	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceReg, svc)
-
-	return
 }
 
 func (em *EndpointManager) ServiceReady(svc inf.IService) {
@@ -178,7 +177,7 @@ func (em *EndpointManager) ServiceReady(svc inf.IService) {
 		return
 	}
 	em.repository.UpdateStatus(pid.GetServiceUid(), svc.GetStatus())
-	if svc.GetVisibility() != def.ServiceVisibilityCluster || !em.isClusterMode {
+	if (svc.GetVisibility() != def.ServiceVisibilityCluster && !svc.IsPrimarySecondaryMode()) || !em.isClusterMode {
 		return
 	}
 	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceReg, svc)
@@ -188,7 +187,7 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 	pid := svc.GetPid()
 	em.repository.Remove(pid.GetServiceUid())
 
-	if svc.GetVisibility() != def.ServiceVisibilityCluster || !em.isClusterMode || em.eventProcessor == nil {
+	if (svc.GetVisibility() != def.ServiceVisibilityCluster && !svc.IsPrimarySecondaryMode()) || !em.isClusterMode || em.eventProcessor == nil {
 		return
 	}
 
@@ -198,11 +197,16 @@ func (em *EndpointManager) RemoveService(svc inf.IService) {
 	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())
 }
 
-func (em *EndpointManager) ToPrivateService(svc inf.IService) {
+func (em *EndpointManager) ToNodeService(svc inf.IService) {
 	if svc == nil || svc.GetPid() == nil {
 		return
 	}
-	em.repository.UpdateVisibility(svc.GetPid().GetServiceUid(), def.ServiceVisibilityPrivate)
+	em.repository.UpdateVisibility(svc.GetPid().GetServiceUid(), def.ServiceVisibilityNode)
+	if svc.IsPrimarySecondaryMode() {
+		// 主从 watcher 与服务发现可见性解耦。动态降级为 node 时，不能停止
+		// 主从 watcher，否则会释放 master lease 并退出主从小集群。
+		return
+	}
 	if !em.isClusterMode || em.eventProcessor == nil {
 		return
 	}

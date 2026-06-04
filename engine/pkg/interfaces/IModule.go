@@ -54,6 +54,5 @@ type IModuleServiceEvent interface {
 type IMethodMgr interface {
 	AddMethodFunc(name string, fn def.MethodCallFunc)
 	GetMethodFunc(name string) (def.MethodCallFunc, bool)
-	RemoveMethods(names []string) bool
-	IsPrivate() bool
+	RemoveMethods(names []string)
 }

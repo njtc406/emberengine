@@ -123,7 +123,7 @@ type ServiceInitConf struct {
 	// StopPolicy 停机策略配置：优雅窗口与停机时队列处理方式。
 	StopPolicy             *StopPolicyConf `binding:""`
 	RpcType                string          `binding:""` // 远程调用方式(默认使用nats)
-	Visibility             string          `binding:""` // 服务可见性(private/node/cluster/auto, 默认private)
+	Visibility             string          `binding:""` // 服务可见性(node/cluster, 默认node)
 	Mailbox                *MailboxConf    `binding:""` // 邮箱配置
 	LogConf                *ServiceLogConf `binding:""` // 日志配置
 	IsPrimarySecondaryMode bool            `binding:""` // 是否是主从模式(默认不开启)

@@ -21,8 +21,7 @@ func (m *testReadOnlyMethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc
 func (m *testReadOnlyMethodMgr) GetMethodFunc(name string) (def.MethodCallFunc, bool) {
 	return nil, false
 }
-func (m *testReadOnlyMethodMgr) RemoveMethods(names []string) bool { return true }
-func (m *testReadOnlyMethodMgr) IsPrivate() bool                   { return false }
+func (m *testReadOnlyMethodMgr) RemoveMethods(names []string) {}
 func (m *testReadOnlyMethodMgr) MarkReadOnly(name string) {
 	if m.readOnly == nil {
 		m.readOnly = make(map[string]bool)

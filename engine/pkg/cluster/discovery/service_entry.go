@@ -32,7 +32,7 @@ func UnmarshalServiceEntry(data []byte) (*actor.PID, int32, def.ServiceVisibilit
 	if err := json.Unmarshal(data, &entry); err == nil && len(entry.PID) > 0 {
 		var pid actor.PID
 		if err := protojson.Unmarshal(entry.PID, &pid); err != nil {
-			return nil, 0, def.ServiceVisibilityPrivate, fmt.Errorf("unmarshal service entry pid failed: %w", err)
+			return nil, 0, def.ServiceVisibilityNode, fmt.Errorf("unmarshal service entry pid failed: %w", err)
 		}
 		pid.SyncMasterFlag()
 		status := entry.Status
@@ -50,7 +50,7 @@ func UnmarshalServiceEntry(data []byte) (*actor.PID, int32, def.ServiceVisibilit
 
 	var pid actor.PID
 	if err := protojson.Unmarshal(data, &pid); err != nil {
-		return nil, 0, def.ServiceVisibilityPrivate, fmt.Errorf("unmarshal pid failed: %w", err)
+		return nil, 0, def.ServiceVisibilityNode, fmt.Errorf("unmarshal pid failed: %w", err)
 	}
 	pid.SyncMasterFlag()
 	return &pid, def.SvcStatusReady, def.ServiceVisibilityCluster, nil

@@ -471,18 +471,16 @@ func (s *UserService) ReadOnlyMethods() []string {
 2. 服务实现 `IReadOnlyDeclarer` → 对应方法名标记 ReadOnly ✅
 3. 均未匹配 → 默认 Write（保证向后兼容）
 
-**冲突检测与警告**：两种方式对同一方法给出矛盾判断时，输出 WARN 日志帮助开发者定位问题：
+**声明有效性校验**：`IReadOnlyDeclarer` 只能覆盖已注册的 RPC/API 方法。
+如果 `ReadOnlyMethods()` 返回的方法名不存在，或该方法没有通过 `suitableMethods()` 注册到方法表，
+框架输出 WARN 并跳过该声明，避免把拼写错误或非 RPC/API 方法误标为只读。
 
 | 场景 | 前缀判断 | IReadOnlyDeclarer | 最终结果 | 日志 |
 |---|---|---|---|---|
 | `RpcRoGetUser` + `ReadOnlyMethods` 中也列出 | ReadOnly | ReadOnly | ReadOnly | 无（一致） |
 | `RpcRoGetUser` + `ReadOnlyMethods` 中未列出 | ReadOnly | 无声明 | ReadOnly | 无（前缀优先） |
-| `RpcUpdateUser` + `ReadOnlyMethods` 中列出 | Write | ReadOnly | **ReadOnly** | **⚠️ WARN** |
-| `RpcGetUser` + `ReadOnlyMethods` 中列出 | Write | ReadOnly | ReadOnly | 无（正常用法） |
-
-第三种场景输出警告是因为：`RpcUpdateUser` 的前缀暗示它是写方法（无 `Ro` 后缀），
-但 `IReadOnlyDeclarer` 却将其声明为 ReadOnly——这很可能是误标。框架仍尊重 `IReadOnlyDeclarer` 的声明
-（因为它是显式意图），但通过 WARN 日志提醒开发者复查。
+| `RpcGetUser` + `ReadOnlyMethods` 中列出 | Write | ReadOnly | ReadOnly | 无（显式覆盖） |
+| `RpcMissing` + `ReadOnlyMethods` 中列出 | 未注册 | ReadOnly | 忽略声明 | WARN |
 
 实现方式（在 `suitableMethods` 扫描完成后、`IReadOnlyDeclarer` 标记阶段）：
 
@@ -491,13 +489,10 @@ func (s *UserService) ReadOnlyMethods() []string {
 if declarer, ok := module.(inf.IReadOnlyDeclarer); ok {
     if roMgr, ok := h.mgr.(inf.IReadOnlyMethodMgr); ok {
         for _, name := range declarer.ReadOnlyMethods() {
-            // 冲突检测：如果方法前缀不是 ReadOnly（如 Rpc/Api 前缀，无 Ro），
-            // 但 IReadOnlyDeclarer 却将其声明为 ReadOnly，输出警告
-            if !hasRpcReadOnlyPrefix(name) && !hasApiReadOnlyPrefix(name) &&
-                (hasRpcPrefix(name) || hasApiPrefix(name)) {
-                h.logger.Warnf("Method '%s' has a write-style prefix (Rpc/Api) but is declared "+
-                    "as ReadOnly by IReadOnlyDeclarer. Please verify this is intentional. "+
-                    "If this method modifies state, it should NOT be in ReadOnlyMethods().", name)
+            if _, registered := h.mgr.GetMethodFunc(name); !registered {
+                h.Warnf("Method '%s' is declared as ReadOnly by IReadOnlyDeclarer "+
+                    "but is not registered as an RPC/API method", name)
+                continue
             }
             roMgr.MarkReadOnly(name)
         }
@@ -505,12 +500,68 @@ if declarer, ok := module.(inf.IReadOnlyDeclarer); ok {
 }
 ```
 
+#### 方式 B 的后续收敛方向（建议）
+
+在服务可见性已经从方法前缀语义中解耦后，`IReadOnlyDeclarer` 保留的主要价值，
+不再是“兼容旧的服务级推断”，而是**为 RW 调度提前提取方法级元信息**。因此建议把这块职责收敛为：
+
+1. **启动期一次性提取方法级元信息**
+    - 识别该方法是否属于可注册 RPC/API 方法；
+    - 预编译调用闭包；
+    - 确定 `readOnly` 标记；
+    - 将结果写入静态方法表，供运行期无锁读取。
+
+2. **`IReadOnlyDeclarer` 仅作为显式覆盖源**
+    - 适用于已有大量 `RpcXxx` / `ApiXxx` 方法不便改名；
+    - 只负责声明“这些已注册方法应按只读调度”；
+    - 不再承担任何服务级可见性或集群发布语义。
+
+3. **校验重点从“前缀风格冲突”切换到“声明有效性”**
+    - 比起“`RpcXxx` 看起来像写方法但被声明为只读”的风格告警，
+      更值得优先检查的是：
+    - `ReadOnlyMethods()` 返回的方法是否真实存在；
+    - 该方法是否已被注册为 RPC/API 方法；
+    - 若声明的方法不存在或未注册，输出 `WARN`，必要时可升级为启动失败。
+
+4. **移除 `rpcCnt` / `MethodMgr.IsPrivate()` 的历史语义**
+    - 在服务可见性完全由 `visibility=node|cluster` 决定后，
+      `MethodMgr.IsPrivate()` 这个命名容易继续误导读者，把“方法名前缀统计”和“服务私有性”混为一谈；
+    - 当前框架不再需要根据 RPC 方法数量推断服务可见性，`rpcCnt` 没有保留价值；
+    - 已删除 `rpcCnt` 字段、计数维护逻辑和 `MethodMgr.IsPrivate()` 方法，避免保留历史包袱。
+
+推荐的目标形态如下：
+
+```go
+type MethodMeta struct {
+     Name      string
+     Kind      MethodKind // Rpc / Api
+     ReadOnly  bool
+     Invoker   def.MethodCallFunc
+}
+```
+
+其中：
+
+- `Handler.registerMethod()` 负责反射扫描并一次性构建 `MethodMeta`；
+- `MethodMgr` 只保存静态方法表，不再重复分散做前缀语义判断；
+- `Service.setJobRWMode()` 只依赖 `ReadOnly` 元信息，不关心方法名推断细节。
+
+按这个方向收敛后，`handler.go` 中扫描逻辑的意义会更清晰：
+它不是在“猜服务怎么暴露”，而是在**启动阶段编译接口元数据，给运行期调度和派发使用**。
+
+建议的最小落地顺序：
+
+1. 保留 `IReadOnlyDeclarer`，但把当前“写前缀 + 只读声明”的风格告警降级为次要检查；
+2. 新增“声明的方法不存在 / 未注册”校验；
+3. 抽取统一的 `MethodMeta` 或等价分析结果，减少 `HasRpcPrefix/HasApiPrefix/...` 在多个位置重复判断；
+4. 已直接移除 `rpcCnt` / `MethodMgr.IsPrivate()`，并同步清理 `IMethodMgr` 中的遗留接口。
+
 ### 5.2 MethodMgr 扩展
 
-> **ℹ️ 静态表说明**：`MethodMgr` 的方法注册表（`methodMap`）是**启动阶段构建的静态表**。
+> **ℹ️ 静态表说明**：`MethodMgr` 的方法注册表（`methods`）是**启动阶段构建的静态表**。
 > 框架不支持运行期动态增删 module，所有方法在服务启动时一次性注册完成。
-> 运行期 `GetMethodFunc()`/`IsReadOnly()` 仅做并发读，`methodMap` 不会被写入。
-> 因此 `MethodMgr` **无需加锁保护**，读路径零开销。
+> 运行期 `GetMethodFunc()`/`IsReadOnly()` 仅做并发读，`methods` 不会被写入。
+> 因此读路径无需加锁；启动期写入和 shutdown 阶段 `RemoveMethods()` 由 `mu` 保护。
 
 新增 `methodEntry` 结构体，将方法的可执行函数和 ReadOnly 标记合并存储，
 运行时单次 map 查找即可获取全部信息：
@@ -523,25 +574,30 @@ type methodEntry struct {
 }
 
 type MethodMgr struct {
-    rpcCnt    int
-    methodMap map[string]*methodEntry  // 启动阶段写入，运行期只读（无需加锁）
-    logger    log.ILoggerX
-    enableRW  *atomic.Bool             // 引用 WorkerPool.enableRW，用于 RemoveMethods 防御性校验（可为 nil）
+    mu          sync.RWMutex
+    methods     map[string]*methodEntry
+    index       inf.INodeMethodIndex
+    isRWEnabled func() bool // 查询 RW 模式是否启用，封装 atomic 细节
+    logger      log.ILoggerX
 }
 
-func NewMethodMgr(logger log.ILoggerX, enableRW ...*atomic.Bool) inf.IMethodMgr {
-    m := &MethodMgr{
-        methodMap: make(map[string]*methodEntry),
+func NewMethodMgr(logger log.ILoggerX, index inf.INodeMethodIndex) inf.IMethodMgr {
+    if index == nil {
+        index = NewMethodIndex()
+    }
+    return &MethodMgr{
+        methods: make(map[string]*methodEntry),
+        index:     index,
         logger:    logger,
     }
-    if len(enableRW) > 0 {
-        m.enableRW = enableRW[0]
-    }
-    return m
+}
+
+func (m *MethodMgr) SetRWStateProvider(provider func() bool) {
+    m.isRWEnabled = provider
 }
 
 // AddMethodFunc 注册方法（保持原签名兼容 IMethodMgr，默认 readOnly=false）
-// 仅在启动阶段调用，运行期 methodMap 为只读
+// 仅在启动阶段调用，运行期 methods 为只读
 func (m *MethodMgr) AddMethodFunc(name string, fn def.MethodCallFunc) {
     m.AddMethod(name, fn, false)
 }
@@ -552,20 +608,15 @@ func (m *MethodMgr) AddMethod(name string, fn def.MethodCallFunc, readOnly bool)
         m.logger.Debugf("method[%s] register failed", name)
         return
     }
-    // 注意：先匹配 ReadOnly 前缀（RpcRo/ApiRo），再匹配普通前缀（Rpc/Api），
-    // 使用 || 短路求值确保只计数一次。"RpcRoGetUser" 同时匹配 hasRpcReadOnlyPrefix
-    // 和 hasRpcPrefix（前者是后者的超集），但 || 短路保证 rpcCnt 只 +1。
-    if hasRpcReadOnlyPrefix(name) || hasApiReadOnlyPrefix(name) ||
-        hasRpcPrefix(name) || hasApiPrefix(name) {
-        m.rpcCnt++
-    }
-    m.methodMap[name] = &methodEntry{fn: fn, readOnly: readOnly}
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    m.methods[name] = &methodEntry{fn: fn, readOnly: readOnly}
 }
 
 // GetMethodFunc 获取方法函数（兼容原有 IMethodMgr 接口）
-// 运行期并发读安全（methodMap 为启动后只读的静态表）
+// 运行期并发读安全（methods 为启动后只读的静态表）
 func (m *MethodMgr) GetMethodFunc(name string) (def.MethodCallFunc, bool) {
-    entry, ok := m.methodMap[name]
+    entry, ok := m.methods[name]
     if !ok {
         return nil, false
     }
@@ -573,48 +624,43 @@ func (m *MethodMgr) GetMethodFunc(name string) (def.MethodCallFunc, bool) {
 }
 
 // IsReadOnly 查询方法是否为只读（无锁，单次 map 查找）
-// 运行期并发读安全（methodMap 为启动后只读的静态表）
+// 运行期并发读安全（methods 为启动后只读的静态表）
 func (m *MethodMgr) IsReadOnly(name string) bool {
-    entry, ok := m.methodMap[name]
+    entry, ok := m.methods[name]
     return ok && entry.readOnly
 }
 
 // MarkReadOnly 标记指定方法为只读（启动阶段使用，供 IReadOnlyDeclarer 批量设置）
 func (m *MethodMgr) MarkReadOnly(name string) {
-    if entry, ok := m.methodMap[name]; ok {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    if entry, ok := m.methods[name]; ok {
         entry.readOnly = true
     }
 }
 
 // RemoveMethods 移除方法（仅在服务关闭阶段、模块卸载时调用）
 // 设计约束：此方法仅在 Service 已关闭对外接口后的 shutdown 阶段调用（模块 Release 流程），
-// 此时所有 Worker 已停止，不存在并发读 methodMap 的 goroutine。
+// 此时所有 Worker 已停止，不存在并发读 methods 的 goroutine。
 // 防御性校验：RW 模式下额外检查调用时机，防止误在运行期调用导致 map 并发读写 fatal。
-func (m *MethodMgr) RemoveMethods(names []string) bool {
-    // 【防御性校验】RW 模式下，运行期 GetMethodFunc()/IsReadOnly() 并发读 methodMap，
+func (m *MethodMgr) RemoveMethods(names []string) {
+    // 【防御性校验】RW 模式下，运行期 GetMethodFunc()/IsReadOnly() 并发读 methods，
     // 如果此时 RemoveMethods 写入 map → map concurrent read/write fatal。
     // 正常调用时机是 shutdown 阶段（Worker 已停止），此校验防止误用。
-    if m.enableRW != nil && m.enableRW.Load() {
+    if m.isRWEnabled != nil && m.isRWEnabled() {
         m.logger.Errorf("RemoveMethods called while RW mode is active! "+
             "This may cause data race. Caller should ensure all Workers are stopped. names=%v", names)
-        // 不 panic（避免影响 shutdown 流程），但输出高优先级告警
+        return
     }
 
-    oldRpcCnt := m.rpcCnt
+    m.mu.Lock()
+    defer m.mu.Unlock()
     for _, name := range names {
-        if _, ok := m.methodMap[name]; !ok {
+        if _, ok := m.methods[name]; !ok {
             continue
         }
-        delete(m.methodMap, name)
-        if hasRpcReadOnlyPrefix(name) || hasApiReadOnlyPrefix(name) ||
-            hasRpcPrefix(name) || hasApiPrefix(name) {
-            m.rpcCnt--
-        }
-        if m.rpcCnt < 0 {
-            m.rpcCnt = 0
-        }
+        delete(m.methods, name)
     }
-    return oldRpcCnt > 0 && m.rpcCnt == 0
 }
 ```
 
@@ -629,12 +675,11 @@ func (m *MethodMgr) RemoveMethods(names []string) bool {
 > 因此采用**新增独立接口 + 类型断言**的方式，完全不修改 `IMethodMgr`：
 
 ```go
-// IMethodMgr 保持不变（零修改）
+// IMethodMgr 删除服务可见性推断遗留接口，只保留方法表职责
 type IMethodMgr interface {
-    IsPrivate() bool
     AddMethodFunc(name string, fn def.MethodCallFunc)
     GetMethodFunc(name string) (def.MethodCallFunc, bool)
-    RemoveMethods(names []string) bool
+    RemoveMethods(names []string)
 }
 
 // IReadOnlyMethodMgr 新增独立接口，MethodMgr 同时实现两者
@@ -646,9 +691,9 @@ type IReadOnlyMethodMgr interface {
 ```
 
 `MethodMgr` 同时实现 `IMethodMgr` 和 `IReadOnlyMethodMgr`。
-`IsReadOnly()` 直接在 `methodMap` 中查找 `methodEntry.readOnly` 字段，
+`IsReadOnly()` 直接在 `methods` 中查找 `methodEntry.readOnly` 字段，
 与 `GetMethodFunc()` 共享同一个底层 map。
-`methodMap` 在启动阶段一次性构建完成，运行期为只读静态表，
+`methods` 在启动阶段一次性构建完成，运行期为只读静态表，
 因此 `GetMethodFunc()`/`IsReadOnly()` 的并发读操作天然安全，无需加锁，零开销。
 
 调用方通过类型断言安全使用：
@@ -1938,11 +1983,11 @@ AutoScaler 根据 Worker 的队列长度和负载决定扩缩容。RW 模式下�
 RW 模式下，读 goroutine 遍历 `children`/`rootContains` map 时不会与写操作并发，
 因为这些结构在运行期为只读，无需加锁保护。
 
-同理，`MethodMgr.methodMap` 也是启动阶段构建的静态表（见 §5.2），
+同理，`MethodMgr.methods` 也是启动阶段构建的静态表（见 §5.2），
 运行期 `GetMethodFunc()`/`IsReadOnly()` 的并发读天然安全。
 
 `MethodMgr.RemoveMethods()` 仅在 Service shutdown 阶段（模块卸载流程）调用，
-此时 Service 已关闭对外接口，所有 Worker 已停止，不存在并发读 `methodMap` 的 goroutine。
+此时 Service 已关闭对外接口，所有 Worker 已停止，不存在并发读 `methods` 的 goroutine。
 作为防御性措施，`RemoveMethods()` 内部增加了 RW 模式下的运行时校验（见 §5.2），
 防止误在运行期调用导致 map 并发读写 fatal。
 

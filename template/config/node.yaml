@@ -160,8 +160,8 @@ ServiceConf:
       Version: 1
       # rpc方式,优先推荐使用nats(如果业务需要明确知道对方是否有收到消息,推荐使用rpcx,如果被调用方是非go语言服务,且不支持nats,可以选择grpc)
       RpcType: "nats"
-      # 服务可见性: private/node/cluster/auto；默认 private，auto 仅用于旧服务迁移兼容
-      Visibility: "private"
+      # 服务可见性: node/cluster；默认 node
+      Visibility: "node"
       # 系统级线程池大小(根据业务自行调整，io密集型建议设置大一点)
       GoroutinePoolSize: 1000
       # 停机策略配置

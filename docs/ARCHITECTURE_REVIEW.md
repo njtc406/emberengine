@@ -134,7 +134,7 @@ type INodeEndpointManager interface {
     CreatePid(...)
     AddService(svc IService)
     RemoveService(svc IService)
-    ToPrivateService(svc IService)
+    ToNodeService(svc IService)
 }
 ```
 

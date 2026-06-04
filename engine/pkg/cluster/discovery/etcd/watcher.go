@@ -372,6 +372,12 @@ func (w *watcher) notifyService(evtType def.EventType, oldStateIsMaster bool, pr
 }
 
 func (w *watcher) registerService() error {
+	// visibility 只控制服务发现发布。主从模式可通过同一个 watcher 使用
+	// MasterPath 通道参与选举，但 node visibility 不写入服务发现 Path，
+	// 避免被集群普通路由主动发现。
+	if w.svc.GetVisibility() != def.ServiceVisibilityCluster {
+		return nil
+	}
 	if !w.d.provider.IsConnected() {
 		return fmt.Errorf("etcd client not connected")
 	}

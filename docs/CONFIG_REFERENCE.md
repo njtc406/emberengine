@@ -262,7 +262,7 @@ YAML 路径：`ServiceConf.StartServices[*]`
 | `Version` | int64 | 0 | | 服务版本号 |
 | `Partition` | int32 | — | ✅ | 分区 ID（用于服务路由隔离） |
 | `RpcType` | string | `local` | | 远程调用方式：`local` / `grpc` / `rpcx` / `nats` |
-| `Visibility` | string | `private` | | 服务可见性：`private` / `node` / `cluster` / `auto`。未配置时默认私有；`auto` 仅用于旧服务迁移兼容 |
+| `Visibility` | string | `node` | | 服务可见性：`node` / `cluster`。未配置时默认节点内可见 |
 | `IsPrimarySecondaryMode` | bool | false | | 是否启用主从模式 |
 | `EventChanSize` | int | 100 | | 事件通道大小 |
 
@@ -477,7 +477,7 @@ ServiceConf:
       ServiceName: my-svc
       Type: game
       Partition: 1
-      Visibility: private
+      Visibility: node
 
 SystemLogger:
   Dir: ./data/logs

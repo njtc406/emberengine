@@ -27,7 +27,7 @@ Start()
 
 这导致 `OnStarted()` 执行前，服务已经可能被其他节点发现并选中。对于需要在 `OnStarted()` 中完成数据预热、订阅、依赖检查、集群协作初始化的服务而言，这个时机过早。
 
-同时，当前 `IsPrivate()` 的判断来自 `MethodMgr.IsPrivate()`：只要存在 `Rpc`/`RPC` 前缀方法，服务就不是私有服务。这个规则把“方法是否可被 RPC 调用”和“服务是否应该注册到集群发现”耦合在一起，不够灵活。例如玩家服务虽然有 RPC 方法，但不应该因为每个玩家都有可调用接口就全部注册到 etcd 并进入全局路由候选集。
+同时，旧设计中 `IsPrivate()` 的判断来自 `MethodMgr.IsPrivate()`：只要存在 `Rpc`/`RPC` 前缀方法，服务就不是私有服务。这个规则把“方法是否可被 RPC 调用”和“服务是否应该注册到集群发现”耦合在一起，不够灵活。例如玩家服务虽然有 RPC 方法，但不应该因为每个玩家都有可调用接口就全部注册到 etcd 并进入全局路由候选集。
 
 引入显式可见性后，`api`/`rpc` 前缀不应再决定服务是否私有。方法前缀只描述接口的调用入口和暴露风格；服务是否发布到集群、是否允许远端定向调用，应统一由 `ServiceVisibility` 决定。
 
@@ -39,7 +39,7 @@ Start()
 - `OnStarted()` 阶段允许服务进行依赖其他集群服务的初始化，并能接收必要的定向回复。
 - 集群服务发现规模与“公共可发现服务数量”相关，而不是与“所有拥有 RPC 方法的实体服务数量”相关。
 - 区分“可发现路由”和“持有 PID 的定向访问”。
-- 配置未声明可见性时默认按私有服务处理，避免服务因新增 RPC/API 方法意外进入集群发现。
+- 配置未声明可见性时默认按节点内可见服务处理，避免服务因新增 RPC/API 方法意外进入集群发现。
 - 兼容旧行为必须显式选择迁移模式，不能作为新配置默认值。
 
 ---
@@ -166,13 +166,15 @@ OnStarted() returns error
 
 ### 4.1 当前问题
 
-当前私有服务判断过于隐式：
+旧的私有服务判断过于隐式：
 
 ```go
 func (m *MethodMgr) IsPrivate() bool {
     return m.rpcCnt == 0
 }
 ```
+
+该逻辑已废弃并移除。服务可见性不再依赖 `MethodMgr.IsPrivate()` 或 `rpcCnt`，方法表只负责 RPC/API 方法注册、调用闭包和 ReadOnly 元信息。
 
 这表示只要服务注册了 RPC 方法，就会被视为集群可发布服务。更早的约定里，只有 `api` 开头的接口服务不主动注册到集群；但一旦引入显式可见性，这类前缀规则也应该退出“服务发现决策”。对于“玩家服务”“场景内实体服务”“房间对象服务”等数量巨大的实体服务，如果继续依赖方法前缀推断可见性，会导致：
 
@@ -189,10 +191,8 @@ func (m *MethodMgr) IsPrivate() bool {
 type ServiceVisibility int32
 
 const (
-    ServiceVisibilityAuto ServiceVisibility = iota
-    ServiceVisibilityCluster
-    ServiceVisibilityNode
-    ServiceVisibilityPrivate
+    ServiceVisibilityCluster ServiceVisibility = 1
+    ServiceVisibilityNode    ServiceVisibility = 2
 )
 ```
 
@@ -200,29 +200,16 @@ const (
 
 | 可见性 | etcd 发布 | 集群普通路由可发现 | 持有 PID 可远程访问 | 典型服务 |
 | -------- | ----------- | -------------------- | --------------------- | ---------- |
-| Auto | 按兼容规则推断 | 按兼容规则推断 | 按推断结果 | 旧配置迁移模式 |
 | Cluster | 是 | 是，且 Ready 后可选中 | 是 | API、匹配、全局聊天、公共网关 |
-| Node | 否 | 否 | 是 | 玩家、房间、场景实体 |
-| Private | 否 | 否 | 否或仅本进程内部 | DB 内部模块、工具服务、纯内部组件 |
+| Node | 否 | 仅本节点内可发现，Ready 后可选中 | 是 | 玩家、房间、场景实体、普通本地服务 |
 
-### 4.3 Auto 与迁移规则
+### 4.3 配置与默认值
 
-最终目标是：服务是否私有、是否集群可见、是否允许远端定向调用，全部由 `visibility` 显式定义。`rpcCnt`、`api` 前缀、`rpc` 前缀不再参与服务级可见性判断。
+服务是否集群可见、是否允许远端定向调用，全部由 `visibility` 显式定义。`rpcCnt`、`api` 前缀、`rpc` 前缀不再参与服务级可见性判断。
 
-配置中未声明 `visibility` 时，默认值应为 `private`。这是新的安全默认值：服务只有在显式声明 `cluster` 或 `node` 后，才会获得集群发布或远端定向调用能力。
+配置中未声明 `visibility` 时，默认值为 `node`。这是安全默认值：服务默认只在本节点内可发现，不会因为新增 RPC/API 方法意外发布到集群发现。
 
-为了降低迁移成本，短期可以保留 `Auto` 作为显式兼容模式：
-
-```text
-if rpcCnt == 0:
-    visibility = Private
-else:
-    visibility = Cluster
-```
-
-该规则只用于明确配置 `visibility: auto` 的旧服务。新服务和逐步迁移后的服务应显式声明 `cluster`、`node` 或 `private`，并避免继续依赖 RPC/API 方法前缀推断服务发现行为。
-
-业务可以显式配置：
+业务显式配置：
 
 ```yaml
 services:
@@ -231,12 +218,6 @@ services:
 
   - name: MatchService
     visibility: cluster
-
-  - name: DBProxy
-    visibility: private
-
-   - name: LegacyService
-      visibility: auto
 ```
 
 如果省略 `visibility`：
@@ -244,18 +225,18 @@ services:
 ```yaml
 services:
    - name: InternalCacheService
-      # visibility 默认为 private
+   # visibility 默认为 node
 ```
 
 ### 4.4 Node 可见性的访问模型
 
-`ServiceVisibilityNode` 的核心是“不参与发现，但允许持有 PID 的定向访问”。
+`ServiceVisibilityNode` 的核心是“只参与本节点发现，不发布到集群发现；跨节点场景下允许持有 PID 的定向访问”。
 
 典型流程：
 
 ```text
 1. PlayerService 启动，visibility=node
-2. 服务只加入本节点 Repository，不发布到 etcd
+2. 服务加入本节点 Repository，可被本节点普通路由选择，但不发布到 etcd
 3. 玩家进入场景时，将 Player PID 交给 SceneService
 4. SceneService 持有完整 PID 后发起定向 RPC
 5. 本地 Repository 找不到该 PID 时，EndpointManager.GetDispatcher() 使用 AddTmp 创建临时 dispatcher
@@ -265,12 +246,12 @@ services:
 
 这个模型不要求每个 PlayerService 出现在 etcd 中，集群发现规模只取决于 Cluster 可见服务数量。
 
-### 4.5 Private 与 Node 的边界
+### 4.5 Node 与 Cluster 的边界
 
 需要明确区分：
 
-- `Node`：不被发现，但拥有 PID 的远端服务可以调用。
-- `Private`：不被发现，也不应允许远端定向调用。
+- `Node`：仅本节点普通路由可发现；不发布到 etcd；拥有 PID 的远端服务可以定向调用。
+- `Cluster`：发布到 etcd；Ready 后可被集群普通路由选中；拥有 PID 的远端服务也可以定向调用。
 
 因此远端入口在投递到本地服务前，需要能够判断目标服务是否允许远端访问。建议增加：
 
@@ -284,10 +265,9 @@ IsRemoteCallable() bool
 ```text
 Cluster -> remote callable
 Node    -> remote callable
-Private -> not remote callable
 ```
 
-`IsPrivate()` 可以短期保留为兼容 API，但内部应改为基于 visibility 判断。迁移完成后，`MethodMgr.IsPrivate()` 和 `rpcCnt` 不应再作为服务私有性的来源；`rpcCnt` 最多只保留为方法表统计或兼容诊断信息。
+`Service.IsPrivate()` 若作为兼容 API 保留，语义仅表示“非 Cluster 可见”。`MethodMgr.IsPrivate()` 和 `rpcCnt` 已不再需要，应从方法管理器中移除，避免把方法前缀统计重新引入服务级集群发现语义。
 
 ### 4.6 主从模式关系
 
@@ -306,7 +286,7 @@ if !primarySecondaryMode || visibility != Cluster || !clusterMode:
     SetMaster(true)
 ```
 
-即只有 `Cluster` 可见且启用主从的服务才需要参与跨节点主从选择；`Node` 和 `Private` 服务默认本地 master。
+即只有 `Cluster` 可见且启用主从的服务才需要参与跨节点主从选择；`Node` 服务默认本地 master。
 
 ---
 
@@ -344,19 +324,19 @@ if !primarySecondaryMode || visibility != Cluster || !clusterMode:
 
 1. **新增 ServiceVisibility 类型**
    - 文件：`engine/pkg/def/*`
-   - 操作：定义 `Auto/Cluster/Node/Private`。
+   - 操作：定义 `Cluster/Node`。
    - 风险：低。
 
 2. **配置层支持 visibility**
    - 文件：`engine/pkg/config/*`
-   - 操作：在服务初始化配置中增加 `visibility` 字段，解析字符串到枚举；字段缺省时使用 `private`。
-   - 风险：中。旧服务若依赖隐式 RPC 注册，需要显式补充 `visibility: auto` 或 `visibility: cluster`。
+   - 操作：在服务初始化配置中增加 `visibility` 字段，解析字符串到枚举；字段缺省时使用 `node`。
+   - 风险：低。
 
 3. **解除 RPC/API 前缀与服务可见性的绑定**
    - 文件：`engine/pkg/core/rpc/handler.go`
    - 文件：`engine/pkg/core/service.go`
-   - 操作：`MethodMgr.IsPrivate()` 不再作为服务注册依据；服务级私有性改为读取 `ServiceVisibility`。
-   - 风险：中。需要提供显式 `Auto` 兼容模式，并在迁移文档中提示旧服务补配置。
+   - 操作：移除 `MethodMgr.IsPrivate()` / `rpcCnt`；服务级私有性改为读取 `ServiceVisibility`。
+   - 风险：低。
 
 4. **Service 保存并暴露 visibility**
    - 文件：`engine/pkg/core/service.go`
@@ -366,13 +346,8 @@ if !primarySecondaryMode || visibility != Cluster || !clusterMode:
 
 5. **EndpointManager 按 visibility 发布**
    - 文件：`engine/pkg/cluster/endpoints/endpoints.go`
-   - 操作：只有 `Cluster` 可见服务发布到 etcd；`Node/Private` 只注册本地。
+   - 操作：只有 `Cluster` 可见服务发布到 etcd；`Node` 只注册本地。
    - 风险：中。需要验证定向调用路径仍可到达 Node 服务。
-
-6. **远端投递保护 Private 服务**
-   - 文件：`engine/pkg/rpc/remote/*` 或远端请求落地入口
-   - 操作：远端请求投递本地 mailbox 前检查目标服务 visibility，拒绝 Private。
-   - 风险：中。需要确认 reply、内部系统消息不会被误拒。
 
 ### 阶段 3：测试与文档同步
 
@@ -382,13 +357,9 @@ if !primarySecondaryMode || visibility != Cluster || !clusterMode:
    - 验证 `OnStarted()` 失败会 RemoveService。
 
 2. **可见性测试**
-   - 未配置 `visibility` 时默认推断为 Private。
-   - 显式 `visibility=private` 时，即使存在 RPC 方法也不注册 etcd。
+   - 未配置 `visibility` 时默认推断为 Node。
    - 显式 `visibility=cluster` 时，即使没有 RPC 方法也按集群服务发布，但普通路由是否可调用仍取决于实际方法表。
-   - 显式 `visibility=auto` 且 `rpcCnt==0` 时推断为 Private。
-   - 显式 `visibility=auto` 且 `rpcCnt>0` 时推断为 Cluster。
-   - `Node` 不发布 etcd，但持有 PID 的远程调用可达。
-   - `Private` 不发布 etcd，远程定向调用被拒绝。
+   - `Node` 不发布 etcd，但可被本节点普通路由选择，持有 PID 的远程调用可达。
 
 3. **文档同步**
    - 更新 `docs/CONFIG_REFERENCE.md` 中服务配置示例。
@@ -422,26 +393,16 @@ Ready 更新与 Running 注册使用同一 key。watch 处理逻辑需要识别�
 
 缓解：确认 PID 创建时保留 `nodeUid`、`rpcType`、必要地址或能通过 nodeUid 找到 node 级连接。若缺少，应补充“节点级发现”和“服务级发现”的分层设计。
 
-### 风险：Private 远端拒绝误伤系统消息
-
-Private 服务可能仍需要本进程内部消息，但不应暴露给远端。
-
-缓解：拒绝逻辑放在远端请求入口，不影响本地 mailbox 投递；系统内部消息需要明确来源和绕行规则。
-
----
-
 ## 7. 成功标准
 
 - [ ] Service 启动期间会先以 Running 状态进入集群缓存。
 - [ ] Running 服务不会被普通服务发现和负载均衡选中。
 - [ ] `OnStarted()` 成功后服务更新为 Ready，并开始参与普通路由选择。
 - [ ] `OnStarted()` 失败时，Running 注册会被主动撤销。
-- [ ] 服务可见性支持 `Auto/Cluster/Node/Private`。
+- [ ] 服务可见性支持 `Cluster/Node`。
 - [ ] 显式 `visibility` 优先级高于 RPC/API 方法前缀。
-- [ ] 配置未声明 `visibility` 时默认使用 Private。
-- [ ] Auto 仅作为显式配置的旧服务迁移兼容逻辑。
-- [ ] Node 可见服务不注册 etcd，但持有 PID 时可远程访问。
-- [ ] Private 服务不注册 etcd，且远端定向访问会被拒绝。
+- [ ] 配置未声明 `visibility` 时默认使用 Node。
+- [ ] Node 可见服务不注册 etcd，但本节点普通路由可发现，持有 PID 时可远程访问。
 - [ ] etcd/watch/repository 能正确处理同一服务 key 的 Running -> Ready 更新。
 - [ ] `go test ./...` 或至少相关包测试通过。
 
@@ -453,7 +414,7 @@ Private 服务可能仍需要本进程内部消息，但不应暴露给远端。
 
 生命周期上，Running 表示“服务已进入集群缓存，可支持启动期定向交互”，Ready 表示“服务业务完全就绪，可被普通路由选中”。
 
-可见性上，Cluster/Node/Private 将“全局发现”和“持有 PID 的访问能力”拆开：公共服务继续注册到 etcd；玩家、场景实体等高基数服务使用 Node 可见性；纯内部服务使用 Private。这样可以控制服务发现规模，同时保留业务中必要的定向调用能力。
+可见性上，Cluster/Node 将“集群发现”和“节点内发现”拆开：公共服务继续注册到 etcd；玩家、场景实体等高基数服务使用 Node 可见性。这样可以控制服务发现规模，同时保留业务中必要的本地路由和定向调用能力。
 ---
 
 ## 9. 实施约束与兼容性说明

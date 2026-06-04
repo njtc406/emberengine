@@ -50,7 +50,7 @@ type INodeEndpointManager interface {
 	AddService(svc IService)
 	ServiceReady(svc IService)
 	RemoveService(svc IService)
-	ToPrivateService(svc IService)
+	ToNodeService(svc IService)
 }
 
 // INodeEventBus 事件总线窄接口，由 *event.Bus 隐式满足
