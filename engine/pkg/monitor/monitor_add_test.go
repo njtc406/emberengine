@@ -37,7 +37,7 @@ func (s *errScheduler) CronAsyncFunc(_ string, _ string, _ timingwheel.TimerCall
 }
 func (s *errScheduler) CancelTimer(_ uint64) {}
 func (s *errScheduler) Stop()                {}
-func (s *errScheduler) GetTimerCbChannel() chan timingwheel.ITimer {
+func (s *errScheduler) GetTimerCbChannel() <-chan timingwheel.ITimer {
 	return make(chan timingwheel.ITimer)
 }
 

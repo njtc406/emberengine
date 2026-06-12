@@ -66,21 +66,24 @@ func (b *bucket) Remove(t *Timer) bool {
 
 func (b *bucket) Flush(reinsert func(*Timer)) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	timers := make([]*Timer, 0, b.timers.Len())
 
 	for e := b.timers.Front(); e != nil; {
 		next := e.Next()
 
 		t := e.Value.(*Timer)
 		b.remove(t)
-		// 注意：此操作要么执行定时器的任务，要么将定时器插入更低层时间轮的另一个 bucket。
-		// 无论哪种情况，都不会对 b.mu 做后续加锁操作。
-		if t.isActive() && reinsert != nil {
-			reinsert(t)
-		}
+		timers = append(timers, t)
 
 		e = next
 	}
 
 	b.SetExpiration(-1)
+	b.mu.Unlock()
+
+	for _, t := range timers {
+		if t.isActive() && reinsert != nil {
+			reinsert(t)
+		}
+	}
 }

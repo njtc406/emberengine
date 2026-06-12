@@ -33,7 +33,7 @@ type ITimerScheduler interface {
 	CancelTimer(taskId uint64)
 	Stop()
 
-	GetTimerCbChannel() chan ITimer
+	GetTimerCbChannel() <-chan ITimer
 }
 
 const defaultSeed uint64 = 10000
@@ -71,6 +71,7 @@ type jobScheduler struct {
 	closed int32
 	shards []*timerBucket
 	c      chan ITimer
+	sendMu sync.RWMutex
 	tw     *TimingWheel // 关联的timingwheel实例
 	logger log.ILoggerX
 }
@@ -147,8 +148,24 @@ func (scheduler *jobScheduler) remove(taskId uint64) *Timer {
 	return shard.remove(taskId)
 }
 
-func (scheduler *jobScheduler) GetTimerCbChannel() chan ITimer {
+func (scheduler *jobScheduler) GetTimerCbChannel() <-chan ITimer {
 	return scheduler.c
+}
+
+func (scheduler *jobScheduler) postTimer(t *Timer) bool {
+	scheduler.sendMu.RLock()
+	defer scheduler.sendMu.RUnlock()
+
+	if scheduler.isClosed() {
+		return false
+	}
+
+	select {
+	case scheduler.c <- t:
+		return true
+	default:
+		return false
+	}
 }
 
 // isClosed 返回调度器是否已关闭
@@ -299,18 +316,26 @@ func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
 }
 
 func (scheduler *jobScheduler) Stop() {
-	atomic.StoreInt32(&scheduler.closed, 1)
+	if !atomic.CompareAndSwapInt32(&scheduler.closed, 0, 1) {
+		return
+	}
 
+	var timers []*Timer
 	for _, shard := range scheduler.shards {
 		shard.Lock()
 		for timerId, t := range shard.tasks {
-			t.stop()
+			timers = append(timers, t)
 			delete(shard.tasks, timerId)
 		}
 		shard.Unlock()
 	}
+	for _, t := range timers {
+		t.stop()
+	}
 
+	scheduler.sendMu.Lock()
 	close(scheduler.c)
+	scheduler.sendMu.Unlock()
 }
 
 func (scheduler *jobScheduler) createTimer() *Timer {

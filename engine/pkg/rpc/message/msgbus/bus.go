@@ -18,7 +18,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/errorlib"
+	"github.com/njtc406/emberengine/engine/pkg/utils/errorx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
@@ -716,7 +716,7 @@ func (m MultiBus) Call(ctx context.Context, method string, in, out interface{}) 
 			return nil // 找到一个成功的就返回
 		}
 	}
-	return errorlib.CombineErr(errs...)
+	return errorx.CombineErrors(errs...)
 }
 
 func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
@@ -744,7 +744,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 		if len(errs) > 0 {
 			m.logWarnf(ctx, "call %s with CallModeAll: %d/%d succeeded", option.Method, successCount, len(m))
 		}
-		return errorlib.CombineErr(errs...)
+		return errorx.CombineErrors(errs...)
 
 	default: // dto.CallModeAny 或未设置
 		// 模式0: 依次尝试调用每个服务，找到第一个成功的就返回
@@ -757,7 +757,7 @@ func (m MultiBus) CallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 				return nil // 找到一个成功的就返回
 			}
 		}
-		return errorlib.CombineErr(errs...)
+		return errorx.CombineErrors(errs...)
 	}
 }
 
@@ -783,9 +783,9 @@ func (m MultiBus) AsyncCall(ctx context.Context, method string, in interface{}, 
 	}
 	mt, monitorErr := m.requireRpcMonitor(ctx)
 	if monitorErr != nil {
-		return dto.EmptyCancelRpc, errorlib.CombineErr(append(errs, monitorErr)...)
+		return dto.EmptyCancelRpc, errorx.CombineErrors(append(errs, monitorErr)...)
 	}
-	return mt.NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+	return mt.NewMultiCancel(reqIds...), errorx.CombineErrors(errs...)
 }
 
 func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) (dto.CancelRpc, error) {
@@ -825,9 +825,9 @@ func (m MultiBus) AsyncCallWithOpt(ctx context.Context, opts ...dto.BusOptionBui
 	// 返回 MultiCancel,可以取消所有节点的回调
 	mt, monitorErr := m.requireRpcMonitor(option.Ctx)
 	if monitorErr != nil {
-		return dto.EmptyCancelRpc, errorlib.CombineErr(append(errs, monitorErr)...)
+		return dto.EmptyCancelRpc, errorx.CombineErrors(append(errs, monitorErr)...)
 	}
-	return mt.NewMultiCancel(reqIds...), errorlib.CombineErr(errs...)
+	return mt.NewMultiCancel(reqIds...), errorx.CombineErrors(errs...)
 }
 
 // TODO send这里需要考虑一下所有的都公用一个ctx会不会有什么问题
@@ -850,7 +850,7 @@ func (m MultiBus) Send(ctx context.Context, method string, in interface{}) error
 		}
 	}
 
-	return errorlib.CombineErr(errs...)
+	return errorx.CombineErrors(errs...)
 }
 
 func (m MultiBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder) error {
@@ -872,7 +872,7 @@ func (m MultiBus) SendWithOpt(ctx context.Context, opts ...dto.BusOptionBuilder)
 			errs = append(errs, err)
 		}
 	}
-	return errorlib.CombineErr(errs...)
+	return errorx.CombineErrors(errs...)
 }
 
 func (m MultiBus) Release() {

@@ -52,7 +52,7 @@ type Service struct {
 	name string     // 服务名称
 
 	src                    inf.IService // 服务实现
-	cfg                    interface{}  // 服务配置
+	cfg                    any          // 服务配置
 	status                 int32        // 服务状态(0初始化 1启动中 2启动  3关闭中 4关闭 5退休)
 	isPrimarySecondaryMode bool         // 是否是主从模式
 	visibility             def.ServiceVisibility

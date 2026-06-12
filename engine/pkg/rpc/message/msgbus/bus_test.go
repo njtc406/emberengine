@@ -213,14 +213,19 @@ func TestMultiBusCallAnyStopsAfterSuccess(t *testing.T) {
 }
 
 func TestMultiBusCallWithOptAllAggregatesErrors(t *testing.T) {
-	b1 := &fakeInternalBus{callErr: errors.New("e1")}
+	err1 := errors.New("e1")
+	err3 := errors.New("e3")
+	b1 := &fakeInternalBus{callErr: err1}
 	b2 := &fakeInternalBus{callErr: nil}
-	b3 := &fakeInternalBus{callErr: errors.New("e3")}
+	b3 := &fakeInternalBus{callErr: err3}
 	m := MultiBus{b1, b2, b3}
 
 	err := m.CallWithOpt(context.Background(), dto.WithMethod("ApiX"), dto.WithCallModeAll())
 	if err == nil {
 		t.Fatalf("expected combined error when some buses fail in CallModeAll")
+	}
+	if !errors.Is(err, err1) || !errors.Is(err, err3) {
+		t.Fatalf("expected combined error to preserve child errors, got %v", err)
 	}
 	if b1.callCount != 1 || b2.callCount != 1 || b3.callCount != 1 {
 		t.Fatalf("expected all buses called once, got b1=%d b2=%d b3=%d", b1.callCount, b2.callCount, b3.callCount)
@@ -273,14 +278,19 @@ func TestMultiBusSendWithOptEmpty(t *testing.T) {
 }
 
 func TestMultiBusSendAggregatesErrors(t *testing.T) {
-	b1 := &fakeInternalBus{sendErr: errors.New("e1")}
+	err1 := errors.New("e1")
+	err3 := errors.New("e3")
+	b1 := &fakeInternalBus{sendErr: err1}
 	b2 := &fakeInternalBus{sendErr: nil}
-	b3 := &fakeInternalBus{sendErr: errors.New("e3")}
+	b3 := &fakeInternalBus{sendErr: err3}
 	m := MultiBus{b1, b2, b3}
 
 	err := m.Send(context.Background(), "Api", nil)
 	if err == nil {
 		t.Fatal("expected combined error")
+	}
+	if !errors.Is(err, err1) || !errors.Is(err, err3) {
+		t.Fatalf("expected combined error to preserve child errors, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "e1") || !strings.Contains(err.Error(), "e3") {
 		t.Fatalf("expected combined errors containing e1 and e3, got %v", err)

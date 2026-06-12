@@ -1,7 +1,7 @@
 # EmberEngine 下一步目标规划
 
 > **编制时间**: 2026-03-13  
-> **最后更新**: 2026-05-13  
+> **最后更新**: 2026-06-10  
 > **基准分支**: `v2-dev-node-fix`  
 > **编制依据**: 全项目源码分析、ARCHITECTURE_REVIEW.md、ROADMAP.md、DESIGN_MULTI_NODE*.md、DESIGN_ISSUES_FIXLIST.md、TODO_SERVICE_CONTAINER.md
 
@@ -18,7 +18,7 @@
 | **RPC 通信层** | ⭐⭐⭐⭐ | 三协议透明支持 (gRPC/NATS/rpcx)、连接池完整、MessageBus 统一 | 缺少链路追踪、缺少请求级 metrics |
 | **集群/服务发现** | ⭐⭐⭐⭐ | etcd Watch + 健康检查 + 指数退避重连 + 主从选举守卫 | 缺少灰度路由、缺少节点级健康端点 |
 | **事件系统** | ⭐⭐⭐⭐ | 三级事件 (Global/Server/Specific)、NATS 跨节点、限流批处理 | 已拆分完成，缺少 metrics |
-| **错误处理** | ⭐⭐⭐⭐ | panic→error 全面改造、errorlib 基础能力 | errorlib.Is 签名问题（P3-03）待确认清理 |
+| **错误处理** | ⭐⭐⭐⭐⭐ | panic→error 全面改造、errorx 结构化错误码与 wire 序列化已落地、errorlib 已移除 | def sentinel 错误码化可按模块继续推进 |
 | **配置体系** | ⭐⭐⭐⭐ | 结构化配置树完整、硬编码已配置化，binding tags + validator 校验已就位 | 配置校验边界值待深化、缺少热加载 |
 | **可观测性** | ⭐⭐⭐⭐ | Prometheus text 全链路指标（Node/RPC/Mailbox/Event/Pool）、/health+/ready+/metrics 端点、TraceID 贯通验证 | OTel SDK 接入待 P3 |
 | 测试覆盖 | ⭐⭐⭐⭐½ | 70+ 测试文件，P0-P3 全链路覆盖（RPC/Handler/Router/Monitor），race 门禁全绿 | sysModule/sysService/cluster 等模块覆盖率仍可提升 |
@@ -39,6 +39,7 @@
 | Actor 目录重整（2026Q2 审计） | ✅ | Mailbox RW 分离、洋葱中间件、panicRateLimiter、死代码清理、CPU spin 修复、race 修复 |
 | 配置基线回归测试 | ✅ | 全部 template/config + example/configs 通过 Config.Load 自动化验证；补齐 NodeType、StopPolicy、OutputFormat、RW Mode、MiddlewareConf |
 | P1 基础能力建设 | ✅ | errorx 契约收敛 + PoolMetrics MVP + 核心测试 +35 tests + 优雅关闭顺序固定 |
+| TimingWheel 稳定性复核 | ✅ | 修复 Stop/send race、Stop/Flush 锁顺序、bucket.Flush 锁内 reinsert；补齐 add/cancel、overflow、SetTimeOffset、dispatch benchmark；README 已同步当前非对象池设计 |
 
 ### 1.3 当前技术债残余
 
@@ -101,7 +102,7 @@
 
 | 编号 | 任务 | 具体内容 |
 |------|------|----------|
-| A-3-1 | errorlib.Is 签名修正 | 确认 P3-03 是否已修复，若未修复则重命名为 `IsCode(int) bool` |
+| A-3-1 | errorlib.Is 签名修正 | ✅ 已完成——legacy `errorlib` 已由 `errorx` 完全替代并移除，不再保留 `CError`/`NewErrCode` |
 | A-3-2 | Service 状态机化 | 引入显式状态机替代 atomic int32，统一状态转换规则 |
 | A-3-3 | go vet 零告警 | ✅ 已完成——`go vet ./...` 零告警（含 example 目录） |
 | A-3-4 | race 检测通过 | ✅ 已完成——actor/core/rpc/event/services/node/pool 全部 `-race -count=2` 通过 |
@@ -161,9 +162,9 @@ engine/pkg/authz/
 
 ---
 
-#### B-2 结构化错误码体系（errorx）
+#### B-2 结构化错误码体系（errorx） ✅ 基础、wire 与 legacy errorlib 迁移已完成
 
-**背景**: 现有 `errorlib` 存在签名问题（Is(int)），且缺少错误链、堆栈追踪、结构化字段。RPC 调用的错误信息在跨节点传播后丢失上下文。
+**背景**: 旧 `errorlib` 存在签名问题（Is(int)），且缺少错误链、堆栈追踪、结构化字段。当前已统一迁移到 `errorx`，RPC 调用的错误信息可通过 `ErrorDetail` 跨节点传播。
 
 **目标**:
 - 统一业务错误码格式：模块(2位) + 类型(2位) + 序号(4位)
@@ -191,10 +192,10 @@ func (e *Error) Unwrap() error        { return e.Cause }
 
 | 序号 | 任务 |
 |------|------|
-| B-2-1 | 设计 errorx 包，实现 Error 结构体 + Is/As/Unwrap |
-| B-2-2 | 定义框架内置错误码（RPC 超时、服务不可达、方法不存在等） |
-| B-2-3 | RPC Envelope 支持 errorx 序列化/反序列化 |
-| B-2-4 | 迁移现有 errorlib 调用侧到 errorx |
+| B-2-1 | ✅ 已完成——`engine/pkg/utils/errorx` 实现 Error 结构体、错误码、错误链、结构化字段、`errors.Is/As` 兼容 |
+| B-2-2 | 🔄 部分完成——`def/error.go` 已定义错误码分段规范，但现有 sentinel 仍多为 `errors.New()`，按需迁移 |
+| B-2-3 | ✅ 已完成——`actor.ErrorDetail` + `errorx.MarshalToBytes/UnmarshalFromBytes` + Envelope Err bytes 路径已接入 |
+| B-2-4 | ✅ 已完成——`errorlib` 包已删除，`msgbus` 聚合错误统一使用 `errorx.CombineErrors` |
 
 ---
 
@@ -269,7 +270,7 @@ func (e *Error) Unwrap() error        { return e.Cause }
 | **正面** | 业界标准方案，生态丰富，对接 Grafana/Jaeger 零成本 |
 | **负面** | 增加依赖，metrics 采集有微小性能开销 |
 | **替代方案** | 自研 metrics（维护成本高，生态差） |
-| **状态** | 📋 待实施 |
+| **状态** | 🔄 Metrics/Health/TraceID 骨架已完成；OpenTelemetry SDK 适配器仍待实施 |
 
 ### 3.2 ADR-006: 服务间安全认证方案
 
@@ -288,8 +289,8 @@ func (e *Error) Unwrap() error        { return e.Cause }
 
 | 风险 | 级别 | 说明 | 缓解措施 |
 |------|------|------|----------|
-| **无认证的生产暴露** | � 中 | 内网不等于安全，横向移动可调用任意 RPC | mTLS ✅ + RBAC ✅，剩余审计日志待实施 |
-| **可观测性缺失** | 🔴 高 | 问题定位只能靠日志 grep，线上事故恢复时间长 | Phase A-1 metrics + tracing |
+| **无认证的生产暴露** | 🟡 中 | 内网不等于安全，横向移动可调用任意 RPC | mTLS ✅ + RBAC ✅ + 策略分发 ✅，剩余审计日志待实施 |
+| **可观测性缺口** | 🟡 中 | Metrics/Health 已具备，分布式 trace 仍未接 OTel SDK | 实施 OTel adapter + trace exporter |
 | **测试覆盖不足** | 🟡 中 | 核心路径改动可能引入回归 | Phase A-2 补齐测试 + race 检测 |
 | **单点 etcd 依赖** | 🟡 中 | etcd 不可用则集群服务发现失效 | 本地缓存兜底 + 多 etcd 节点 |
 | **文档缺失** | 🟡 中 | 新人上手成本高，推广困难 | Phase C-3 文档体系 |
@@ -310,7 +311,7 @@ Phase A: 稳固基座
 
 Phase B: 生产就绪
 ├── B-1  服务间认证授权 (mTLS + RBAC + 审计)
-├── B-2  结构化错误码 (errorx) — P1-1 已完成基础，待 RPC wire error 扩展
+├── B-2  结构化错误码 (errorx) — 基础 + RPC wire error + errorlib 迁移已完成，剩余 def sentinel 错误码化
 └── B-3  配置系统增强 (校验 + 文档 + 热加载)
 
 2026-07 ─── Phase B 完成 ──────────────────────────
@@ -330,16 +331,16 @@ Phase C: 生态完善
 
 | 排名 | 任务ID | 任务名称 | 理由 |
 |------|--------|----------|------|
-| 1 | A-1-1~A-1-3 | Metrics 包创建 + RPC 埋点 | 可观测性零到一，投入产出比最高 |
-| 2 | A-1-7 | Health/Ready/Metrics HTTP 端点 | 运维基础能力，K8s 探针必需 |
-| 3 | A-2 (P0) | core/service + msgbus + node smoke test | 防止核心链路回归 |
-| 4 | A-3-3~A-3-4 | go vet 零告警 + race 检测通过 | CI 基线质量保障（A-3-3 ✅，A-3-4 🔄） |
-| 5 | A-1-4~A-1-6 | Mailbox/Pool/Event 指标埋点 | 完整可观测性闭环 |
-| 6 | B-1-1~B-1-2 | mTLS 底座 + 身份提取 | ✅ 已完成 |
-| 7 | B-2 | errorx 结构化错误码 | RPC 跨节点错误传播的基础 |
-| 8 | A-1-8 | OpenTelemetry 接入 | 分布式调用链追踪 |
-| 9 | B-1-3~B-1-5 | RBAC 引擎 + 策略分发 + RPC 拦截 | ✅ B-1-3/B-1-4/B-1-5 全部完成 |
-| 10 | C-3-1 | 快速入门文档 | 降低上手门槛，推广框架 |
+| 1 | B-1-6 | 审计日志 | mTLS/RBAC/策略分发已完成，审计是安全闭环最后一块 |
+| 2 | B-1-7 | 开发证书工具/证书轮转辅助 | 降低 mTLS 开发和运维接入成本 |
+| 3 | A-1-8 | OpenTelemetry SDK 适配器 | Metrics/Health 已具备，下一步补齐分布式 trace |
+| 4 | B-2-2 | def sentinel 错误码化 | errorlib 已移除，剩余是按模块将关键 sentinel 迁移到 errorx |
+| 5 | B-3-1 | 配置边界值测试深化 | validator 已接入，需补齐关键配置边界/证书路径等测试 |
+| 6 | B-3-3 | 敏感配置环境变量引用 | 生产化必需，避免密码/Token 明文落配置 |
+| 7 | C-1-1 | 优雅发布/DrainPolicy | 已有 StopGraceTimeout 基础，可优先形成滚动发布能力 |
+| 8 | C-2-4 | 标准化 benchmark suite | 当前已有局部 benchmark，需沉淀为性能回归基线 |
+| 9 | C-3-5 | 性能调优指南 | 结合 timingwheel、mailbox、连接池、pprof 形成运维手册 |
+| 10 | C-1-4 | Docker/K8s 部署模板 | template/docker 仅有依赖服务 compose，应用部署模板仍缺失 |
 
 ---
 
@@ -378,3 +379,5 @@ Phase C: 生态完善
 *2026-05-14 更新：P5 策略存储与分发完成拆分规划，新增 P5_POLICY_DISTRIBUTION_DEV_PLAN.md，拆为 P5-10~P5-15。*
 
 *2026-05-16 更新：P5-10~P5-15 策略存储与分发全部完成。新增 policy.go/store.go/watcher.go/etcd_store.go + 20 tests、AuthzConf 配置、模板示例。安全能力升至 ⭐⭐⭐½。*
+
+*2026-06-10 更新：复核当前源码状态。errorx 基础能力与 RPC wire error 已完成（ErrorDetail + MarshalToBytes/UnmarshalFromBytes + Envelope Err bytes）；errorlib legacy 包已由 errorx 完全替代并删除；A-3-1 已收敛为移除 legacy errorlib；TimingWheel 完成并发稳定性修复与 benchmark 补齐，README 已同步当前“不复用 Timer 对象”的生命周期策略。下一步优先级调整为审计日志、证书工具、OTel SDK 适配器、def sentinel 错误码化与配置生产化增强。*

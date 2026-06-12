@@ -224,31 +224,22 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 			return
 		}
 
-		// 防止往已关闭的 channel 发送导致 panic。
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					if tw.logger != nil {
-						tw.logger.Warnf("send to closed scheduler channel, task_name:%s, recover:%v", t.name, r)
-					}
-				}
-			}()
-			select {
-			case t.taskScheduler.GetTimerCbChannel() <- t:
-				// 投递成功
-			default:
-				// 队列已满,本次不执行
-				if tw.logger != nil {
-					tw.logger.Errorf("task queue is full, task will not be executed, task_name:%s", t.name)
-				} else {
-					fmt.Printf("task queue is full, task will not be executed, task_name:%s\n", t.name)
-				}
-				if t.loop == nil {
-					// 不是循环任务，释放
-					t.taskScheduler.CancelTimer(t.timerId)
-				}
+		posted := false
+		if scheduler, ok := t.taskScheduler.(*jobScheduler); ok {
+			posted = scheduler.postTimer(t)
+		}
+		if !posted {
+			// 队列已满或调度器已关闭,本次不执行
+			if tw.logger != nil {
+				tw.logger.Errorf("task queue is full or closed, task will not be executed, task_name:%s", t.name)
+			} else {
+				fmt.Printf("task queue is full or closed, task will not be executed, task_name:%s\n", t.name)
 			}
-		}()
+			if t.loop == nil {
+				// 不是循环任务，释放
+				t.taskScheduler.CancelTimer(t.timerId)
+			}
+		}
 	}
 
 	if runLoop && t.loop != nil {
@@ -260,6 +251,9 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 // addOrRun 将定时器 t 插入当前时间轮；如果已过期则立即执行任务。
 func (tw *TimingWheel) addOrRun(t *Timer) {
 	if tw.closed.Load() {
+		return
+	}
+	if !t.isActive() {
 		return
 	}
 

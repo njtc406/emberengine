@@ -2,17 +2,16 @@
 
 ## 概述
 
-TimingWheel 是一个基于时间轮算法的高性能定时器库，专为多线程Actor模型设计。它提供了对象池复用、并发安全和ABA问题防护等特性。
+TimingWheel 是一个基于时间轮算法的高性能定时器库，专为多线程Actor模型设计。它提供了分层时间轮、并发安全的调度器、同步/异步定时任务和测试环境时间偏移能力。
 
 ## 特性
 
 - ✅ **高性能时间轮算法** - O(1)时间复杂度的定时器插入和删除
-- ✅ **对象池复用** - Timer对象复用,减少GC压力
 - ✅ **并发安全** - 完整的并发保护机制
-- ✅ **ABA问题防护** - 通过generation版本号机制防止对象复用导致的错误执行
+- ✅ **安全生命周期** - 当前版本不复用Timer对象，避免Timer已投递但对象被重置复用导致的ABA问题
 - ✅ **多种定时器类型** - 支持一次性定时器、循环定时器、Cron表达式定时器
 - ✅ **异步执行支持** - 支持在独立goroutine中执行任务
-- ✅ **时间偏移支持** - 开发环境支持时间偏移调整,所有定时器自动重算(仅开发环境)
+- ✅ **时间偏移支持** - 测试/开发环境支持时间偏移调整,所有定时器自动重算(生产环境禁止调用)
 
 ## 架构设计
 
@@ -30,8 +29,8 @@ TimingWheel 是一个基于时间轮算法的高性能定时器库，专为多�
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────┐
-│                   Timer Pool                             │
-│  (对象池，复用Timer对象，带generation版本号)               │
+│                   Timer                                  │
+│  (每次创建独立对象；当前不使用对象池，优先生命周期安全)       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -65,16 +64,14 @@ defer timingwheel.Stop()
 // jobName: 调度器名称（用于日志）
 // chanSize: 回调通道大小
 // bucketSize: Timer分片数量
-// tw: 时间轮实例（传 nil 使用全局时间轮）
+// tw: 时间轮实例（由节点注入）
 // logger: 日志器
-// isDebug: 是否开启调试模式（开启后会记录对象池统计）
 scheduler := timingwheel.NewJobScheduler(
     "myService",
     1000, 
     10, 
     timingwheel.GetTimingWheel(),
     log.NewLoggerX(logger, log.Fields{"pkg": "myService"}),
-    false,
 )
 defer scheduler.Stop()
 ```
@@ -123,11 +120,12 @@ timerId, err := scheduler.CronFunc("@every 5s", "cronTimer",
 #### 异步定时器
 
 ```go
-// 在独立goroutine中执行（注意：异步回调不需要context和返回error）
+// 在独立goroutine中执行
 timerId, err := scheduler.AfterAsyncFunc(time.Second*5, "asyncTimer",
-    func(args ...interface{}) {
+    func(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
         // 在独立goroutine中执行
         fmt.Println("Async execution!")
+        return nil
     }, "arg1")
 ```
 
@@ -151,7 +149,7 @@ func (s *Service) startListenCallback() {
             if !ok {
                 return
             }
-            // 执行timer回调（内部会自动验证版本号防止ABA问题）
+            // 执行timer回调
             if err := t.Do(context.Background()); err != nil {
                 s.logger.Errorf("timer callback error: %v", err)
             }
@@ -160,7 +158,19 @@ func (s *Service) startListenCallback() {
 }
 ```
 
-## ABA问题防护机制
+## Timer复用与ABA问题说明
+
+当前生产代码**不使用 `sync.Pool` 复用 `Timer` 对象**。这是有意设计：Timer 触发后可能已经被投递到 callback channel 中等待业务消费，如果此时对象被回收并复用给另一个业务，旧 channel 中的指针后续被取出时就可能执行成新业务的 Timer。
+
+因此当前策略是：
+
+- 每次创建新的 `Timer` 对象；
+- 依靠 `cancel` 状态、scheduler 分片表、bucket 移除和 `addOrRun` active 检查保证生命周期安全；
+- 不为了减少少量分配而引入对象复用风险。
+
+如果未来确实需要恢复 `Timer` 对象池，必须同时引入 generation/triggerGeneration 形式的ABA防护。可参考仓库记忆中的 `timingwheel-aba-timer-reuse.md` 方案。
+
+### 未来对象池方案备忘
 
 ### 问题场景
 
@@ -172,54 +182,31 @@ func (s *Service) startListenCallback() {
 4. 服务B注册新Timer，复用了同一个Timer对象
 5. 服务A从mailbox取出Timer执行 → **错误执行了B的Timer！**
 
-### 解决方案
-
-使用**snapGen快照版本号**机制，在时间轮弹出Timer时冻结版本号：
+如果未来恢复对象池，可使用**触发快照版本号**机制，在时间轮弹出Timer时冻结版本号：
 
 ```go
-// Timer结构体包含两个版本号
 type Timer struct {
-    generation atomic.Uint64  // 每次Reset递增
-    snapGen    atomic.Uint64  // 在runTimer中冻结，用于验证
-    execWg     sync.WaitGroup // 等待执行完成（避免忙等待）
+    generation        atomic.Uint64 // 每次初始化/复用递增
+    triggerGeneration atomic.Uint64 // 触发投递前冻结，用于执行校验
     // ... 其他字段
 }
 
-// TimingWheel在Timer到期时冻结版本号
 func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
-    // 标记执行中，阻止 Reset() 在 runTimer 期间清理字段
-    if !t.executing.CompareAndSwap(false, true) {
-        return
-    }
-    t.execWg.Add(1)
-    
-    // 冻结snapGen，防止ABA问题
-    t.snapGen.Store(t.generation.Load())
-    // ... 快照拷贝其他字段
-    
-    t.executing.Store(false)
-    t.execWg.Done()
-    
-    // ... 投递到channel或执行
+    t.triggerGeneration.Store(t.generation.Load())
+    // ... 投递到channel或执行异步任务
 }
 
-// Timer.Do()执行时验证版本号
 func (t *Timer) Do(ctx context.Context) error {
-    t.execWg.Add(1)
-    defer t.execWg.Done()
-    
-    // 对比snapGen和generation
-    if t.snapGen.Load() != t.generation.Load() {
+    if t.triggerGeneration.Load() != t.generation.Load() {
         // 版本号不匹配，Timer已被回收并复用，丢弃
-        return def.ErrTimerReuse
+        return nil
     }
     // ... 执行任务
 }
 
-// Reset时递增generation，使旧引用失效
-func (t *Timer) Reset() {
-    t.execWg.Wait()  // 高效等待执行完成（零CPU占用）
+func (t *Timer) resetForReuse() {
     t.generation.Add(1)
+    t.triggerGeneration.Store(0)
     // ... 重置字段
 }
 ```
@@ -227,24 +214,19 @@ func (t *Timer) Reset() {
 **时序保证：**
 ```
 T1: TimingWheel检测到Timer到期
-T2: runTimer()被调用
-T3: 检查并设置 executing 标志
-T4: snapGen = generation （冻结版本号）✓
-T5: 快照拷贝所有需要的字段
-T6: 释放 executing 标志
-T7: c <- t (投递到channel) 或 执行异步任务
---- 即使这里Timer被Stop()并回收，snapGen已经冻结 ---
-T8: Service从channel接收timer
-T9: 执行Timer.Do(ctx)
-T10: Do()内部验证 snapGen == generation
-T11: 验证通过则执行，否则返回ErrTimerReuse
+T2: runTimer()被冻结 triggerGeneration = generation
+T3: c <- t 投递到channel，或启动异步任务
+T4: 如果Timer被回收并复用，generation递增
+T5: Service从channel接收旧timer指针
+T6: Do()内部验证 triggerGeneration == generation
+T7: 验证通过则执行，否则丢弃
 ```
 
 **优势：**
-- ✅ 版本号在投递前冻结，避免并发竞态
+- ✅ 版本号在投递前冻结，降低对象复用导致的ABA风险
 - ✅ 验证逻辑封装在Timer.Do()内部，使用方无需关心
 - ✅ 零额外对象分配
-- ✅ 完全防止ABA问题
+- ⚠️ 仍需配合严格的回收时机管理，不能在Timer仍可能位于callback channel或异步goroutine中时直接复用
 
 ## 性能特性
 
@@ -258,16 +240,15 @@ T11: 验证通过则执行，否则返回ErrTimerReuse
 
 ### 内存优化
 
-- **对象池复用**：Timer对象通过sync.Pool复用，减少GC压力
-- **零忙等待**：使用sync.WaitGroup替代忙等待，Reset/Stop时零CPU占用
+- **生命周期优先**：当前不复用Timer对象，避免已投递Timer被重置复用
 - **分片存储**：Timer按ID分片存储，减少锁竞争
 
 ### 并发安全
 
 - ✅ Timer字段分为可变（atomic）和不可变（初始化后只读）
-- ✅ executing标志防止重复执行
-- ✅ Stop/Reset使用WaitGroup高效等待执行完成（零CPU占用）
-- ✅ 全局TimingWheel有mutex保护
+- ✅ Stop/Cancel通过atomic状态、scheduler分片表和bucket移除协同处理
+- ✅ 同步回调通道只读暴露，内部投递与关闭有同步保护
+- ✅ TimingWheel调整时间偏移时有调整锁和pending队列保护
 
 ## 优缺点分析
 
@@ -275,8 +256,8 @@ T11: 验证通过则执行，否则返回ErrTimerReuse
 
 1. **高性能**
    - O(1)的定时器添加和删除
-   - 对象池复用，减少GC压力
-   - WaitGroup零CPU等待，高并发友好
+    - 分片存储减少调度器锁竞争
+    - 长延迟Timer通过分层overflow wheel覆盖，层级增长慢
 
 2. **易用性**
    - 支持多种定时器类型（一次性、循环、Cron）
@@ -285,7 +266,7 @@ T11: 验证通过则执行，否则返回ErrTimerReuse
 
 3. **可靠性**
    - 完整的并发保护
-   - ABA问题防护
+    - 不复用Timer对象，避免对象池ABA风险
    - 优雅的关闭机制
 
 4. **灵活性**
@@ -301,7 +282,7 @@ T11: 验证通过则执行，否则返回ErrTimerReuse
 
 2. **内存占用**
    - 时间轮需要预分配槽位数组
-   - 长时间定时器可能占用多个槽位
+    - 当前Timer不使用对象池，换取更简单可靠的生命周期语义
 
 3. **单节点限制**
    - 全局只有一个TimingWheel实例
@@ -345,10 +326,11 @@ scheduler.AfterFunc(time.Second, "syncTimer", func(ctx context.Context, t *Timer
 
 // 异步定时器：回调在独立goroutine中执行
 // 适用于不需要保证执行顺序，可以并发执行的任务
-scheduler.AfterAsyncFunc(time.Second, "asyncTimer", func(args ...interface{}) {
+scheduler.AfterAsyncFunc(time.Second, "asyncTimer", func(ctx context.Context, t *Timer, args ...interface{}) error {
     // 在独立goroutine中执行
     // 不保证与Service其他消息的执行顺序
     heavyComputation()  // 可以并发执行
+    return nil
 })
 ```
 
@@ -368,7 +350,6 @@ scheduler := timingwheel.NewJobScheduler(
     10,     // 分片数量
     timingwheel.GetTimingWheel(),
     logger,
-    false,  // isDebug
 )
 ```
 
@@ -376,7 +357,7 @@ scheduler := timingwheel.NewJobScheduler(
 
 1. **全局初始化**：必须先调用`timingwheel.Start()`启动全局时间轮
 2. **优雅关闭**：程序退出前调用`timingwheel.Stop()`和`scheduler.Stop()`
-3. **版本号验证**：Timer.Do()内部自动验证版本号,防止ABA问题
+3. **Timer生命周期**：当前不复用Timer对象；如未来恢复对象池，必须同时加入ABA版本号校验
 4. **回调执行上下文**：回调在Service的Worker线程中执行,可安全访问Service状态
 5. **Cron表达式**：使用标准Cron格式（秒 分 时 日 月 周）或`@every`语法
 
@@ -546,15 +527,15 @@ time.Sleep(5 * time.Second)
 type ITimerScheduler interface {
     // 一次性定时器
     AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
-    AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+    AfterAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
     
     // 循环定时器
     TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
-    TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+    TickerAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
     
     // Cron定时器
     CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
-    CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+    CronAsyncFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
     
     // 取消定时器
     CancelTimer(taskId uint64)
@@ -563,7 +544,7 @@ type ITimerScheduler interface {
     Stop()
     
     // 获取回调通道
-    GetTimerCbChannel() chan ITimer
+    GetTimerCbChannel() <-chan ITimer
 }
 
 // 回调函数类型
