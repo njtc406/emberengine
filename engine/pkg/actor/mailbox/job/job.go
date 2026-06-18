@@ -125,6 +125,8 @@ func NewRpcJob() *RpcJob {
 	return j
 }
 
+func (j *RpcJob) IsCancelOnContextDone() bool { return true }
+
 func (j *RpcJob) Release() { getMsgJobPool().Put(j) }
 
 // EventBusJob 承载 EventBus 投递的事件。

@@ -76,6 +76,15 @@ type IMailboxJob interface {
 	Release()
 }
 
+// ICancelableJob 标记 Job 在执行前是否应响应 context 取消。
+//
+// 默认 IMailboxJob 不具备该语义：PostJob 成功后仍遵循“入队即执行”的通用 mailbox 语义。
+// 只有显式实现该接口并返回 true 的 Job，Worker 才会在 ExecuteJob 前检查 ctx.Done()；
+// 若 ctx 已取消，则该 Job 被视为不会执行业务的 discard 路径。
+type ICancelableJob interface {
+	IsCancelOnContextDone() bool
+}
+
 // IMailboxChannel 消息接口
 //
 // 资源契约：

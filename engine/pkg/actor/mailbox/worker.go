@@ -495,6 +495,9 @@ func (w *Worker) safeExecSkipProfiler(job inf.IMailboxJob) {
 // skipShared=true 供 RW 模式读 goroutine 调用：注入 RW 读上下文、采集读时长。
 func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipShared bool) {
 	ctx := job.GetContext()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	mctx := job.GetMiddlewareContext()
 	var execErr error
 	var panicVal interface{}
@@ -533,6 +536,20 @@ func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipShared bool) {
 			job.Release()
 		}
 	}()
+
+	// ---------- 执行前取消检查 ----------
+	// 默认 mailbox 语义是“入队即执行”。只有显式实现 ICancelableJob 并返回 true 的 Job，
+	// 才在出队后、执行业务前响应 ctx 取消。这样可避免 RPC/请求类任务超时后继续浪费资源，
+	// 同时不影响 EventBus/系统消息等 fire-and-forget 任务。
+	if cancelable, ok := job.(inf.ICancelableJob); ok && cancelable.IsCancelOnContextDone() {
+		select {
+		case <-ctx.Done():
+			execErr = ctx.Err()
+			w.safeNotifyJobDiscarded(job, execErr)
+			return
+		default:
+		}
+	}
 
 	// ---------- watchdog: 单 Job 执行超时告警 ----------
 	if maxExec := w.env.rw.maxJobExecTime; maxExec > 0 {

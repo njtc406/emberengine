@@ -52,6 +52,19 @@ func newSimpleConf(workerNum int32) *config.MailboxConf {
 	}
 }
 
+func newWorkerForSafeExecTest(t *testing.T, invoker inf.IMessageInvoker) *Worker {
+	t.Helper()
+	return &Worker{
+		workerId: 1,
+		env: &WorkerEnv{
+			logger:          &testLogger{t: t},
+			invoker:         invoker,
+			middlewareChain: NewMiddlewareChain(nil),
+			rw:              &RWController{},
+		},
+	}
+}
+
 // waitUntil 等待条件满足或超时
 func waitUntil(t *testing.T, cond func() bool, timeout time.Duration, msg string) {
 	t.Helper()
@@ -96,6 +109,54 @@ func TestPostJob_Success_WorkerReleasesJob(t *testing.T) {
 	// 不应触发 discard
 	if invoker.discardCount.Load() != 0 {
 		t.Errorf("discardCount = %d, want 0", invoker.discardCount.Load())
+	}
+}
+
+func TestWorkerSafeExec_CancelableJobCanceledBeforeExecute_Discards(t *testing.T) {
+	invoker := &releaseTrackingInvoker{mockInvoker: mockInvoker{name: "test-svc"}}
+	w := newWorkerForSafeExecTest(t, invoker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	job := mbjob.NewRpcJob()
+	job.SetContext(ctx)
+	job.SetPriority(def.PriorityNormal)
+
+	w.safeExec(job)
+
+	if invoker.executeCount.Load() != 0 {
+		t.Errorf("executeCount = %d, want 0", invoker.executeCount.Load())
+	}
+	if invoker.discardCount.Load() != 1 {
+		t.Errorf("discardCount = %d, want 1", invoker.discardCount.Load())
+	}
+	if job.IsRef() {
+		t.Error("job should be unref'd after canceled discard")
+	}
+}
+
+func TestWorkerSafeExec_NonCancelableJobCanceledContext_StillExecutes(t *testing.T) {
+	invoker := &releaseTrackingInvoker{mockInvoker: mockInvoker{name: "test-svc"}}
+	w := newWorkerForSafeExecTest(t, invoker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	job := mbjob.NewEventBusJob()
+	job.SetContext(ctx)
+	job.SetPriority(def.PriorityNormal)
+
+	w.safeExec(job)
+
+	if invoker.executeCount.Load() != 1 {
+		t.Errorf("executeCount = %d, want 1", invoker.executeCount.Load())
+	}
+	if invoker.discardCount.Load() != 0 {
+		t.Errorf("discardCount = %d, want 0", invoker.discardCount.Load())
+	}
+	if job.IsRef() {
+		t.Error("job should be unref'd after execution")
 	}
 }
 
