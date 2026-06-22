@@ -19,3 +19,6 @@
 /engine/pkg/log/logs/
 tools/localetcd/example/data/
 /.vscode
+/docs/.gitnexus
+/docs/.github
+/docs/.claude
