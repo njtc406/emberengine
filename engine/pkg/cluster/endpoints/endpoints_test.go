@@ -142,6 +142,27 @@ func TestGetDispatcherCreatesTmpWhenMissing(t *testing.T) {
 	}
 }
 
+func TestEndpointManagerRouteByPid_UsesTemporaryDispatcherForUnknownRemoteReceiver(t *testing.T) {
+	em := newTestEndpointManager(t)
+	sender := actor.NewPID("127.0.0.1:6670", em.nodeUid, 1, "sender", "system", "SenderService", 1, def.RpcTypeGrpc)
+	receiver := actor.NewPID("127.0.0.1:6671", "remote-node", 1, "scene-1", "scene", "SceneService", 1, def.RpcTypeGrpc)
+
+	em.repository.AddWithMeta("", client.NewDispatcher(nil, sender, nil), def.SvcStatusReady, def.ServiceVisibilityCluster)
+
+	if got := em.repository.SelectByServiceUid(receiver.GetServiceUid()); got != nil {
+		t.Fatalf("receiver should not be preloaded in repository, got %T", got)
+	}
+
+	bus := em.RouteByPid(sender, receiver)
+	if bus == nil {
+		t.Fatalf("expected non-nil bus")
+	}
+
+	if got := em.repository.SelectByServiceUid(receiver.GetServiceUid()); got == nil {
+		t.Fatalf("expected receiver to be cached as temporary dispatcher")
+	}
+}
+
 func TestToNodeServiceUpdatesLocalVisibility(t *testing.T) {
 	em := newTestEndpointManager(t)
 	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)

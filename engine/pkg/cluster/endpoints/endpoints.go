@@ -217,6 +217,28 @@ func (em *EndpointManager) GetRepository() *repository.Repository {
 	return em.repository
 }
 
+func (em *EndpointManager) RouteByPid(sender, receiver *actor.PID) inf.IBus {
+	if em.repository == nil {
+		return nil
+	}
+
+	var senderDispatcher inf.IRpcDispatcher
+	if sender != nil {
+		senderDispatcher = em.repository.SelectByServiceUid(sender.GetServiceUid())
+	}
+
+	if receiver == nil {
+		return em.repository.NewBus(senderDispatcher, nil, def.ErrServiceNotFound)
+	}
+
+	receiverDispatcher := em.GetDispatcher(receiver)
+	if receiverDispatcher == nil || actor.IsRetired(receiverDispatcher.GetPid()) {
+		return em.repository.NewBus(senderDispatcher, receiverDispatcher, def.ErrServiceNotFound)
+	}
+
+	return em.repository.NewBus(senderDispatcher, receiverDispatcher, nil)
+}
+
 func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
 	if em.repository == nil || pid == nil {
 		return nil

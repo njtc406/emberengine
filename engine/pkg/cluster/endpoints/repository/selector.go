@@ -19,6 +19,10 @@ func (r *Repository) newMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcD
 	return msgbus.NewMessageBus(sender, receiver, err)
 }
 
+func (r *Repository) NewBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) inf.IBus {
+	return r.newMessageBus(sender, receiver, err)
+}
+
 func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 	v, ok := r.mapPID.Load(serviceUid)
 	if ok {

@@ -21,6 +21,11 @@ func TestRouter_NilEndpoints_SelectByPidReturnsNil(t *testing.T) {
 	assert.Nil(t, r.SelectByPid(testPID("S"), testPID("R")))
 }
 
+func TestRouter_NilEndpoints_RouteByPidReturnsNil(t *testing.T) {
+	r := NewRouter(nil)
+	assert.Nil(t, r.RouteByPid(testPID("S"), testPID("R")))
+}
+
 func TestRouter_NilEndpoints_SelectByServiceUidReturnsNil(t *testing.T) {
 	r := NewRouter(nil)
 	assert.Nil(t, r.SelectByServiceUid(testPID("S"), "some-uid"))

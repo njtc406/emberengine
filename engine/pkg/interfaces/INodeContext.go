@@ -63,6 +63,7 @@ type INodeEventBus interface {
 type INodeRouter interface {
 	Select(sender *actor.PID, options ...SelectParamBuilder) IBus
 	SelectByPid(sender, receiver *actor.PID) IBus
+	RouteByPid(sender, receiver *actor.PID) IBus
 	SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus
 	SelectByServiceUid(sender *actor.PID, receiverServiceUid string) IBus
 }

@@ -43,6 +43,8 @@ type IRpcSelector interface {
 
 	SelectByPid(receiver *actor.PID) IBus
 
+	RouteByPid(receiver *actor.PID) IBus
+
 	SelectByServiceUid(receiverServiceUid string) IBus
 
 	// SelectByRule 根据自定义规则选择服务

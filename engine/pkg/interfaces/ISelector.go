@@ -34,4 +34,11 @@ type ISelector interface {
 	SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) IBus
 
 	SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) IBus
+
+	// RouteByPid 根据业务提供的可路由 PID 构造消息路由。
+	//
+	// receiver 可以不来自服务发现，也可以不是完整的服务发现 PID；
+	// 但业务必须保证它包含当前 RPC 协议和远端分发所需的最小字段。
+	// 框架不会根据 name/address 推断或补全缺失的服务身份。
+	RouteByPid(sender, receiver *actor.PID) IBus
 }

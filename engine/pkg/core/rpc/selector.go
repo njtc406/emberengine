@@ -74,6 +74,14 @@ func (h *Handler) SelectByPid(receiver *actor.PID) inf.IBus {
 	return rt.SelectByPid(h.GetPid(), receiver)
 }
 
+func (h *Handler) RouteByPid(receiver *actor.PID) inf.IBus {
+	rt := h.getRouter()
+	if rt == nil {
+		return nil
+	}
+	return rt.RouteByPid(h.GetPid(), receiver)
+}
+
 // SelectByRule 根据自定义规则选择服务
 func (h *Handler) SelectByRule(rule func(pid *actor.PID) bool) inf.IBus {
 	rt := h.getRouter()

@@ -42,6 +42,14 @@ func (r *Router) SelectByPid(sender, receiver *actor.PID) inf.IBus {
 	return em.GetRepository().SelectByPid(sender, receiver)
 }
 
+func (r *Router) RouteByPid(sender, receiver *actor.PID) inf.IBus {
+	em := r.endpointManager()
+	if em == nil {
+		return nil
+	}
+	return em.RouteByPid(sender, receiver)
+}
+
 func (r *Router) SelectByServiceUid(sender *actor.PID, receiverServiceUid string) inf.IBus {
 	em := r.endpointManager()
 	if em == nil {

@@ -42,6 +42,7 @@ type mockRouter struct{}
 
 func (mr *mockRouter) Select(_ *actor.PID, _ ...inf.SelectParamBuilder) inf.IBus { return nil }
 func (mr *mockRouter) SelectByPid(_, _ *actor.PID) inf.IBus                      { return nil }
+func (mr *mockRouter) RouteByPid(_, _ *actor.PID) inf.IBus                       { return nil }
 func (mr *mockRouter) SelectByRule(_ *actor.PID, _ func(*actor.PID) bool) inf.IBus {
 	return nil
 }
