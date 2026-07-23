@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -32,4 +33,21 @@ func TestInvokeJob_UsesNanosecondDeadline(t *testing.T) {
 	err := registry.InvokeJob(context.Background(), rpcJob)
 	require.NoError(t, err)
 	assert.WithinDuration(t, expected, gotDeadline, 50*time.Millisecond)
+}
+
+func TestServiceExecuteJobPropagatesHandlerError(t *testing.T) {
+	service := &Service{jobRegistry: newJobHandlerRegistry()}
+	wantErr := errors.New("业务处理失败")
+	callCount := 0
+	registerJobHandler(service.jobRegistry, def.MailboxJobTypeRpc, func(context.Context, inf.IEnvelope) error {
+		callCount++
+		return wantErr
+	})
+
+	rpcJob := job.NewRpcJob()
+	defer rpcJob.Release()
+
+	err := service.ExecuteJob(context.Background(), rpcJob)
+	require.Same(t, wantErr, err)
+	assert.Equal(t, 1, callCount)
 }

@@ -61,10 +61,6 @@ func registerJobHandler[T any](registry *jobHandlerRegistry, jobType def.Mailbox
 // 1. InvokeJob 返回后 Job 可安全释放（无 use-after-free）
 // 2. 外层 rwMu 锁的保护范围覆盖 handler 的完整执行生命周期
 // 3. handler 必须 respect context cancellation/timeout 以避免无限阻塞
-//
-// 【事务机制】由 Service.ExecuteJob 管理事务钩子：
-// handler 成功 → 执行 commit 钩子；handler 失败 → 执行 rollback 钩子。
-// 钩子在 Service.Init 阶段一次性注册，内部自行根据脏标记决定实际操作。
 func (r *jobHandlerRegistry) InvokeJob(ctx context.Context, mJob inf.IMailboxJob) error {
 	handler, ok := r.handlers[mJob.GetType()]
 	if !ok {
@@ -210,69 +206,6 @@ func (s *Service) handleSysCtl(ctx context.Context, cmd dto.SysCmd) error {
 }
 
 // ExecuteJob 实现 IMessageInvoker 接口
-//
-// 事务语义：
-//   - handler 成功 → 执行所有 commit 钩子（如：清除脏标记、刷盘等）
-//   - handler 失败 → 执行所有 rollback 钩子（如：恢复快照数据）
-//
-// 钩子在 Init 阶段注册，内部自行根据脏标记决定是否需要实际操作。
-// 此时 Job 仍存活、外层 rwMu 仍持有，业务状态可安全操作。
 func (s *Service) ExecuteJob(ctx context.Context, job inf.IMailboxJob) error {
-	err := s.jobRegistry.InvokeJob(ctx, job)
-
-	if err != nil {
-		// handler 失败（含 panic→error）：执行 rollback 钩子
-		if s.txHookMgr.HasRollback() {
-			s.txHookMgr.Rollback()
-		}
-		s.WithContext(ctx).Errorf("invoke job[%+v] error: %v\nstack:%s", job, err, string(debug.Stack()))
-		return err
-	}
-
-	// handler 成功：执行 commit 钩子
-	if s.txHookMgr.HasCommit() {
-		s.txHookMgr.Commit()
-	}
-	return nil
-}
-
-// RegisterCommit 注册 commit 钩子（Init 阶段调用，注册后不可修改）。
-//
-// 每次写操作(Write) Job handler 成功后，框架按 LIFO 顺序调用所有 commit 钩子。
-// 钩子内部自行根据脏标记等条件判断是否需要执行实际操作（如清除脏标记、刷盘等）。
-// 读操作(Read)路径并发执行，不触发事务钩子。
-//
-// 使用示例（在 Init/OnInit 中注册）：
-//
-//	func (s *MyService) OnInit() error {
-//	    s.RegisterCommit(func() {
-//	        if s.balanceDirty {
-//	            s.balanceDirty = false  // 清除脏标记，确认本次修改
-//	        }
-//	    })
-//	    return nil
-//	}
-func (s *Service) RegisterCommit(fn TxHookFunc) {
-	s.txHookMgr.RegisterCommit(fn)
-}
-
-// RegisterRollback 注册 rollback 钩子（Init 阶段调用，注册后不可修改）。
-//
-// 每次写操作(Write) Job handler 失败后，框架按 LIFO 顺序调用所有 rollback 钩子。
-// 钩子内部自行根据脏标记等条件判断是否需要执行实际回滚（如恢复快照数据）。
-// 读操作(Read)路径并发执行，不触发事务钩子。
-//
-// 使用示例（在 Init/OnInit 中注册）：
-//
-//	func (s *MyService) OnInit() error {
-//	    s.RegisterRollback(func() {
-//	        if s.balanceDirty {
-//	            s.balance = s.balanceSnapshot  // 恢复到修改前的快照
-//	            s.balanceDirty = false
-//	        }
-//	    })
-//	    return nil
-//	}
-func (s *Service) RegisterRollback(fn TxHookFunc) {
-	s.txHookMgr.RegisterRollback(fn)
+	return s.jobRegistry.InvokeJob(ctx, job)
 }

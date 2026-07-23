@@ -71,8 +71,6 @@ type Service struct {
 
 	sysCtlRegistry *sysCtlRegistry // SysCtl 命令注册中心
 
-	txHookMgr TxHookManager // 事务钩子管理器（值类型，Init 注册，写路径 WLock 串行保护）
-
 	stopGraceTimeout time.Duration // 关闭时等待窗口
 	stopRequested    atomic.Bool   // 是否已请求停止（防止重复投递 FinalizeEvent）
 	initErr          error
