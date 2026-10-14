@@ -1,0 +1,69 @@
+{
+  "target": {
+    "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_test.go:TestMailboxPerformanceSample",
+    "name": "TestMailboxPerformanceSample",
+    "type": "Function",
+    "filePath": "engine/pkg/actor/mailbox/mailbox_performance_test.go"
+  },
+  "direction": "upstream",
+  "impactedCount": 0,
+  "risk": "LOW",
+  "summary": {
+    "direct": 0,
+    "processes_affected": 0,
+    "modules_affected": 0
+  },
+  "byDepthCounts": {},
+  "affected_processes": [],
+  "affected_modules": [],
+  "byDepth": {}
+}
+{
+  "target": {
+    "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_replication_test.go:mailboxPerfReplication",
+    "name": "mailboxPerfReplication",
+    "type": "Function",
+    "filePath": "engine/pkg/actor/mailbox/mailbox_performance_replication_test.go"
+  },
+  "direction": "upstream",
+  "impactedCount": 2,
+  "risk": "LOW",
+  "summary": {
+    "direct": 2,
+    "processes_affected": 0,
+    "modules_affected": 1
+  },
+  "byDepthCounts": {
+    "1": 2
+  },
+  "affected_processes": [],
+  "affected_modules": [
+    {
+      "name": "Mailbox",
+      "hits": 2,
+      "impact": "direct"
+    }
+  ],
+  "byDepth": {
+    "1": [
+      {
+        "depth": 1,
+        "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_replication_test.go:TestMailboxPerfReplicationProtocol",
+        "name": "TestMailboxPerfReplicationProtocol",
+        "filePath": "engine/pkg/actor/mailbox/mailbox_performance_replication_test.go",
+        "relationType": "CALLS",
+        "confidence": 0.85,
+        "processes": []
+      },
+      {
+        "depth": 1,
+        "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_test.go:TestMailboxPerformanceSample",
+        "name": "TestMailboxPerformanceSample",
+        "filePath": "engine/pkg/actor/mailbox/mailbox_performance_test.go",
+        "relationType": "CALLS",
+        "confidence": 0.85,
+        "processes": []
+      }
+    ]
+  }
+}

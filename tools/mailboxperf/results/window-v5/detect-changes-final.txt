@@ -1,0 +1,10 @@
+Changes: 23 files, 5 symbols
+Affected processes: 0
+Risk level: low
+
+Changed symbols:
+  Symbol mailboxPerfReplication → engine/pkg/actor/mailbox/mailbox_performance_replication_test.go
+  Symbol TestMailboxPerformanceSample → engine/pkg/actor/mailbox/mailbox_performance_test.go
+  Symbol validateMailboxPerfBaseline → engine/pkg/actor/mailbox/mailbox_performance_test.go
+  Symbol Task 2 performance report → task-2-report.md
+  Symbol Remaining gaps / concerns → task-2-report.md

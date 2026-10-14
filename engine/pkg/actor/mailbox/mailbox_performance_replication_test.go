@@ -12,7 +12,7 @@ func mailboxPerfReplication(mode string) (int, error) {
 	switch mode {
 	case "":
 		return 1, nil
-	case mailboxPerfReplicatedProtocol:
+	case mailboxPerfReplicatedProtocol, "task2-v5-window":
 		return 32, nil
 	default:
 		return 0, fmt.Errorf("unsupported fixed replication protocol %q", mode)

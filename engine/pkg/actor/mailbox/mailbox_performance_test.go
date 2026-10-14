@@ -190,13 +190,25 @@ func TestMailboxPerformanceSample(t *testing.T) {
 				}
 				wait(int64(i + 1))
 			}
-			jobs := make([]*perfJob, n*windows)
-			for i := range jobs {
-				jobs[i] = makeJob(i % n)
+			windowed := os.Getenv("MAILBOX_PERF_PROTOCOL") == "task2-v5-window"
+			var jobs []*perfJob
+			var fixture *mailboxPerfWindow
+			var durations []time.Duration
+			if windowed {
+				fixture = newMailboxPerfWindow(n, &released)
+				durations = make([]time.Duration, 0, n*windows)
+			} else {
+				jobs = make([]*perfJob, n*windows)
+				for i := range jobs {
+					jobs[i] = makeJob(i % n)
+				}
 			}
 			row := mailboxPerfRow{Protocol: "task2-v3-qpc", Machine: perftest.Machine(), Candidate: candidate, Scenario: s.Name, Workers: s.Workers, EffectiveRW: mb.workerPool.rw.enabled.Load(), Samples: n * windows, Windows: windows}
 			if windows > 1 {
 				row.Protocol = mailboxPerfReplicatedProtocol
+			}
+			if windowed {
+				row.Protocol = "task2-v5-window"
 			}
 			before, err := perftest.CPUTime()
 			if err != nil {
@@ -204,8 +216,19 @@ func TestMailboxPerformanceSample(t *testing.T) {
 			}
 			blockStart := time.Now()
 			for window := 0; window < windows; window++ {
+				var windowJobs []*perfJob
+				if windowed {
+					// Include every acquisition/reset in CPU and wall accounting,
+					// but begin the identical offered schedule only after preparation.
+					if err := fixture.prepare(s); err != nil {
+						t.Fatal(err)
+					}
+					windowJobs = fixture.jobs
+				} else {
+					windowJobs = jobs[window*n : (window+1)*n]
+				}
 				start := time.Now()
-				for i, j := range jobs[window*n : (window+1)*n] {
+				for i, j := range windowJobs {
 					if i%batch == 0 {
 						due := start.Add(time.Duration(i/batch) * tick)
 						if delay := time.Until(due); delay > 0 {
@@ -229,6 +252,14 @@ func TestMailboxPerformanceSample(t *testing.T) {
 					}
 				}
 				wait(int64((window+1)*n + 256))
+				if windowed {
+					first := len(durations)
+					durations, err = fixture.collect(durations)
+					if err != nil {
+						t.Fatal(err)
+					}
+					row.WindowCompletions = append(row.WindowCompletions, perftest.Percentiles(durations[first:]))
+				}
 			}
 			row.Wall = time.Since(blockStart)
 			after, err := perftest.CPUTime()
@@ -240,7 +271,7 @@ func TestMailboxPerformanceSample(t *testing.T) {
 			if windows > 1 {
 				row.CPUResolved = mailboxPerfCPUResolved(row.CPU)
 			}
-			for window := 0; window < windows; window++ {
+			for window := 0; !windowed && window < windows; window++ {
 				var latencies []time.Duration
 				for _, j := range jobs[window*n : (window+1)*n] {
 					if j.executed.Load() {
@@ -250,7 +281,9 @@ func TestMailboxPerformanceSample(t *testing.T) {
 				row.WindowCompletions = append(row.WindowCompletions, perftest.Percentiles(latencies))
 			}
 			n *= windows
-			durations := make([]time.Duration, 0, n)
+			if !windowed {
+				durations = make([]time.Duration, 0, n)
+			}
 			for _, j := range jobs {
 				if j.executed.Load() {
 					durations = append(durations, j.latency)

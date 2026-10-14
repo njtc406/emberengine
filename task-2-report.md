@@ -238,3 +238,31 @@ Examples of production screening failures from `comparison.csv`:
 7. Benchmark duration is intentionally fixed and short; longer isolated deployment-machine runs are needed. Unix helper still requires target-platform execution validation.
 
 **Decision:** retain default unbounded; no canary authorization. Complete missing production evidence in Task 9 or a follow-up explicitly scoped to those requirements. Do not substitute microbenchmark wins or loosen thresholds to bypass these blockers.
+
+## 2026-10-14: retained-fixture hypothesis / distinct task2-v5-window protocol
+
+Evidence is additive in `tools/mailboxperf/results/window-v5`; v3/v4 and rejection diagnostics are unchanged. No random rejection reproduction was attempted. Required upstream impact on the freshly indexed worktree: `TestMailboxPerformanceSample` LOW (zero callers/flows), `mailboxPerfReplication` LOW (two test callers, zero flows); no production symbols changed.
+
+**Hypothesis demonstrated, stall attribution not demonstrated.** The v4 slice roots every perfJob, each of which roots its real pooled EventBusJob even after Release; before submission all windows' Jobs are simultaneously checked out. Event payload is nil in this workload. The initial allocation therefore changes pool occupancy, live pointer graph, heap goal and GC work, not merely accumulated CPU. Deterministic 65,536-job diagnostic, GOMAXPROCS=4:
+
+| Windows | Jobs retained | Retained bytes above clean heap | Allocated bytes | Live object delta | Forced GC wall |
+|---|---:|---:|---:|---:|---:|
+| 1 | 65,536 | 9,964,048 | 10,484,872 | 131,090 | 1.026 ms |
+| 4 | 262,144 | 39,847,392 | 41,925,064 | 524,297 | 14.012 ms |
+| 32 | 2,097,152 | 318,768,784 | 335,354,512 | 4,194,315 | 48.630 ms |
+
+This is essentially 32x retention (~304 MiB versus ~9.5 MiB), violating the intended repeated-identical-window interpretation. Both baseline/current unbounded and bounded shared v4's defect; identical source alone does not remove different allocation/pool/collector interactions across candidates. V4 remains evidence for that specific large-live-heap workload, not a clean replication of v3. New/old protocols must never be combined for ratios or gate decisions.
+
+`legacy-gc.txt` confirms up to ~40 ms concurrent marking and 44.4 ms forced-GC wall at 32 windows. ReadMemStats pause fields initially returned zero; a separate deterministic trace recorded 511 us at four windows. Zero reported pause is not proof of zero scheduling interruption. These are NOT 194 ms STW measurements: concurrent mark duration and runtime.GC wall include non-STW work. Heap pressure is a plausible contributor to scheduling/assist effects, but no causal explanation of the historical 194 ms stall is established.
+
+**Design implemented:** task2-v5-window keeps n reusable wrappers, acquires real pooled Jobs for exactly one window, drains through the post-Release atomic counter, copies scalar latency/executed results, drops stale Job references, and only then prepares the next window. Underlying Jobs are reacquired from the pool, never manually resurrected. No nonnil Event payload exists to reuse. Preparation rejects active windows; collection rejects incomplete/double collection. Per-window key/RW mapping, offered deadlines/batch/tick, CPU loop, resize transitions, warmup and capacities remain identical. O(n*windows) scalar durations (16 MiB for the fixed pilot) are intentionally retained for exact message-level pooled percentiles, not percentiles of window percentiles. The window quantiles remain diagnostic only.
+
+Accounting is explicit: wrapper/scalar-buffer setup remains outside row CPU/wall, like fixture setup in v4; every per-window Job/key acquisition, reset, collection and window sort is INSIDE row CPU/wall for ALL candidates. There is no disabling GC or moving per-window allocation off-clock. This changed accounting is another reason v5 cannot be compared numerically with v4. Setup/live allocation is reported by the standalone diagnostic rather than silently treated as zero cost. Final pooled sorting remains outside row timing in both protocols.
+
+V5 deterministic diagnostic (including the fixed full scalar buffer): retained bytes at windows 1/4/32 were 28,843,136 / 28,843,424 / 28,839,200; wrappers stayed 65,536, live objects ~131,100. Total allocation through 32 windows was 51,737,400 bytes; reuse is not claimed allocation-free. Forced GC wall was ~2 ms. Runtime metrics reported heap scan 12,215,680 bytes and GC CPU 0.02594 s; pause histogram included one [458.752,524.288) us bucket. Forced GC is diagnostic-only, never used in the pilot.
+
+**Fixed same-candidate pilot, once only:** priority-w1-rwfalse-hottrue-steady, bounded, 32 windows, GOMAXPROCS=4, normal GC with gctrace. 2,097,152/2,097,152 completed, zero rejection, drained; wall 65.84785 s; CPU 2.640625 s (169 quanta), below unchanged 3.125 s minimum. P50/P99/P999 = 8.9/20.7/43.1 us. Application GC trace (after RUN, not compiler traces) stabilizes at ~29 MiB live, ~2 ms concurrent marking. This supports bounded-retention validity, NOT acceptance or proof the historical stall was GC. CPU resolution still fails; no additional pilot or full comparison was run. `window-pilot.ps1` preserves that exact invocation and refuses overwrite.
+
+Validation: new protocol regression failed first; ownership regression initially failed to compile before helper implementation. Targeted tests passed; short perftest/mailbox/boundedmpsc suites passed; race tests passed including 32 real-mailbox windows for both backends. Initial diagnostic integration test used a missing bounded capacity config and failed; its raw output is retained, configuration corrected to the unchanged 4096 capacities, subsequent race/full-suite results passed. No production, queue capacity, threshold, default-backend or acceptance gate changes.
+
+**Next justified action:** retain the invalid-CPU decision. A separately preregistered measurement protocol using a sufficiently resolved process CPU source on controlled hardware is needed before any matched baseline/current/bounded comparison. Do not extend windows opportunistically or interpret this pilot as project completion, deployment approval, or proof of stall causality.
