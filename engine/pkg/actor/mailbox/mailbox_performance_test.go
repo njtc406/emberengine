@@ -190,7 +190,8 @@ func TestMailboxPerformanceSample(t *testing.T) {
 				}
 				wait(int64(i + 1))
 			}
-			windowed := os.Getenv("MAILBOX_PERF_PROTOCOL") == "task2-v5-window"
+			protocol := os.Getenv("MAILBOX_PERF_PROTOCOL")
+			windowed := protocol == "task2-v5-window" || protocol == "task2-v5-window-fixed128"
 			var jobs []*perfJob
 			var fixture *mailboxPerfWindow
 			var durations []time.Duration
@@ -208,7 +209,7 @@ func TestMailboxPerformanceSample(t *testing.T) {
 				row.Protocol = mailboxPerfReplicatedProtocol
 			}
 			if windowed {
-				row.Protocol = "task2-v5-window"
+				row.Protocol = protocol
 			}
 			before, err := perftest.CPUTime()
 			if err != nil {

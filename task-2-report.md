@@ -1,5 +1,31 @@
 # Task 2 performance report
 
+## Latest disposition: fixed128 focused experiment — STOP (2026-10-14)
+
+**Authorized fixed experiment completed; Task2 remains NOT ACCEPTED.** CPU precision is now sufficient in all 15 rows, but bounded lost submissions in three of five rounds. Its five-round CPU comparison is INVALID, not a demonstrated CPU regression or a pass. No selective removal, replacement, rerun or tuning was performed. No production changes. Tasks7/8/9 remain blocked/not executed; no deployment, canary, merge or production approval.
+
+Preregistered protocol and minimum CPU exposure are in `tools/mailboxperf/results/fixed128-v5/protocol.md`, with pre-execution registration and identical baseline/current helper SHA256 manifests. The only fixture change is a separately named fixed128 protocol; original V5/V4 remain 32 windows. The unchanged focused scenario is priority/w1/RW-off/hot/steady, 65,536 jobs/window, 128 windows, 8,388,608 offered jobs/row. Minimum CPU remains 3.125s, CPU ratio limit 1.10. Five rotating rounds ran once, sequentially, 06:01:25–07:08:38 UTC (~67 minutes), against isolated baseline 73ecd28 and current 5b703f3 plus recorded test-only support. Baseline isolation was removed afterward. Machine: Ryzen 7 5700X, Windows/amd64, Go 1.24.9, GOMAXPROCS=4; gctrace=1 for all rows.
+
+### Complete focused results
+
+All rows drained and resolved CPU. All rejection counts below are main-queue rejects; other rejection/drop categories are zero. Successful count equals 8,388,608 minus rejects. Bounded rounds 0–2 exited 1 for non-overload loss; all other exits were 0. Wall time, full quantiles, per-window distributions, raw GC/test output and exact exit/order timestamps are retained in individual JSON/TXT files, `summary.csv` and `attempts.json`. Raw fixture `Round` defaults to zero; filename and attempts ledger are the authoritative actual round IDs (raw rows intentionally not rewritten).
+
+| Round | Baseline CPU s | Unbounded CPU s | Bounded CPU s | Bounded rejects | Bounded valid |
+|---|---:|---:|---:|---:|---|
+| 0 | 11.734375 | 13.203125 | 14.343750 | 30,926 | No |
+| 1 | 13.187500 | 12.765625 | 11.015625 | 2,112 | No |
+| 2 | 11.312500 | 10.703125 | 11.078125 | 954 | No |
+| 3 | 11.906250 | 11.500000 | 10.921875 | 0 | Yes |
+| 4 | 12.062500 | 12.796875 | 11.687500 | 0 | Yes |
+
+Baseline and current-unbounded are loss-free in all five rounds. Their median CPU/success ratio is **1.0721784777**, below unchanged 1.10 (focused CPU criterion only). Baseline median CPU is 11.90625s; unbounded is 12.765625s. Paired ratios, descriptive only: 1.12516644, 0.96800948, 0.94613260, 0.96587927, 1.06088083. Host variability is visible; this is not a confidence-bound attestation. Bounded's 33,992 total rejected submissions invalidate the series; no bounded aggregate ratio is offered using the two surviving rounds. CPU exposure no longer blocks measurement, but loss blocks the requested bounded inference. The cause of stalls/loss is not newly diagnosed here.
+
+### Verification and exact remaining status
+
+Selector regression failed before implementation and passed afterward (`red.txt`, `green.txt`). Fresh full `go test ./engine/internal/perftest ./engine/pkg/actor/mailbox -count=1` passed; those correctness tests skip opt-in performance and do not override the three recorded measurement failures. GitNexus impact was LOW; final detect_changes identifies exactly three test symbols in two files, zero affected processes, low risk. `git diff --check` passed. Helper hashes verified identical before running; prior evidence untouched. No new race run or OS scheduler attestation is claimed.
+
+The fixed authorization is exhausted: **STOP, no further experiment tweaks.** Remaining Task2 work is unresolved bounded non-overload loss and a valid bounded focused comparison, followed by the complete frozen 15-scenario, three-candidate, five-round matrix (225 observations) with compatible valid exposure for every scenario: dual/priority × worker/RW combinations (w1/RW-off, w4/RW-off, w4/RW-on) × hot/distributed, plus mostly-empty, resize and overload. Full throughput, CPU/success, p99/p999, idle CPU and overload-specific criteria remain unaccepted; this experiment substitutes for none of those full-matrix gates. Further work requires separate authorization, not automatic reruns. Tasks7/8/9 must not proceed. Earlier sections retain chronological stops and are not current approvals.
+
 ## Bounded rejection investigation (2026-10-14)
 
 **STOP after one diagnostic: physical queue exhaustion is established; the triggering stall behind the historical 2,144 rejects is NOT isolated. No harness bug is demonstrated, no production fix is justified, and Task2 remains unaccepted.** This investigation did not retry acceptance, tune rates/capacities, discard arrivals, or resume Tasks7/8/9.

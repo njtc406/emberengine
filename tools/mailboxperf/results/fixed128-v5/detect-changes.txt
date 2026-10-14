@@ -1,0 +1,12 @@
+warning: in the working copy of 'engine/pkg/actor/mailbox/mailbox_performance_replication_test.go', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'engine/pkg/actor/mailbox/mailbox_performance_test.go', LF will be replaced by CRLF the next time Git touches it
+Changes: 2 files, 3 symbols
+Affected processes: 0
+Risk level: low
+
+Changed symbols:
+  Symbol mailboxPerfReplication → engine/pkg/actor/mailbox/mailbox_performance_replication_test.go
+  Symbol TestMailboxPerfReplicationProtocol → engine/pkg/actor/mailbox/mailbox_performance_replication_test.go
+  Symbol TestMailboxPerformanceSample → engine/pkg/actor/mailbox/mailbox_performance_test.go
+(node:43852) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)

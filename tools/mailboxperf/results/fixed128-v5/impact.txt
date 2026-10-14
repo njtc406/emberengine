@@ -1,0 +1,66 @@
+{
+  "target": {
+    "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_replication_test.go:mailboxPerfReplication",
+    "name": "mailboxPerfReplication",
+    "type": "Function",
+    "filePath": "engine/pkg/actor/mailbox/mailbox_performance_replication_test.go"
+  },
+  "direction": "upstream",
+  "impactedCount": 0,
+  "risk": "LOW",
+  "summary": {
+    "direct": 0,
+    "processes_affected": 0,
+    "modules_affected": 0
+  },
+  "byDepthCounts": {},
+  "affected_processes": [],
+  "affected_modules": [],
+  "byDepth": {}
+}
+(node:38088) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "target": {
+    "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_test.go:TestMailboxPerformanceSample",
+    "name": "TestMailboxPerformanceSample",
+    "type": "Function",
+    "filePath": "engine/pkg/actor/mailbox/mailbox_performance_test.go"
+  },
+  "direction": "upstream",
+  "impactedCount": 0,
+  "risk": "LOW",
+  "summary": {
+    "direct": 0,
+    "processes_affected": 0,
+    "modules_affected": 0
+  },
+  "byDepthCounts": {},
+  "affected_processes": [],
+  "affected_modules": [],
+  "byDepth": {}
+}
+(node:38768) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "target": {
+    "id": "Function:engine/pkg/actor/mailbox/mailbox_performance_replication_test.go:TestMailboxPerfReplicationProtocol",
+    "name": "TestMailboxPerfReplicationProtocol",
+    "type": "Function",
+    "filePath": "engine/pkg/actor/mailbox/mailbox_performance_replication_test.go"
+  },
+  "direction": "upstream",
+  "impactedCount": 0,
+  "risk": "LOW",
+  "summary": {
+    "direct": 0,
+    "processes_affected": 0,
+    "modules_affected": 0
+  },
+  "byDepthCounts": {},
+  "affected_processes": [],
+  "affected_modules": [],
+  "byDepth": {}
+}
+(node:40604) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)

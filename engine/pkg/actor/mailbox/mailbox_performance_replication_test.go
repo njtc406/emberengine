@@ -14,6 +14,8 @@ func mailboxPerfReplication(mode string) (int, error) {
 		return 1, nil
 	case mailboxPerfReplicatedProtocol, "task2-v5-window":
 		return 32, nil
+	case "task2-v5-window-fixed128":
+		return 128, nil
 	default:
 		return 0, fmt.Errorf("unsupported fixed replication protocol %q", mode)
 	}
@@ -29,7 +31,8 @@ func TestMailboxPerfReplicationProtocol(t *testing.T) {
 		windows int
 		valid   bool
 	}{
-		{"", 1, true}, {"task2-v4-replicated", 32, true}, {"32", 0, false},
+		{"", 1, true}, {"task2-v4-replicated", 32, true}, {"task2-v5-window", 32, true},
+		{"task2-v5-window-fixed128", 128, true}, {"128", 0, false}, {"32", 0, false},
 	} {
 		windows, err := mailboxPerfReplication(tc.mode)
 		if (err == nil) != tc.valid || windows != tc.windows {

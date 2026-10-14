@@ -1,0 +1,92 @@
+[
+  {
+    "Candidate": "baseline",
+    "Round": 0,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:06:00.3051276Z"
+  },
+  {
+    "Candidate": "unbounded",
+    "Round": 0,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:10:29.9287219Z"
+  },
+  {
+    "Candidate": "bounded",
+    "Round": 0,
+    "Exit": 1,
+    "Finished": "2026-10-14T06:14:58.6884467Z"
+  },
+  {
+    "Candidate": "unbounded",
+    "Round": 1,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:19:29.0727755Z"
+  },
+  {
+    "Candidate": "bounded",
+    "Round": 1,
+    "Exit": 1,
+    "Finished": "2026-10-14T06:23:55.9475310Z"
+  },
+  {
+    "Candidate": "baseline",
+    "Round": 1,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:28:23.4112430Z"
+  },
+  {
+    "Candidate": "bounded",
+    "Round": 2,
+    "Exit": 1,
+    "Finished": "2026-10-14T06:32:50.2289820Z"
+  },
+  {
+    "Candidate": "baseline",
+    "Round": 2,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:37:17.1661814Z"
+  },
+  {
+    "Candidate": "unbounded",
+    "Round": 2,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:41:43.7125923Z"
+  },
+  {
+    "Candidate": "baseline",
+    "Round": 3,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:46:11.4486457Z"
+  },
+  {
+    "Candidate": "unbounded",
+    "Round": 3,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:50:42.2432536Z"
+  },
+  {
+    "Candidate": "bounded",
+    "Round": 3,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:55:09.2077677Z"
+  },
+  {
+    "Candidate": "unbounded",
+    "Round": 4,
+    "Exit": 0,
+    "Finished": "2026-10-14T06:59:42.8779258Z"
+  },
+  {
+    "Candidate": "bounded",
+    "Round": 4,
+    "Exit": 0,
+    "Finished": "2026-10-14T07:04:09.9460790Z"
+  },
+  {
+    "Candidate": "baseline",
+    "Round": 4,
+    "Exit": 0,
+    "Finished": "2026-10-14T07:08:38.5678062Z"
+  }
+]

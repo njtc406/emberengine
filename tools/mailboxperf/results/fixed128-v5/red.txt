@@ -1,0 +1,5 @@
+--- FAIL: TestMailboxPerfReplicationProtocol (0.00s)
+    mailbox_performance_replication_test.go:37: "task2-v5-window-fixed128": 0 unsupported fixed replication protocol "task2-v5-window-fixed128"
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.118s
+FAIL
