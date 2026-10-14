@@ -8,6 +8,7 @@ package services
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/authz"
 	"github.com/njtc406/emberengine/engine/pkg/cluster"
@@ -44,15 +45,16 @@ func GetServiceFactory(name string) (func() inf.IService, bool) {
 
 // ServiceManager 管理单个 Node 的运行时服务实例。
 type ServiceManager struct {
-	log.ILoggerX // 持有 ILoggerX
-	runServices  []inf.IService
-	daemon       *daemon
-	cluster      *cluster.Cluster
-	endpoints    *endpoints.EndpointManager
-	profilerReg  *profiler.Registry
-	router       *router.Router
-	nodeCtx      inf.INodeContext
-	authorizer   *authz.Authorizer
+	observedQueueHighWatermark atomic.Int64
+	log.ILoggerX               // 持有 ILoggerX
+	runServices                []inf.IService
+	daemon                     *daemon
+	cluster                    *cluster.Cluster
+	endpoints                  *endpoints.EndpointManager
+	profilerReg                *profiler.Registry
+	router                     *router.Router
+	nodeCtx                    inf.INodeContext
+	authorizer                 *authz.Authorizer
 }
 
 type runtimeDepsAware interface {

@@ -25,12 +25,24 @@ func MailboxMetricsToSamples(m *def.MailboxMetrics) []MetricSample {
 		return nil
 	}
 
-	return []MetricSample{
+	samples := []MetricSample{
 		{Desc: mailboxMetricDescs.PostTotal, Value: float64(m.PostTotal)},
 		{Desc: mailboxMetricDescs.SuspendedTotal, Value: float64(m.SuspendedTotal)},
 		{Desc: mailboxMetricDescs.RejectedTotal, Value: float64(m.RejectedTotal)},
 		{Desc: mailboxMetricDescs.DispatchFailedTotal, Value: float64(m.DispatchFailedTotal)},
+		{Desc: MetricDesc{Name: "ember_mailbox_queue_full_rejected_total", Help: "Main queue full rejections across live services; may decrease on service removal", Type: Counter}, Value: float64(m.QueueFullRejectedTotal)},
+		{Desc: MetricDesc{Name: "ember_mailbox_read_queue_full_discarded_total", Help: "RW secondary queue full discards across live services; not synchronous rejections and may decrease on service removal", Type: Counter}, Value: float64(m.ReadQueueFullDiscardedTotal)},
+		{Desc: MetricDesc{Name: "ember_mailbox_queue_length", Help: "Approximate nonnegative main queue length excluding readCh, pending and executing jobs", Type: Gauge}, Value: float64(m.QueueLength)},
+		{Desc: MetricDesc{Name: "ember_mailbox_queue_observed_high_watermark", Help: "Maximum global main queue length observed at collection, not an exact lifetime peak", Type: Gauge}, Value: float64(m.ObservedQueueHighWatermark)},
 	}
+	switch m.QueueBackend {
+	case "bounded", "unbounded", "mixed":
+		samples = append(samples, MetricSample{Desc: MetricDesc{Name: "ember_mailbox_queue_backend_info", Help: "Backend composition of observable mailboxes", Type: Gauge}, Labels: map[string]string{"backend": m.QueueBackend}, Value: 1})
+	}
+	if m.QueueBounded && m.QueueBackend == "bounded" {
+		samples = append(samples, MetricSample{Desc: MetricDesc{Name: "ember_mailbox_queue_capacity", Help: "Main queue capacity; present only for a nonempty all-bounded mailbox set", Type: Gauge}, Value: float64(m.QueueCapacity)})
+	}
+	return samples
 }
 
 // MailboxMetricsToText 将 MailboxMetrics 转换为 Prometheus exposition text。

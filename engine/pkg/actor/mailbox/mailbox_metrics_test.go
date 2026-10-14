@@ -9,6 +9,31 @@ import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
 
+func TestMailboxMetricsBounded(t *testing.T) {
+	for _, policy := range []DrainPolicy{DrainExecute, DrainDiscard} {
+		mb, _ := startLifecycleMailbox(t, lifecycleConf("bounded"), policy)
+		_, unblock := blockLifecycleConsumer(t, mb)
+		for i := 0; i < 2; i++ {
+			if err := mb.PostJob(trackedLifecycleJob()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := mb.PostJob(trackedLifecycleJob()); err != def.ErrMailboxWorkerIsFull {
+			t.Fatalf("full: %v", err)
+		}
+		m := mb.GetMailboxMetrics()
+		if !m.QueueBounded || m.QueueLength != 2 || m.QueueCapacity != 4 || m.ObservedQueueHighWatermark != 2 || m.QueueFullRejectedTotal != 1 || m.DispatchFailedTotal != 1 || m.ReadQueueFullDiscardedTotal != 0 {
+			t.Fatalf("full snapshot: %+v", m)
+		}
+		unblock()
+		mb.Stop()
+		m = mb.GetMailboxMetrics()
+		if m.QueueLength != 0 || m.ObservedQueueHighWatermark != 2 || m.QueueFullRejectedTotal != 1 {
+			t.Fatalf("drained: %+v", m)
+		}
+	}
+}
+
 func TestMailboxMetricsCollector_Snapshot(t *testing.T) {
 	var c mailboxMetricsCollector
 	c.postTotal.Add(10)

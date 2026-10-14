@@ -45,6 +45,7 @@ func (sm *ServiceManager) GetAggregatedMailboxMetrics() def.MailboxMetrics {
 		return def.MailboxMetrics{}
 	}
 	var agg def.MailboxMetrics
+	var bounded, unbounded bool
 	for _, svc := range sm.runServices {
 		if svc == nil {
 			continue
@@ -59,7 +60,34 @@ func (sm *ServiceManager) GetAggregatedMailboxMetrics() def.MailboxMetrics {
 			agg.SuspendedTotal += m.SuspendedTotal
 			agg.RejectedTotal += m.RejectedTotal
 			agg.DispatchFailedTotal += m.DispatchFailedTotal
+			agg.QueueFullRejectedTotal += m.QueueFullRejectedTotal
+			agg.ReadQueueFullDiscardedTotal += m.ReadQueueFullDiscardedTotal
+			agg.QueueLength += m.QueueLength
+			if m.QueueBounded {
+				bounded = true
+				agg.QueueCapacity += m.QueueCapacity
+			} else {
+				unbounded = true
+			}
 		}
 	}
+	switch {
+	case bounded && unbounded:
+		agg.QueueBackend = "mixed"
+	case bounded:
+		agg.QueueBackend = "bounded"
+		agg.QueueBounded = true
+	case unbounded:
+		agg.QueueBackend = "unbounded"
+	}
+	if !agg.QueueBounded {
+		agg.QueueCapacity = 0
+	}
+	for old := sm.observedQueueHighWatermark.Load(); agg.QueueLength > old; old = sm.observedQueueHighWatermark.Load() {
+		if sm.observedQueueHighWatermark.CompareAndSwap(old, agg.QueueLength) {
+			break
+		}
+	}
+	agg.ObservedQueueHighWatermark = sm.observedQueueHighWatermark.Load()
 	return agg
 }

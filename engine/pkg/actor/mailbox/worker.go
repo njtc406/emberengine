@@ -44,11 +44,13 @@ type watchdogCanceler interface {
 // WorkerEnv 封装 Worker 运行所需的外部依赖。
 // 由 WorkerPool 在创建 Worker 时注入，Worker 不再直接引用 WorkerPool。
 type WorkerEnv struct {
-	logger            log.ILoggerX
-	invoker           inf.IMessageInvoker
-	middlewareChain   *MiddlewareChain
-	rw                *RWController
-	watchdogScheduler watchdogCanceler // 时间轮看门狗（nil = 使用 time.AfterFunc 降级）
+	queueFullRejectedTotal      *atomic.Int64
+	readQueueFullDiscardedTotal *atomic.Int64
+	logger                      log.ILoggerX
+	invoker                     inf.IMessageInvoker
+	middlewareChain             *MiddlewareChain
+	rw                          *RWController
+	watchdogScheduler           watchdogCanceler // 时间轮看门狗（nil = 使用 time.AfterFunc 降级）
 
 	// 预构的 RWContextInfo，SourceService 在 Pool 生命周期内是常量，
 	// 避免 execRead 路径上每条 Job 重建 struct + 字符串拷贝。
@@ -200,6 +202,9 @@ func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
 
 	// Publication transfers ownership; never recheck state after it succeeds.
 	err := w.queueManager.Submit(job)
+	if err == def.ErrMailboxWorkerIsFull && w.env.queueFullRejectedTotal != nil {
+		w.env.queueFullRejectedTotal.Add(1)
+	}
 	w.admissionMu.Unlock()
 	if err != nil {
 		return err
@@ -615,6 +620,9 @@ func (w *Worker) dispatchRead(job inf.IMailboxJob) {
 	}
 	w.readsLaunched.Add(1)
 
+	if w.env.readQueueFullDiscardedTotal != nil {
+		w.env.readQueueFullDiscardedTotal.Add(1)
+	}
 	// readCh 满 = 入队侧回压：直接丢弃 + 通知业务（OnJobDiscarded 对称）
 	w.env.rw.drainDiscardTotal.Add(1)
 	w.env.logger.WithContext(job.GetContext()).Warnf(

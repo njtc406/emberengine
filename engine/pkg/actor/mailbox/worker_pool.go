@@ -114,18 +114,21 @@ type workersSnapshot struct {
 }
 
 type WorkerPool struct {
-	conf            *config.MailboxConf
-	queueSpec       normalizedQueueSpec
-	mu              sync.Mutex // 仅作 resize/publish 串行化，dispatch 不持有
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
-	snap            atomic.Pointer[workersSnapshot] // 拓扑快照，COW 发布
-	invoker         inf.IMessageInvoker             // 消息处理器
-	middlewareChain *MiddlewareChain                // 中间件链
-	autoScaler      IScaler                         // 自动扩容器
-	logger          log.ILoggerX
-	workerCount     atomic.Int32 // 当前 worker 数量（用于扩缩容），atomic 以支持 RW 模式下无锁读取
+	queueFullRejectedTotal      atomic.Int64
+	readQueueFullDiscardedTotal atomic.Int64
+	observedQueueHighWatermark  atomic.Int64
+	conf                        *config.MailboxConf
+	queueSpec                   normalizedQueueSpec
+	mu                          sync.Mutex // 仅作 resize/publish 串行化，dispatch 不持有
+	wg                          sync.WaitGroup
+	ctx                         context.Context
+	cancel                      context.CancelFunc
+	snap                        atomic.Pointer[workersSnapshot] // 拓扑快照，COW 发布
+	invoker                     inf.IMessageInvoker             // 消息处理器
+	middlewareChain             *MiddlewareChain                // 中间件链
+	autoScaler                  IScaler                         // 自动扩容器
+	logger                      log.ILoggerX
+	workerCount                 atomic.Int32 // 当前 worker 数量（用于扩缩容），atomic 以支持 RW 模式下无锁读取
 
 	// 停机时队列处理策略（由 Mailbox 下发）
 	drainPolicy DrainPolicy
@@ -215,11 +218,13 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 // workerEnv 构建当前 WorkerPool 对应的 WorkerEnv（Worker 的运行时依赖）
 func (p *WorkerPool) workerEnv() *WorkerEnv {
 	return &WorkerEnv{
-		logger:            p.logger,
-		invoker:           p.invoker,
-		middlewareChain:   p.middlewareChain,
-		rw:                p.rw,
-		watchdogScheduler: p.watchdogAdapter,
+		queueFullRejectedTotal:      &p.queueFullRejectedTotal,
+		readQueueFullDiscardedTotal: &p.readQueueFullDiscardedTotal,
+		logger:                      p.logger,
+		invoker:                     p.invoker,
+		middlewareChain:             p.middlewareChain,
+		rw:                          p.rw,
+		watchdogScheduler:           p.watchdogAdapter,
 		// 预构 RWContextInfo，SourceService 在 Pool 生命周期内不变
 		rwReadCtxInfo: def.RWContextInfo{
 			Mode:          def.RWModeRead,
