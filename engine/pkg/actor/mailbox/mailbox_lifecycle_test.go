@@ -11,6 +11,7 @@ import (
 	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/boundedmpsc"
 )
 
 // ============================================================================
@@ -349,5 +350,132 @@ func TestMailbox_MultiWorker_DrainDiscard_AllReleased(t *testing.T) {
 	t.Logf("executed=%d, discarded=%d, total=%d", invoker.executeCount.Load(), invoker.discardCount.Load(), total)
 	if total < int64(N) {
 		t.Errorf("executed(%d) + discarded(%d) = %d < %d", invoker.executeCount.Load(), invoker.discardCount.Load(), total, N)
+	}
+}
+
+// admissionQueue pauses publication after SubmitJob's final state check. Normal
+// dequeue is disabled so shutdown alone determines terminal ownership.
+type admissionQueue struct {
+	IQueueManager
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (q *admissionQueue) Submit(j inf.IMailboxJob) error {
+	close(q.entered)
+	<-q.resume
+	return q.IQueueManager.Submit(j)
+}
+
+func (q *admissionQueue) NextJob() (inf.IMailboxJob, bool) { return nil, false }
+
+func awaitAdmission(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("admission synchronization timed out")
+	}
+}
+
+func TestWorkerAdmissionLateSubmit(t *testing.T) {
+	for _, tc := range []struct {
+		policy  DrainPolicy
+		bounded bool
+	}{{DrainExecute, false}, {DrainDiscard, false}, {DrainExecute, true}, {DrainDiscard, true}} {
+		policy := tc.policy
+		t.Run(fmt.Sprintf("policy=%d/bounded=%t", policy, tc.bounded), func(t *testing.T) {
+			inv := &releaseTrackingInvoker{}
+			env := newWorkerForSafeExecTest(t, inv).env
+			env.rw.stopTimeout = 10 * time.Millisecond
+			w := newWorker(1, newSimpleConf(1), env, policy).(*Worker)
+			q := &admissionQueue{IQueueManager: NewDualQueueManager(), entered: make(chan struct{}), resume: make(chan struct{})}
+			if tc.bounded {
+				bq, err := boundedmpsc.New[inf.IMailboxJob](2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				q.IQueueManager = &admissionBoundedManager{q: bq}
+			}
+			w.queueManager = q
+			w.Start()
+			j := &admissionOwnershipJob{IMailboxJob: newJob()}
+			result := make(chan error, 1)
+			go func() { result <- w.SubmitJob(j) }()
+			awaitAdmission(t, q.entered)
+			stopping, stopped := make(chan struct{}), make(chan struct{})
+			go func() { close(stopping); w.Stop(); close(stopped) }()
+			awaitAdmission(t, stopping)
+			late := false
+			select {
+			case <-stopped:
+				late = true
+			case <-time.After(5 * w.env.rw.stopTimeout):
+			}
+			close(q.resume)
+			if err := <-result; err != nil {
+				t.Errorf("publication rejected: %v", err)
+			}
+			awaitAdmission(t, stopped)
+			if late {
+				t.Errorf("Worker exited before paused publication; late enqueue after exit: len=%d", q.GetJobLen())
+			}
+			if j.releases.Load() != 1 {
+				t.Errorf("releases=%d, want 1", j.releases.Load())
+			}
+			wantExec, wantDiscard := int64(1), int64(0)
+			if policy == DrainDiscard {
+				wantExec, wantDiscard = 0, 1
+			}
+			if inv.executeCount.Load() != wantExec || inv.discardCount.Load() != wantDiscard {
+				t.Errorf("execute/discard=%d/%d, want %d/%d", inv.executeCount.Load(), inv.discardCount.Load(), wantExec, wantDiscard)
+			}
+			// Clean up the leaked publication on the unfixed implementation.
+			q.DrainAll(func(j inf.IMailboxJob) { j.Release() })
+		})
+	}
+}
+
+type admissionFallbackLogger struct {
+	*testLogger
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (l *admissionFallbackLogger) Warnf(_ string, _ ...interface{}) { close(l.entered); <-l.resume }
+
+func TestWorkerAdmissionFallbackOutsideGateOwnership(t *testing.T) {
+	inv := &releaseTrackingInvoker{}
+	env := newWorkerForSafeExecTest(t, inv).env
+	w := newWorker(1, newSimpleConf(1), env, DrainExecute).(*Worker)
+	logger := &admissionFallbackLogger{testLogger: &testLogger{t: t}, entered: make(chan struct{}), resume: make(chan struct{})}
+	w.queueManager = NewPriorityQueueManager(nil, logger)
+	w.Start()
+	j := &admissionOwnershipJob{IMailboxJob: newJob()}
+	j.SetPriority(def.Priority(10000))
+	result := make(chan error, 1)
+	go func() { result <- w.SubmitJob(j) }()
+	awaitAdmission(t, logger.entered)
+	stopped := make(chan struct{})
+	go func() { w.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Error("fallback logger held admission gate")
+	}
+	close(logger.resume)
+	err := <-result
+	awaitAdmission(t, stopped)
+	if err != def.ErrMailboxWorkerClosed {
+		t.Errorf("outside gate submission returned %v, want closed", err)
+	}
+	if err != nil {
+		if j.releases.Load() != 0 {
+			t.Error("rejection consumed ownership")
+		}
+		j.Release()
+	}
+	if j.releases.Load() != 1 {
+		t.Error("terminal ownership mismatch")
 	}
 }

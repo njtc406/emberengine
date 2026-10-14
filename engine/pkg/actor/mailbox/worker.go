@@ -70,7 +70,7 @@ type WorkerEnv struct {
 type Worker struct {
 	workerId        int32
 	state           atomic.Int32 // workerStateRunning / workerStateClosing / workerStateClosed
-	submitters      atomic.Int64
+	admissionMu     sync.Mutex   // serializes final running check + publication with closing
 	env             *WorkerEnv
 	wg              sync.WaitGroup
 	inflightReads   sync.WaitGroup // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
@@ -179,24 +179,36 @@ func (w *Worker) GetWorkerId() int32 {
 
 // SubmitJob 提交任务到队列
 func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
-	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
 	if w.state.Load() != workerStateRunning {
 		return def.ErrMailboxWorkerClosed
 	}
-	w.submitters.Add(1)
-	// If Stop flipped state concurrently, back out and refuse.
+	// Resolve the built-in priority fallback before admission so its logger
+	// cannot block shutdown or reenter this gate. Submit sees a known priority.
+	if m, ok := w.queueManager.(*PriorityQueueManager); ok {
+		priority := job.GetPriority()
+		if _, exists := m.queues[priority]; !exists {
+			if _, exists := m.queues[m.fallbackPriority]; exists {
+				job.SetPriority(m.fallbackPriority)
+				if m.fallbackWarned.CompareAndSwap(false, true) && m.logger != nil {
+					m.logger.Warnf("PriorityQueueManager: unregistered priority fallback: requested=%d fallback=%d",
+						priority, m.fallbackPriority)
+				}
+			}
+		}
+	}
+	w.admissionMu.Lock()
 	if w.state.Load() != workerStateRunning {
-		w.submitters.Add(-1)
+		w.admissionMu.Unlock()
 		return def.ErrMailboxWorkerClosed
 	}
-	defer w.submitters.Add(-1)
-
 	if w.queueManager == nil {
+		w.admissionMu.Unlock()
 		return def.ErrMailboxWorkerChannelNotInit
 	}
 
-	// 提交到队列管理器
+	// Publication transfers ownership; never recheck state after it succeeds.
 	err := w.queueManager.Submit(job)
+	w.admissionMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -369,42 +381,19 @@ func (w *Worker) run() {
 	}
 }
 
-// BeginStop 发起停止（非阻塞）。
+// BeginStop closes admission and requests shutdown without waiting for consumers.
+// It may wait for publication under admissionMu: StopTimeout bounds RW cleanup,
+// not admission, and is not a hard Stop deadline.
 func (w *Worker) BeginStop() {
-	// First, stop accepting new submissions.
+	w.admissionMu.Lock()
 	if !w.state.CompareAndSwap(workerStateRunning, workerStateClosing) {
+		w.admissionMu.Unlock()
 		return // already stopping/stopped
 	}
 	atomic.StoreInt64(&w.stopDeadlineNS, time.Now().Add(w.env.rw.stopTimeout).UnixNano())
-
-	// Wait for in-flight SubmitJob calls to finish.
-	// 阶梯退避：先 Gosched，超过阈值后改用 microsecond 级 Sleep，避免长时间 CPU 燃烧。
-	// 总体超时保护：避免上层死循环投递导致永久阻塞。
-	const spinBudget = 1024
-	deadline := time.Now().Add(w.env.rw.stopTimeout)
-	spins := 0
-	sleep := time.Duration(0)
-	for w.submitters.Load() != 0 {
-		if time.Now().After(deadline) {
-			w.env.logger.Errorf("Worker %d: BeginStop deadline exceeded, submitters=%d still in-flight, forcing stop",
-				w.workerId, w.submitters.Load())
-			break
-		}
-		if spins < spinBudget {
-			runtime.Gosched()
-			spins++
-			continue
-		}
-		if sleep == 0 {
-			sleep = time.Microsecond
-		} else if sleep < 100*time.Microsecond {
-			sleep *= 2
-		}
-		time.Sleep(sleep)
-	}
-
-	// Now stop the run loop.
+	// All admitted publications are complete before the run loop can drain.
 	w.state.Store(workerStateClosed)
+	w.admissionMu.Unlock()
 
 	// 唤醒可能在等待的Worker
 	if w.idler != nil {
