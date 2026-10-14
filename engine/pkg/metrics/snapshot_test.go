@@ -88,8 +88,8 @@ func TestSnapshotToSamples_Count(t *testing.T) {
 	}
 	samples := SnapshotToSamples(info)
 	// 7 node + 7 rpc + 8 mailbox + 4 event + 10*2 pool = 46
-		if len(samples) != 46 {
-			t.Errorf("samples count = %d, want 46", len(samples))
+	if len(samples) != 46 {
+		t.Errorf("samples count = %d, want 46", len(samples))
 	}
 }
 

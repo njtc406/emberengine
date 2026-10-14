@@ -1,5 +1,50 @@
 # Task 2 performance report
 
+## Task 9 final verification and selection (2026-10-14)
+
+**Current authoritative disposition: MutexRing implemented but NOT selected for production pending acceptance. Task 9 verification/selection executed; production acceptance FAILED/OPEN, not all-pass. NO CANARY, no default switch, no merge, no deployment.** Task 7/8 coding is delivered at `cbd3ee5`. Historical statements below that Tasks 7/8/9 were blocked/not executed describe earlier checkpoints, not the current coding status. The original plan is NOT fully accepted/completed while mandatory production evidence remains missing.
+
+Reviewed the branch against `73ecd28`, focusing on physical queue ownership, immutable normalized configuration, admission versus shutdown, fallback priority rollback, Pool-owned rejection/discard counters, topology-consistent scrape capacity, global observed peaks and defaults. No new proven runtime integration defect was found; no speculative production tuning was applied. The only source correction is gofmt of Task 7's misindented `TestSnapshotToSamples_Count` assertion (46 samples). Upstream impact before editing: LOW, zero direct callers/processes. Existing tests cover full rejection cleanup, gate-in/gate-out shutdown, DrainExecute/DrainDiscard, RW unsafe cleanup, resize and concurrent scraping. Metrics retain Pool counters across removal; main full and asynchronous readCh full remain distinct. No successful publication path accesses the transferred Job. Public unbounded MPSC/MPMC and Gate Session sources are unchanged against the requested baseline. Template active backend remains `unbounded`; bounded capacities remain comments.
+
+### Fresh final evidence
+
+Environment: Go 1.24.9, Windows/amd64; default GOMAXPROCS=16 (benchmark suffix). Verification commands ran in this worktree. Concurrent verification processes make their timing unsuitable for performance acceptance.
+
+| Check / exact command | Result |
+|---|---|
+| `go test ./... -count=1` | PASS, exit 0, 45 tested packages; other packages report no tests |
+| `go test -race ./... -count=1` | PASS, exit 0, 45 tested packages; no race warnings |
+| `go vet ./...` | PASS, exit 0 |
+| `go vet ./engine/pkg/utils/boundedmpsc ./engine/pkg/actor/mailbox ./engine/pkg/config ./engine/pkg/def ./engine/pkg/metrics` | PASS, exit 0 |
+| `go test ./engine/pkg/utils/boundedmpsc ./engine/pkg/actor/mailbox ./engine/pkg/config ./engine/pkg/metrics -count=1` | PASS, exit 0 |
+| `go test -race ./engine/pkg/utils/boundedmpsc ./engine/pkg/actor/mailbox -count=10` | PASS, exit 0 (97.080s queue, 53.058s mailbox) |
+| Plan selector `go test ./engine/pkg/utils/boundedmpsc -run 'Test.*Concurrent' -count=1000` | **NO TESTS MATCHED; not stress evidence** |
+| Corrected selector `go test ./engine/pkg/utils/boundedmpsc -run '^TestMPSC$' -count=1000` | PASS, exit 0; checks conservation, per-producer FIFO and bounded length |
+| `go test ./engine/pkg/utils/boundedmpsc -run '^$' -bench '^BenchmarkQueue$' -benchmem -benchtime=100x -count=1` | PASS, exit 0; 112 benchmark rows, correctness/smoke only |
+| `go test ./engine/pkg/actor/mailbox -run '^Test(MailboxPerformance(Comparison\|GateRequiresBaseline\|RejectsUnresolvedCurrentLatency)\|PerfMemoryAccounting.*\|MailboxPerf.*\|MailboxFlight.*\|MailboxTraceWriterBound)$' -count=1` | PASS, exit 0; comparator, accounting, fixture ownership, trace and protocol tests, not opt-in acceptance sampling |
+| `& .\tools\mailboxperf\summary_test.ps1` | PASS; valid fixture processed, protocol/commit/duplicate/missing/metadata/round corruptions rejected; output explicitly NOT production approval |
+| `go test ./engine/pkg/metrics -count=1` after formatting | PASS |
+| `git diff --check` | PASS |
+
+Formatting scope: ran `gofmt -l` over Task 9's directories and branch-changed Go files; corrected the changed snapshot assertion with gofmt. Did not rewrite unrelated legacy files (many are reported due to existing formatting/line endings). Broad recursive `gofmt -w` was deliberately narrowed to avoid unrelated churn. Queue latency tests ran within full/target/race suites, including ten repetitions in the targeted race run. White-box zero-allocation tests passed; the short benchmark's whole-harness allocation values are not a queue allocation proof.
+
+Step 4's expensive ten-run final performance collection and opt-in production gate were **not rerun**, as explicitly requested. Prior definitive failed fixed128 evidence is retained unchanged, not replaced by smoke. The default test suite skips opt-in performance/memory sampling and gate execution; its PASS cannot establish acceptance. No claim is made that every optional workload ran.
+
+### Change analysis and risk
+
+Before commit, path-qualified GitNexus `detect_changes --scope compare --base-ref 73ecd28 --repo E:\pro\src\emberengine\.worktrees\bounded-mpsc-mailbox` succeeded: **CRITICAL**, 322 files, 394 indexed symbols, 18 affected processes. This is a broad branch/test/evidence change, not a LOW-risk release. Reported flows include Worker resize/construction and Start/timing-wheel paths. Index lastCommit is `0f9e8c55`, predating Task 7/8; graph results are incomplete supplementary evidence, not an exhaustive call-graph guarantee. Initial unqualified invocation failed due to multiple repositories and was corrected with the worktree path.
+
+Required `--base-ref main` comparison also succeeded: **CRITICAL**, 816 files, 7,843 symbols, 275 processes. Local main is `9470e4e`; `main..73ecd28` already differs in 558 files (merge-base `4e9d48e`), explaining unrelated older flows in that comparison. The requested feature baseline is therefore `73ecd28`, not main. Direct diff confirms no changes to unbounded MPSC/MPMC or Gate Session; do not interpret preexisting main divergence as a feature edit or fix it in this task.
+
+### Remaining mandatory acceptance requirements
+
+- A controlled, scheduling-stable target CPU/OS environment and target-machine attestation; representative real business Job work. This shared development machine cannot certify non-overload acceptance. Existing fixed128 bounded loss in three of five rounds invalidates its CPU comparison, not merely its latency score.
+- Original unchanged same-harness baseline/current-unbounded/MutexRing comparisons with five valid rounds, matched successful work, resolved CPU/latency, zero non-overload loss, throughput >=95%, p99 <=110%, p999 <=115%, CPU/success and MostlyEmpty idle CPU <=110%. Admission-gated **unbounded also requires acceptance**; retaining its configuration default does not waive that cost.
+- Required broader overload/RW/stop/idle evidence and deployment memory behavior. Existing controlled main-queue retained-heap plateau is not RSS or long-running concurrent overload attestation. Preserve distinctions among main queues, RW extra holdings and process memory; do not substitute lifecycle tests for workload measurements.
+- The executable gate remains deliberately fail-closed for target/memory evidence; no production-approval endpoint is implemented by this verification. Missing required acceptance deliverables remain open, even though implementation and current correctness checks are delivered.
+
+No fresh acceptance matrix, selective rerun, threshold/workload/capacity change, SequenceRing, merge or deployment occurred. Only Task 9-owned scratch logs are removed after their outcomes are recorded here; preexisting plan/brief files and historical measurement artifacts are retained.
+
 ## Task 7/8 delivery scope correction (2026-10-14)
 
 Authoritative plan line 456 says “任一正确性或生产性能条件失败即停止灰度”; section 15 orders execution of Task 2, then Task 7–8, then Task 9, with correctness and production performance both required before canary. Earlier STOP wording applied too broadly to further coding: the failed gate blocks canary/production approval, **not safe observability or documentation work**. Task 7/8 proceeds without changing defaults, thresholds, approvals, workload or prior performance evidence. Task2 remains NOT ACCEPTED; Task9 remains outstanding. No canary, SequenceRing, default switch or merge.

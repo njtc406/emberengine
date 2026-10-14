@@ -2,7 +2,7 @@
 
 ## 有界 Mailbox：配置、观测与回滚
 
-当前默认仍为 `unbounded`。`bounded` 使用 MutexRing；本次不启用灰度，不引入 SequenceRing，不改变审批或性能门槛。配置位于服务的 `Mailbox`（Go 类型 `MailboxConf`）下：
+当前默认仍为 `unbounded`。`bounded` 使用 MutexRing；Task 9 正确性验证已执行，但生产性能仍 **NOT ACCEPTED / NO CANARY**，MutexRing 尚未获选生产使用。完整证据与未完成的验收要求见 [最终报告](../task-2-report.md)。本次不引入 SequenceRing，不改变审批或性能门槛。配置位于服务的 `Mailbox`（Go 类型 `MailboxConf`）下：
 
 ```yaml
 Mailbox:
