@@ -1,5 +1,40 @@
 # Task 2 performance report
 
+## Runtime trace follow-up: STOP after one diagnostic (2026-10-14)
+
+**Task2 remains NOT ACCEPTED.** Exactly one existing fixed128 bounded diagnostic ran; no matrix, retry, workload/rate/capacity/threshold or production changes. Preregistered executable stop rule: capture until first rejection or 60 seconds, maximum 64 MiB written (overflow explicitly invalidates trace); continue the unchanged 128-window workload once, stop regardless of reproduction. The runner refuses overwrite. GitNexus upstream impact for `TestMailboxPerformanceSample`: LOW, zero direct callers/processes. New support is test-only.
+
+### Capture and exact commands
+
+Parent `8a0bac541dd6c389e88ef01a5c019b10123ff7b8`; Go reports go1.24.9 windows/amd64, GOMAXPROCS=4, Ryzen 7 5700X. `tools/mailboxperf/results/trace128-diagnostic` contains timestamps, helper SHA256, full row, process logs, trace metadata, compact profile and excerpts. Run from this worktree:
+
+```powershell
+& .\tools\mailboxperf\trace128.ps1
+go tool trace -pprof=sched tools\mailboxperf\results\trace128-diagnostic\runtime.trace > tools\mailboxperf\results\trace128-diagnostic\sched.pprof
+go tool pprof -top tools\mailboxperf\results\trace128-diagnostic\sched.pprof
+go tool trace -d=parsed tools\mailboxperf\results\trace128-diagnostic\runtime.trace | Select-String 'mailbox-block|mailbox-first-rejection|mailbox-trace-stop'
+node tools\mailboxperf\extract-trace.cjs tools\mailboxperf\results\trace128-diagnostic 540321800000000 540323245000000
+```
+
+This installed Go tool documents `-d=parsed` (not numeric `-d=1`). Trace started 07:30:48.386050 UTC, stopped on first rejection 07:31:00.5068585: 5,672,478 bytes, zero discarded. Full trace and 37-MB expanded neighborhood were analyzed then deleted, as was redundant full flight JSON; SHA256 retained in `discarded-raw-hashes.json`. Commands describe the completed analysis, not a request to repeat it. Compact `target-events.txt`, `long-states.json`, `flight-excerpt.json`, markers and sched profile remain. `long-states` measures successive trace state records, including generation snapshots, NOT exclusively scheduler delays.
+
+### What this trace establishes
+
+- First rejection: window 5/index 17,134; actual block +12.1208085s vs deadline +10.9684158s (**1.1523927s late**); occupancy 4,096 on both sides, completions 340,718. GC cycle/pauses remain 3/6.
+- Producer G50, between publications 11,647/11,648: 997.5643ms gap, queue 32→0 before the next submit, completions 339,296→339,328. The trace explicitly shows `Running→Waiting reason=sleep` at 540321919580360, `Waiting→Runnable` at 540322917404447 (**997.824087ms**), then `Runnable→Running` at 540322917437136 (**32.689µs**). Thus the dominant initial gap is **delayed sleep/timer resumption**, NOT a producer spending that second runnable. Its next deadline was only ~0.58ms beyond the previous observation. The queue had drained; this is not a full-queue stall.
+- G50 wakes worker G51 at 540322917476907 (M42500/P1). Parsed trace puts G51 runnable until 540323218460112 on M39112/P0, nominal **300.983205ms**; worker identity is established by the `Worker.run → safeExec → perfInvoker.ExecuteJob → perftest.Since` stack. Producer subsequently runs on M26524/P3, where the rejection marker is emitted. P IDs are Go processors, M IDs runtime threads, not proof of continuous OS CPU residency.
+- **Important clock/trace boundary limitation:** around 540323218460xxx there are `Running→Running`/`Runnable→Runnable` generation snapshots and many consecutive events spaced exactly 1ns. Producer also appears Running across ~300ms. These are ordered/reconstructed trace timestamps, not trustworthy independent measurements of a 300ms OS scheduling interval. `Running` alone cannot distinguish actual CPU execution from OS descheduling. Do not claim Windows thread starvation, a particular competing process, or exact worker starvation duration is proven.
+- Catch-up from publication 11,648 to rejection: 5,486 positions, 1,390 further completions, net **4,096** pending growth from occupancy 0. From 12,240 to rejection: 4,894 positions minus 811 completions = 4,083 growth, 13→4,096. The unchanged finite-buffer accounting explains rejection.
+- Scheduler profile is aggregate over the capture: 695.29ms total, 529.92ms attributed to `sync.Cond.Broadcast`, 96.14ms `runtime.asyncPreempt`, 28.37ms runtime metric reads. Wake-site attribution is NOT time spent inside Broadcast nor evidence of a production lock defect. It does not include the producer's timer Waiting interval. Instrumentation, QPC syscalls, trace startup/stop and trace writes perturb this run; stopping synchronously after rejection can affect later workload results.
+
+Whole row: 8,388,608 offered, 226,744 main rejects, zero other rejects, 267.7964326s measured wall; exit 1 retained, no acceptance inference. This event is substantially different from the earlier 136.9ms capture; do not transfer exact durations across runs.
+
+### Disposition and external prerequisite
+
+The missing attribution is narrowed to a timer-wait/resumption delay plus observed worker runnable delay, with trace-clock limitations; no production queue defect is demonstrated. Environment/runtime/harness timing is implicated, but the exact OS cause is **not proven** by Go trace. A finite queue cannot guarantee losslessness when an open-loop deadline generator repays a large pause as a catch-up burst while consumer service is delayed. Extra production tuning is not a justified remedy. **This machine/run cannot establish non-overload acceptance.** Remaining external prerequisite is an independently controlled, scheduling-stable performance environment (with reliable OS-level timing evidence if attribution is required) that can satisfy the original unchanged acceptance protocol. No additional speculative local run is prescribed or authorized here. Tasks7/8/9 and production approval remain blocked.
+
+Verification: fresh `go test ./engine/pkg/actor/mailbox ./engine/internal/perftest -count=1` and matching `-race` passed; these skip the opt-in performance sample. The bounded-writer test checks overflow accounting. The diagnostic itself failed for loss, as reported; it was not rerun.
+
 ## Latest diagnostic: first fixed128 rejection captured (2026-10-14)
 
 **One authorized diagnostic completed, no repeat and no acceptance inference. Production bug NOT proven.** A test-only, opt-in flight recorder captured producer deadline catch-up plus insufficient completion progress into a physically full queue. The initiating scheduling delay is not attributable to a specific goroutine/OS cause from this capture. Task2 remains NOT ACCEPTED; Tasks7/8/9 and production approval remain blocked. Historical fixed128 results below remain unchanged and invalid for bounded CPU comparison.

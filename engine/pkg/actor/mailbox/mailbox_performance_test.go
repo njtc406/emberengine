@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/trace"
 
 	"sync/atomic"
 	"testing"
@@ -228,7 +229,17 @@ func TestMailboxPerformanceSample(t *testing.T) {
 					}
 				}()
 			}
+			var stopTrace func(string)
+			if path := os.Getenv("MAILBOX_PERF_TRACE"); path != "" {
+				if flight == nil {
+					t.Fatal("trace requires flight recorder")
+				}
+				stopTrace = startMailboxTrace(t, path)
+			}
 			blockStart := time.Now()
+			if stopTrace != nil {
+				trace.Log(context.Background(), "mailbox-block", "start")
+			}
 			for window := 0; window < windows; window++ {
 				var windowJobs []*perfJob
 				if windowed {
@@ -277,6 +288,10 @@ func TestMailboxPerformanceSample(t *testing.T) {
 							sample.CompletedAfter--
 						}
 						flight.record(sample, err != nil)
+						if err != nil && stopTrace != nil {
+							trace.Logf(context.Background(), "mailbox-first-rejection", "window=%d index=%d actual_ns=%d returned_ns=%d", window, i, sample.ActualNS, sample.ReturnedNS)
+							stopTrace("first rejection")
+						}
 					}
 					switch {
 					case err == nil:

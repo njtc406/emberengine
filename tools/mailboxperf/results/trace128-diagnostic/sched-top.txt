@@ -1,0 +1,25 @@
+Type: delay
+Showing nodes accounting for 693.95ms, 99.81% of 695.29ms total
+Dropped 22 nodes (cum <= 3.48ms)
+      flat  flat%   sum%        cum   cum%
+  529.92ms 76.22% 76.22%   529.92ms 76.22%  sync.(*Cond).Broadcast
+   96.14ms 13.83% 90.04%    96.14ms 13.83%  runtime.asyncPreempt
+   28.37ms  4.08% 94.12%    28.37ms  4.08%  runtime/metrics.runtime_readMetrics
+   26.96ms  3.88% 98.00%    26.96ms  3.88%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job.NewEventBusJob
+    7.62ms  1.10% 99.10%     7.62ms  1.10%  runtime.traceWriter.event
+    4.81ms  0.69% 99.79%     4.81ms  0.69%  sync.(*Mutex).Unlock
+    0.07ms 0.0099% 99.80%   683.63ms 98.32%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.TestMailboxPerformanceSample.func1
+    0.04ms 0.006% 99.80%   683.67ms 98.33%  testing.tRunner
+    0.02ms 0.0031% 99.81%   530.26ms 76.26%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*WorkerPool).DispatchJob
+         0     0% 99.81%   530.29ms 76.27%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*Mailbox).PostJob
+         0     0% 99.81%   530.24ms 76.26%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*Worker).SubmitJob
+         0     0% 99.81%     3.97ms  0.57%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*Worker).run
+         0     0% 99.81%    28.37ms  4.08%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*mailboxFlight).readRuntime
+         0     0% 99.81%    96.11ms 13.82%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*mailboxPerfWindow).collect
+         0     0% 99.81%    26.96ms  3.88%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*mailboxPerfWindow).prepare
+         0     0% 99.81%    26.96ms  3.88%  github.com/njtc406/emberengine/engine/pkg/actor/mailbox.newMetricsTestJob
+         0     0% 99.81%   530.09ms 76.24%  github.com/njtc406/emberengine/engine/pkg/utils/idle.(*AdaptiveController).Wake
+         0     0% 99.81%     7.62ms  1.10%  runtime.(*traceAdvancerState).start.func1
+         0     0% 99.81%     7.62ms  1.10%  runtime.traceAdvance
+         0     0% 99.81%     7.62ms  1.10%  runtime.traceWriter.writeGoStatus
+         0     0% 99.81%    28.37ms  4.08%  runtime/metrics.Read
