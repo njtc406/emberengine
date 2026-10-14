@@ -1,5 +1,137 @@
 # Task 2 performance report
 
+## Final disposition — planned STOP (2026-10-14)
+
+**The overall requested implementation is INCOMPLETE. Task2 is NOT ACCEPTED. Tasks7/8/9 were NOT EXECUTED because the Task2 acceptance gate failed.** This commit preserves the existing implementation and measurement/failure evidence only. It grants **NO production approval, NO Task7/8 productionization, NO canary authorization and NO merge**. The user is unavailable to choose a new experiment; the conservative action is to stop, not reinterpret failed acceptance as completion. Earlier sections are chronological evidence, not current completion claims; their “no commit” statements describe those earlier runs.
+
+The fixed v4 pilot remains INVALID for all three candidates (CPU below 3.125 seconds); bounded additionally lost 2,144 submissions in the nominal non-overload trajectory. No pilot rerun, replication retuning, threshold relaxation or full v4 comparison was performed during finalization. Passing regression tests validate harness behavior, not Task2 performance acceptance.
+
+Final validation (fresh evidence in `tools/mailboxperf/results/final-stop/`):
+
+- `go test ./engine/internal/perftest ./engine/pkg/actor/mailbox -run 'TestClock|TestCPUTime|TestMailboxPerfReplicationProtocol|TestMailboxPerformanceComparison|TestMailboxPerformanceRejects|TestMailboxPerformanceGateRequiresBaseline|TestPerfMemoryAccounting' -count=1 -v`: PASS, exit 0, both packages; the replicated protocol test actually ran.
+- The same package/selector set with `-race -count=1`: PASS, exit 0, both packages.
+- `tools/mailboxperf/summary_test.ps1`: PASS; valid matrix accepted and all six malformed cases rejected (protocol, baseline commit, duplicate round, missing/replaced scenario, metadata and round range).
+- `go test -short ./... -count=1`: PASS, exit 0; 45 packages passed, 67 packages had no tests. Explicit performance experiments/gates remain opt-in; this is not execution of Task9 production validation.
+- Editor diagnostics: no errors. Initial tracked `git diff --check`: PASS (CRLF conversion notices only). After staging previously untracked evidence, `git diff --cached --check` reports two existing generated-summary trailing blank lines (`corrected-v3/comparison.txt:34` and `review-fixes/summary/comparison.txt:34`); preserved verbatim rather than rewriting historical evidence. The staged code/report/script check excluding result artifacts passes.
+
+Review covered the changed measurement code, QPC helpers, per-ID memory accounting, protocol and comparator regressions, and collection/summary scripts rather than bulk raw observations. No additional concrete code defect requiring a fix was identified. No production source was edited. Scripts are preserved experiment procedures; removed detached baseline worktrees must be explicitly recreated before any separately authorized future collection. Existing output directories are not permission to rerun or overwrite evidence.
+
+GitNexus `detect_changes --scope all --repo emberengine` was executed before commit and returned **“No changes detected.”** This is a stale/shared main-worktree index limitation, **not** proof of zero changes or a LOW-risk result. Earlier impact queries returned UNKNOWN for the new harness symbols. Git diff and explicit staging are the authoritative scope check: only Task2 test/measurement helpers, scripts, evidence and this report; no production queue/mailbox source, briefs or untracked implementation plan. Owned summary-test scratch was cleaned by its `finally` block; no owned detached performance worktree remains. Unrelated/untracked briefs and plan are preserved and excluded, not deleted.
+
+Remaining prerequisites: explicit authorization of a new measurement design; reliable actual process CPU exposure without artificial burn; investigation and resolution of the observed non-overload rejection without hiding loss; representative application workload and target-deployment attestation; complete compatible baseline/current/bounded matrix and unchanged acceptance thresholds; remaining memory/RSS, idle, overload/RW and platform evidence described below. Only a subsequently accepted Task2 gate permits reconsidering Tasks7/8, followed by Task9 validation and a separate production/merge decision. **Do not label all tasks complete.**
+
+## Fixed replication experiment (2026-10-14, preregistration)
+
+Using systematic debugging, brainstorming, writing-plans, TDD and Go testing. Autonomous scope follows the requested Task2 continuation; no approval or commit is implied. Impact query for `TestMailboxPerformanceSample` returned UNKNOWN/not found in the shared graph (see `results/replicated-v4/impact.txt`). Direct callers are Go's explicit test runner only; affected flow is test-only workload collection, not production. No graph-derived LOW claim.
+
+Design decision: summing separately bracketed CPU deltas does **not** reliably amortize endpoint quantization (worst-case uncertainty grows with window count). Instead v4 brackets one uninterrupted block of **32 identical workload windows** with actual GetProcessTimes reads. A mailbox is warmed once, all message wrappers are preallocated before the CPU bracket, every window restarts the same offered schedule and drains, and sorting/reporting occurs after the bracket. Inter-window drain and loop overhead are included, not subtracted. This is a repeated-window estimand, not v3 single-window data; no cross-protocol pooling. Work, rate, capacity, routing and each window's message count remain unchanged. No CPU burning or adaptive repeats.
+
+Frozen reliability rule: at least **3.125 seconds actual process CPU** per observation (200 observed 15.625ms quanta). Under a conservative two-quantum endpoint uncertainty model this is at most 1% exposure error; this is a resolution screen, not a statistical confidence guarantee or OS accounting accuracy proof. Low exposure is INVALID, never PASS. Performance thresholds remain .95/1.10/1.10/1.15 and mostly-empty 1.10.
+
+Plan: (1) add tested fixed protocol selection and exposure validation; (2) preserve v3 entry behavior, add continuous 32-window v4 mode; (3) one fixed pilot, priority/w1/RW-off/hot-key steady (previous zero-CPU scenario), baseline73ecd28 then current unbounded then bounded, one observation each, identical helpers; (4) only if all three are resolved and loss-free, run full 15×3×5 matrix with the same 32 windows and rotating candidate order; otherwise stop without increasing replication or selecting a different pilot. Pilot is resolution feasibility only, excluded from any full comparison. Tests/race and owned scratch cleanup follow. Raw prior evidence stays untouched.
+
+
+### Fixed replication outcome — STOP
+
+One preregistered pilot was executed, no performance reruns or replication tuning. Exact source SHA256 parity was checked for all copied performance fixtures and perftest helpers (`results/replicated-v4/helpers.json`); detached baseline HEAD was verified before execution. CPU and latency use the same helpers across all candidates. Current source identity is HEAD a68ab9a plus the preserved uncommitted test changes, not a clean-commit attestation.
+
+| Candidate | Actual CPU | 15.625ms quanta | Wall seconds | Completed / offered | Resolution |
+|---|---:|---:|---:|---:|---|
+| baseline 73ecd28 | 2.562500 s | 164 | 65.5288282 | 2,097,152 / 2,097,152 | INVALID |
+| current unbounded | 2.562500 s | 164 | 65.5304507 | 2,097,152 / 2,097,152 | INVALID |
+| current bounded | 3.015625 s | 193 | 65.6188003 | 2,095,008 / 2,097,152 | INVALID + LOSS |
+
+All three exposures are below the frozen 3.125s minimum. Bounded additionally rejected **2,144 main-queue submissions** (0.10223%) in the nominal non-overload trajectory; it drained and conserved all messages, but the no-loss requirement fails. Its aggregate message p99 was 147.2µs and p999 131.4843ms; per-window quantiles are retained rather than averaging scenario percentiles. These are descriptive only, not five-round acceptance ratios. A scheduled workload can catch up in bursts after scheduling delays; this observation does not isolate a production root cause or excuse the rejection.
+
+**Full comparison was not run**: the preregistered feasibility condition failed, and increasing windows or selecting another scenario would violate the one-experiment stop. Repetition accumulated real CPU without burning, but did not establish the required reliable exposure. The test-only implementation remains available; v3 comparators deliberately reject v4 rather than silently compare protocols. No v4 approval comparator is claimed. All message wrappers/latencies remain distinct until observation ends, preserving the existing job release/execution accounting; repetition increases fixture live memory and can influence GC, another reason not to mix it with v3. Per-window warmup is not repeated; this is one warmed mailbox with repeated offered windows, explicitly different from 32 independent process runs.
+
+Evidence: `tools/mailboxperf/results/replicated-v4/` includes RED missing-helper build failure, GREEN protocol-boundary/invalid-mode and existing gate regression tests, immutable pilot JSON/logs, helper hashes, decision and summary CSV. Targeted clocks/protocol/gate/bounded-post/ownership tests passed under race; the initial queue selector matched no tests, so the complete boundedmpsc race suite was separately run and passed (`race-queue.txt`). The busy-loop clock unit test is a separate pre-existing helper diagnostic, never part of pilot CPU exposure. Editor diagnostics and `git diff --check` passed (CRLF notices only). The owned `.perf-replicated-baseline` worktree was removed; original worktrees/evidence and edits remain. No production edits, SequenceRing, commit, target-deployment attestation or approval. **Task2 productionization remains stopped** for insufficient measurement reliability and observed bounded non-overload loss, in addition to prior deployment/real-workload blockers.
+
+## Bounded review fixes (2026-10-14)
+
+Only the summary harness, memory fixture, regression tests and this report were changed in this follow-up; production code and thresholds are unchanged. Skills used: systematic-debugging, receiving-code-review, test-driven-development, golang-testing, GitNexus impact analysis and verification-before-completion. Upstream impact queries for `TestMailboxPerformanceMemory`, `perfMemoryInvoker`, `ExecuteJob`, `OnJobDiscarded`, `validatePerfMemoryStates`, `compareMailboxPerf` and `Median` returned **not found / UNKNOWN** in the shared main-worktree index. Direct inspection limits affected callers to the memory test and its invoker callbacks, accounting regression tests, and the PowerShell summary entry point; no production execution flow changes. This is not a graph-derived LOW-risk claim.
+
+- `run.ps1 -SummarizeOnly` now validates the complete frozen 15-scenario × three-candidate × five-round matrix **before ratios**: rounds 0–4 exactly once, protocol `task2-v3-qpc`, explicit baseline `73ecd28`, consistent current commit, compatible CPU/OS/architecture/Go/GOMAXPROCS, scenario worker/RW/sample settings, conservation/drain and positive wall/success. PowerShell mirrors the Go comparator contract (the comparator lives in test-only Go code), additionally pins baseline identity and complete matrix coverage. CPU/latency resolution remains separately reported as invalid/failed screening, not silently accepted. Numerical thresholds are unchanged.
+- `summary_test.ps1` demonstrated RED (wrong protocol accepted), then GREEN for valid input and rejection of wrong protocol, wrong baseline commit, duplicate round, replaced/missing scenario, mismatched machine metadata and out-of-range round. It uses isolated project-local files and cleans them. `-InputPath` permits fixture inputs; summaries now use a new directory, refuse overwrites, and never rewrite input JSON.
+- Memory accounting preallocates 32,769 scalar-only ID records before the first heap point. Each submission owns its record; execute/discard/release callbacks increment atomic per-ID counters without retaining jobs or payloads. After drain and worker stop, each accepted ID must execute once, never discard, and release once; each rejected ID must never execute, discard once, and release once. Regressions demonstrated RED with the old aggregate-equivalent validator for compensating duplicate/missing execute, discard and release, and swapped acceptance disposition, then GREEN with per-ID validation. Constant accounting storage is included in all heap points; absolute heap values are not directly comparable to the old wrapper fixture.
+
+New evidence is under `tools/mailboxperf/results/review-fixes/`: `summary-tests.txt`, `summary/comparison.{csv,txt}`, `targeted.txt`, `race.txt`, `memory-{unbounded,bounded}.json` and `memory-baseline-73ecd28.json` with matching logs. The raw 225 timing rows were reused; no performance sample was rerun. The 11 unresolved CPU rows and all previous deployment blockers remain.
+
+Memory reruns: verified detached baseline HEAD `73ecd2818ad1e8c7c6153e48c88aa94fb5b20fb5`; baseline heap 2,582,336 → 7,568,520 bytes and current unbounded 2,579,216 → 7,558,136 as occupancy grows 0 → 32,768. Bounded occupancy stays 4,096 across full windows; heap 3,229,968 → 3,230,400 (432-byte drift), accepted 4,097/rejected 28,672. All three pass per-ID assertions; bounded also passes under race (`memory-bounded-race.json`). An initial baseline invocation used the current worktree because the detached directory was absent: `memory-baseline.{json,txt}` is **invalid baseline evidence and excluded**; it is retained for transparency and superseded only by the explicitly verified `-73ecd28` files.
+
+Verification: targeted accounting/comparison/unresolved-latency/missing-baseline tests PASS; the same tests plus actual bounded memory fixture under `-race` PASS; all three uninstrumented memory fixtures PASS; PowerShell negative/positive summary tests PASS; editor diagnostics clear; `git diff --check` PASS (only Git CRLF notices). No commit. Production approval remains BLOCKED by CPU resolution, development-only synthetic workload, deployment attestation and previously documented instrumented overload; no threshold relaxation or further tuning attempted.
+
+
+## Measurement debugging follow-up (2026-10-14)
+
+The original sections and `results/` evidence below are preserved. Corrected latency observations use a distinct **task2-v3-qpc** protocol and `results/corrected-v3/`; they must not be mixed with v1/v2. No production source, workload, offered arrival rate, sample count, capacity or acceptance threshold was changed. Deployment approval remains **BLOCKED**.
+
+### Demonstrated causes and harness corrections
+
+- **Zero latency:** Go 1.24.9 Windows amd64 `runtime.nanotime1` reads `_INTERRUPT_TIME` (`GOROOT/src/runtime/sys_windows_amd64.s:279–284`), not QueryPerformanceCounter. The regression reproduced **0/1000** resolved 64-iteration work samples using `time.Now`/`time.Since`. The harness now uses QPC for message latency and queue call/admission/transit/rejection latency. On other OSes the helper retains Go monotonic time. QPC calls add measurement overhead; identical helpers are used on all three revisions/candidates. Arrival pacing and wall-window measurement remain unchanged. QPC is not used as a CPU substitute.
+- **Zero CPU:** no conversion/handle defect found in `GetProcessTimes`: it reads the current process, adds user+kernel FILETIME ticks and multiplies by 100 ns. A fixed 500 ms busy-loop diagnostic returned 500 ms CPU before correction and 484.375 ms afterward. Recorded deltas are quantized in 15.625 ms steps. Sleep-heavy, short actual CPU workloads can therefore return zero even across a two-second wall window. This remains an external measurement-resolution blocker, not zero work. No artificial CPU burn, clamping, wall-clock replacement or success-until-pass repeats were added to the Mailbox workload.
+- **False numerical acceptance:** the Go comparison accepted zero current p99/p999 as an improvement against nonzero baseline. A regression first failed, then passed after rejecting unresolved current latency. CSV screening now also requires every round's latency to resolve and verifies no loss; it no longer relies only on median baseline latency. Numerical thresholds are untouched.
+- **Instrumented rejection:** original race evidence reports genuine main-capacity errors, not a data-race warning: 1,943–21,193 rejections in RW cases, execution windows 2.57–2.79 s versus a 2.047 s offered schedule. A fixed open-loop 32,000 jobs/s workload is not guaranteed non-overload with instrumentation. Deadline catch-up may compound bursts. Rejections are retained as failures; no retry, throttling, larger capacity or production change hides them. Targeted race correctness tests and the full instrumented sample are separate from numerical performance acceptance.
+
+### Scope and impact
+
+GitNexus upstream impact was invoked before editing existing harness symbols (`TestMailboxPerformanceSample`, `perfInvoker.ExecuteJob`, `TestQueueLatency`, comparison helpers; CPUTime queried but unchanged). Results are retained in `results/debug-impact.txt`: **not found / UNKNOWN**, because the registered graph belongs to the main worktree at `73ecd28` (indexed 2026-08-28), not this branch's new harness. There is no graph-derived LOW-risk claim. Direct source review bounds changes to test entry points and `engine/internal/perftest`, their shared measurement helper; no production execution flow or queue implementation is edited. Reindexing the shared main-worktree graph would not validate these worktree-only symbols.
+
+### Reproduction commands
+
+From this worktree:
+
+```powershell
+go test ./engine/internal/perftest -count=1 -v
+go test ./engine/pkg/actor/mailbox -run 'TestMailboxPerformanceComparison|TestMailboxPerformanceRejectsUnresolvedCurrentLatency|TestMailboxPerformanceGateRequiresBaseline' -count=1 -v
+.\tools\mailboxperf\run.ps1
+.\tools\mailboxperf\debug-verify.ps1
+```
+
+`run.ps1` refuses to overwrite corrected evidence. It copies the compatible fixture/helper into detached `73ecd28`, uses five rotated rounds and the frozen v2 workload, and preserves failed samples. `debug-verify.ps1` separately collects three-candidate controlled-backlog heap evidence, targeted race tests, bounded recovery under race, and the unchanged full bounded arrival schedule under race. Original red/green diagnostics are `results/debug-clock-{red,green}.txt` and `results/debug-gate-{red,green}.txt`.
+
+
+### Corrected observations and bounded stop
+
+Five rotated rounds completed: **225 observations**, baseline `73ecd28` versus current `a68ab9a` (production source unchanged from `4100678`), all using identical QPC latency logic. `fixture-hashes.csv` records exact copies: Mailbox fixture, CPU helper and memory fixture match byte-for-byte; QPC file hashes differ because current was gofmt-formatted after baseline copying (whitespace/import ordering only). No timing logic changed during collection. The validator/runner summary corrections were completed during collection, then `run.ps1 -SummarizeOnly` recomputed the CSV from the unchanged raw observations without rerunning samples. All 15 uninstrumented sample processes passed conservation/non-overload loss checks. **Zero p99: 0/225. Zero CPU: 11/225** (baseline 1, current unbounded 5, bounded 5). These unresolved CPU observations remain invalid; numerical screening and the executable gate cannot approve them. No further workload tuning was attempted.
+
+Examples from corrected medians (descriptive development-machine results, not deployment claims):
+
+| Scenario / candidate | CPU/success ratio | p99 ratio | Outcome |
+|---|---:|---:|---|
+| dual / 1 worker / uniform / bounded | 1.25 | 1.031 | CPU threshold failure |
+| dual / 4 workers / uniform / RW-off / bounded | 1.50 | 0.929 | CPU threshold failure |
+| priority / 4 workers / uniform / RW-on / unbounded | 1.944 | 1.079 | CPU threshold failure |
+| priority / 4 workers / uniform / RW-on / bounded | 1.889 | 0.577 | CPU threshold failure |
+| dual / 4 workers / MostlyEmpty / bounded | 1.00 | 0.996 | Numerical screening only |
+
+Bounded finite-overload successes: **20,511 / 19,727 / 22,720 / 18,787 / 22,489**; main rejections **45,025 / 45,809 / 42,816 / 46,749 / 43,047** (65–71%). Each round conserves 65,536 and drains. Original and corrected failures are both retained; improved MostlyEmpty screening does not replace the original failure or authorize canary.
+
+### Windows overload memory evidence
+
+The separate identical three-candidate fixture holds one real worker inside execution, then offers eight windows of 4,096 additional real jobs to one hot user queue. Jobs are allocated per submission rather than preallocated/retained by the harness. Each point records exact queued occupancy plus post-GC process-wide live Go heap. The blocked worker is released afterward and all accepted jobs execute; rejected jobs are discarded/released exactly once.
+
+- Old baseline: occupancy 0 → **32,768**, live heap **1,525,744 → 7,031,128 bytes**; accepted 32,769, rejected 0.
+- Current unbounded: occupancy 0 → **32,768**, live heap **1,541,848 → 7,044,976 bytes**; accepted 32,769, rejected 0.
+- Bounded: occupancy stays at **4,096** from window 1 through 8; live heap **2,246,144 → 2,251,728 bytes** across those full windows (5,584 bytes drift); accepted 4,097 including the in-flight job, rejected 28,672. Recovery/conservation passed, including under race.
+
+This is controlled main-queue capacity/retained-heap plateau evidence on Windows, **not RSS**, not a long-running concurrent steady overload experiment, not every queue layout, and not deployment attestation. Full per-window data is in `results/debug-verification/memory-*.json`.
+
+### Final verification and limitations
+
+- Final three-package `go test ... -short -count=1`: PASS (`debug-verification/tests-final.txt`).
+- Clock regression red→green; sustained process-CPU diagnostic: PASS. CPU helper remained unchanged.
+- Zero-current-latency comparison regression red→green; existing validator tests: PASS.
+- Corrected `TestQueueLatency`, five internally rotated rounds: PASS (`queue-latency.txt`).
+- Targeted `-race` on measurement helpers, queue latency, bounded PostJob lifecycle and comparison/missing-baseline tests: PASS; bounded controlled-memory recovery under race: PASS.
+- Full bounded fixed-arrival `-race` sample: **FAIL**, four RW scenarios with main rejections **8,599 / 22,549 / 4,512 / 16,519**; no `WARNING: DATA RACE` emitted. All drain/conserve. This confirms instrumentation turns the fixed arrival schedule into overload; it is not fixed by changing the production queue or hiding rejected jobs.
+- Corrected executable production gate: expected **FAIL**, `invalid baseline metadata or CPU resolution`; later attestation requirements remain unsatisfied.
+- `git diff --check`: PASS. No commit made; no production code/SequenceRing changes. The scratch baseline worktree created for this run is removed after retaining source/helper hashes and all evidence.
+
+**Bounded stop:** latency defects and false acceptance are corrected and regression-tested. CPU quantization remains substantiated on this OS/workload; target-machine attestation, representative business load, longer isolated CPU windows and broader overload/RW/stop scenarios remain external/follow-up blockers. Retain default unbounded and no canary approval.
+
+## Original report (preserved)
+
 ## Status: BLOCKED / NOT APPROVED
 
 Task 2 measurement artifacts are delivered, but **production acceptance is not established**. This is a development-machine screening run, not completion of every production evidence requirement. No production Mailbox code, defaults, ownership, shutdown behavior, or queue implementation was changed. No SequenceRing was implemented or registered. Gate thresholds were not relaxed.

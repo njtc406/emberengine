@@ -9,7 +9,7 @@ import (
 )
 
 type latencyMessage struct {
-	first, published         time.Time
+	first, published         time.Duration
 	push, admission, transit time.Duration
 }
 
@@ -37,12 +37,12 @@ func TestQueueLatency(t *testing.T) {
 							<-start
 							for i := p; i < n; i += producers {
 								s := &samples[i]
-								s.first = time.Now()
+								s.first = perftest.Now()
 								for {
-									s.published = time.Now()
+									s.published = perftest.Now()
 									if q.Push(s) {
-										s.push = time.Since(s.published)
-										s.admission = time.Since(s.first)
+										s.push = perftest.Since(s.published)
+										s.admission = perftest.Since(s.first)
 										break
 									}
 									runtime.Gosched()
@@ -61,7 +61,7 @@ func TestQueueLatency(t *testing.T) {
 								continue
 							}
 							s := v.(*latencyMessage)
-							s.transit = time.Since(s.published)
+							s.transit = perftest.Since(s.published)
 							i++
 						}
 					}()
@@ -93,11 +93,11 @@ func TestQueueLatency(t *testing.T) {
 				}
 				v := make([]time.Duration, 32768)
 				for i := range v {
-					start := time.Now()
+					start := perftest.Now()
 					if q.Push(i) {
 						t.Fatal("full push accepted")
 					}
-					v[i] = time.Since(start)
+					v[i] = perftest.Since(start)
 				}
 				t.Logf("round=%d candidate=%s full-rejection=%+v", round, name, perftest.Percentiles(v))
 			}

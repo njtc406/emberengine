@@ -1,0 +1,6 @@
+=== RUN   TestMailboxPerformanceGate
+    mailbox_performance_test.go:295: invalid baseline metadata or CPU resolution
+--- FAIL: TestMailboxPerformanceGate (0.00s)
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.100s
+FAIL

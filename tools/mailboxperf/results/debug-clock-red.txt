@@ -1,0 +1,9 @@
+=== RUN   TestClockResolvesShortWork
+    clock_test.go:19: short-work clock resolved only 0/1000 samples
+--- FAIL: TestClockResolvesShortWork (0.00s)
+=== RUN   TestCPUTimeMeasuresBusyWork
+    clock_test.go:31: busy process CPU=500ms wall=500.8547ms
+--- PASS: TestCPUTimeMeasuresBusyWork (0.50s)
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/internal/perftest	0.782s
+FAIL

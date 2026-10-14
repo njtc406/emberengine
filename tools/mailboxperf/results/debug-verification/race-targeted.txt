@@ -1,0 +1,113 @@
+=== RUN   TestClockResolvesShortWork
+--- PASS: TestClockResolvesShortWork (0.00s)
+=== RUN   TestCPUTimeMeasuresBusyWork
+    clock_test.go:45: busy process CPU=500ms wall=500.7368ms
+--- PASS: TestCPUTimeMeasuresBusyWork (0.50s)
+=== RUN   TestCPUTimeMonotonic
+--- PASS: TestCPUTimeMonotonic (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/internal/perftest	1.927s
+=== RUN   TestQueueLatency
+    queue_latency_test.go:20: machine={CPU:AMD Ryzen 7 5700X 8-Core Processor              OS:windows Arch:amd64 Go:go1.24.9 Commit:a68ab9a Procs:4} capacity=4096 payload=interface-pointer warmup=4096 samples=32768
+    queue_latency_test.go:87: round=0 candidate=UnboundedMPSC producers=1 cpu=250ms successful-push={P50:1.6µs P99:4.1µs P999:10.3µs} first-attempt-to-accepted={P50:2.4µs P99:6.1µs P999:16.1µs} push-to-pop={P50:2.8µs P99:8.1µs P999:39.8µs}
+    queue_latency_test.go:87: round=0 candidate=UnboundedMPSC producers=2 cpu=156.25ms successful-push={P50:1.5µs P99:3.4µs P999:9.2µs} first-attempt-to-accepted={P50:2.5µs P99:5.6µs P999:14.3µs} push-to-pop={P50:3.4µs P99:260.9µs P999:322.2µs}
+    queue_latency_test.go:87: round=0 candidate=UnboundedMPSC producers=4 cpu=218.75ms successful-push={P50:2.1µs P99:6.2µs P999:80.5µs} first-attempt-to-accepted={P50:3.7µs P99:9.6µs P999:83.9µs} push-to-pop={P50:38.6234ms P99:40.1992ms P999:40.2231ms}
+    queue_latency_test.go:87: round=0 candidate=UnboundedMPSC producers=4 cpu=187.5ms successful-push={P50:1.7µs P99:4.6µs P999:36.4µs} first-attempt-to-accepted={P50:3µs P99:7.2µs P999:48.7µs} push-to-pop={P50:2.4075ms P99:3.6925ms P999:3.72ms}
+    queue_latency_test.go:87: round=0 candidate=MutexRing producers=1 cpu=140.625ms successful-push={P50:1µs P99:4.5µs P999:10.4µs} first-attempt-to-accepted={P50:1.8µs P99:5.9µs P999:12.9µs} push-to-pop={P50:2.3µs P99:18.8µs P999:185.9µs}
+    queue_latency_test.go:87: round=0 candidate=MutexRing producers=2 cpu=140.625ms successful-push={P50:1.4µs P99:3.5µs P999:16.9µs} first-attempt-to-accepted={P50:2.3µs P99:5.3µs P999:22.8µs} push-to-pop={P50:127.4µs P99:1.7267ms P999:1.7312ms}
+    queue_latency_test.go:87: round=0 candidate=MutexRing producers=4 cpu=375ms successful-push={P50:2.2µs P99:35.9µs P999:74.2µs} first-attempt-to-accepted={P50:4.2µs P99:71.3µs P999:135.1µs} push-to-pop={P50:12.1277ms P99:13.0442ms P999:13.1785ms}
+    queue_latency_test.go:87: round=0 candidate=MutexRing producers=4 cpu=328.125ms successful-push={P50:2.2µs P99:38µs P999:71µs} first-attempt-to-accepted={P50:4.2µs P99:70.8µs P999:131.3µs} push-to-pop={P50:11.672ms P99:12.9905ms P999:13.0387ms}
+    queue_latency_test.go:102: round=0 candidate=MutexRing full-rejection={P50:600ns P99:900ns P999:2µs}
+    queue_latency_test.go:87: round=0 candidate=Channel producers=1 cpu=156.25ms successful-push={P50:600ns P99:1.3µs P999:3.9µs} first-attempt-to-accepted={P50:1.4µs P99:2.7µs P999:7.7µs} push-to-pop={P50:1.2µs P99:5.1µs P999:8.9µs}
+    queue_latency_test.go:87: round=0 candidate=Channel producers=2 cpu=125ms successful-push={P50:700ns P99:2.4µs P999:7.9µs} first-attempt-to-accepted={P50:1.8µs P99:5.6µs P999:55.2µs} push-to-pop={P50:1.7µs P99:101.3µs P999:190.8µs}
+    queue_latency_test.go:87: round=0 candidate=Channel producers=4 cpu=125ms successful-push={P50:900ns P99:5.6µs P999:14.8µs} first-attempt-to-accepted={P50:2.4µs P99:8.1µs P999:33.2µs} push-to-pop={P50:625.4µs P99:1.1691ms P999:1.226ms}
+    queue_latency_test.go:87: round=0 candidate=Channel producers=4 cpu=171.875ms successful-push={P50:900ns P99:6.9µs P999:19.8µs} first-attempt-to-accepted={P50:2.3µs P99:9.1µs P999:34.9µs} push-to-pop={P50:175.5µs P99:4.6646ms P999:4.6801ms}
+    queue_latency_test.go:102: round=0 candidate=Channel full-rejection={P50:300ns P99:600ns P999:1.5µs}
+    queue_latency_test.go:87: round=1 candidate=MutexRing producers=1 cpu=203.125ms successful-push={P50:900ns P99:5.1µs P999:11.2µs} first-attempt-to-accepted={P50:1.7µs P99:6.1µs P999:13.4µs} push-to-pop={P50:2.1µs P99:264.1µs P999:337.5µs}
+    queue_latency_test.go:87: round=1 candidate=MutexRing producers=2 cpu=156.25ms successful-push={P50:1.3µs P99:3.6µs P999:16.2µs} first-attempt-to-accepted={P50:2.2µs P99:5.5µs P999:20.8µs} push-to-pop={P50:1.3807ms P99:3.944ms P999:4.097ms}
+    queue_latency_test.go:87: round=1 candidate=MutexRing producers=4 cpu=312.5ms successful-push={P50:2.1µs P99:37.8µs P999:74.6µs} first-attempt-to-accepted={P50:4.2µs P99:72.5µs P999:128.4µs} push-to-pop={P50:11.9118ms P99:13.1835ms P999:13.2358ms}
+    queue_latency_test.go:87: round=1 candidate=MutexRing producers=4 cpu=359.375ms successful-push={P50:2.1µs P99:37.3µs P999:70.9µs} first-attempt-to-accepted={P50:4.1µs P99:73.1µs P999:130.6µs} push-to-pop={P50:12.1425ms P99:13.056ms P999:13.1031ms}
+    queue_latency_test.go:102: round=1 candidate=MutexRing full-rejection={P50:600ns P99:1.1µs P999:2.5µs}
+    queue_latency_test.go:87: round=1 candidate=Channel producers=1 cpu=109.375ms successful-push={P50:600ns P99:1.2µs P999:5.1µs} first-attempt-to-accepted={P50:1.3µs P99:2.4µs P999:8.3µs} push-to-pop={P50:1.1µs P99:5.2µs P999:13µs}
+    queue_latency_test.go:87: round=1 candidate=Channel producers=2 cpu=109.375ms successful-push={P50:700ns P99:2µs P999:7.4µs} first-attempt-to-accepted={P50:1.7µs P99:3.7µs P999:9.2µs} push-to-pop={P50:1.7µs P99:10.6µs P999:74.5µs}
+    queue_latency_test.go:87: round=1 candidate=Channel producers=4 cpu=156.25ms successful-push={P50:900ns P99:6.8µs P999:16.9µs} first-attempt-to-accepted={P50:2.3µs P99:9.2µs P999:26.4µs} push-to-pop={P50:241.9µs P99:782.3µs P999:793.6µs}
+    queue_latency_test.go:87: round=1 candidate=Channel producers=4 cpu=187.5ms successful-push={P50:900ns P99:5.6µs P999:11.9µs} first-attempt-to-accepted={P50:2.4µs P99:11µs P999:153µs} push-to-pop={P50:4.6777ms P99:5.8932ms P999:5.9692ms}
+    queue_latency_test.go:102: round=1 candidate=Channel full-rejection={P50:400ns P99:700ns P999:1.6µs}
+    queue_latency_test.go:87: round=1 candidate=UnboundedMPSC producers=1 cpu=203.125ms successful-push={P50:1.3µs P99:2.6µs P999:7.4µs} first-attempt-to-accepted={P50:2µs P99:4.3µs P999:10µs} push-to-pop={P50:2.3µs P99:7.5µs P999:91.8µs}
+    queue_latency_test.go:87: round=1 candidate=UnboundedMPSC producers=2 cpu=171.875ms successful-push={P50:1.5µs P99:3.6µs P999:9.5µs} first-attempt-to-accepted={P50:2.4µs P99:5.1µs P999:12.9µs} push-to-pop={P50:53µs P99:2.6875ms P999:2.7469ms}
+    queue_latency_test.go:87: round=1 candidate=UnboundedMPSC producers=4 cpu=171.875ms successful-push={P50:1.6µs P99:3.5µs P999:12.2µs} first-attempt-to-accepted={P50:2.8µs P99:6µs P999:29.6µs} push-to-pop={P50:2.4331ms P99:3.5356ms P999:3.5794ms}
+    queue_latency_test.go:87: round=1 candidate=UnboundedMPSC producers=4 cpu=156.25ms successful-push={P50:1.6µs P99:3.9µs P999:26.6µs} first-attempt-to-accepted={P50:2.8µs P99:7.1µs P999:64.8µs} push-to-pop={P50:1.398ms P99:3.8072ms P999:3.8312ms}
+    queue_latency_test.go:87: round=2 candidate=Channel producers=1 cpu=171.875ms successful-push={P50:600ns P99:1.3µs P999:2.5µs} first-attempt-to-accepted={P50:1.3µs P99:2.6µs P999:7.6µs} push-to-pop={P50:1.2µs P99:5µs P999:9.3µs}
+    queue_latency_test.go:87: round=2 candidate=Channel producers=2 cpu=171.875ms successful-push={P50:800ns P99:2.5µs P999:8.4µs} first-attempt-to-accepted={P50:1.8µs P99:4.2µs P999:11µs} push-to-pop={P50:1.8µs P99:67µs P999:84.6µs}
+    queue_latency_test.go:87: round=2 candidate=Channel producers=4 cpu=171.875ms successful-push={P50:900ns P99:6µs P999:12.2µs} first-attempt-to-accepted={P50:2.4µs P99:8.8µs P999:30.7µs} push-to-pop={P50:621.2µs P99:4.7713ms P999:4.8018ms}
+    queue_latency_test.go:87: round=2 candidate=Channel producers=4 cpu=125ms successful-push={P50:900ns P99:5.7µs P999:10.7µs} first-attempt-to-accepted={P50:2.5µs P99:10.3µs P999:33.4µs} push-to-pop={P50:3.8764ms P99:5.963ms P999:5.9782ms}
+    queue_latency_test.go:102: round=2 candidate=Channel full-rejection={P50:300ns P99:600ns P999:1.3µs}
+    queue_latency_test.go:87: round=2 candidate=UnboundedMPSC producers=1 cpu=250ms successful-push={P50:1.3µs P99:2.9µs P999:8µs} first-attempt-to-accepted={P50:2.1µs P99:4.5µs P999:10µs} push-to-pop={P50:2.4µs P99:7.8µs P999:33.3µs}
+    queue_latency_test.go:87: round=2 candidate=UnboundedMPSC producers=2 cpu=218.75ms successful-push={P50:1.5µs P99:3.3µs P999:9.8µs} first-attempt-to-accepted={P50:2.4µs P99:5.2µs P999:12.9µs} push-to-pop={P50:3µs P99:336.3µs P999:374.9µs}
+    queue_latency_test.go:87: round=2 candidate=UnboundedMPSC producers=4 cpu=171.875ms successful-push={P50:1.7µs P99:6.5µs P999:22.3µs} first-attempt-to-accepted={P50:3µs P99:8.6µs P999:50.5µs} push-to-pop={P50:34.9069ms P99:35.9302ms P999:35.9467ms}
+    queue_latency_test.go:87: round=2 candidate=UnboundedMPSC producers=4 cpu=93.75ms successful-push={P50:1.6µs P99:4.2µs P999:19.6µs} first-attempt-to-accepted={P50:2.8µs P99:8.4µs P999:65.1µs} push-to-pop={P50:2.8113ms P99:5.5303ms P999:5.5389ms}
+    queue_latency_test.go:87: round=2 candidate=MutexRing producers=1 cpu=218.75ms successful-push={P50:900ns P99:5.3µs P999:9.3µs} first-attempt-to-accepted={P50:1.7µs P99:6.3µs P999:11.5µs} push-to-pop={P50:2µs P99:9.1µs P999:32.4µs}
+    queue_latency_test.go:87: round=2 candidate=MutexRing producers=2 cpu=156.25ms successful-push={P50:1.3µs P99:3.3µs P999:11.8µs} first-attempt-to-accepted={P50:2.2µs P99:4.8µs P999:16.4µs} push-to-pop={P50:853.9µs P99:2.0233ms P999:2.0287ms}
+    queue_latency_test.go:87: round=2 candidate=MutexRing producers=4 cpu=312.5ms successful-push={P50:2.1µs P99:37.7µs P999:80.8µs} first-attempt-to-accepted={P50:4.1µs P99:72.9µs P999:133.6µs} push-to-pop={P50:12.0087ms P99:12.8624ms P999:13.1282ms}
+    queue_latency_test.go:87: round=2 candidate=MutexRing producers=4 cpu=343.75ms successful-push={P50:2.1µs P99:37.8µs P999:70.5µs} first-attempt-to-accepted={P50:4.1µs P99:74.5µs P999:126.4µs} push-to-pop={P50:11.9757ms P99:13.1714ms P999:13.213ms}
+    queue_latency_test.go:102: round=2 candidate=MutexRing full-rejection={P50:600ns P99:1.3µs P999:5.4µs}
+    queue_latency_test.go:87: round=3 candidate=UnboundedMPSC producers=1 cpu=203.125ms successful-push={P50:1.3µs P99:2.8µs P999:9.3µs} first-attempt-to-accepted={P50:2µs P99:4.3µs P999:11.3µs} push-to-pop={P50:2.3µs P99:7µs P999:14.6µs}
+    queue_latency_test.go:87: round=3 candidate=UnboundedMPSC producers=2 cpu=140.625ms successful-push={P50:1.5µs P99:3.3µs P999:9.1µs} first-attempt-to-accepted={P50:2.4µs P99:5.5µs P999:11.5µs} push-to-pop={P50:3.1µs P99:382.8µs P999:430.8µs}
+    queue_latency_test.go:87: round=3 candidate=UnboundedMPSC producers=4 cpu=140.625ms successful-push={P50:1.6µs P99:5.7µs P999:22µs} first-attempt-to-accepted={P50:2.9µs P99:8.1µs P999:56.2µs} push-to-pop={P50:19.8416ms P99:22.0987ms P999:22.1932ms}
+    queue_latency_test.go:87: round=3 candidate=UnboundedMPSC producers=4 cpu=187.5ms successful-push={P50:1.6µs P99:3.6µs P999:17.6µs} first-attempt-to-accepted={P50:2.7µs P99:6.5µs P999:41.3µs} push-to-pop={P50:1.4656ms P99:3.3977ms P999:3.4235ms}
+    queue_latency_test.go:87: round=3 candidate=MutexRing producers=1 cpu=203.125ms successful-push={P50:900ns P99:5.1µs P999:9.2µs} first-attempt-to-accepted={P50:1.7µs P99:6.1µs P999:11.4µs} push-to-pop={P50:2µs P99:202.8µs P999:231µs}
+    queue_latency_test.go:87: round=3 candidate=MutexRing producers=2 cpu=140.625ms successful-push={P50:1.1µs P99:3.4µs P999:13.3µs} first-attempt-to-accepted={P50:2.1µs P99:5µs P999:16.6µs} push-to-pop={P50:3.7721ms P99:6.4733ms P999:6.5288ms}
+    queue_latency_test.go:87: round=3 candidate=MutexRing producers=4 cpu=359.375ms successful-push={P50:2.1µs P99:37.8µs P999:71.1µs} first-attempt-to-accepted={P50:4.1µs P99:72µs P999:118.4µs} push-to-pop={P50:11.733ms P99:12.852ms P999:13.0152ms}
+    queue_latency_test.go:87: round=3 candidate=MutexRing producers=4 cpu=296.875ms successful-push={P50:2.1µs P99:37.2µs P999:78.4µs} first-attempt-to-accepted={P50:4.2µs P99:73.2µs P999:136.2µs} push-to-pop={P50:12.1994ms P99:13.1111ms P999:13.2183ms}
+    queue_latency_test.go:102: round=3 candidate=MutexRing full-rejection={P50:600ns P99:900ns P999:2.4µs}
+    queue_latency_test.go:87: round=3 candidate=Channel producers=1 cpu=171.875ms successful-push={P50:600ns P99:1.3µs P999:3.9µs} first-attempt-to-accepted={P50:1.3µs P99:2.5µs P999:7.9µs} push-to-pop={P50:1.2µs P99:5.4µs P999:15.7µs}
+    queue_latency_test.go:87: round=3 candidate=Channel producers=2 cpu=171.875ms successful-push={P50:700ns P99:2µs P999:7.5µs} first-attempt-to-accepted={P50:1.7µs P99:3.6µs P999:9.7µs} push-to-pop={P50:1.6µs P99:99.6µs P999:147.9µs}
+    queue_latency_test.go:87: round=3 candidate=Channel producers=4 cpu=187.5ms successful-push={P50:900ns P99:5.4µs P999:17.7µs} first-attempt-to-accepted={P50:2.4µs P99:9.2µs P999:51.3µs} push-to-pop={P50:4.3333ms P99:4.8785ms P999:4.8981ms}
+    queue_latency_test.go:87: round=3 candidate=Channel producers=4 cpu=125ms successful-push={P50:900ns P99:5.6µs P999:12µs} first-attempt-to-accepted={P50:2.3µs P99:8.8µs P999:25.1µs} push-to-pop={P50:263.8µs P99:767.9µs P999:788.6µs}
+    queue_latency_test.go:102: round=3 candidate=Channel full-rejection={P50:300ns P99:600ns P999:1µs}
+    queue_latency_test.go:87: round=4 candidate=MutexRing producers=1 cpu=218.75ms successful-push={P50:900ns P99:5.1µs P999:9.5µs} first-attempt-to-accepted={P50:1.6µs P99:6µs P999:11.2µs} push-to-pop={P50:1.9µs P99:8.9µs P999:15.6µs}
+    queue_latency_test.go:87: round=4 candidate=MutexRing producers=2 cpu=140.625ms successful-push={P50:1.1µs P99:3.1µs P999:13.8µs} first-attempt-to-accepted={P50:2µs P99:4.3µs P999:27.1µs} push-to-pop={P50:1.7177ms P99:3.2682ms P999:3.2898ms}
+    queue_latency_test.go:87: round=4 candidate=MutexRing producers=4 cpu=359.375ms successful-push={P50:2.1µs P99:39.3µs P999:74.6µs} first-attempt-to-accepted={P50:4.2µs P99:76.5µs P999:146.1µs} push-to-pop={P50:12.327ms P99:16.9151ms P999:16.9903ms}
+    queue_latency_test.go:87: round=4 candidate=MutexRing producers=4 cpu=312.5ms successful-push={P50:2.2µs P99:36.9µs P999:73.7µs} first-attempt-to-accepted={P50:4.2µs P99:73.7µs P999:130.4µs} push-to-pop={P50:12.1277ms P99:13.2189ms P999:13.2763ms}
+    queue_latency_test.go:102: round=4 candidate=MutexRing full-rejection={P50:600ns P99:1.2µs P999:2.1µs}
+    queue_latency_test.go:87: round=4 candidate=Channel producers=1 cpu=140.625ms successful-push={P50:600ns P99:1.2µs P999:3.3µs} first-attempt-to-accepted={P50:1.3µs P99:2.3µs P999:8.3µs} push-to-pop={P50:1.1µs P99:5.2µs P999:93.9µs}
+    queue_latency_test.go:87: round=4 candidate=Channel producers=2 cpu=171.875ms successful-push={P50:700ns P99:2.1µs P999:8.3µs} first-attempt-to-accepted={P50:1.8µs P99:3.9µs P999:13.9µs} push-to-pop={P50:1.8µs P99:85.9µs P999:276µs}
+    queue_latency_test.go:87: round=4 candidate=Channel producers=4 cpu=156.25ms successful-push={P50:900ns P99:6.2µs P999:14.8µs} first-attempt-to-accepted={P50:2.3µs P99:9.3µs P999:58.3µs} push-to-pop={P50:1.5405ms P99:5.1157ms P999:5.1328ms}
+    queue_latency_test.go:87: round=4 candidate=Channel producers=4 cpu=140.625ms successful-push={P50:900ns P99:5.8µs P999:12.7µs} first-attempt-to-accepted={P50:2.3µs P99:9.1µs P999:40.2µs} push-to-pop={P50:423.8µs P99:4.6873ms P999:4.6971ms}
+    queue_latency_test.go:102: round=4 candidate=Channel full-rejection={P50:300ns P99:500ns P999:1.3µs}
+    queue_latency_test.go:87: round=4 candidate=UnboundedMPSC producers=1 cpu=250ms successful-push={P50:1.4µs P99:3µs P999:8.3µs} first-attempt-to-accepted={P50:2.1µs P99:4.6µs P999:10.2µs} push-to-pop={P50:2.3µs P99:7.7µs P999:31.1µs}
+    queue_latency_test.go:87: round=4 candidate=UnboundedMPSC producers=2 cpu=156.25ms successful-push={P50:1.5µs P99:3.5µs P999:8.8µs} first-attempt-to-accepted={P50:2.4µs P99:5.1µs P999:11.9µs} push-to-pop={P50:2.9µs P99:11.6µs P999:23.4µs}
+    queue_latency_test.go:87: round=4 candidate=UnboundedMPSC producers=4 cpu=171.875ms successful-push={P50:1.6µs P99:3.7µs P999:22.2µs} first-attempt-to-accepted={P50:2.8µs P99:6.4µs P999:46.1µs} push-to-pop={P50:1.6274ms P99:3.1816ms P999:3.2415ms}
+    queue_latency_test.go:87: round=4 candidate=UnboundedMPSC producers=4 cpu=125ms successful-push={P50:1.5µs P99:3.3µs P999:28.3µs} first-attempt-to-accepted={P50:2.7µs P99:5.8µs P999:42.9µs} push-to-pop={P50:943.3µs P99:2.0632ms P999:2.083ms}
+--- PASS: TestQueueLatency (5.82s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/boundedmpsc	7.303s
+=== RUN   TestPostJobBoundedFullOwnership
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:1
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=1 active=1 idle=0 total=4 max=4 min=4 avg=4.0 top=w0=4
+    worker.go:402: [INFO] Worker 0 processed 3 events
+--- PASS: TestPostJobBoundedFullOwnership (0.00s)
+=== RUN   TestMailboxPerformanceComparison
+=== RUN   TestMailboxPerformanceComparison/missing
+=== RUN   TestMailboxPerformanceComparison/metadata
+=== RUN   TestMailboxPerformanceComparison/cpu-zero
+=== RUN   TestMailboxPerformanceComparison/loss
+=== RUN   TestMailboxPerformanceComparison/duplicate-round
+=== RUN   TestMailboxPerformanceComparison/p99
+=== RUN   TestMailboxPerformanceComparison/cpu
+=== RUN   TestMailboxPerformanceComparison/throughput
+--- PASS: TestMailboxPerformanceComparison (0.01s)
+    --- PASS: TestMailboxPerformanceComparison/missing (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/metadata (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu-zero (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/loss (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/duplicate-round (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/p99 (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/throughput (0.00s)
+=== RUN   TestMailboxPerformanceRejectsUnresolvedCurrentLatency
+--- PASS: TestMailboxPerformanceRejectsUnresolvedCurrentLatency (0.00s)
+=== RUN   TestMailboxPerformanceGateRequiresBaseline
+--- PASS: TestMailboxPerformanceGateRequiresBaseline (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	2.663s

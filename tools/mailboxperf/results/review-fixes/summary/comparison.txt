@@ -1,0 +1,35 @@
+
+Scenario                              Candidate ThroughputRatio CPUPerSuccessRatio P99Ratio P999Ratio IdleCPURatio CPUResolved LatencyResolved  Pass
+--------                              --------- --------------- ------------------ -------- --------- ------------ ----------- ---------------  ----
+dual-w1-rwfalse-hotfalse-steady       unbounded            1.00               1.00     1.01      0.94            1        True            True  True
+dual-w1-rwfalse-hotfalse-steady       bounded              1.00               1.25     1.03      1.05         1.25        True            True False
+dual-w1-rwfalse-hottrue-steady        unbounded            1.00               0.86     0.98      0.81         0.86        True            True  True
+dual-w1-rwfalse-hottrue-steady        bounded              1.00               0.57     1.04      0.96         0.57        True            True  True
+dual-w4-rwfalse-hotfalse-mostly-empty unbounded            1.00               1.10     1.02      0.97         1.10        True            True  True
+dual-w4-rwfalse-hotfalse-mostly-empty bounded              1.00               1.00     1.00      0.95            1        True            True  True
+dual-w4-rwfalse-hotfalse-overload     unbounded            0.99               0.95     1.04      1.04         0.95        True            True False
+dual-w4-rwfalse-hotfalse-overload     bounded              1.04               1.00     0.30      0.29         0.31        True            True False
+dual-w4-rwfalse-hotfalse-resize       unbounded            1.00                NaN     0.92      0.82          NaN       False            True False
+dual-w4-rwfalse-hotfalse-resize       bounded              1.00                NaN     1.19      1.27          NaN       False            True False
+dual-w4-rwfalse-hotfalse-steady       unbounded            1.00               0.75     0.92      0.82         0.75        True            True  True
+dual-w4-rwfalse-hotfalse-steady       bounded              1.00               1.50     0.93      0.85         1.50        True            True False
+dual-w4-rwfalse-hottrue-steady        unbounded            1.00               0.40     0.99      1.25         0.40        True            True False
+dual-w4-rwfalse-hottrue-steady        bounded              1.00               1.00     0.97      0.92            1        True            True  True
+dual-w4-rwtrue-hotfalse-steady        unbounded            1.00               0.50     0.31      0.29         0.50        True            True  True
+dual-w4-rwtrue-hotfalse-steady        bounded              1.00               1.19     0.32      0.31         1.19        True            True False
+dual-w4-rwtrue-hottrue-steady         unbounded            1.00               0.68     1.56      1.03         0.68        True            True False
+dual-w4-rwtrue-hottrue-steady         bounded              1.00               0.95     1.60      1.07         0.95        True            True False
+priority-w1-rwfalse-hotfalse-steady   unbounded            1.00                NaN        1      1.12          NaN       False            True False
+priority-w1-rwfalse-hotfalse-steady   bounded              1.00               1.25     1.00      1.06         1.25        True            True False
+priority-w1-rwfalse-hottrue-steady    unbounded            1.00                NaN     1.02      1.07          NaN       False            True False
+priority-w1-rwfalse-hottrue-steady    bounded              1.00                NaN     0.97         1          NaN       False            True False
+priority-w4-rwfalse-hotfalse-steady   unbounded            1.00                NaN     1.07      0.84          NaN       False            True False
+priority-w4-rwfalse-hotfalse-steady   bounded              1.00                NaN     1.01      1.06          NaN       False            True False
+priority-w4-rwfalse-hottrue-steady    unbounded            1.00               0.62     0.97      0.69         0.62        True            True  True
+priority-w4-rwfalse-hottrue-steady    bounded              1.00                NaN     1.01      0.85          NaN       False            True False
+priority-w4-rwtrue-hotfalse-steady    unbounded            1.00               1.94     1.08      0.83         1.94        True            True False
+priority-w4-rwtrue-hotfalse-steady    bounded              1.00               1.89     0.58      0.40         1.89        True            True False
+priority-w4-rwtrue-hottrue-steady     unbounded            1.00               1.10     0.54      0.74         1.10        True            True  True
+priority-w4-rwtrue-hottrue-steady     bounded              1.00               0.95     1.46      1.79         0.95        True            True False
+
+

@@ -1,0 +1,4 @@
+"Candidate","CPUSeconds","Quanta","WallSeconds","Success","Samples","Resolved","Exit"
+"baseline","2.5625","164","65.5288282","2097152","2097152","False","0"
+"unbounded","2.5625","164","65.5304507","2097152","2097152","False","0"
+"bounded","3.015625","193","65.6188003","2095008","2097152","False","1"

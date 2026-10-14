@@ -1,0 +1,5 @@
+# github.com/njtc406/emberengine/engine/pkg/actor/mailbox [github.com/njtc406/emberengine/engine/pkg/actor/mailbox.test]
+engine\pkg\actor\mailbox\mailbox_performance_replication_test.go:12:19: undefined: mailboxPerfReplication
+engine\pkg\actor\mailbox\mailbox_performance_replication_test.go:19:13: undefined: mailboxPerfCPUResolved
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox [build failed]
+FAIL

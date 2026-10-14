@@ -1,13 +1,21 @@
+param(
+  [switch]$SummarizeOnly,
+  [string]$InputPath,
+  [string]$SummaryDirectory
+)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location $root
+$results = Join-Path $PSScriptRoot 'results\corrected-v3'
+if (!$SummarizeOnly) {
 $baseline = Join-Path $root '.perf-baseline'
 if (!(Test-Path $baseline)) { git worktree add --detach $baseline 73ecd28; if ($LASTEXITCODE) { throw 'baseline checkout failed' } }
 if ((git -C $baseline rev-parse --short HEAD) -ne '73ecd28') { throw 'wrong baseline' }
 New-Item -ItemType Directory -Force "$baseline\engine\internal\perftest" | Out-Null
 Copy-Item "$root\engine\internal\perftest\*.go" "$baseline\engine\internal\perftest"
 Copy-Item "$root\engine\pkg\actor\mailbox\mailbox_performance*_test.go" "$baseline\engine\pkg\actor\mailbox"
-$results = Join-Path $PSScriptRoot 'results'
+$results = Join-Path $PSScriptRoot 'results\corrected-v3'
+if (Test-Path $results) { throw 'Refusing to overwrite corrected evidence' }
 New-Item -ItemType Directory -Force $results | Out-Null
 $env:GOMAXPROCS = '4'
 $env:PERF_CPU_MODEL = (Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)
@@ -32,24 +40,80 @@ for ($round=0; $round -lt 5; $round++) {
       foreach ($row in $rows) { $row.Round=$round; $all += $row }
       $rows | ConvertTo-Json -Depth 10 | Set-Content $env:PERF_OUTPUT
     }
-    if ($exit) { throw "sample failed: $candidate round $round" }
+    if ($exit) { Write-Warning "sample failed: $candidate round $round; retaining failure and continuing the frozen matrix" }
   }
 }
 $all | ConvertTo-Json -Depth 10 | Set-Content "$results\all.json"
 $all | Where-Object Candidate -eq baseline | ConvertTo-Json -Depth 10 | Set-Content "$results\baseline.json"
+} else {
+  if (!$InputPath) { $InputPath = Join-Path $results 'all.json' }
+  $all = @(Get-Content $InputPath -Raw | ConvertFrom-Json)
+}
+# Mirror the Go comparator's frozen scenario and metadata contract before computing any ratios.
+$expected = @{}
+foreach ($mode in @('dual','priority')) {
+  foreach ($workers in @(1,4)) {
+    foreach ($rw in @('false','true')) {
+      if ($workers -eq 1 -and $rw -eq 'true') { continue }
+      foreach ($hot in @('false','true')) {
+        $expected["$mode-w$workers-rw$rw-hot$hot-steady"] = @($workers, ($rw -eq 'true'), 65536)
+      }
+    }
+  }
+}
+foreach ($kind in @('mostly-empty','resize','overload')) {
+  $expected["dual-w4-rwfalse-hotfalse-$kind"] = @(4, $false, $(if ($kind -eq 'mostly-empty') {8192} else {65536}))
+}
+if ($all.Count -ne 225) { throw 'Incomplete corrected matrix: need 225 observations' }
+$reference = $all[0].Machine
+$seen = @{}
+$currentCommit = $null
+foreach ($row in $all) {
+  if (!$expected.ContainsKey($row.Scenario) -or $row.Candidate -cnotin @('baseline','unbounded','bounded')) { throw 'Unexpected scenario/candidate' }
+  $spec = $expected[$row.Scenario]
+  if ($row.Protocol -cne 'task2-v3-qpc') { throw 'Incompatible protocol' }
+  if ($row.Round -notin 0..4 -or $row.Round -isnot [long] -and $row.Round -isnot [int]) { throw 'Invalid round ID' }
+  $key = "$($row.Candidate)/$($row.Scenario)/$($row.Round)"
+  if ($seen.ContainsKey($key)) { throw "Duplicate round: $key" }
+  $seen[$key] = $true
+  foreach ($field in @('CPU','OS','Arch','Go','Procs')) {
+    if (!$row.Machine.$field -or $row.Machine.$field -cne $reference.$field) { throw "Incompatible machine metadata: $field" }
+  }
+  if (!$row.Machine.Commit) { throw 'Missing commit identity' }
+  if ($row.Candidate -eq 'baseline') {
+    if ($row.Machine.Commit -cne '73ecd28') { throw 'Wrong explicit baseline commit: expected 73ecd28' }
+  } elseif (!$currentCommit) { $currentCommit = $row.Machine.Commit
+  } elseif ($row.Machine.Commit -cne $currentCommit) { throw 'Incompatible current commit identity' }
+  if ($row.Workers -ne $spec[0] -or $row.EffectiveRW -isnot [bool] -or $row.EffectiveRW -ne $spec[1] -or $row.Samples -ne $spec[2]) { throw 'Incompatible scenario metadata/samples' }
+  if (!$row.Drained -or $row.Success -le 0 -or $row.Wall -le 0 -or $row.Success+$row.MainRejected+$row.RWDropped+$row.StopRejected+$row.OtherRejected -ne $row.Samples) { throw 'Invalid conservation/drain/wall measurement' }
+}
+foreach ($scenario in $expected.Keys) {
+  foreach ($candidate in @('baseline','unbounded','bounded')) {
+    foreach ($round in 0..4) {
+      if (!$seen.ContainsKey("$candidate/$scenario/$round")) { throw "Missing round: $candidate/$scenario/$round" }
+    }
+  }
+}
+if ($SummaryDirectory) { $results = $SummaryDirectory
+} elseif ($SummarizeOnly) { $results = Join-Path $results ('summary-' + [guid]::NewGuid()) }
+if ($SummarizeOnly -or $SummaryDirectory) {
+  if (Test-Path $results) { throw 'Refusing to overwrite summary evidence' }
+  New-Item -ItemType Directory $results | Out-Null
+}
 function Median($values) { $v=@($values | Sort-Object); return $v[[int][math]::Floor($v.Count/2)] }
 $comparison = foreach ($scenario in ($all.Scenario | Sort-Object -Unique)) {
   $base=@($all | Where-Object { $_.Scenario -eq $scenario -and $_.Candidate -eq 'baseline' })
   foreach ($candidate in @('unbounded','bounded')) {
     $rows=@($all | Where-Object { $_.Scenario -eq $scenario -and $_.Candidate -eq $candidate })
     $throughput=(Median ($rows | ForEach-Object { $_.Success/$_.Wall })) / (Median ($base | ForEach-Object { $_.Success/$_.Wall }))
-    $resolved = @($base + $rows | Where-Object { $_.CPU -le 0 }).Count -eq 0
+    $resolved = $base.Count -eq 5 -and $rows.Count -eq 5 -and @($base + $rows | Where-Object { $_.CPU -le 0 }).Count -eq 0
+    $lossFree = @($base + $rows | Where-Object { !$_.Drained -or $_.Success -ne $_.Samples -or $_.MainRejected -ne 0 -or $_.RWDropped -ne 0 -or $_.StopRejected -ne 0 -or $_.OtherRejected -ne 0 }).Count -eq 0
     $cpu = if ($resolved) { (Median ($rows | ForEach-Object { $_.CPU/$_.Success })) / (Median ($base | ForEach-Object { $_.CPU/$_.Success })) } else { [double]::NaN }
-    $latencyResolved = (Median $base.Completion.P99) -gt 0 -and (Median $base.Completion.P999) -gt 0
+    $latencyResolved = @($base + $rows | Where-Object { $_.Completion.P99 -le 0 -or $_.Completion.P999 -le 0 }).Count -eq 0
     $p99 = if ($latencyResolved) {(Median $rows.Completion.P99)/(Median $base.Completion.P99)} else {[double]::NaN}
     $p999 = if ($latencyResolved) {(Median $rows.Completion.P999)/(Median $base.Completion.P999)} else {[double]::NaN}
     $idleCPU = if ($resolved) { (Median $rows.CPU)/(Median $base.CPU) } else { [double]::NaN }
-    [pscustomobject]@{Scenario=$scenario;Candidate=$candidate;ThroughputRatio=$throughput;CPUPerSuccessRatio=$cpu;P99Ratio=$p99;P999Ratio=$p999;IdleCPURatio=$idleCPU;CPUResolved=$resolved;LatencyResolved=$latencyResolved;Pass=(!$scenario.Contains('overload') -and $latencyResolved -and $resolved -and $throughput -ge .95 -and $cpu -le 1.10 -and $p99 -le 1.10 -and $p999 -le 1.15 -and (!$scenario.Contains('mostly-empty') -or $idleCPU -le 1.10));RejectionRatio=(Median $rows.RejectionRatio)}
+    [pscustomobject]@{Scenario=$scenario;Candidate=$candidate;ThroughputRatio=$throughput;CPUPerSuccessRatio=$cpu;P99Ratio=$p99;P999Ratio=$p999;IdleCPURatio=$idleCPU;CPUResolved=$resolved;LatencyResolved=$latencyResolved;Pass=(!$scenario.Contains('overload') -and $lossFree -and $latencyResolved -and $resolved -and $throughput -ge .95 -and $cpu -le 1.10 -and $p99 -le 1.10 -and $p999 -le 1.15 -and (!$scenario.Contains('mostly-empty') -or $idleCPU -le 1.10));RejectionRatio=(Median $rows.RejectionRatio)}
   }
 }
 $comparison | Export-Csv "$results\comparison.csv" -NoTypeInformation

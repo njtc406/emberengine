@@ -1,0 +1,5 @@
+--- FAIL: TestMailboxPerformanceRejectsUnresolvedCurrentLatency (0.00s)
+    mailbox_performance_regression_test.go:21: unresolved current latency was accepted as an improvement
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.146s
+FAIL

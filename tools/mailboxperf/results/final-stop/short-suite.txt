@@ -1,0 +1,112 @@
+ok  	github.com/njtc406/emberengine/engine/internal/perftest	1.112s
+ok  	github.com/njtc406/emberengine/engine/pkg/actor	1.103s
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	7.346s
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job	1.765s
+ok  	github.com/njtc406/emberengine/engine/pkg/authz	1.714s
+ok  	github.com/njtc406/emberengine/engine/pkg/cluster	2.435s
+?   	github.com/njtc406/emberengine/engine/pkg/cluster/discovery	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd	1.932s
+ok  	github.com/njtc406/emberengine/engine/pkg/cluster/endpoints	2.537s
+ok  	github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository	1.867s
+ok  	github.com/njtc406/emberengine/engine/pkg/cluster/leadership	1.852s
+ok  	github.com/njtc406/emberengine/engine/pkg/config	2.167s
+?   	github.com/njtc406/emberengine/engine/pkg/config/remote	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/core	2.431s
+ok  	github.com/njtc406/emberengine/engine/pkg/core/rpc	1.876s
+ok  	github.com/njtc406/emberengine/engine/pkg/def	0.522s
+?   	github.com/njtc406/emberengine/engine/pkg/dto	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/event	1.972s
+?   	github.com/njtc406/emberengine/engine/pkg/interfaces	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/log	1.185s
+ok  	github.com/njtc406/emberengine/engine/pkg/metrics	1.524s
+ok  	github.com/njtc406/emberengine/engine/pkg/monitor	1.915s
+ok  	github.com/njtc406/emberengine/engine/pkg/node	1.832s
+?   	github.com/njtc406/emberengine/engine/pkg/plugins	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/profiler	0.597s
+ok  	github.com/njtc406/emberengine/engine/pkg/router	1.723s
+?   	github.com/njtc406/emberengine/engine/pkg/rpc/client	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/rpc/client/pool	1.409s
+ok  	github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus	1.663s
+ok  	github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope	1.400s
+?   	github.com/njtc406/emberengine/engine/pkg/rpc/remote	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/rpc/remote/gr	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler	1.438s
+?   	github.com/njtc406/emberengine/engine/pkg/rpc/remote/nt	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/rpc/remote/pool	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/rpc/remote/rx	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/services	1.391s
+ok  	github.com/njtc406/emberengine/engine/pkg/sysModule/gate	1.664s
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/gate/limiter	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/gate/proto	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/gate/protocol_adapter/connx	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/gate/protocol_adapter/session	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/gate/protocol_adapter/ws	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/httpmodule	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/httpmodule/auth	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/mongomodule	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/mysqlmodule	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/redismodule	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/router	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysModule/wsmodule	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysService/dbservice	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysService/dbservice/config	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/sysService/healthservice	2.048s
+?   	github.com/njtc406/emberengine/engine/pkg/sysService/healthservice/config	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice/config	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/tracing	0.512s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/asynclib	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/boundedmpsc	0.541s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/bytespool	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/circuitbreaker	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/codec	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/concurrent	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/dedup	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/diag	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/emberctx	0.507s
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/errorx	1.129s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/hashring	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/httplib	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/httpx	0.849s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/idle	0.456s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/idle/test	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/jwtx	0.682s
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/maps	0.513s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/mapx	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/memdbx	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/mpmc	0.515s [no tests to run]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/mpsc	1.292s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/network	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/network/processor	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/pid	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/pool	0.519s [no tests to run]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/queue	0.526s
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/ring	1.774s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/safe	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/serializer	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/shardedlock	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/syncx	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/timelib	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/timingwheel	27.481s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/timingwheel/delayqueue	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/title	0.304s
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/tlsx	0.623s
+?   	github.com/njtc406/emberengine/engine/pkg/utils/translate	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/util	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/validate	[no test files]
+?   	github.com/njtc406/emberengine/engine/pkg/utils/version	[no test files]
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/xcontext	0.970s
+?   	github.com/njtc406/emberengine/example/comm	[no test files]
+?   	github.com/njtc406/emberengine/example/msg	[no test files]
+?   	github.com/njtc406/emberengine/example/node1	[no test files]
+?   	github.com/njtc406/emberengine/example/node2	[no test files]
+?   	github.com/njtc406/emberengine/example/node3	[no test files]
+?   	github.com/njtc406/emberengine/example/node_concurrency	[no test files]
+?   	github.com/njtc406/emberengine/example/node_concurrency1	[no test files]
+?   	github.com/njtc406/emberengine/example/node_ctl	[no test files]
+?   	github.com/njtc406/emberengine/example/node_local	[no test files]
+?   	github.com/njtc406/emberengine/example/node_master	[no test files]
+?   	github.com/njtc406/emberengine/example/node_slave	[no test files]
+?   	github.com/njtc406/emberengine/example/node_slave1	[no test files]

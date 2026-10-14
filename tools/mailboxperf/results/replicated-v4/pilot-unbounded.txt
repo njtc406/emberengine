@@ -1,0 +1,6 @@
+=== RUN   TestMailboxPerformanceSample
+=== RUN   TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady
+--- PASS: TestMailboxPerformanceSample (66.25s)
+    --- PASS: TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady (66.25s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	67.389s

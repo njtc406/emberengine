@@ -18,7 +18,7 @@ import (
 
 type perfJob struct {
 	inf.IMailboxJob
-	started  time.Time
+	started  time.Duration
 	latency  time.Duration
 	released *atomic.Int64
 	executed atomic.Bool
@@ -42,7 +42,7 @@ func (i *perfInvoker) ExecuteJob(_ context.Context, j inf.IMailboxJob) error {
 		x = x*6364136223846793005 + 1
 	}
 	atomic.AddInt64(&i.state, int64(x))
-	p.latency = time.Since(p.started)
+	p.latency = perftest.Since(p.started)
 	p.executed.Store(true)
 	return nil
 }
@@ -95,6 +95,9 @@ type mailboxPerfRow struct {
 	Completion                                                             perftest.Quantiles
 	RejectionRatio                                                         float64
 	Drained                                                                bool
+	Windows                                                                int
+	CPUResolved                                                            bool
+	WindowCompletions                                                      []perftest.Quantiles
 }
 
 func TestMailboxPerformanceSample(t *testing.T) {
@@ -104,6 +107,10 @@ func TestMailboxPerformanceSample(t *testing.T) {
 	candidate := os.Getenv("PERF_CANDIDATE")
 	if candidate != "baseline" && candidate != "unbounded" && candidate != "bounded" {
 		t.Fatal("invalid candidate")
+	}
+	windows, err := mailboxPerfReplication(os.Getenv("MAILBOX_PERF_PROTOCOL"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	var rows []mailboxPerfRow
 	for _, s := range mailboxPerfScenarios() {
@@ -177,52 +184,72 @@ func TestMailboxPerformanceSample(t *testing.T) {
 			}
 			for i := 0; i < 256; i++ {
 				j := makeJob(i)
-				j.started = time.Now()
+				j.started = perftest.Now()
 				if err := mb.PostJob(j); err != nil {
 					t.Fatal(err)
 				}
 				wait(int64(i + 1))
 			}
-			jobs := make([]*perfJob, n)
+			jobs := make([]*perfJob, n*windows)
 			for i := range jobs {
-				jobs[i] = makeJob(i)
+				jobs[i] = makeJob(i % n)
 			}
-			row := mailboxPerfRow{Protocol: "task2-v2", Machine: perftest.Machine(), Candidate: candidate, Scenario: s.Name, Workers: s.Workers, EffectiveRW: mb.workerPool.rw.enabled.Load(), Samples: n}
+			row := mailboxPerfRow{Protocol: "task2-v3-qpc", Machine: perftest.Machine(), Candidate: candidate, Scenario: s.Name, Workers: s.Workers, EffectiveRW: mb.workerPool.rw.enabled.Load(), Samples: n * windows, Windows: windows}
+			if windows > 1 {
+				row.Protocol = mailboxPerfReplicatedProtocol
+			}
 			before, err := perftest.CPUTime()
 			if err != nil {
 				t.Fatal(err)
 			}
-			start := time.Now()
-			for i, j := range jobs {
-				if i%batch == 0 {
-					due := start.Add(time.Duration(i/batch) * tick)
-					if delay := time.Until(due); delay > 0 {
-						time.Sleep(delay)
+			blockStart := time.Now()
+			for window := 0; window < windows; window++ {
+				start := time.Now()
+				for i, j := range jobs[window*n : (window+1)*n] {
+					if i%batch == 0 {
+						due := start.Add(time.Duration(i/batch) * tick)
+						if delay := time.Until(due); delay > 0 {
+							time.Sleep(delay)
+						}
+					}
+					if s.Kind == "resize" && i == n/3 {
+						mb.workerPool.resizeWorkers(6)
+					}
+					if s.Kind == "resize" && i == 2*n/3 {
+						mb.workerPool.resizeWorkers(4)
+					}
+					j.started = perftest.Now()
+					err := mb.PostJob(j)
+					switch {
+					case err == nil:
+					case errors.Is(err, def.ErrMailboxWorkerIsFull):
+						row.MainRejected++
+					default:
+						row.OtherRejected++
 					}
 				}
-				if s.Kind == "resize" && i == n/3 {
-					mb.workerPool.resizeWorkers(6)
-				}
-				if s.Kind == "resize" && i == 2*n/3 {
-					mb.workerPool.resizeWorkers(4)
-				}
-				j.started = time.Now()
-				err := mb.PostJob(j)
-				switch {
-				case err == nil:
-				case errors.Is(err, def.ErrMailboxWorkerIsFull):
-					row.MainRejected++
-				default:
-					row.OtherRejected++
-				}
+				wait(int64((window+1)*n + 256))
 			}
-			wait(int64(n + 256))
-			row.Wall = time.Since(start)
+			row.Wall = time.Since(blockStart)
 			after, err := perftest.CPUTime()
 			if err != nil {
 				t.Fatal(err)
 			}
 			row.CPU = after - before
+			row.CPUResolved = row.CPU > 0
+			if windows > 1 {
+				row.CPUResolved = mailboxPerfCPUResolved(row.CPU)
+			}
+			for window := 0; window < windows; window++ {
+				var latencies []time.Duration
+				for _, j := range jobs[window*n : (window+1)*n] {
+					if j.executed.Load() {
+						latencies = append(latencies, j.latency)
+					}
+				}
+				row.WindowCompletions = append(row.WindowCompletions, perftest.Percentiles(latencies))
+			}
+			n *= windows
 			durations := make([]time.Duration, 0, n)
 			for _, j := range jobs {
 				if j.executed.Load() {

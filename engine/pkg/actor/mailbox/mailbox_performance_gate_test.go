@@ -37,11 +37,11 @@ func compareMailboxPerf(base, current []mailboxPerfRow) []string {
 				rounds := map[int]bool{}
 				for _, r := range group {
 					m, bm := r.Machine, b[0].Machine
-					if rounds[r.Round] || r.Protocol != "task2-v2" || m.CPU == "" || m.CPU != bm.CPU || m.OS != bm.OS || m.Arch != bm.Arch || m.Go != bm.Go || m.Procs != bm.Procs || m.Commit == "" || r.Samples != b[0].Samples || r.Workers != scenario.Workers || r.EffectiveRW != scenario.RW || !r.Drained || r.Success+r.MainRejected+r.RWDropped+r.StopRejected+r.OtherRejected != r.Samples || r.CPU <= 0 || r.Wall <= 0 || r.Success <= 0 {
+					if rounds[r.Round] || r.Protocol != "task2-v3-qpc" || m.CPU == "" || m.CPU != bm.CPU || m.OS != bm.OS || m.Arch != bm.Arch || m.Go != bm.Go || m.Procs != bm.Procs || m.Commit == "" || r.Samples != b[0].Samples || r.Workers != scenario.Workers || r.EffectiveRW != scenario.RW || !r.Drained || r.Success+r.MainRejected+r.RWDropped+r.StopRejected+r.OtherRejected != r.Samples || r.CPU <= 0 || r.Wall <= 0 || r.Success <= 0 {
 						valid = false
 					}
 					rounds[r.Round] = true
-					if scenario.Kind != "overload" && (r.Success != r.Samples || r.MainRejected != 0 || r.RWDropped != 0 || r.OtherRejected != 0 || r.StopRejected != 0) {
+					if scenario.Kind != "overload" && (r.Success != r.Samples || r.MainRejected != 0 || r.RWDropped != 0 || r.OtherRejected != 0 || r.StopRejected != 0 || r.Completion.P99 <= 0 || r.Completion.P999 <= 0) {
 						valid = false
 					}
 				}
@@ -96,7 +96,7 @@ func TestMailboxPerformanceComparison(t *testing.T) {
 	var base, current []mailboxPerfRow
 	for _, s := range mailboxPerfScenarios() {
 		for round := 0; round < 5; round++ {
-			r := mailboxPerfRow{Protocol: "task2-v2", Scenario: s.Name, Round: round, Workers: s.Workers, EffectiveRW: s.RW, Samples: 100, Success: 100, Wall: time.Second, CPU: time.Second, Drained: true}
+			r := mailboxPerfRow{Protocol: "task2-v3-qpc", Scenario: s.Name, Round: round, Workers: s.Workers, EffectiveRW: s.RW, Samples: 100, Success: 100, Wall: time.Second, CPU: time.Second, Drained: true}
 			r.Machine.CPU = "test-cpu"
 			r.Machine.OS = "test-os"
 			r.Machine.Commit = "73ecd28"
