@@ -1,0 +1,467 @@
+[
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w1-rwfalse-hotfalse-steady",
+    "Round": 2,
+    "Workers": 1,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047787500,
+    "CPU": 46875000,
+    "Completion": {
+      "P50": 0,
+      "P99": 24800,
+      "P999": 55500
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w1-rwfalse-hottrue-steady",
+    "Round": 2,
+    "Workers": 1,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047609200,
+    "CPU": 15625000,
+    "Completion": {
+      "P50": 0,
+      "P99": 28000,
+      "P999": 67700
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwfalse-hotfalse-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047841000,
+    "CPU": 46875000,
+    "Completion": {
+      "P50": 0,
+      "P99": 0,
+      "P999": 38800
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwfalse-hottrue-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047578800,
+    "CPU": 15625000,
+    "Completion": {
+      "P50": 0,
+      "P99": 24400,
+      "P999": 41500
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwtrue-hotfalse-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": true,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2049620000,
+    "CPU": 421875000,
+    "Completion": {
+      "P50": 46300,
+      "P99": 3366200,
+      "P999": 8075000
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwtrue-hottrue-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": true,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2049542000,
+    "CPU": 187500000,
+    "Completion": {
+      "P50": 281100,
+      "P99": 3612400,
+      "P999": 5099100
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "priority-w1-rwfalse-hotfalse-steady",
+    "Round": 2,
+    "Workers": 1,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2048460400,
+    "CPU": 109375000,
+    "Completion": {
+      "P50": 0,
+      "P99": 30000,
+      "P999": 74200
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "priority-w1-rwfalse-hottrue-steady",
+    "Round": 2,
+    "Workers": 1,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047923800,
+    "CPU": 15625000,
+    "Completion": {
+      "P50": 0,
+      "P99": 29300,
+      "P999": 56600
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "priority-w4-rwfalse-hotfalse-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047204200,
+    "CPU": 250000000,
+    "Completion": {
+      "P50": 0,
+      "P99": 0,
+      "P999": 35400
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "priority-w4-rwfalse-hottrue-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047760700,
+    "CPU": 0,
+    "Completion": {
+      "P50": 0,
+      "P99": 26700,
+      "P999": 53500
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "priority-w4-rwtrue-hotfalse-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": true,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047181600,
+    "CPU": 281250000,
+    "Completion": {
+      "P50": 36500,
+      "P99": 1598400,
+      "P999": 2619500
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "priority-w4-rwtrue-hottrue-steady",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": true,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2057692200,
+    "CPU": 328125000,
+    "Completion": {
+      "P50": 530600,
+      "P99": 4247700,
+      "P999": 7420500
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwfalse-hotfalse-mostly-empty",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 8192,
+    "Success": 8192,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 8191822500,
+    "CPU": 93750000,
+    "Completion": {
+      "P50": 0,
+      "P99": 0,
+      "P999": 26000
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwfalse-hotfalse-resize",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 2047941200,
+    "CPU": 171875000,
+    "Completion": {
+      "P50": 0,
+      "P99": 0,
+      "P999": 35600
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  },
+  {
+    "Protocol": "task2-v2",
+    "Machine": {
+      "CPU": "AMD Ryzen 7 5700X 8-Core Processor             ",
+      "OS": "windows",
+      "Arch": "amd64",
+      "Go": "go1.24.9",
+      "Commit": "73ecd28",
+      "Procs": 4
+    },
+    "Candidate": "baseline",
+    "Scenario": "dual-w4-rwfalse-hotfalse-overload",
+    "Round": 2,
+    "Workers": 4,
+    "EffectiveRW": false,
+    "Samples": 65536,
+    "Success": 65536,
+    "MainRejected": 0,
+    "RWDropped": 0,
+    "StopRejected": 0,
+    "OtherRejected": 0,
+    "Wall": 273092700,
+    "CPU": 984375000,
+    "Completion": {
+      "P50": 117222500,
+      "P99": 244213000,
+      "P999": 251538900
+    },
+    "RejectionRatio": 0,
+    "Drained": true
+  }
+]

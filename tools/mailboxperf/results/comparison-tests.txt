@@ -1,0 +1,22 @@
+=== RUN   TestMailboxPerformanceComparison
+=== RUN   TestMailboxPerformanceComparison/missing
+=== RUN   TestMailboxPerformanceComparison/metadata
+=== RUN   TestMailboxPerformanceComparison/cpu-zero
+=== RUN   TestMailboxPerformanceComparison/loss
+=== RUN   TestMailboxPerformanceComparison/duplicate-round
+=== RUN   TestMailboxPerformanceComparison/p99
+=== RUN   TestMailboxPerformanceComparison/cpu
+=== RUN   TestMailboxPerformanceComparison/throughput
+--- PASS: TestMailboxPerformanceComparison (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/missing (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/metadata (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu-zero (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/loss (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/duplicate-round (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/p99 (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/throughput (0.00s)
+=== RUN   TestMailboxPerformanceGateRequiresBaseline
+--- PASS: TestMailboxPerformanceGateRequiresBaseline (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.125s
