@@ -388,7 +388,7 @@ func TestWorkerAdmissionLateSubmit(t *testing.T) {
 			inv := &releaseTrackingInvoker{}
 			env := newWorkerForSafeExecTest(t, inv).env
 			env.rw.stopTimeout = 10 * time.Millisecond
-			w := newWorker(1, newSimpleConf(1), env, policy).(*Worker)
+			w := newWorker(1, newSimpleConf(1), normalizedQueueSpec{backend: "unbounded", mode: QueueModeDual}, env, policy).(*Worker)
 			q := &admissionQueue{IQueueManager: NewDualQueueManager(), entered: make(chan struct{}), resume: make(chan struct{})}
 			if tc.bounded {
 				bq, err := boundedmpsc.New[inf.IMailboxJob](2)
@@ -447,7 +447,7 @@ func (l *admissionFallbackLogger) Warnf(_ string, _ ...interface{}) { close(l.en
 func TestWorkerAdmissionFallbackOutsideGateOwnership(t *testing.T) {
 	inv := &releaseTrackingInvoker{}
 	env := newWorkerForSafeExecTest(t, inv).env
-	w := newWorker(1, newSimpleConf(1), env, DrainExecute).(*Worker)
+	w := newWorker(1, newSimpleConf(1), normalizedQueueSpec{backend: "unbounded", mode: QueueModeDual}, env, DrainExecute).(*Worker)
 	logger := &admissionFallbackLogger{testLogger: &testLogger{t: t}, entered: make(chan struct{}), resume: make(chan struct{})}
 	w.queueManager = NewPriorityQueueManager(nil, logger)
 	w.Start()

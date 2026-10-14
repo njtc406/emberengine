@@ -109,7 +109,7 @@ type Worker struct {
 }
 
 // newWorker 创建统一Worker
-func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPolicy DrainPolicy) inf.IMailboxWorker {
+func newWorker(workerId int32, conf *config.MailboxConf, spec normalizedQueueSpec, env *WorkerEnv, drainPolicy DrainPolicy) inf.IMailboxWorker {
 	w := &Worker{
 		workerId:    workerId,
 		env:         env,
@@ -117,7 +117,7 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 	}
 
 	// 根据配置创建队列管理器
-	w.queueManager = createQueueManager(conf, env.logger)
+	w.queueManager = createQueueManager(spec, env.logger)
 
 	// 创建空闲控制器
 	idlerConf := conf.SchedulePolicy.IdlerConf
@@ -151,24 +151,26 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 }
 
 // createQueueManager 根据配置创建队列管理器
-func createQueueManager(conf *config.MailboxConf, logger log.ILoggerX) IQueueManager {
-	// 确定队列模式
-	queueMode := conf.QueueMode
-	if queueMode == "" {
-		queueMode = QueueModeDual // 默认双队列模式
+func createQueueManager(spec normalizedQueueSpec, logger log.ILoggerX) IQueueManager {
+	// Task 5 connects the bounded factory. Never silently run bounded as unbounded.
+	if spec.backend != "unbounded" {
+		panic("mailbox: bounded QueueManager integration is not yet available")
 	}
-
-	switch queueMode {
+	switch spec.mode {
 	case QueueModeDual:
-		// 双队列模式（系统队列 + 用户队列）
 		return NewDualQueueManager()
-
 	case QueueModePriority:
-		// 多优先级队列模式
-		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf, logger)
-
+		p := spec.priority
+		priorities := make(map[def.Priority]*config.PriorityConfig, len(p.priorities))
+		for priority, pc := range p.priorities {
+			copy := pc
+			priorities[priority] = &copy
+		}
+		return NewPriorityQueueManager(&config.MultiLevelQueueConf{
+			Strategy: p.strategy, TotalBatchLimit: p.totalBatchLimit, PriorityBatches: priorities,
+		}, logger)
 	default:
-		return NewDualQueueManager()
+		panic("mailbox: invalid normalized queue mode")
 	}
 }
 

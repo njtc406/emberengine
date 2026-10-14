@@ -369,7 +369,7 @@ func (j *admissionOwnershipJob) Release() {
 func TestWorkerAdmissionOutsideGateOwnership(t *testing.T) {
 	inv := &releaseTrackingInvoker{}
 	env := newWorkerForSafeExecTest(t, inv).env
-	w := newWorker(1, newSimpleConf(1), env, DrainExecute).(*Worker)
+	w := newWorker(1, newSimpleConf(1), normalizedQueueSpec{backend: "unbounded", mode: QueueModeDual}, env, DrainExecute).(*Worker)
 	w.Start()
 	j := &admissionOwnershipJob{IMailboxJob: newJob()}
 	paused, resume := make(chan struct{}), make(chan struct{})

@@ -16,8 +16,8 @@ func TestWorkerPoolAdmissionShrinkOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.rw.stopTimeout = 10 * time.Millisecond
-	survivor := newWorker(0, p.conf, p.workerEnv(), DrainExecute).(*Worker)
-	victim := newWorker(1, p.conf, p.workerEnv(), DrainDiscard).(*Worker)
+	survivor := newWorker(0, p.conf, p.queueSpec, p.workerEnv(), DrainExecute).(*Worker)
+	victim := newWorker(1, p.conf, p.queueSpec, p.workerEnv(), DrainDiscard).(*Worker)
 	q := &admissionQueue{IQueueManager: NewDualQueueManager(), entered: make(chan struct{}), resume: make(chan struct{})}
 	victim.queueManager = q
 	p.workerCount.Store(2)
