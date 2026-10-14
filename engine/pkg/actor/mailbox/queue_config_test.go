@@ -273,10 +273,10 @@ func TestQueueConfigBoundedNotSilentlyUnbounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if recover() == nil {
-			t.Fatal("Task 4 must not silently instantiate unbounded for bounded spec before Task 5 integration")
+	m := createQueueManager(s, nil).(*DualQueueManager)
+	for _, q := range []queue[inf.IMailboxJob]{m.systemMailbox, m.userMailbox} {
+		if _, ok := q.(*boundedmpsc.Queue[inf.IMailboxJob]); !ok {
+			t.Fatalf("bounded spec constructed %T", q)
 		}
-	}()
-	createQueueManager(s, nil)
+	}
 }

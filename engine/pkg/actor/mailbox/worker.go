@@ -152,23 +152,14 @@ func newWorker(workerId int32, conf *config.MailboxConf, spec normalizedQueueSpe
 
 // createQueueManager 根据配置创建队列管理器
 func createQueueManager(spec normalizedQueueSpec, logger log.ILoggerX) IQueueManager {
-	// Task 5 connects the bounded factory. Never silently run bounded as unbounded.
-	if spec.backend != "unbounded" {
-		panic("mailbox: bounded QueueManager integration is not yet available")
-	}
 	switch spec.mode {
 	case QueueModeDual:
-		return NewDualQueueManager()
-	case QueueModePriority:
-		p := spec.priority
-		priorities := make(map[def.Priority]*config.PriorityConfig, len(p.priorities))
-		for priority, pc := range p.priorities {
-			copy := pc
-			priorities[priority] = &copy
+		if spec.backend == "unbounded" {
+			return NewDualQueueManager()
 		}
-		return NewPriorityQueueManager(&config.MultiLevelQueueConf{
-			Strategy: p.strategy, TotalBatchLimit: p.totalBatchLimit, PriorityBatches: priorities,
-		}, logger)
+		return newDualQueueManager(spec)
+	case QueueModePriority:
+		return newPriorityQueueManager(spec, logger)
 	default:
 		panic("mailbox: invalid normalized queue mode")
 	}
@@ -184,13 +175,12 @@ func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
 	if w.state.Load() != workerStateRunning {
 		return def.ErrMailboxWorkerClosed
 	}
-	// Resolve the built-in priority fallback before admission so its logger
-	// cannot block shutdown or reenter this gate. Submit sees a known priority.
+	// Log fallback before admission so the logger cannot block shutdown or
+	// reenter this gate. Submit owns mutation and rollback on rejection.
 	if m, ok := w.queueManager.(*PriorityQueueManager); ok {
 		priority := job.GetPriority()
 		if _, exists := m.queues[priority]; !exists {
 			if _, exists := m.queues[m.fallbackPriority]; exists {
-				job.SetPriority(m.fallbackPriority)
 				if m.fallbackWarned.CompareAndSwap(false, true) && m.logger != nil {
 					m.logger.Warnf("PriorityQueueManager: unregistered priority fallback: requested=%d fallback=%d",
 						priority, m.fallbackPriority)

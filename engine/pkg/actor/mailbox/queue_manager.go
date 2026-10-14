@@ -7,6 +7,8 @@ package mailbox
 
 import (
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/utils/boundedmpsc"
+	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
 
 // IQueueManager 队列管理器接口
@@ -34,7 +36,21 @@ type IQueueManager interface {
 type queue[T any] interface {
 	Push(T) bool
 	Pop() (T, bool)
-	BatchPop(int) []T
 	Empty() bool
 	Len() int
+}
+
+func newQueue[T any](spec normalizedPhysicalQueueSpec) queue[T] {
+	switch spec.backend {
+	case "unbounded":
+		return mpsc.New[T]()
+	case "bounded":
+		q, err := boundedmpsc.New[T](spec.capacity)
+		if err != nil {
+			panic(err)
+		}
+		return q
+	default:
+		panic("mailbox: invalid normalized queue backend")
+	}
 }

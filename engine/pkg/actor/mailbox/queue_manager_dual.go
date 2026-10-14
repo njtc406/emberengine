@@ -8,7 +8,6 @@ package mailbox
 import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
 )
 
 // DualQueueManager 双队列管理器
@@ -21,19 +20,25 @@ type DualQueueManager struct {
 
 // NewDualQueueManager 创建双队列管理器
 func NewDualQueueManager() *DualQueueManager {
+	return newDualQueueManager(normalizedQueueSpec{backend: "unbounded", dual: &normalizedDualQueueSpec{}})
+}
+
+func newDualQueueManager(spec normalizedQueueSpec) *DualQueueManager {
 	return &DualQueueManager{
-		systemMailbox: mpsc.New[inf.IMailboxJob](),
-		userMailbox:   mpsc.New[inf.IMailboxJob](),
+		systemMailbox: newQueue[inf.IMailboxJob](normalizedPhysicalQueueSpec{backend: spec.backend, capacity: spec.dual.system}),
+		userMailbox:   newQueue[inf.IMailboxJob](normalizedPhysicalQueueSpec{backend: spec.backend, capacity: spec.dual.user}),
 	}
 }
 
 // Submit 提交事件到对应队列
 func (m *DualQueueManager) Submit(e inf.IMailboxJob) error {
 	// 按优先级分配队列：< Normal 的进系统队列，>= Normal 的进用户队列
+	q := m.userMailbox
 	if e.GetPriority() < def.PriorityNormal {
-		m.systemMailbox.Push(e)
-	} else {
-		m.userMailbox.Push(e)
+		q = m.systemMailbox
+	}
+	if !q.Push(e) {
+		return def.ErrMailboxWorkerIsFull
 	}
 	return nil
 }
