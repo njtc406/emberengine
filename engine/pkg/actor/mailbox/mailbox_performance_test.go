@@ -215,6 +215,19 @@ func TestMailboxPerformanceSample(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var flight *mailboxFlight
+			flightPath := os.Getenv("MAILBOX_PERF_FLIGHT")
+			if flightPath != "" {
+				if candidate != "bounded" || protocol != "task2-v5-window-fixed128" || s.Name != "priority-w1-rwfalse-hottrue-steady" {
+					t.Fatal("flight recorder requires the fixed128 bounded focused scenario")
+				}
+				flight = newMailboxFlight(32768)
+				defer func() {
+					if err := flight.write(flightPath); err != nil {
+						t.Error(err)
+					}
+				}()
+			}
 			blockStart := time.Now()
 			for window := 0; window < windows; window++ {
 				var windowJobs []*perfJob
@@ -242,8 +255,29 @@ func TestMailboxPerformanceSample(t *testing.T) {
 					if s.Kind == "resize" && i == 2*n/3 {
 						mb.workerPool.resizeWorkers(4)
 					}
+					var sample mailboxFlightSample
+					if flight != nil && !flight.frozen {
+						if i%batch == 0 {
+							flight.readRuntime()
+						}
+						sample = mailboxFlightSample{Window: window, Index: i,
+							ScheduledNS:     start.Add(time.Duration(i/batch) * tick).Sub(blockStart).Nanoseconds(),
+							OccupancyBefore: mb.workerPool.snap.Load().sole.GetJobLen(),
+							CompletedBefore: released.Load() - int64(row.MainRejected+row.OtherRejected) - 256,
+							GCCycles:        flight.gc, GCPauses: flight.pauses, SchedEvents: flight.sched, SchedOver1ms: flight.slow}
+						sample.ActualNS = time.Since(blockStart).Nanoseconds()
+					}
 					j.started = perftest.Now()
 					err := mb.PostJob(j)
+					if flight != nil && !flight.frozen {
+						sample.ReturnedNS = time.Since(blockStart).Nanoseconds()
+						sample.OccupancyAfter = mb.workerPool.snap.Load().sole.GetJobLen()
+						sample.CompletedAfter = released.Load() - int64(row.MainRejected+row.OtherRejected) - 256
+						if err != nil {
+							sample.CompletedAfter--
+						}
+						flight.record(sample, err != nil)
+					}
 					switch {
 					case err == nil:
 					case errors.Is(err, def.ErrMailboxWorkerIsFull):
