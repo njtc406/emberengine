@@ -35,6 +35,10 @@ func (b *bucket) SetExpiration(expiration int64) bool {
 
 func (b *bucket) Add(t *Timer) {
 	b.mu.Lock()
+	if !t.isActive() {
+		b.mu.Unlock()
+		return
+	}
 
 	e := b.timers.PushBack(t)
 	t.setBucket(b)

@@ -39,6 +39,8 @@ type Queue[T any] struct {
 	tail      int64 // 生产者写入位置
 	_padding4 [8]int64
 	buffer    []slot[T]
+	_padding5 [8]int64
+	_nil      T // 用于返回零值
 }
 
 // NewQueue 创建一个新的 Queue，capacity 会向上取整为 2 的幂次方
@@ -196,8 +198,7 @@ func (q *Queue[T]) Pop() (T, bool) {
 			}
 		} else if dif < 0 {
 			// 队列为空
-			var zero T
-			return zero, false
+			return q._nil, false
 		} else {
 			// 使用指数退避来减少忙等开销
 			if backoff < maxBackoff {
@@ -210,6 +211,8 @@ func (q *Queue[T]) Pop() (T, bool) {
 	}
 	// 读取槽中的数据
 	ret := q.buffer[pos&q.mask].value
+	// 清空槽中的数据，避免内存泄漏
+	q.buffer[pos&q.mask].value = q._nil
 	// 更新槽的序号为 pos + q.size，以便后续生产者写入时判断该槽可用
 	atomic.StoreInt64(&q.buffer[pos&q.mask].sequence, pos+q.mask+1)
 	return ret, true

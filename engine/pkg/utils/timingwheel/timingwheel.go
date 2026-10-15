@@ -14,17 +14,11 @@ import (
 
 // adjustState 封装时间偏移调整相关的状态，所有层级（包括 overflow wheel）共享同一实例。
 type adjustState struct {
-	mu            sync.Mutex    // 保护整个调整过程，确保串行执行
-	adjusting     atomic.Bool   // 是否正在调整时间偏移
-	pendingTimers chan *Timer   // 时间调整期间的待处理 timer 缓冲队列
-	adjustDone    chan struct{} // adjusting 结束时广播通知，替代 busy-wait
+	mu sync.Mutex
 }
 
 func newAdjustState() *adjustState {
-	return &adjustState{
-		pendingTimers: make(chan *Timer, 10000),
-		adjustDone:    make(chan struct{}),
-	}
+	return &adjustState{}
 }
 
 // TimingWheel 是分层时间轮的实现。
@@ -43,9 +37,13 @@ type TimingWheel struct {
 	// 注意：此字段可被并发读写（通过 Add()），因此使用原子指针。
 	overflowWheel unsafe.Pointer // type: *TimingWheel
 
-	exitC     chan struct{}
-	closed    *atomic.Bool
-	waitGroup waitGroupWrapper
+	exitC       chan struct{}
+	lifecycleMu sync.Mutex
+	started     bool
+	operationMu sync.Mutex
+	timers      sync.Map
+	closed      *atomic.Bool
+	waitGroup   waitGroupWrapper
 
 	logger log.ILoggerX
 
@@ -113,22 +111,6 @@ func (tw *TimingWheel) add(t *Timer) bool {
 	// 如果timingwheel已关闭，不能添加任务
 	if tw.closed.Load() {
 		return false
-	}
-
-	// 如果正在调整offset,将timer放入缓冲队列
-	if tw.adjust.adjusting.Load() {
-		select {
-		case tw.adjust.pendingTimers <- t:
-			return true // 已加入缓冲队列
-		default:
-			// 缓冲队列已满，等待 adjusting 完成再重试
-			if tw.logger != nil {
-				tw.logger.Warnf("[TimingWheel] Pending timer queue is full, waiting for SetTimeOffset to complete")
-			}
-			<-tw.adjust.adjustDone
-			// 调整完成后再次尝试
-			return tw.addInternal(t)
-		}
 	}
 
 	return tw.addInternal(t)
@@ -250,14 +232,31 @@ func (tw *TimingWheel) runTimer(t *Timer, runLoop bool) {
 
 // addOrRun 将定时器 t 插入当前时间轮；如果已过期则立即执行任务。
 func (tw *TimingWheel) addOrRun(t *Timer) {
+	tw.operationMu.Lock()
 	if tw.closed.Load() {
+		tw.operationMu.Unlock()
+		if t.taskScheduler != nil {
+			t.taskScheduler.CancelTimer(t.timerId)
+		} else {
+			t.stop()
+		}
 		return
 	}
 	if !t.isActive() {
+		tw.operationMu.Unlock()
+		return
+	}
+	t.owner.Store(tw)
+	tw.timers.Store(t, struct{}{})
+	if !t.isActive() {
+		tw.timers.Delete(t)
+		tw.operationMu.Unlock()
 		return
 	}
 
-	if !tw.add(t) {
+	added := tw.add(t)
+	tw.operationMu.Unlock()
+	if !added && !tw.closed.Load() {
 		// 任务已经过期，立即执行
 		tw.runTimer(t, true)
 		return
@@ -296,6 +295,12 @@ func (tw *TimingWheel) advanceClock(expiration int64) {
 
 // Start 启动当前时间轮。
 func (tw *TimingWheel) Start() {
+	tw.lifecycleMu.Lock()
+	defer tw.lifecycleMu.Unlock()
+	if tw.started || tw.closed.Load() {
+		return
+	}
+	tw.started = true
 	tw.waitGroup.Wrap(func() {
 		tw.queue.Poll(tw.exitC, func() int64 {
 			return timeToMs(tw.getNow())
@@ -307,8 +312,22 @@ func (tw *TimingWheel) Start() {
 			select {
 			case elem := <-tw.queue.C:
 				b := elem.(*bucket)
-				tw.advanceClock(b.Expiration())
-				b.Flush(tw.addOrRun)
+				tw.operationMu.Lock()
+				var timers []*Timer
+				if !tw.closed.Load() && b.Expiration() >= 0 && b.Expiration() <= timeToMs(tw.getNow()) {
+					tw.advanceClock(b.Expiration())
+					b.Flush(func(timer *Timer) {
+						if !tw.addInternal(timer) {
+							timers = append(timers, timer)
+						}
+					})
+				}
+				tw.operationMu.Unlock()
+				for _, timer := range timers {
+					if !tw.closed.Load() {
+						tw.runTimer(timer, true)
+					}
+				}
 			case <-tw.exitC:
 				return
 			}
@@ -321,11 +340,31 @@ func (tw *TimingWheel) Start() {
 // 如果有定时任务在独立的 goroutine 中运行，Stop 不会等待这些任务完成才返回。
 // 如果调用方需要知道任务是否已完成，需要由调用方自行与任务进行协调。
 func (tw *TimingWheel) Stop() {
+	tw.lifecycleMu.Lock()
+	defer tw.lifecycleMu.Unlock()
+	tw.operationMu.Lock()
 	if tw.closed.Swap(true) {
+		tw.operationMu.Unlock()
 		return
 	}
 	close(tw.exitC)
+	var timers []*Timer
+	tw.timers.Range(func(key, value interface{}) bool {
+		timers = append(timers, key.(*Timer))
+		tw.timers.Delete(key)
+		return true
+	})
+	tw.clearAllBucketsRecursive()
+	tw.operationMu.Unlock()
+	for _, timer := range timers {
+		if timer.taskScheduler != nil {
+			timer.taskScheduler.CancelTimer(timer.timerId)
+		} else {
+			timer.stop()
+		}
+	}
 	tw.waitGroup.Wait()
+	tw.queue.Clear()
 }
 
 func (tw *TimingWheel) IsClosed() bool {
@@ -351,6 +390,10 @@ type Scheduler interface {
 // 如果调用方希望中途终止执行计划，必须显式停止定时器并确认定时器已停止，
 // 因为当前实现中在定时任务到期与重新调度之间存在短暂的间隙。
 func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
+	if tw.closed.Load() {
+		t.stop()
+		return ErrClosed
+	}
 	expiration := t.Next(tw.getNow())
 	if expiration.IsZero() {
 		return fmt.Errorf("next time is zero")
@@ -396,16 +439,11 @@ func (tw *TimingWheel) ScheduleFunc(t *Timer) error {
 // SetTimeOffset 设置时间偏移量，同步操作，会阻塞直到所有 timer 重算完毕。
 // offset: 时间偏移量（可正可负）
 func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
+	tw.operationMu.Lock()
 	if tw.closed.Load() {
+		tw.operationMu.Unlock()
 		return
 	}
-
-	// 获取互斥锁,保护整个调整过程,确保串行执行
-	tw.adjust.mu.Lock()
-	defer tw.adjust.mu.Unlock()
-
-	// 设置调整标志，阻止新的 timer 直接插入（改为缓冲到 pendingTimers）
-	tw.adjust.adjusting.Store(true)
 
 	// 计算偏移差值
 	oldOffsetNs := tw.timeOffsetNs.Load()
@@ -419,7 +457,7 @@ func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
 
 	if offsetDeltaNs == 0 {
 		// 没有实际变化,提前返回
-		tw.endAdjusting()
+		tw.operationMu.Unlock()
 		return
 	}
 
@@ -444,9 +482,7 @@ func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
 		(*TimingWheel)(overflowWheel).adjustCurrentTimeRecursive(offsetDeltaMs)
 	}
 
-	// 3. 解除 adjusting 阻塞，允许正常 add() 恢复
-	//    后续的 addOrRun 调用不再需要特殊的 "direct" 路径
-	tw.endAdjusting()
+	var ready []*Timer
 
 	// 4. 单轮循环：跨过执行点的 timer 立即执行，其余重新插入
 	for _, t := range allTimers {
@@ -461,49 +497,42 @@ func (tw *TimingWheel) SetTimeOffset(offset time.Duration) {
 				if tw.logger != nil {
 					tw.logger.Infof("[TimingWheel] Periodic timer %s crossed execution time due to offset, executing once", t.name)
 				}
-				tw.runTimer(t, false)
+				ready = append(ready, t)
 				next := t.Next(msToTime(newCurrentTime))
 				if !next.IsZero() {
 					t.expiration.Store(timeToMs(next))
-					tw.addOrRun(t)
+					tw.addInternal(t)
 				}
 			} else {
 				// 一次性任务：直接执行
 				if tw.logger != nil {
 					tw.logger.Infof("[TimingWheel] One-time timer %s crossed execution time due to offset, executing", t.name)
 				}
-				tw.runTimer(t, false)
+				ready = append(ready, t)
 			}
 		} else {
 			// 未跨过执行点：保持原 expiration，重新插入
-			tw.addOrRun(t)
+			if !tw.addInternal(t) {
+				ready = append(ready, t)
+			}
 		}
 	}
 
-	// 5. 排空调整期间累积的 pending timers
-	tw.drainPendingTimers()
+	tw.operationMu.Unlock()
+	for _, timer := range ready {
+		if tw.closed.Load() {
+			if timer.taskScheduler != nil {
+				timer.taskScheduler.CancelTimer(timer.timerId)
+			} else {
+				timer.stop()
+			}
+			continue
+		}
+		tw.runTimer(timer, false)
+	}
 
 	if tw.logger != nil {
 		tw.logger.Infof("[TimingWheel] Time offset adjustment completed, currentTime: %d -> %d", oldCurrentTime, newCurrentTime)
-	}
-}
-
-// endAdjusting 结束 adjusting 状态，广播通知所有等待者
-func (tw *TimingWheel) endAdjusting() {
-	tw.adjust.adjusting.Store(false)
-	close(tw.adjust.adjustDone)
-	tw.adjust.adjustDone = make(chan struct{})
-}
-
-// drainPendingTimers 排空调整期间累积的 pending timers（adjusting 已为 false）
-func (tw *TimingWheel) drainPendingTimers() {
-	for {
-		select {
-		case t := <-tw.adjust.pendingTimers:
-			tw.addOrRun(t)
-		default:
-			return
-		}
 	}
 }
 

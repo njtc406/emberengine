@@ -30,6 +30,7 @@ type Timer struct {
 	timerId    uint64       // 任务唯一id
 	expiration atomic.Int64 // in milliseconds 任务到期时间
 	cancel     atomic.Bool  // 任务是否已经取消
+	owner      atomic.Pointer[TimingWheel]
 
 	// 保存该定时器所属的 bucket 的指针。
 	// 注意：该字段可能被并发更新和读取（通过 Timer.Stop() 和 Bucket.Flush()）。
@@ -73,12 +74,10 @@ func (t *Timer) setBucket(b *bucket) {
 	atomic.StorePointer(&t.b, unsafe.Pointer(b))
 }
 
-// Stop prevents the Timer from firing. It returns true if the call
-// stops the timer, false if the timer has already expired or been stopped.
-//
-// Stop will wait for any ongoing task execution to complete before returning.
+// Stop cancels future execution without waiting for callbacks already in progress.
 func (t *Timer) Stop() {
 	if t.taskScheduler == nil {
+		t.stop()
 		return
 	}
 	t.taskScheduler.CancelTimer(t.timerId)
@@ -87,6 +86,9 @@ func (t *Timer) Stop() {
 func (t *Timer) stop() bool {
 	if !t.cancel.CompareAndSwap(false, true) {
 		return false
+	}
+	if owner := t.owner.Load(); owner != nil {
+		owner.timers.Delete(t)
 	}
 
 	stopped := false

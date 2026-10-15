@@ -62,6 +62,7 @@ func (pq *priorityQueue) Pop() interface{} {
 	}
 	item := (*pq)[n-1]
 	item.Index = -1
+	(*pq)[n-1] = nil
 	*pq = (*pq)[0 : n-1]
 	return item
 }
@@ -101,11 +102,17 @@ func New(size int) *DelayQueue {
 	return &DelayQueue{
 		C:       make(chan interface{}),
 		pq:      newPriorityQueue(size),
-		wakeupC: make(chan struct{}),
+		wakeupC: make(chan struct{}, 1),
 	}
 }
 
 // Offer inserts the element into the current queue.
+func (dq *DelayQueue) Clear() {
+	dq.mu.Lock()
+	dq.pq = nil
+	dq.mu.Unlock()
+}
+
 func (dq *DelayQueue) Offer(elem interface{}, expiration int64) {
 	item := &item{Value: elem, Priority: expiration}
 
@@ -117,7 +124,12 @@ func (dq *DelayQueue) Offer(elem interface{}, expiration int64) {
 	if index == 0 {
 		// A new item with the earliest expiration is added.
 		if atomic.CompareAndSwapInt32(&dq.sleeping, 1, 0) {
-			dq.wakeupC <- struct{}{}
+			// The notification is only a hint: Poll always re-checks the heap.
+			// Never wait for a receiver, because Poll may have exited.
+			select {
+			case dq.wakeupC <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
@@ -161,12 +173,9 @@ func (dq *DelayQueue) Poll(exitC chan struct{}, nowF func() int64) {
 				case <-delayTimer.C:
 					// The current "earliest" item expires.
 
-					// Reset the sleeping state since there's no need to receive from wakeupC.
-					if atomic.SwapInt32(&dq.sleeping, 0) == 0 {
-						// A caller of Offer() is being blocked on sending to wakeupC,
-						// drain wakeupC to unblock the caller.
-						<-dq.wakeupC
-					}
+					// Reset the sleeping state. wakeupC is a non-blocking hint,
+					// so there is never a sender that needs to be drained here.
+					atomic.StoreInt32(&dq.sleeping, 0)
 					continue
 				case <-exitC:
 					delayTimer.Stop()

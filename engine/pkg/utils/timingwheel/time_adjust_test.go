@@ -48,7 +48,11 @@ func TestTimeAdjustment(t *testing.T) {
 
 	fmt.Printf("[%s] Task created (delay: 2s)\n", time.Now().Format("2006-01-02 15:04:05"))
 	js := scheduler.(*jobScheduler)
-	originalExpiration := js.getShard(timerId).tasks[timerId].GetExpiration()
+	shard := js.getShard(timerId)
+	shard.Lock()
+	registeredTimer := shard.tasks[timerId]
+	shard.Unlock()
+	originalExpiration := registeredTimer.GetExpiration()
 	fmt.Printf("[DEBUG] CurrentTime(ms): %d, Timer expiration(ms): %d, Diff: %dms\n",
 		atomic.LoadInt64(&tw.currentTime),
 		originalExpiration,
@@ -62,7 +66,7 @@ func TestTimeAdjustment(t *testing.T) {
 	tw.SetTimeOffset(offset)
 
 	fmt.Printf("[%s] Time adjusted\n", time.Now().Format("2006-01-02 15:04:05"))
-	newExpiration := js.getShard(timerId).tasks[timerId].GetExpiration()
+	newExpiration := registeredTimer.GetExpiration()
 	fmt.Printf("[DEBUG] CurrentTime(ms): %d, Timer expiration(ms): %d, Diff: %dms\n",
 		atomic.LoadInt64(&tw.currentTime),
 		newExpiration,

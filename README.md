@@ -1,4 +1,4 @@
-# EmberEngine 🔥
+# EmberEngine ![EmberEngine Logo](./resources/ember-logo-1.png)
 >
 > 以 Actor + RPC 为内核的分布式服务框架/容器
 > 
@@ -99,6 +99,149 @@
   - 服务初始化时, 会自动注册service下所有以API/Api/RPC/Rpc开头的方法
   - 如果服务包含RPC/Rpc开头的方法，则会自动将服务注册到集群， 其他服务可以通过服务发现调用该服务的方法
   - 否则，只能被同node上的其他服务调用，不能跨node调用
+
+#### RPC → Mailbox 完整调用时序
+
+本地调用与跨节点调用最终都会汇聚为 `RpcJob`，进入目标 Service 的 Mailbox。Mailbox 通过中间件、WorkerPool 和 QueueManager 完成路由、排队和执行；需要回复时，再通过 Dispatcher 返回同步结果或投递异步回调。
+
+```mermaid
+sequenceDiagram
+  autonumber
+
+  participant Caller as 调用方业务
+  participant Call as MessageBus / CallState
+  participant Sender as RPC Sender
+  participant Transport as gRPC / NATS / rpcx
+  participant Listener as 远端 Listener
+  participant Handler as Remote RPC Handler
+  participant Factory as SenderFactory
+  participant Dispatcher as RpcDispatcher
+  participant Mailbox as 目标 Service Mailbox
+  participant MW as Mailbox Middleware
+  participant Pool as WorkerPool
+  participant Worker as Worker
+  participant Queue as QueueManager
+  participant Service as core.Service
+  participant Registry as JobHandlerRegistry
+  participant Biz as Service / Module 方法
+
+  Caller->>Call: Call / AsyncCall / Send
+  Call->>Call: 创建 ReqId、CallState、deadline
+  Call->>Dispatcher: DeliverRequest(ctx, envelope)
+  Dispatcher->>Dispatcher: 根据目标 PID 选择 Sender
+
+  alt 同节点本地调用
+    Dispatcher->>Sender: localSender.DeliverRequest
+    Sender->>Sender: Envelope 包装为 RpcJob
+    Sender->>Mailbox: PostJob(rpcJob)
+  else 跨节点调用
+    Dispatcher->>Sender: grpcSender / natsSender / rpcxSender
+    Sender->>Transport: 序列化并发送 actor.Message
+    Transport->>Listener: 接收请求
+    Listener->>Handler: RpcMessageHandler(factory, message)
+    Handler->>Handler: PID 同步、幂等检查、鉴权
+    Handler->>Handler: 解码请求并重建 Context / Envelope
+    Handler->>Factory: GetDispatcher(receiverPID)
+    Factory-->>Handler: 目标 Dispatcher
+    Handler->>Dispatcher: DeliverRequest(ctx, envelope)
+    Dispatcher->>Sender: 选择目标节点 localSender
+    Sender->>Sender: Envelope 包装为 RpcJob
+    Sender->>Mailbox: PostJob(rpcJob)
+  end
+
+  Mailbox->>Mailbox: 检查运行/挂起状态
+  Mailbox->>MW: ExecuteOnReceive(job)
+
+  alt 挂起、中间件拒绝或分发失败
+    Mailbox->>Service: OnJobDiscarded(job, reason)
+    Mailbox->>MW: ExecuteOnComplete(error)
+    Mailbox->>Mailbox: job.Release()
+    Mailbox-->>Caller: 返回投递错误
+  else 接受任务
+    MW-->>Mailbox: Accept / Skip
+    Mailbox->>Pool: DispatchJob(job)
+    Pool->>Pool: DispatcherKey 一致性哈希选择 Worker
+    Pool->>Worker: SubmitJob(job)
+    Worker->>Queue: Submit(job)
+    Worker->>Worker: Wake
+
+    loop Worker 主循环
+      Worker->>Queue: NextJob()
+      Queue-->>Worker: RpcJob
+    end
+
+    alt 串行 Actor 模式
+      Worker->>Service: ExecuteJob(ctx, job)
+    else RW 模式：只读任务
+      Worker->>Worker: 投递 readCh，获取 RLock
+      Worker->>Service: ExecuteJob(ctx, job)
+    else RW 模式：写任务
+      Worker->>Worker: 等待先序读注册并获取 WLock
+      Worker->>Service: ExecuteJob(ctx, job)
+    end
+
+    Service->>Registry: InvokeJob(ctx, rpcJob)
+    Registry->>Registry: 检查 deadline，创建超时 Context
+    Registry->>Service: handleRpcJob(ctx, envelope)
+    Service->>Service: HandleRequest(ctx, envelope)
+    Service->>Biz: 调用注册的 Service / Module 方法
+    Biz-->>Service: response / error
+
+    opt NeedResponse = true
+      Service->>Service: 构造独立 Response Envelope
+      Service->>Dispatcher: DeliverResponse(ctx, response)
+
+      alt 调用方在本节点
+        Dispatcher->>Sender: localSender.DeliverResponse
+        Sender->>Call: RpcMonitor.Remove(reqId)
+        Call->>Call: SetResult + Complete
+
+        alt 同步 Call
+          Call-->>Caller: 唤醒 Wait，返回结果
+        else AsyncCall
+          Call->>Mailbox: PostJob(callback RpcJob)
+          Mailbox->>Pool: DispatchJob(callback)
+          Pool->>Worker: SubmitJob(callback)
+          Worker->>Service: ExecuteJob(callback)
+          Service->>Biz: 执行 CompletionFunc
+        end
+      else 调用方在远端节点
+        Dispatcher->>Sender: remote Sender
+        Sender->>Transport: 序列化并发送 Reply
+        Transport->>Listener: 调用方节点接收 Reply
+        Listener->>Handler: RpcMessageHandler(reply)
+        Handler->>Call: RpcMonitor.Remove(reqId)
+        Call->>Call: SetResult + Complete
+        Call-->>Caller: 返回结果或投递异步回调
+      end
+    end
+
+    Service-->>Worker: ExecuteJob 返回
+    Worker->>MW: ExecuteOnComplete(result)
+    Worker->>Worker: Envelope.Release + Job.Release
+  end
+```
+
+核心执行链路可以简化为：
+
+```text
+MessageBus
+  → RpcDispatcher.DeliverRequest
+  → localSender 或远程 Transport
+  → Remote Handler（跨节点）
+  → 目标 RpcDispatcher
+  → Mailbox.PostJob
+  → Mailbox Middleware
+  → WorkerPool.DispatchJob
+  → Worker.SubmitJob
+  → QueueManager.Submit / NextJob
+  → Service.ExecuteJob
+  → JobHandlerRegistry.InvokeJob
+  → handleRpcJob / HandleRequest
+  → Service 或 Module 业务方法
+```
+
+> 当前 Mailbox 默认双队列和多优先级队列的底层实现是 MPSC 队列。`engine/pkg/utils/mpmc` 是独立的 MPMC 无锁环形队列，目前不是 Mailbox 生产调用链的必经组件。
 
 ### **Timer**  
 - 定时器系统, 用于服务之间的定时任务

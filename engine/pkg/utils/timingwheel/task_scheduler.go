@@ -6,6 +6,7 @@
 package timingwheel
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,8 @@ type ITimerScheduler interface {
 
 const defaultSeed uint64 = 10000
 
+var ErrClosed = errors.New("timingwheel: closed")
+
 // timerBucket 定时器桶，用于存储和管理定时器任务
 type timerBucket struct {
 	sync.Mutex
@@ -69,6 +72,7 @@ func (b *timerBucket) remove(timerId uint64) *Timer {
 
 type jobScheduler struct {
 	closed int32
+	addMu  sync.RWMutex
 	shards []*timerBucket
 	c      chan ITimer
 	sendMu sync.RWMutex
@@ -122,7 +126,9 @@ func (scheduler *jobScheduler) getShard(timerId uint64) *timerBucket {
 }
 
 func (scheduler *jobScheduler) add(t *Timer) bool {
-	// P1#6: 调度器已关闭，拒绝添加
+	scheduler.addMu.RLock()
+	defer scheduler.addMu.RUnlock()
+
 	if scheduler.isClosed() {
 		return false
 	}
@@ -183,14 +189,7 @@ func (scheduler *jobScheduler) AfterFunc(d time.Duration, name string, f TimerCa
 	t.taskScheduler = scheduler
 
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
-	if !scheduler.add(t) {
-		t.stop()
-		return 0, fmt.Errorf("after task add failed")
-	}
-
-	scheduler.tw.AfterFunc(d, t)
-
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, false)
 }
 
 // AfterAsyncFunc 异步执行任务
@@ -203,12 +202,7 @@ func (scheduler *jobScheduler) AfterAsyncFunc(d time.Duration, name string, f Ti
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
-	if !scheduler.add(t) {
-		t.stop()
-		return 0, fmt.Errorf("after async task add failed")
-	}
-	scheduler.tw.AfterFunc(d, t)
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, false)
 }
 
 // TickerFunc 循环任务
@@ -221,17 +215,7 @@ func (scheduler *jobScheduler) TickerFunc(d time.Duration, name string, f TimerC
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
-	if !scheduler.add(t) {
-		t.stop()
-		return 0, fmt.Errorf("ticker task add failed")
-	}
-
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	// 加入任务
-
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, true)
 }
 
 // TickerAsyncFunc 异步循环任务
@@ -244,15 +228,7 @@ func (scheduler *jobScheduler) TickerAsyncFunc(d time.Duration, name string, f T
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
-	if !scheduler.add(t) {
-		t.stop()
-		return 0, fmt.Errorf("ticker async task add failed")
-	}
-	// 加入任务
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, true)
 }
 
 // CronFunc 循环任务,请注意,这个函数的精度只到秒
@@ -271,14 +247,7 @@ func (scheduler *jobScheduler) CronFunc(spec string, name string, f TimerCallbac
 	t.taskScheduler = scheduler
 
 	// 加入任务
-	if !scheduler.add(t) {
-		t.stop()
-		return 0, fmt.Errorf("cron task add failed")
-	}
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	return t.GetTimerId(), nil
+	return scheduler.register(t, 0, true)
 }
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
@@ -293,15 +262,33 @@ func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f TimerCa
 	t.taskScheduler = scheduler
 
 	// 加入任务
-	if !scheduler.add(t) {
-		t.stop()
-		return 0, fmt.Errorf("cron async task add failed")
+	return scheduler.register(t, 0, true)
+}
+
+func (scheduler *jobScheduler) register(timer *Timer, delay time.Duration, periodic bool) (uint64, error) {
+	scheduler.addMu.RLock()
+	defer scheduler.addMu.RUnlock()
+	if scheduler.isClosed() || scheduler.tw.IsClosed() {
+		timer.stop()
+		return 0, ErrClosed
 	}
-	// 创建task
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
+	if !scheduler.getShard(timer.timerId).add(timer) {
+		timer.stop()
+		return 0, fmt.Errorf("timer already registered")
 	}
-	return t.GetTimerId(), nil
+	if periodic {
+		if err := scheduler.tw.ScheduleFunc(timer); err != nil {
+			scheduler.CancelTimer(timer.timerId)
+			return 0, err
+		}
+	} else {
+		scheduler.tw.AfterFunc(delay, timer)
+	}
+	if scheduler.tw.IsClosed() {
+		scheduler.CancelTimer(timer.timerId)
+		return 0, ErrClosed
+	}
+	return timer.timerId, nil
 }
 
 func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
@@ -313,12 +300,17 @@ func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
 		return
 	}
 	t.stop()
+	scheduler.tw.timers.Delete(t)
 }
 
 func (scheduler *jobScheduler) Stop() {
-	if !atomic.CompareAndSwapInt32(&scheduler.closed, 0, 1) {
+	scheduler.addMu.Lock()
+	defer scheduler.addMu.Unlock()
+
+	if scheduler.isClosed() {
 		return
 	}
+	atomic.StoreInt32(&scheduler.closed, 1)
 
 	var timers []*Timer
 	for _, shard := range scheduler.shards {
@@ -331,10 +323,13 @@ func (scheduler *jobScheduler) Stop() {
 	}
 	for _, t := range timers {
 		t.stop()
+		scheduler.tw.timers.Delete(t)
 	}
 
 	scheduler.sendMu.Lock()
 	close(scheduler.c)
+	for range scheduler.c {
+	}
 	scheduler.sendMu.Unlock()
 }
 
