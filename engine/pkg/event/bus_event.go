@@ -8,9 +8,9 @@ package event
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
 // busEvent 是 EventBus 内部使用的事件包装

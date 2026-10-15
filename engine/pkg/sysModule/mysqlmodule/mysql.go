@@ -7,16 +7,16 @@ package mysqlmodule
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/v2/engine/pkg/log"
 	syslog "log"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/v2/engine/pkg/log"
 
-	"github.com/njtc406/emberengine/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

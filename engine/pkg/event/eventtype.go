@@ -6,7 +6,7 @@
 package event
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 const (

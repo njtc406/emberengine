@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/gate/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

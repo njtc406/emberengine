@@ -3,7 +3,7 @@ package event
 import (
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // processBatchedEvents 处理批量事件

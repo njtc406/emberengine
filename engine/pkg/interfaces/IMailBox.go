@@ -9,8 +9,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
 )
 
 // IMailbox interface is used to enqueue messages to the mailbox

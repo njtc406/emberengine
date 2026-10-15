@@ -4,12 +4,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	"github.com/njtc406/emberengine/engine/pkg/metrics"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
-	"github.com/njtc406/emberengine/engine/pkg/services"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	"github.com/njtc406/emberengine/v2/engine/pkg/metrics"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/services"
 )
 
 // RuntimeSnapshot 提供 Node 运行时关键状态快照。

@@ -1,10 +1,10 @@
 package metrics
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	pool "github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	pool "github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
 )
 
 // SnapshotInfo 聚合 Node + Pool + RPC + Mailbox + Event 指标所需的信息。

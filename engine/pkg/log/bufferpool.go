@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 var bufferPool pool.IPool[*bytes.Buffer]

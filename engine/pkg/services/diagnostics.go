@@ -3,7 +3,7 @@ package services
 import (
 	"sort"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // RuntimeSummary 提供 ServiceManager 的运行态摘要，用于诊断与可观测性。

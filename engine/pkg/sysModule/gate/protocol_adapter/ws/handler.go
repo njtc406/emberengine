@@ -6,9 +6,9 @@
 package ws
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/limiter"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/gate/limiter"
 )
 
 type MsgRouter func(s inf.ISession, packInfo inf.IMessagePack)

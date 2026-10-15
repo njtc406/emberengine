@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/cluster"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/router"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/endpoints"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/router"
 )
 
 type testManagedService struct {

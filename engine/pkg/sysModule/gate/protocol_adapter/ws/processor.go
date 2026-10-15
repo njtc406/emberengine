@@ -9,8 +9,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 const HeaderSize = 4

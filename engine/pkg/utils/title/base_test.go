@@ -11,7 +11,7 @@ package title
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/translate"
 	"testing"
 )
 

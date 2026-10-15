@@ -5,10 +5,10 @@
 package core
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/profiler"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // profilerBridge 封装 Profiler 的注册/注销逻辑。

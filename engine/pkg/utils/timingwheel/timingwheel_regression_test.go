@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // TimingWheel 回归/并发测试用例集合。

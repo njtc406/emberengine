@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
 )
 
 func TestInfo(t *testing.T) {

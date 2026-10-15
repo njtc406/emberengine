@@ -2,11 +2,11 @@ package network
 
 import (
 	"errors"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/v2/engine/pkg/log"
 	"net"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/v2/engine/pkg/log"
 
 	"github.com/gorilla/websocket"
 )

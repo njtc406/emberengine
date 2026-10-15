@@ -16,9 +16,9 @@ package interfaces
 import (
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // ── 窄接口定义（由具体类型隐式满足，避免 interfaces → 具体包的反向导入） ──

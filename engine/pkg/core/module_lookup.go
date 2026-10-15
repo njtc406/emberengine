@@ -1,6 +1,6 @@
 package core
 
-import inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+import inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 
 // GetModule 按 moduleId 查找并转换为目标模块接口/类型。
 // 返回 false 表示模块不存在或类型不匹配。

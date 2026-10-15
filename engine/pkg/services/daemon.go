@@ -6,9 +6,9 @@
 package services
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 // TODO 节点守护线程

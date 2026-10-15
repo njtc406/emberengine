@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/gate/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
 // RestartPolicy 配置 Gate 监听失败后的重启策略。

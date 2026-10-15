@@ -11,14 +11,14 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/concurrent"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
 )
 
 var (

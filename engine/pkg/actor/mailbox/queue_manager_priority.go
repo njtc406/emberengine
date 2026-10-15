@@ -10,11 +10,11 @@ import (
 	"sort"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/mpsc"
 )
 
 // PriorityQueueManager 多优先级队列管理器

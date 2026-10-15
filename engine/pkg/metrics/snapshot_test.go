@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	pool "github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	pool "github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
 )
 
 func TestSnapshotToText_Nil(t *testing.T) {

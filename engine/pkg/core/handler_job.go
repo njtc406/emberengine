@@ -11,15 +11,15 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
 // JobHandler 泛型 Job 处理器，T 是 payload 类型

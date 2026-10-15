@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 // SenderCreator 发送器创建函数类型

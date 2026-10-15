@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // KeyRingProvider 基于 KeyRing 的 JWT 签发/校验 Provider。

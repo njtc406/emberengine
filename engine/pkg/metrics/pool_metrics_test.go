@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pool "github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
+	pool "github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
 )
 
 func TestPoolMetricsToText_Empty(t *testing.T) {

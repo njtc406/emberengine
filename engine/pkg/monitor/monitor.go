@@ -11,13 +11,13 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/asynclib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/util"
 )
 
 type waitBucket struct {

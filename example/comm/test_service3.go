@@ -8,8 +8,8 @@ package comm
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/example/msg"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/example/msg"
 )
 
 type Service3 struct {

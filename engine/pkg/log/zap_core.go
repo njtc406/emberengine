@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-colorable"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
 	"go.uber.org/zap/zapcore"
 )
 

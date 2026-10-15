@@ -7,17 +7,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/monitor"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	mbjob "github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/asynclib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
 )
 
 var benchInitOnce sync.Once

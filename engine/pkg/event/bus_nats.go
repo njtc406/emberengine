@@ -5,8 +5,8 @@ import (
 	"strconv"
 
 	"github.com/nats-io/nats.go"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 func switchOpts(conf *config.NatsConf) []nats.Option {

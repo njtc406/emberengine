@@ -3,7 +3,7 @@ package metrics
 import (
 	"sort"
 
-	pool "github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
+	pool "github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
 )
 
 // --- Pool Metrics 转换 ---

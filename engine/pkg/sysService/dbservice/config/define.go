@@ -1,8 +1,8 @@
 package config
 
 import (
-	mongodbmodule "github.com/njtc406/emberengine/engine/pkg/sysModule/mongomodule"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/mysqlmodule"
+	mongodbmodule "github.com/njtc406/emberengine/v2/engine/pkg/sysModule/mongomodule"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/mysqlmodule"
 	"github.com/njtc406/viper"
 	"github.com/redis/go-redis/v9"
 	"time"

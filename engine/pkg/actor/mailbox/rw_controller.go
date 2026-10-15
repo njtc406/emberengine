@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/asynclib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/idle"
 	"github.com/panjf2000/ants/v2"
 )
 

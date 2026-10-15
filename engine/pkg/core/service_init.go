@@ -13,15 +13,15 @@ import (
 	"runtime/debug"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/concurrent"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/concurrent"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
 )
 
 type loggerReleasable interface {

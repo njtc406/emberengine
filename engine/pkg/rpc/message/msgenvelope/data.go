@@ -8,9 +8,9 @@ package msgenvelope
 import (
 	"sync"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"github.com/njtc406/emberengine/engine/pkg/utils/errorx"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/errorx"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 

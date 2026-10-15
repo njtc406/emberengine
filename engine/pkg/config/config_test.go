@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	"github.com/njtc406/viper"
 )
 

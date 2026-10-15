@@ -8,7 +8,7 @@ package discovery
 import (
 	"sync"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 // 服务发现工厂注册中心

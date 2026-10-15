@@ -6,7 +6,7 @@
 package router
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
 	"github.com/patrickmn/go-cache"
 )
 

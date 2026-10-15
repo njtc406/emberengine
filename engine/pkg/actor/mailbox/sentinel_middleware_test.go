@@ -7,8 +7,8 @@ import (
 	"github.com/alibaba/sentinel-golang/core/circuitbreaker"
 	"github.com/alibaba/sentinel-golang/core/flow"
 	"github.com/alibaba/sentinel-golang/core/system"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 func TestSentinelJobTypeRulesLoadToRuntimeResources(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
 )
 
 type EveryScheduler struct {

@@ -8,8 +8,8 @@ package mailbox
 import (
 	"fmt"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/utils/syncx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/syncx"
 )
 
 const (

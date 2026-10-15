@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // --- mock INodeContext ---

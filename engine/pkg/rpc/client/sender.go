@@ -10,13 +10,13 @@ import (
 	"crypto/tls"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/monitor"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
 )
 
 // ── 默认创建器注册表（返回副本，避免全局可变 map） ──

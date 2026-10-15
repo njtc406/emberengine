@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 type testModuleLookupHierarchy struct {

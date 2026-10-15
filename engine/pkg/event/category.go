@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
 )
 
 // EventCategory 事件分类

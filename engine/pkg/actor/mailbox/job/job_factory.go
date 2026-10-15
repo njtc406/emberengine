@@ -6,9 +6,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 // runtimeDebug 控制池统计是否启用。debug=false 时使用 no-op recorder，

@@ -11,9 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
 )
 
 // SysCtlHandler 系统控制命令处理函数。

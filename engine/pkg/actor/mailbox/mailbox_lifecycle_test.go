@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	mbjob "github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 // ============================================================================

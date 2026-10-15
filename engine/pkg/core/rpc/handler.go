@@ -16,11 +16,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/njtc406/emberengine/engine/pkg/authz"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/v2/engine/pkg/authz"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgenvelope"
 )
 
 var emptyError = reflect.TypeOf((*error)(nil))

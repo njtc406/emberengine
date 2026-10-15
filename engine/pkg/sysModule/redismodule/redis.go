@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
 
-	"github.com/njtc406/emberengine/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
 	"github.com/redis/go-redis/v9"
 )
 

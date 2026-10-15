@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	disc "github.com/njtc406/emberengine/v2/engine/pkg/cluster/discovery"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 

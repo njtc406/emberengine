@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/emberctx"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

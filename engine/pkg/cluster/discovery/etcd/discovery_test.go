@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )

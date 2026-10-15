@@ -5,8 +5,8 @@
 package mailbox
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // MultiLevelConfig 多级队列配置

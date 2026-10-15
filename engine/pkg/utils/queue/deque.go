@@ -1,6 +1,6 @@
 package queue
 
-import "github.com/njtc406/emberengine/engine/pkg/utils/util"
+import "github.com/njtc406/emberengine/v2/engine/pkg/utils/util"
 
 // minCapacity is the smallest capacity that deque may have. Must be power of 2
 // for bitwise modulus: x % n == x & (n - 1).

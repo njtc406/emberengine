@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
+	disc "github.com/njtc406/emberengine/v2/engine/pkg/cluster/discovery"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 

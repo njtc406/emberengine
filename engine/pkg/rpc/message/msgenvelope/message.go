@@ -8,8 +8,8 @@ package msgenvelope
 import (
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 // TODO 需要做成配置

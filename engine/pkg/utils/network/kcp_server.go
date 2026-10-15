@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/network/processor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/network/processor"
 	"github.com/xtaci/kcp-go"
 )
 

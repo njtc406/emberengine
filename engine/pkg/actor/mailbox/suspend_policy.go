@@ -9,9 +9,9 @@ import (
 	"runtime"
 	"sync/atomic"
 
-	job2 "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	job2 "github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 // DefaultSuspendPolicy 是 ISuspendPolicy 的默认实现。

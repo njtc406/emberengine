@@ -3,8 +3,8 @@ package msgenvelope
 import (
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // BenchmarkMsgEnvelope_SetGetMeta 测量 SetMeta/GetMeta 的锁开销。

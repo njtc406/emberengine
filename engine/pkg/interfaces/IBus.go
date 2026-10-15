@@ -8,7 +8,7 @@ package interfaces
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/dto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
 )
 
 // 重要说明: 如果是本地调用, in和out都支持[]interface{}结构,即可以直接传入多个参数,和返回多个值,如果返回的是多个值(除了error还有一个以上的返回)时,那么out就是[]interface{}

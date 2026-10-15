@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/event"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
 )
 
 // --- Event Metrics 转换 ---

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	"github.com/njtc406/emberengine/engine/pkg/metrics"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	"github.com/njtc406/emberengine/v2/engine/pkg/metrics"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client/pool"
 )
 
 func TestGetRuntimeSnapshotNilNode(t *testing.T) {

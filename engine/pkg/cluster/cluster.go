@@ -10,16 +10,16 @@ import (
 	"hash/fnv"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
-	_ "github.com/njtc406/emberengine/engine/pkg/cluster/discovery/etcd"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
-	remotehandler "github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/discovery"
+	_ "github.com/njtc406/emberengine/v2/engine/pkg/cluster/discovery/etcd"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/endpoints"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
+	remotehandler "github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote/handler"
 )
 
 // NewCluster 创建新的 Cluster 实例（Phase 2 per-Node 模式推荐使用）。

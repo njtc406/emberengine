@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/bytespool"
 )
 
 // TODO 文件需要修改

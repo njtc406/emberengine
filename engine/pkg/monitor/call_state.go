@@ -6,12 +6,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor/mailbox/job"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 // CallState 承载一次 RPC 调用（Call/AsyncCall）的等待/回调状态。

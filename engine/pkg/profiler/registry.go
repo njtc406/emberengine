@@ -4,7 +4,7 @@ import (
 	"container/list"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 type Registry struct {

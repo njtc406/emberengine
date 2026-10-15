@@ -8,9 +8,9 @@ package gr
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote/handler"
 )
 
 type GrpcListener struct {

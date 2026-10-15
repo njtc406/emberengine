@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
 // --- P2-5: Envelope ContextHeaders round-trip 验证 ---

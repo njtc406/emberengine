@@ -9,14 +9,14 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/authz"
-	"github.com/njtc406/emberengine/engine/pkg/cluster"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/router"
+	"github.com/njtc406/emberengine/v2/engine/pkg/authz"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/endpoints"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/router"
 )
 
 // ===== 全局工厂注册表（保留为包级变量，init() 阶段注册，运行时只读） =====

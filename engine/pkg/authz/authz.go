@@ -20,7 +20,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
 )
 
 // Principal 表示 RPC 调用方的身份。

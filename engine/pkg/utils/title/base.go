@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/translate"
 )
 
 const (

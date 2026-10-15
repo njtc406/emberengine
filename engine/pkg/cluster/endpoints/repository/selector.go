@@ -6,10 +6,10 @@
 package repository
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
 )
 
 func (r *Repository) newMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *msgbus.MessageBus {

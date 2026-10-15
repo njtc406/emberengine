@@ -11,11 +11,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/node"
-	"github.com/njtc406/emberengine/engine/pkg/services"
-	"github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice"
-	"github.com/njtc406/emberengine/example/comm"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/node"
+	"github.com/njtc406/emberengine/v2/engine/pkg/services"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysService/pprofservice"
+	"github.com/njtc406/emberengine/v2/example/comm"
 )
 
 func init() {

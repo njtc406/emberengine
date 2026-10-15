@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
 )
 
 // --- RPC Metrics 转换 ---

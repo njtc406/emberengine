@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // TestConcurrentTimerStopAndExecute tests concurrent stop and execute

@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	systemConfig "github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/services"
-	"github.com/njtc406/emberengine/engine/pkg/sysService/healthservice/config"
+	systemConfig "github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/services"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysService/healthservice/config"
 )
 
 // RegisterHealthService 注册 HealthService 到框架。

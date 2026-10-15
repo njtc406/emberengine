@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 // ============================================================================

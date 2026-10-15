@@ -5,7 +5,7 @@
 // @Update  yr  2024/11/7
 package interfaces
 
-import "github.com/njtc406/emberengine/engine/pkg/actor"
+import "github.com/njtc406/emberengine/v2/engine/pkg/actor"
 
 // 每条筛选条件
 type PIDPredicate func(pid *actor.PID) bool

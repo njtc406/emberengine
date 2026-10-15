@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 
 	"github.com/nats-io/nats.go"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"github.com/njtc406/emberengine/engine/pkg/utils/diag"
-	"github.com/njtc406/emberengine/engine/pkg/utils/tlsx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/diag"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/tlsx"
 )
 
 type natsSender struct {

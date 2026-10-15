@@ -1,6 +1,6 @@
 package job
 
-import "github.com/njtc406/emberengine/engine/pkg/def"
+import "github.com/njtc406/emberengine/v2/engine/pkg/def"
 
 // resetFactoryFrozenForTest resets the frozen flag for testing purposes only.
 func resetFactoryFrozenForTest() {

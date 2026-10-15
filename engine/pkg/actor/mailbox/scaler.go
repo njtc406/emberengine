@@ -9,8 +9,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 func clamp(val, min, max int32) int32 {

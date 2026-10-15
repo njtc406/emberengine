@@ -3,7 +3,7 @@ package errorx
 import (
 	"fmt"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
 	"google.golang.org/protobuf/proto"
 )
 

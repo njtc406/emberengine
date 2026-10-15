@@ -1,7 +1,7 @@
 package event
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
 )
 
 type testService struct {

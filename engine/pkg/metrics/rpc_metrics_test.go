@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
 )
 
 func TestRpcMetricsToSamples_Nil(t *testing.T) {

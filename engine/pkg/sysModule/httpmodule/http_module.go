@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/httpx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/httpx/router_center"
 )
 
 type HttpModule struct {

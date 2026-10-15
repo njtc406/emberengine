@@ -9,14 +9,14 @@ import (
 	"context"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 

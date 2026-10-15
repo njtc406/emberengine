@@ -1,9 +1,9 @@
 package node
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/utils/translate"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/translate"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 type HookFun func(ctx inf.INodeContext, extra map[any]any) error

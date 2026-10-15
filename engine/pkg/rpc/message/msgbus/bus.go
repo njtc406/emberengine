@@ -11,17 +11,17 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/monitor"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/pkg/utils/errorx"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/errorx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
 type MessageBusFactory struct {

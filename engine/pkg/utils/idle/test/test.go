@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/idle"
 )
 
 //func main() {

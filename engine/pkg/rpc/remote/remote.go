@@ -8,11 +8,11 @@ package remote
 import (
 	"fmt"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote/handler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote/pool"
 )
 
 func NewRemote() *Remote {

@@ -3,7 +3,7 @@ package mailbox
 import (
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // mailboxMetricsCollector 使用原子计数器采集 Mailbox 投递路径的指标。

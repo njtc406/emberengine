@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 // TODO 这里面的整个内容应该是需要提到单独的模块中去做，所有监控信息都发送到监控模块中,统一写入日志

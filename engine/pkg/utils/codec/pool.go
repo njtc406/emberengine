@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/pool"
 )
 
 const Kib = 1024

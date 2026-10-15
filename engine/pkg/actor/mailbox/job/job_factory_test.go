@@ -3,8 +3,8 @@ package job
 import (
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 func TestCreateJob_Builtins(t *testing.T) {

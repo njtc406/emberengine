@@ -9,8 +9,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core/rpc"
 )
 
 type Service2TestModule struct {

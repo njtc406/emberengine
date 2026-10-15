@@ -3,7 +3,7 @@ package metrics
 import (
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/event"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
 )
 
 func TestEventMetricsToSamples_Nil(t *testing.T) {

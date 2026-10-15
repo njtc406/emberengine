@@ -3,8 +3,8 @@ package mailbox
 import (
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

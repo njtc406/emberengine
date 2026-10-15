@@ -8,7 +8,7 @@ package config
 import (
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/httpx"
 	"github.com/njtc406/viper"
 )
 

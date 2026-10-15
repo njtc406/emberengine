@@ -1,8 +1,8 @@
 package rpc
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 func WithPartition(partition int32) inf.SelectParamBuilder {

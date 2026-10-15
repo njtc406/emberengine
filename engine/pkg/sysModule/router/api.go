@@ -8,9 +8,9 @@ package router
 import (
 	"errors"
 
-	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 	"github.com/redis/go-redis/v9"
 )
 

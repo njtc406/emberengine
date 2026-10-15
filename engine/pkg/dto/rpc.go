@@ -8,8 +8,8 @@ package dto
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // CancelRpc 异步调用时的取消函数,可用于取消回调(请注意,一旦调用发送后是无法取消的,只能取消回调)

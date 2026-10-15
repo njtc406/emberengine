@@ -6,9 +6,9 @@
 package router
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/endpoints"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
 type Router struct {

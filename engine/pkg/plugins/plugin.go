@@ -8,7 +8,7 @@ package plugins
 import (
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
 )
 
 // TODO 这个文件后面再做,现在还没有什么好的思路

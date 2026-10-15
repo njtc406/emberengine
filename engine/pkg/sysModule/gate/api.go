@@ -7,7 +7,7 @@ package gate
 
 import (
 	"fmt"
-	gate_proto "github.com/njtc406/emberengine/engine/pkg/sysModule/gate/proto"
+	gate_proto "github.com/njtc406/emberengine/v2/engine/pkg/sysModule/gate/proto"
 )
 
 func (g *Gate) RpcSendMsgToClientBySessionId(msg *gate_proto.Message) error {

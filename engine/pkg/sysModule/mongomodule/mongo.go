@@ -7,7 +7,7 @@ package mongodbmodule
 
 import (
 	"context"
-	"github.com/njtc406/emberengine/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"time"

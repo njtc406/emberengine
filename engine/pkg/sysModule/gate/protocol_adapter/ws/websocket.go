@@ -14,13 +14,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	glbConfig "github.com/njtc406/emberengine/engine/pkg/config"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/config"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/gate/protocol_adapter/connx"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
-	"github.com/njtc406/emberengine/engine/pkg/utils/jwtx"
+	glbConfig "github.com/njtc406/emberengine/v2/engine/pkg/config"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/gate/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/gate/protocol_adapter/connx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/httpx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/httpx/router_center"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/jwtx"
 )
 
 type WebSocketAdapter struct {

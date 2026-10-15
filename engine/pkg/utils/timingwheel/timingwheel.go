@@ -7,9 +7,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel/delayqueue"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel/delayqueue"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
 // adjustState 封装时间偏移调整相关的状态，所有层级（包括 overflow wheel）共享同一实例。

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/emberctx"
 )
 
 // --- P2-5: TraceID 贯通验证 ---

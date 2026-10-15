@@ -8,10 +8,10 @@ package session
 import (
 	"sync/atomic"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
-	"github.com/njtc406/emberengine/engine/pkg/utils/syncx"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/shardedlock"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/syncx"
 )
 
 type WebSocketManager struct {

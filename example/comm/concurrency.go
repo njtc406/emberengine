@@ -16,15 +16,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/core/rpc"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/utils/diag"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"github.com/njtc406/emberengine/example/msg"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core/rpc"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/diag"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
+	"github.com/njtc406/emberengine/v2/example/msg"
 )
 
 const (

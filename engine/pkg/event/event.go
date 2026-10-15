@@ -8,7 +8,7 @@ package event
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 )
 

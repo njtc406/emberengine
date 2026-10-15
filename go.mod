@@ -1,4 +1,4 @@
-module github.com/njtc406/emberengine
+module github.com/njtc406/emberengine/v2
 
 go 1.24
 

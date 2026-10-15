@@ -1,7 +1,7 @@
 package dto
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 // MiddlewareResult 中间件处理结果

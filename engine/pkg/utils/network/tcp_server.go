@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/bytespool"
 )
 
 const (

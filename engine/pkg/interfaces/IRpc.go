@@ -8,7 +8,7 @@ package interfaces
 import (
 	"context"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
 )
 
 // IRpcHandler 完整的 RPC 处理器接口（框架内部使用）

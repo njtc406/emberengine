@@ -14,7 +14,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/safe"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/safe"
 )
 
 type ITimer interface {

@@ -10,12 +10,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
-	"github.com/njtc406/emberengine/engine/pkg/utils/shardedlock"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/shardedlock"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timelib"
 )
 
 // TODO 存储改造,使用go-memdb内存数据库来存储所有的pid数据

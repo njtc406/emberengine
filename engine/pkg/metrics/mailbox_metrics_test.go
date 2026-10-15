@@ -3,7 +3,7 @@ package metrics
 import (
 	"testing"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 )
 
 func TestMailboxMetricsToSamples_Nil(t *testing.T) {

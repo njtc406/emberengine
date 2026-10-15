@@ -10,7 +10,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/util"
 )
 
 const maxBackoff uint32 = 8 // 最大退避时间(最大退避3次)

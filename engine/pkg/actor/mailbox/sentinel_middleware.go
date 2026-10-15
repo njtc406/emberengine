@@ -18,10 +18,10 @@ import (
 	"github.com/alibaba/sentinel-golang/core/flow"
 	"github.com/alibaba/sentinel-golang/core/system"
 
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/dto"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 )
 
 // sentinelEntryKey 是 MiddlewareContext 中保存 Sentinel entry 的私有 key，

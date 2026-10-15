@@ -10,7 +10,7 @@ import (
 	"hash/fnv"
 	"sync"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/util"
 )
 
 type ShardedRWLock struct {

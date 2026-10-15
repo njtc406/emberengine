@@ -8,8 +8,8 @@ package concurrent
 import (
 	"fmt"
 
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 	"github.com/panjf2000/ants/v2"
 	"golang.org/x/net/context"
 )

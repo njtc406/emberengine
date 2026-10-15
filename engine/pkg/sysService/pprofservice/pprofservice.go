@@ -10,14 +10,14 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/gin-gonic/gin"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/httpx/router_center"
 
-	systemConfig "github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/core"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/services"
-	"github.com/njtc406/emberengine/engine/pkg/sysModule/httpmodule"
-	"github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice/config"
+	systemConfig "github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/core"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/services"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/httpmodule"
+	"github.com/njtc406/emberengine/v2/engine/pkg/sysService/pprofservice/config"
 )
 
 func RegisterPprofService() {
