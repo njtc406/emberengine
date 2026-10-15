@@ -1,5 +1,4 @@
 package delayqueue
-package delayqueue
 
 import "testing"
 
