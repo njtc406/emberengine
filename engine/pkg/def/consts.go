@@ -164,8 +164,3 @@ const (
 	WorkerTypeDefault = "default"
 	WorkerTypeMulti   = "multi"
 )
-
-const (
-	ProtoBuf int32 = iota
-	Json
-)
