@@ -1,5 +1,7 @@
 package queue
 
+import "github.com/njtc406/emberengine/engine/pkg/utils/util"
+
 // minCapacity is the smallest capacity that deque may have. Must be power of 2
 // for bitwise modulus: x % n == x & (n - 1).
 const minCapacity = 16
@@ -42,15 +44,15 @@ func New[T any](size ...int) *Deque[T] {
 	}
 
 	minCap := minCapacity
-	for minCap < minimum {
-		minCap <<= 1
+	if minimum > minCapacity {
+		minCap = util.RoundUpToPowerOfTwoInt(minimum)
 	}
 
 	var buf []T
 	if capacity != 0 {
 		bufSize := minCap
-		for bufSize < capacity {
-			bufSize <<= 1
+		if capacity > minCap {
+			bufSize = util.RoundUpToPowerOfTwoInt(capacity)
 		}
 		buf = make([]T, bufSize)
 	}

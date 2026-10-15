@@ -22,24 +22,23 @@ type CriteriaBuilder func(*FilterCriteria)
 type CriteriaFunc = CriteriaBuilder
 
 type ISelector interface {
-	//FindOne(sender *actor.PID, serviceUid string) IBus
-
-	//Select(sender *actor.PID, options ...CriteriaBuilder) IBus
-
-	// TODO 暂时这么写,后续把条件做成query条件
-
-	// 只用于搜索从服务
-	SelectSlavers(sender *actor.PID, options ...SelectParamBuilder) IBus
-
 	//Select 选择服务
 	Select(sender *actor.PID, options ...SelectParamBuilder) IBus
 
 	// SelectByRule 根据自定义规则选择服务
 	SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) IBus
 
+	// SelectByPid 根据PID选择服务
 	SelectByPid(sender, receiver *actor.PID) IBus
 
-	SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) IBus
+	SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) IBus
 
 	SelectByFilterAndChoice(sender *actor.PID, filter func(pid *actor.PID) bool, choice func(pids []*actor.PID) []*actor.PID) IBus
+
+	// RouteByPid 根据业务提供的可路由 PID 构造消息路由。
+	//
+	// receiver 可以不来自服务发现，也可以不是完整的服务发现 PID；
+	// 但业务必须保证它包含当前 RPC 协议和远端分发所需的最小字段。
+	// 框架不会根据 name/address 推断或补全缺失的服务身份。
+	RouteByPid(sender, receiver *actor.PID) IBus
 }

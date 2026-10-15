@@ -14,20 +14,27 @@ import (
 // TODO 节点守护线程
 // 如果之后使用plugin模式,这里就可以做热更
 
-var Daemon = &daemon{}
-
 type daemon struct {
 	core.Service
 }
 
 func (d *daemon) OnInit() error {
-	// TODO 注册服务事件
-	event.GetEventBus().SubscribeGlobal(event.ServiceNew, d)
-	event.GetEventBus().SubscribeGlobal(event.ServiceClose, d)
+	var bus inf.INodeEventBus
+	if ctx := d.GetNodeContext(); ctx != nil {
+		bus = ctx.GetEventBus()
+	}
+	if bus == nil {
+		d.Warn("daemon init: event bus is nil, skip global subscriptions")
+		return nil
+	}
 
-	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
-	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)
-	//d.GetEventProcessor().RegEventReceiverFunc(event.SysEventServiceReload, d.GetEventHandler(), d.serviceReload)
+	// TODO 注册服务事件
+	bus.SubscribeGlobal(event.ServiceNew, d)
+	bus.SubscribeGlobal(event.ServiceClose, d)
+
+	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceUp, d.GetEventHandler(), d.serviceUp)
+	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceDown, d.GetEventHandler(), d.serviceDown)
+	//d.GetEventProcessor().RegEventReceiver(event.SysEventServiceReload, d.GetEventHandler(), d.serviceReload)
 	return nil
 }
 

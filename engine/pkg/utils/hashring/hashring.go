@@ -7,9 +7,10 @@ package hashring
 
 import (
 	"fmt"
-	"github.com/cespare/xxhash/v2"
 	"sort"
 	"sync"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 const hashSalt = "ember_salt_key_y_w"
@@ -61,7 +62,7 @@ func (h *HashRing[T]) Add(key T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for i := 0; i < h.replicas; i++ {
-		virtualNodeKey := fmt.Sprintf("%s-%d-%d", hashSalt, key, i)
+		virtualNodeKey := fmt.Sprintf("%s-%v-%d", hashSalt, key, i)
 		hash := hashEvent(virtualNodeKey)
 		h.nodes = append(h.nodes, hash)
 		h.ring[hash] = key
@@ -82,6 +83,22 @@ func (h *HashRing[T]) Remove(key T) {
 		}
 	}
 	h.nodes = newNodes
+	sort.Ints(h.nodes)
+}
+
+func (h *HashRing[T]) RemoveMany(keys map[T]struct{}) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var newNodes []int
+	for _, hash := range h.nodes {
+		if _, ok := keys[h.ring[hash]]; ok {
+			delete(h.ring, hash)
+		} else {
+			newNodes = append(newNodes, hash)
+		}
+	}
+	h.nodes = newNodes
+	sort.Ints(h.nodes)
 }
 
 // Get 根据传入的 key 计算哈希值，并在哈希环中查找对应的值。

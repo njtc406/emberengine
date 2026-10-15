@@ -7,10 +7,11 @@ package util
 
 import (
 	"fmt"
-	"github.com/shirou/gopsutil/v4/cpu"
-	"golang.org/x/exp/constraints"
 	"math/rand/v2"
 	"strconv"
+
+	"github.com/shirou/gopsutil/v4/cpu"
+	"golang.org/x/exp/constraints"
 )
 
 func GetCPULoad() float64 {
@@ -37,6 +38,15 @@ func ToString(val any) string {
 	switch v := val.(type) {
 	case string:
 		return v
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', 6, 32)
+	case float64:
+		return strconv.FormatFloat(v, 'f', 6, 64)
 	case int:
 		return strconv.FormatInt(int64(v), 10)
 	case int8:

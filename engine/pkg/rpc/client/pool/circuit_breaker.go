@@ -6,10 +6,11 @@
 package pool
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 // CircuitBreakerState 熔断器状态
@@ -59,6 +60,7 @@ type CircuitBreaker struct {
 	state   CircuitBreakerState
 	metrics *CircuitBreakerMetrics
 	mutex   sync.RWMutex
+	logger  log.ILoggerX
 
 	// 时间窗口统计
 	windowStart    time.Time
@@ -66,7 +68,7 @@ type CircuitBreaker struct {
 }
 
 // NewCircuitBreaker 创建新的熔断器
-func NewCircuitBreaker(config *CircuitBreakerConfig) *CircuitBreaker {
+func NewCircuitBreaker(config *CircuitBreakerConfig, logger log.ILoggerX) *CircuitBreaker {
 	if config == nil {
 		config = DefaultCircuitBreakerConfig()
 	}
@@ -75,6 +77,7 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) *CircuitBreaker {
 		config:         config,
 		state:          CircuitClosed,
 		metrics:        &CircuitBreakerMetrics{},
+		logger:         logger,
 		windowStart:    time.Now(),
 		windowDuration: time.Minute, // 1分钟窗口
 	}
@@ -99,7 +102,9 @@ func (cb *CircuitBreaker) CanCall() bool {
 				cb.metrics.HalfOpenCalls = 0
 				cb.metrics.StateChanges++
 				cb.metrics.LastStateChange = time.Now()
-				log.SysLogger.Info("Circuit breaker entering half-open state")
+				if cb.logger != nil {
+					cb.logger.Info("Circuit breaker entering half-open state")
+				}
 			}
 			cb.mutex.Unlock()
 			cb.mutex.RLock()
@@ -129,7 +134,9 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.state = CircuitClosed
 			cb.metrics.StateChanges++
 			cb.metrics.LastStateChange = time.Now()
-			log.SysLogger.Info("Circuit breaker closing after successful recovery")
+			if cb.logger != nil {
+				cb.logger.Info("Circuit breaker closing after successful recovery")
+			}
 		}
 	}
 }
@@ -149,7 +156,9 @@ func (cb *CircuitBreaker) RecordFailure() {
 		cb.state = CircuitOpen
 		cb.metrics.StateChanges++
 		cb.metrics.LastStateChange = time.Now()
-		log.SysLogger.Warn("Circuit breaker opening due to failure in half-open state")
+		if cb.logger != nil {
+			cb.logger.Warn("Circuit breaker opening due to failure in half-open state")
+		}
 		return
 	}
 
@@ -197,8 +206,10 @@ func (cb *CircuitBreaker) tripCircuit() {
 		cb.state = CircuitOpen
 		cb.metrics.StateChanges++
 		cb.metrics.LastStateChange = time.Now()
-		log.SysLogger.Warnf("Circuit breaker opened due to high failure rate: %d failures out of %d requests",
-			cb.metrics.FailedRequests, cb.metrics.TotalRequests)
+		if cb.logger != nil {
+			cb.logger.Warnf("Circuit breaker opened due to high failure rate: %d failures out of %d requests",
+				cb.metrics.FailedRequests, cb.metrics.TotalRequests)
+		}
 	}
 }
 
@@ -235,7 +246,9 @@ func (cb *CircuitBreaker) Reset() {
 	cb.state = CircuitClosed
 	cb.metrics = &CircuitBreakerMetrics{}
 	cb.windowStart = time.Now()
-	log.SysLogger.Info("Circuit breaker reset to closed state")
+	if cb.logger != nil {
+		cb.logger.Info("Circuit breaker reset to closed state")
+	}
 }
 
 // String 返回熔断器状态字符串
@@ -258,7 +271,7 @@ func (cb *CircuitBreaker) String() string {
 // updateCircuitBreaker 更新连接的熔断器状态
 func (pc *PoolConnection) updateCircuitBreaker(success bool) {
 	if pc.circuitBreaker == nil {
-		pc.circuitBreaker = NewCircuitBreaker(nil)
+		pc.circuitBreaker = NewCircuitBreaker(nil, pc.logger)
 	}
 
 	if success {

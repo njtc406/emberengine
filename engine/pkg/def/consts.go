@@ -16,7 +16,7 @@ const (
 
 	DefaultConnectInterval             = 2 * time.Second
 	DefaultCheckRpcCallTimeoutInterval = 1 * time.Second
-	DefaultRpcTimeout                  = time.Second
+	DefaultRpcTimeout                  = time.Second * 5
 )
 
 const (
@@ -32,17 +32,48 @@ const (
 	DefaultWorkerNum         = 1000   // 默认协程数量
 	DefaultGoroutinePoolSize = 10     // 默认协程池大小
 	DefaultVirtualWorkerRate = 10     // 虚拟worker比率
+	DefaultEventChanSize     = 100    // 默认事件通道大小
 )
 
 const (
 	SvcStatusUnknown  int32 = iota // 未运行
 	SvcStatusInit                  // 初始化
 	SvcStatusStarting              // 启动中
-	SvcStatusRunning               // 运行中
+	SvcStatusRunning               // 运行中（已进入集群缓存，但不可被普通路由选中）
+	SvcStatusReady                 // 已就绪（可被普通路由选中）
 	SvcStatusClosing               // 关闭中
 	SvcStatusClosed                // 关闭
 	SvcStatusRetire                // 退休
 )
+
+type ServiceVisibility int32
+
+const (
+	ServiceVisibilityCluster ServiceVisibility = 1
+	ServiceVisibilityNode    ServiceVisibility = 2
+)
+
+func ParseServiceVisibility(value string) (ServiceVisibility, bool) {
+	switch value {
+	case "", "node", "Node", "NODE":
+		return ServiceVisibilityNode, true
+	case "cluster", "Cluster", "CLUSTER":
+		return ServiceVisibilityCluster, true
+	default:
+		return ServiceVisibilityNode, false
+	}
+}
+
+func (v ServiceVisibility) String() string {
+	switch v {
+	case ServiceVisibilityCluster:
+		return "cluster"
+	case ServiceVisibilityNode:
+		return "node"
+	default:
+		return "unknown"
+	}
+}
 
 const (
 	DefaultModuleIdSeed = 1_000_000 // 默认的moduleId开始序号
@@ -79,30 +110,42 @@ const (
 )
 
 const (
-	NatsDefaultMaxReconnects      = 5 // 不限制重连次数
+	NatsDefaultMaxReconnects      = 5 // 默认最大重连次数(0 表示未配置时会回落到该值)
 	NatsDefaultReconnectWait      = 2 * time.Second
 	NatsDefaultPingInterval       = 30 * time.Second
 	NatsDefaultPingMaxOutstanding = 2
 	NatsDefaultReconnectBufSize   = 1024 * 1024 * 8
 	NatsDefaultTimeout            = 10 * time.Second
+	// NatsDefaultSubPendingMsgLimit / NatsDefaultSubPendingBytesLimit
+	// 用于提升异步订阅在高突发消息下的缓冲能力，避免默认 pending 限制触发 slow consumer 导致丢消息。
+	// 注意：这不是“无上限”，仍然需要结合业务吞吐与内存预算评估。
+	NatsDefaultSubPendingMsgLimit   = 200_000
+	NatsDefaultSubPendingBytesLimit = 256 * 1024 * 1024
 )
 
 const (
 	NatsDefaultGlobalPrefix = "event.global.%d"    // global.eventType
-	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.serverId
+	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.partition
 	NatsDefaultMasterPrefix = "event.master.%s"    // master.serviceUid
 	NatsDefaultSlavePrefix  = "event.slave.%s"     // slave.serviceUid
+	DefaultSpecificPrefix   = "event.specific.%d"  // specific.eventType
 )
 
 const NatsDefaultShardCount = 16
 
-const NatsDefaultTopic = "rpc.node."
+const NatsDefaultTopic = "ember.node."
 
 const (
-	DefaultTraceIdKey    = "sys.traceId"
-	DefaultDispatcherKey = "sys.dispatchKey"
-	DefaultTypeKey       = "sys.type"
-	DefaultPriorityKey   = "sys.priority"
+	DefaultTraceIdKey    = "ember.traceId"
+	DefaultDispatcherKey = "ember.dispatchKey"
+	DefaultTypeKey       = "ember.type"
+	DefaultPriorityKey   = "ember.priority"
+
+	// MasterEpochKey carries the current master fencing token (monotonic epoch) in event headers.
+	// It is intended to help upper layers fence side effects under network partitions.
+	MasterEpochKey = "ember.masterEpoch"
+	// MasterPrevEpochKey carries the previous master fencing token in event headers.
+	MasterPrevEpochKey = "ember.masterPrevEpoch"
 )
 
 const (
@@ -115,4 +158,9 @@ const (
 	DeDuplicatorTypeLRU = "lru"
 
 	DefaultDeDuplicatorTTL = time.Second
+)
+
+const (
+	WorkerTypeDefault = "default"
+	WorkerTypeMulti   = "multi"
 )

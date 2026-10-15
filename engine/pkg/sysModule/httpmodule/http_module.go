@@ -6,14 +6,14 @@
 package httpmodule
 
 import (
+	"sync"
+	"sync/atomic"
+
 	"github.com/gin-gonic/gin"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
-	"sync"
-	"sync/atomic"
 )
 
 type HttpModule struct {
@@ -22,7 +22,6 @@ type HttpModule struct {
 
 	systemMod string
 	conf      *httpx.Conf
-	logger    log.ILogger
 	server    *httpx.GinServer
 
 	wg *sync.WaitGroup
@@ -32,7 +31,7 @@ func (hs *HttpModule) OnInit() error {
 	// 替换验证器(这个东西之后再看用哪个版本)
 	//*(binding.Validator.Engine().(*validator.Validate)) = *validate.Validator
 	// 默认日志输出
-	return hs.server.Init(hs.logger, hs.systemMod, hs.conf)
+	return hs.server.Init(hs.GetLogger(), hs.systemMod, hs.conf)
 }
 
 func (hs *HttpModule) OnStart() error {
@@ -85,10 +84,9 @@ func (hs *HttpModule) WithMiddleware(middleware ...gin.HandlerFunc) *HttpModule 
 }
 
 // NewHttpModule 创建新的HTTP服务器
-func NewHttpModule(conf *httpx.Conf, logger log.ILogger, systemMod string) *HttpModule {
+func NewHttpModule(conf *httpx.Conf, systemMod string) *HttpModule {
 	return &HttpModule{
 		conf:      conf,
-		logger:    logger,
 		server:    httpx.NewGinServer(),
 		wg:        new(sync.WaitGroup),
 		systemMod: systemMod,

@@ -10,13 +10,24 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/rpc/message/msgbus"
-	"github.com/njtc406/emberengine/engine/pkg/utils/timelib"
 )
+
+func (r *Repository) newMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *msgbus.MessageBus {
+	if r.busFactory != nil {
+		return r.busFactory.New(sender, receiver, err)
+	}
+	return msgbus.NewMessageBus(sender, receiver, err)
+}
+
+func (r *Repository) NewBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) inf.IBus {
+	return r.newMessageBus(sender, receiver, err)
+}
 
 func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 	v, ok := r.mapPID.Load(serviceUid)
 	if ok {
-		sender := v.(inf.IRpcDispatcher)
+		info := v.(*serviceInfo)
+		sender := info.getDispatcher()
 		if sender != nil && !actor.IsRetired(sender.GetPid()) {
 			return sender
 		}
@@ -24,10 +35,9 @@ func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 		tmpV, ok := r.tmpMapPid.Load(serviceUid)
 		if ok {
 			tmp := tmpV.(*tmpInfo)
-			tmp.latest = timelib.Now()
-			sender := tmp.dispatcher
+			tmp.touch()
+			sender := tmp.getDispatcher()
 			if sender != nil {
-				r.tmpMapPid.Store(serviceUid, tmp)
 				return sender
 			}
 		}
@@ -82,10 +92,10 @@ func (r *Repository) SelectByPid(sender, receiver *actor.PID) inf.IBus {
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	c := r.SelectByServiceUid(receiver.GetServiceUid())
 	if c != nil && !actor.IsRetired(c.GetPid()) {
-		b := msgbus.NewMessageBus(s, c, nil)
+		b := r.newMessageBus(s, c, nil)
 		return b
 	}
-	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
+	return r.newMessageBus(s, c, def.ErrServiceNotFound)
 }
 
 func (r *Repository) SelectBySvcUid(sender *actor.PID, serviceUid string) inf.IBus {
@@ -93,20 +103,24 @@ func (r *Repository) SelectBySvcUid(sender *actor.PID, serviceUid string) inf.IB
 	c := r.SelectByServiceUid(serviceUid)
 
 	if c != nil && !actor.IsRetired(c.GetPid()) {
-		b := msgbus.NewMessageBus(s, c, nil)
+		b := r.newMessageBus(s, c, nil)
 		return b
 	}
-	return msgbus.NewMessageBus(s, c, def.ErrServiceNotFound)
+	return r.newMessageBus(s, c, def.ErrServiceNotFound)
 }
 
 func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool) inf.IBus {
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var returnList msgbus.MultiBus
 	r.mapPID.Range(func(key, value any) bool {
-		c := value.(inf.IRpcDispatcher)
+		info := value.(*serviceInfo)
+		c := info.getDispatcher()
+		if c == nil {
+			return true
+		}
 		pid := c.GetPid()
-		if pid.GetIsMaster() && rule(pid) {
-			returnList = append(returnList, msgbus.NewMessageBus(s, value.(inf.IRpcDispatcher), nil))
+		if r.isSelectableInfo(info) && pid.IsMasterNode() && rule(pid) {
+			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 		return true
 	})
@@ -116,8 +130,8 @@ func (r *Repository) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) b
 
 func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
 	s := r.SelectByServiceUid(sender.GetServiceUid())
-	r.mapNodeLock.RLock(sender.GetServiceUid())
-	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
+	r.mapNodeLock.RLock(indexLockKey)
+	defer r.mapNodeLock.RUnlock(indexLockKey)
 
 	param := &inf.SelectParam{}
 	for _, build := range options {
@@ -126,28 +140,31 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 
 	nameUidMap, ok := r.mapSvcBySNameAndSUid[*param.ServiceName] // 不做判断,如果没给serviceName直接崩,免得忘写
 	if !ok {
-		return msgbus.NewMessageBus(s, nil, def.ErrServiceNotFound)
+		return r.newMessageBus(s, nil, def.ErrServiceNotFound)
 	}
 
 	var returnList msgbus.MultiBus
 	for serviceUid, _ := range nameUidMap {
 		c := r.SelectByServiceUid(serviceUid)
+		if c == nil || !r.IsSelectable(serviceUid) {
+			continue
+		}
 		cPid := c.GetPid()
-		// 常规选择只选择主服务
-		if c != nil && !actor.IsRetired(cPid) && (param.ServerId == nil || cPid.GetServerId() == *param.ServerId) && (param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.GetIsMaster() {
-			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+		if !actor.IsRetired(cPid) && (param.Partition == nil || cPid.GetPartition() == *param.Partition) &&
+			(param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.IsMasterNode() == !param.IsSlaver {
+			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 	}
 
 	return returnList
 }
 
-func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serviceType, serviceName string) inf.IBus {
+func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) inf.IBus {
 	if serviceType == "" && serviceName == "" {
 		return msgbus.MultiBus{}
 	}
-	r.mapNodeLock.RLock(sender.GetServiceUid())
-	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
+	r.mapNodeLock.RLock(indexLockKey)
+	defer r.mapNodeLock.RUnlock(indexLockKey)
 
 	var list msgbus.MultiBus
 	var serviceList []string
@@ -188,9 +205,12 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, serverId int32, serv
 
 	for _, serviceUid := range serviceList {
 		c := r.SelectByServiceUid(serviceUid)
+		if c == nil || !r.IsSelectable(serviceUid) {
+			continue
+		}
 		cPid := c.GetPid()
-		if c != nil && !actor.IsRetired(cPid) && (serverId == 0 || cPid.GetServerId() == serverId) && cPid.GetIsMaster() {
-			list = append(list, msgbus.NewMessageBus(s, c, nil))
+		if c != nil && !actor.IsRetired(cPid) && (partition == 0 || cPid.GetPartition() == partition) && cPid.IsMasterNode() {
+			list = append(list, r.newMessageBus(s, c, nil))
 		}
 	}
 
@@ -201,8 +221,10 @@ func (r *Repository) SelectByFilterAndChoice(sender *actor.PID, filter func(pid 
 	s := r.SelectByServiceUid(sender.GetServiceUid())
 	var tmpList []*actor.PID
 	r.mapPID.Range(func(key, value any) bool {
-		if filter(value.(inf.IRpcDispatcher).GetPid()) {
-			tmpList = append(tmpList, value.(inf.IRpcDispatcher).GetPid())
+		info := value.(*serviceInfo)
+		dispatcher := info.getDispatcher()
+		if dispatcher != nil && r.isSelectableInfo(info) && filter(dispatcher.GetPid()) {
+			tmpList = append(tmpList, dispatcher.GetPid())
 		}
 		return true
 	})
@@ -212,40 +234,7 @@ func (r *Repository) SelectByFilterAndChoice(sender *actor.PID, filter func(pid 
 	for _, pid := range list {
 		c := r.SelectByServiceUid(pid.GetServiceUid())
 		if c != nil && !actor.IsRetired(c.GetPid()) {
-			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
-		}
-	}
-
-	return returnList
-}
-
-func (r *Repository) SelectSlavers(sender *actor.PID, options ...inf.SelectParamBuilder) inf.IBus {
-	s := r.SelectByServiceUid(sender.GetServiceUid())
-	r.mapNodeLock.RLock(sender.GetServiceUid())
-	defer r.mapNodeLock.RUnlock(sender.GetServiceUid())
-
-	param := &inf.SelectParam{}
-	for _, build := range options {
-		build(param)
-	}
-	var returnList msgbus.MultiBus
-	if param.ServiceName == nil || param.ServerId == nil {
-		return returnList
-	}
-
-	serviceName := *param.ServiceName
-
-	nameUidMap, ok := r.mapSvcBySNameAndSUid[serviceName]
-	if !ok {
-		return returnList
-	}
-
-	for serviceUid, _ := range nameUidMap {
-		c := r.SelectByServiceUid(serviceUid)
-		cPid := c.GetPid()
-		// 常规选择只选择主服务
-		if c != nil && !actor.IsRetired(cPid) && (cPid.GetServerId() == *param.ServerId) && (param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && !cPid.GetIsMaster() {
-			returnList = append(returnList, msgbus.NewMessageBus(s, c, nil))
+			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 	}
 

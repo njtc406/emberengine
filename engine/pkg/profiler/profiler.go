@@ -3,10 +3,15 @@ package profiler
 import (
 	"container/list"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 )
+
+// TODO 这里面的整个内容应该是需要提到单独的模块中去做，所有监控信息都发送到监控模块中,统一写入日志
+// TODO 如果做成服务，主要是logger的问题，输出可能就不是分开的了,做成模块,直接挂到每个服务中去
 
 // DefaultMaxOvertime 最大超时时间，一般可以认为是死锁或者死循环，或者极差的性能问题
 var DefaultMaxOvertime time.Duration = 1 * time.Second
@@ -14,12 +19,8 @@ var DefaultMaxOvertime time.Duration = 1 * time.Second
 // DefaultOvertime 超过该时间将会提交监控报告
 var DefaultOvertime time.Duration = 10 * time.Millisecond
 var DefaultMaxRecordNum int = 100 //最大记录条数
-var mapLock sync.RWMutex
-var mapProfiler map[string]*Profiler
 
 type ReportFunType func(name string, callNum int, costTime time.Duration, record *list.List)
-
-var reportFunc ReportFunType = DefaultReportFunction
 
 type Element struct {
 	tagName  string
@@ -52,40 +53,28 @@ type Profiler struct {
 	overTime     time.Duration
 	maxRecordNum int
 
-	analyzerPool sync.Pool
+	analyzerPool pool.IPool[*Analyzer]
+	logger       log.ILoggerX
 }
 
-func init() {
-	mapProfiler = map[string]*Profiler{}
-}
-
-func RegProfiler(profilerName string) *Profiler {
-	mapLock.Lock()
-	defer mapLock.Unlock()
-	if _, ok := mapProfiler[profilerName]; ok == true {
-		return nil
+func NewProfiler(logger log.ILoggerX) *Profiler {
+	return &Profiler{
+		stack:        list.New(),
+		record:       list.New(),
+		maxOverTime:  DefaultMaxOvertime,
+		overTime:     DefaultOvertime,
+		maxRecordNum: DefaultMaxRecordNum,
+		analyzerPool: pool.NewSyncPoolWrapper[*Analyzer](
+			func() *Analyzer {
+				return &Analyzer{}
+			},
+			pool.NewNoStatsRecorder(),
+			pool.WithReset(func(t *Analyzer) {
+				t.Reset()
+			}),
+		),
+		logger: logger,
 	}
-
-	pProfiler := &Profiler{
-		stack:       list.New(),
-		record:      list.New(),
-		maxOverTime: DefaultMaxOvertime,
-		overTime:    DefaultOvertime,
-		analyzerPool: sync.Pool{New: func() interface{} {
-			return &Analyzer{}
-		}},
-	}
-	mapProfiler[profilerName] = pProfiler
-	return pProfiler
-}
-
-func UnRegProfiler(profilerName string) {
-	mapLock.Lock()
-	defer mapLock.Unlock()
-	if _, ok := mapProfiler[profilerName]; !ok {
-		return
-	}
-	delete(mapProfiler, profilerName)
 }
 
 func (slf *Profiler) SetMaxOverTime(tm time.Duration) {
@@ -106,7 +95,7 @@ func (slf *Profiler) Push(tag string) *Analyzer {
 
 	pElem := slf.stack.PushBack(&Element{tagName: tag, pushTime: time.Now()}) // 使用真实时间
 
-	analyzer := slf.analyzerPool.Get().(*Analyzer)
+	analyzer := slf.analyzerPool.Get()
 	analyzer.elem = pElem
 	analyzer.profiler = slf
 
@@ -137,10 +126,10 @@ func (slf *Profiler) check(pElem *Element) (*Record, time.Duration) {
 }
 
 func (slf *Profiler) pushRecordLog(record *Record) {
-	if slf.record.Len() >= DefaultMaxRecordNum {
-		front := slf.stack.Front()
+	if slf.record.Len() >= slf.maxRecordNum {
+		front := slf.record.Front()
 		if front != nil {
-			slf.stack.Remove(front)
+			slf.record.Remove(front)
 		}
 	}
 
@@ -160,7 +149,6 @@ func (slf *Analyzer) Reset() {
 func (slf *Analyzer) Pop() {
 	slf.profiler.stackLocker.Lock()
 	defer func() {
-		slf.Reset()
 		slf.profiler.analyzerPool.Put(slf)
 	}()
 	defer slf.profiler.stackLocker.Unlock()
@@ -173,10 +161,6 @@ func (slf *Analyzer) Pop() {
 		slf.profiler.pushRecordLog(pElem)
 	}
 	slf.profiler.stack.Remove(slf.elem)
-}
-
-func SetReportFunction(reportFun ReportFunType) {
-	reportFunc = reportFun
 }
 
 func DefaultReportFunction(name string, callNum int, costTime time.Duration, record *list.List) {
@@ -207,36 +191,5 @@ func DefaultReportFunction(name string, callNum int, costTime time.Duration, rec
 	}
 
 	// TODO 后面在看这个日志写在哪里
-	log.SysLogger.Debugf("report: %s", strReport)
-}
-
-func Report() {
-	var record *list.List
-	for name, prof := range mapProfiler {
-		prof.stackLocker.RLock()
-
-		//取栈顶，是否存在异常MaxOverTime数据
-		pElem := prof.stack.Back()
-		for pElem != nil {
-			pElement := pElem.Value.(*Element)
-			pExceptionElem, _ := prof.check(pElement)
-			if pExceptionElem != nil {
-				prof.pushRecordLog(pExceptionElem)
-			}
-			pElem = pElem.Prev()
-		}
-
-		if prof.record.Len() == 0 {
-			prof.stackLocker.RUnlock()
-			continue
-		}
-
-		record = prof.record
-		prof.record = list.New()
-		callNum := prof.callNum
-		totalCostTime := prof.totalCostTime
-		prof.stackLocker.RUnlock()
-
-		DefaultReportFunction(name, callNum, totalCostTime, record)
-	}
+	fmt.Printf("report: %s", strReport)
 }

@@ -7,6 +7,7 @@ package interfaces
 
 import (
 	"github.com/njtc406/emberengine/engine/pkg/def"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 type IModule interface {
@@ -14,8 +15,10 @@ type IModule interface {
 	IModuleIdentity
 	IModuleHierarchy
 	IModuleServiceEvent
+	log.ILoggerX
 	//concurrent.IConcurrent 暂时不暴露
 	//timingwheel.ITimerScheduler 暂时不暴露
+
 }
 
 type IModuleLifecycle interface {
@@ -29,7 +32,7 @@ type IModuleIdentity interface {
 	GetModuleID() uint32     // 获取模块ID
 	GetModuleName() string   // 获取模块名称
 	NewModuleID() uint32     // 生成模块ID
-
+	GetService() IService    // 获取服务
 }
 
 type IModuleHierarchy interface {
@@ -44,15 +47,12 @@ type IModuleHierarchy interface {
 }
 
 type IModuleServiceEvent interface {
-	GetService() IService               // 获取服务
 	GetEventHandler() IEventHandler     // 获取事件处理器
 	GetEventProcessor() IEventProcessor // 获取事件管理器
-	NotifyEvent(IEvent)                 // 通知事件
 }
 
 type IMethodMgr interface {
 	AddMethodFunc(name string, fn def.MethodCallFunc)
 	GetMethodFunc(name string) (def.MethodCallFunc, bool)
-	RemoveMethods(names []string) bool
-	IsPrivate() bool
+	RemoveMethods(names []string)
 }

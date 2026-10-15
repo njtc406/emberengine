@@ -6,179 +6,330 @@
 package monitor
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
+	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/engine/pkg/utils/util"
 )
 
-var rpcMonitor *RpcMonitor
+type waitBucket struct {
+	mu sync.RWMutex
+	m  map[uint64]*CallState
+}
+
+func (w *waitBucket) Get(seq uint64) *CallState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state, ok := w.m[seq]
+	if ok {
+		return state
+	}
+	return nil
+}
+
+func (w *waitBucket) Add(seq uint64, state *CallState) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.m[seq] = state
+}
+
+func (w *waitBucket) Del(seq uint64) *CallState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state, ok := w.m[seq]
+	delete(w.m, seq)
+	if ok {
+		return state
+	}
+	return nil
+}
+
+func (w *waitBucket) Clear() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, state := range w.m {
+		state.Release()
+	}
+	clear(w.m)
+}
 
 type RpcMonitor struct {
-	closed  chan struct{}
-	locker  sync.RWMutex
-	seed    uint64
-	waitMap map[uint64]inf.IEnvelope
-	sd      timingwheel.ITimerScheduler
-	wg      sync.WaitGroup
+	log.ILoggerX // 持有 ILoggerX
+	closed       atomic.Bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	seq          uint64
+	buckets      []*waitBucket
+	bucketMask   uint64
+	sd           timingwheel.ITimerScheduler
+	wg           sync.WaitGroup
+	pool         *asynclib.Pool // 用于异步回调投递
 }
 
-func GetRpcMonitor() *RpcMonitor {
-	if rpcMonitor == nil {
-		rpcMonitor = &RpcMonitor{}
+// NewRpcMonitor 创建新的 RpcMonitor 实例。
+// 每个 Node 持有独立的 RpcMonitor，互不干扰。
+func NewRpcMonitor() *RpcMonitor {
+	return &RpcMonitor{}
+}
+
+func (rm *RpcMonitor) bucketIndex(seqId uint64) int {
+	return int(seqId & rm.bucketMask)
+}
+
+func (rm *RpcMonitor) bucket(seqId uint64) *waitBucket {
+	return rm.buckets[rm.bucketIndex(seqId)]
+}
+
+const defaultWaitBucketCount = 256
+
+func (rm *RpcMonitor) initBuckets(bucketCount int, initCap int) {
+	if bucketCount <= 0 {
+		bucketCount = defaultWaitBucketCount
 	}
-	return rpcMonitor
+	bucketCount = util.RoundUpToPowerOfTwoInt(bucketCount)
+	rm.buckets = make([]*waitBucket, bucketCount)
+	for i := range rm.buckets {
+		if initCap > 0 {
+			rm.buckets[i] = &waitBucket{m: make(map[uint64]*CallState, initCap)}
+		} else {
+			rm.buckets[i] = &waitBucket{m: make(map[uint64]*CallState)}
+		}
+	}
+	rm.bucketMask = uint64(bucketCount - 1)
 }
 
-func (rm *RpcMonitor) Init() inf.IMonitor {
-	rm.closed = make(chan struct{})
-	rm.waitMap = make(map[uint64]inf.IEnvelope)
-	rm.sd = timingwheel.NewTaskScheduler(config.Conf.NodeConf.MonitorTimerSize, config.Conf.NodeConf.MonitorBucketSize, timingwheel.GetTimingWheel())
+func (rm *RpcMonitor) Init(conf *config.RpcMonitorConf, logger log.ILoggerX, tw *timingwheel.TimingWheel, pool *asynclib.Pool) *RpcMonitor {
+	rm.ILoggerX = logger
+	rm.pool = pool
+	ctx, cancel := context.WithCancel(context.Background())
+	rm.ctx = ctx
+	rm.cancel = cancel
+	rm.closed.Store(false)
+	rm.seq = 0
+	// Buckets are sharded to reduce lock contention.
+	// BucketCount must be power-of-two; otherwise we round up.
+	bucketCount := defaultWaitBucketCount
+	if conf != nil && conf.WaitBucketCount > 0 {
+		bucketCount = conf.WaitBucketCount
+	}
+	initCap := 0
+	if conf != nil {
+		initCap = conf.WaitBucketInitCap
+		if initCap <= 0 {
+			// Auto derive a reasonable per-bucket capacity to avoid frequent map growth.
+			if conf.MonitorTimerSize > 0 {
+				bc := util.RoundUpToPowerOfTwoInt(bucketCount)
+				initCap = conf.MonitorTimerSize / bc
+				if initCap < 16 {
+					initCap = 16
+				}
+			}
+		}
+	}
+	rm.initBuckets(bucketCount, initCap)
+	timerSize := 10000
+	bucketSize := 20
+	if conf != nil {
+		if conf.MonitorTimerSize > 0 {
+			timerSize = conf.MonitorTimerSize
+		}
+		if conf.MonitorBucketSize > 0 {
+			bucketSize = conf.MonitorBucketSize
+		}
+	}
+	var schedulerLogger log.ILoggerX
+	if rm.ILoggerX != nil {
+		schedulerLogger = rm.ILoggerX.WithField("component", "rpc monitor")
+	}
+	var schedulerErr error
+	rm.sd, schedulerErr = timingwheel.NewJobScheduler("rpc_monitor", timerSize, bucketSize,
+		tw, schedulerLogger)
+	if schedulerErr != nil {
+		if rm.ILoggerX != nil {
+			rm.Errorf("rpc monitor create scheduler failed: %v", schedulerErr)
+		}
+	}
 	return rm
 }
 
-func (rm *RpcMonitor) Start() {
+func (rm *RpcMonitor) Start() error {
+	if rm.closed.Load() {
+		return nil
+	}
+	if rm.sd == nil {
+		return fmt.Errorf("rpc monitor is not initialized")
+	}
 	rm.wg.Add(1)
 	go rm.listen()
+	return nil
 }
 
 func (rm *RpcMonitor) Stop() {
-	close(rm.closed)
-	rm.sd.Stop()
+	if !rm.closed.CompareAndSwap(false, true) {
+		return
+	}
+	// 节点关闭时，所有 service 已停止，无需处理 pending 调用，直接释放资源
+	rm.cancel()
+	if rm.sd != nil {
+		rm.sd.Stop()
+	}
 	rm.wg.Wait()
+	// 清空 buckets，释放 CallState
+	for _, bucket := range rm.buckets {
+		bucket.Clear()
+	}
 }
 
 func (rm *RpcMonitor) listen() {
 	defer rm.wg.Done()
+	if rm.sd == nil {
+		return
+	}
+	ch := rm.sd.GetTimerCbChannel()
+	wg := sync.WaitGroup{}
+	defer func() {
+		rm.Infof("rpc monitor listen stop")
+	}()
+	defer wg.Wait() // 等待所有回调执行完成
 	for {
 		select {
-		case t := <-rm.sd.GetTimerCbChannel():
+		case t, ok := <-ch:
+			if !ok {
+				return
+			}
 			if t == nil {
 				continue
 			}
-			asynclib.Go(func() {
-				//name := t.GetName()
-				//log.SysLogger.Debugf("=====================================================RPC monitor starts executing timeout callback:%s", name)
-				t.Do()
-				//log.SysLogger.Debugf("=====================================================RPC monitor end executing timeout callback:%s", name)
-			})
-		case <-rm.closed:
+			name := t.GetName()
+			wg.Add(1)
+			if err := rm.pool.Go(func() {
+				defer wg.Done()
+				if err := t.Do(rm.ctx); err != nil {
+					rm.Errorf("rpc monitor: %s callback failed,error:%s", name, err)
+				}
+			}); err != nil {
+				wg.Done() // pool.Go 失败时也要 Done，避免 wg 泄漏
+				rm.Errorf("rpc monitor execute timeout callback failed,error:%s", err)
+			}
+		case <-rm.ctx.Done():
 			return
 		}
 	}
 }
 
-func (rm *RpcMonitor) GenSeq() uint64 {
-	// TODO 这个可能需要存库,否则重启的时候会有冲突的风险
-	return atomic.AddUint64(&rm.seed, 1)
+func (rm *RpcMonitor) isClosed() bool {
+	return rm.closed.Load()
 }
 
-func (rm *RpcMonitor) Add(envelope inf.IEnvelope) {
-	rm.locker.Lock()
-	defer rm.locker.Unlock()
+func (rm *RpcMonitor) GenSeq() uint64 {
+	return atomic.AddUint64(&rm.seq, 1)
+}
 
-	timerId, err := rm.sd.AfterFunc(envelope.GetMeta().GetTimeout(), "rpc monitor", func(tm *timingwheel.Timer, args ...interface{}) error {
-		elp := args[0].(inf.IEnvelope)
-		if !elp.IsRef() || elp.GetMeta().GetTimerId() != tm.GetTimerId() {
-			return nil
-		}
-		reqId := elp.GetMeta().GetReqId()
-		rm.locker.Lock()
-		// 直接删除
-		_, ok := rm.waitMap[reqId]
-		delete(rm.waitMap, reqId)
-		rm.locker.Unlock()
-		if !ok {
-			// 已经在其他地方被移除了,不再执行后续的超时
-			return nil
-		}
-
-		if elp == nil || !elp.IsRef() {
-			log.SysLogger.WithContext(elp.GetContext()).Errorf("call seq is not find,seq:%d", tm.GetTimerId())
-			return nil
-		}
-
-		log.SysLogger.WithContext(elp.GetContext()).Debugf("RPC call takes more than %d seconds,method is %s", int64(elp.GetMeta().GetTimeout().Seconds()), envelope.GetData().GetMethod())
-		// 调用超时,执行超时回调
-		rm.callTimeout(elp)
-		return nil
-	}, envelope)
-	if err != nil {
-		log.SysLogger.WithContext(envelope.GetContext()).Errorf("add monitor failed,error:%s", err)
+func (rm *RpcMonitor) Add(state *CallState) {
+	if rm.isClosed() {
+		state.SetResult(nil, def.ErrRPCHadClosed)
+		state.Complete()
 		return
 	}
-	envelope.GetMeta().SetTimerId(timerId)
-	rm.waitMap[envelope.GetMeta().GetReqId()] = envelope
+	reqId := state.ReqID()
+	timeout := state.Timeout()
+	method := state.Method()
+	// TODO 这里可以直接使用异步timer,但是需要评估性能,因为现在使用的是线程池
+	timerId, err := rm.sd.AfterFunc(timeout, "rpc monitor", func(_ context.Context, tm *timingwheel.Timer, args ...interface{}) error {
+		seqId := args[0].(uint64)
+		st := rm.remove(seqId) // 这里只需要移除monitor,不需要取消timer,timer已经触发了
+		if st == nil {
+			// 已经删除
+			return nil
+		}
+
+		// 在 Complete 之前读取 ctx 并打印日志，因为 Complete 后同步 Call
+		// 的调用方可能立即 Release → Reset，导致 state.ctx 被清空。
+		if rm.ILoggerX != nil {
+			rm.WithContext(st.ctx).Debugf("RPC call takes more than %s,method is %s", timeout, method)
+		}
+
+		st.SetResult(nil, def.ErrRPCCallTimeout)
+		st.Complete()
+		return nil
+	}, reqId)
+	if err != nil {
+		if rm.ILoggerX != nil {
+			rm.WithContext(state.ctx).Errorf("add monitor failed,error:%s", err)
+		}
+		// 无法加入 monitor：避免 Call 永久阻塞 / AsyncCall 永远不回调。
+		state.SetResult(nil, err)
+		state.Complete()
+		return
+	}
+	state.setTimerID(timerId)
+	b := rm.bucket(reqId)
+	b.Add(reqId, state)
 }
 
-func (rm *RpcMonitor) remove(seqId uint64) inf.IEnvelope {
-	envelope, ok := rm.waitMap[seqId]
-	if !ok {
+func (rm *RpcMonitor) remove(seqId uint64) *CallState {
+	if rm.isClosed() {
 		return nil
 	}
-
-	rm.sd.CancelTimer(envelope.GetMeta().GetTimerId())
-	delete(rm.waitMap, seqId)
-	return envelope
-}
-
-func (rm *RpcMonitor) Remove(seqId uint64) inf.IEnvelope {
 	if seqId == 0 {
 		return nil
 	}
-	rm.locker.Lock()
-	f := rm.remove(seqId)
-	rm.locker.Unlock()
-	return f
+	b := rm.bucket(seqId)
+	return b.Del(seqId)
 }
 
-func (rm *RpcMonitor) Get(seqId uint64) inf.IEnvelope {
-	rm.locker.RLock()
-	defer rm.locker.RUnlock()
-
-	return rm.waitMap[seqId]
-}
-
-func (rm *RpcMonitor) callTimeout(envelope inf.IEnvelope) {
-	//if !envelope.IsRef() {
-	//	//log.SysLogger.WithCtx(envelope.GetContext()).Debug("envelope is not ref")
-	//	return // 已经被释放,丢弃
-	//}
-
-	envelope.GetData().SetResponse(nil)
-	envelope.GetData().SetError(def.ErrRPCCallTimeout)
-
-	if envelope.GetMeta().NeedCallback() {
-		if err := envelope.GetMeta().GetDispatcher().PostMessage(envelope); err != nil {
-			envelope.Release()
-			log.SysLogger.WithContext(envelope.GetContext()).Errorf("send call timeout response error:%s", err.Error())
+func (rm *RpcMonitor) Remove(seqId uint64) *CallState {
+	state := rm.remove(seqId)
+	if state != nil {
+		if rm.sd != nil && !rm.isClosed() {
+			rm.sd.CancelTimer(state.timerId())
 		}
-	} else {
-		envelope.SetDone()
 	}
+	return state
+}
+
+func (rm *RpcMonitor) Get(seqId uint64) *CallState {
+	if rm.isClosed() {
+		return nil
+	}
+	if seqId == 0 {
+		return nil
+	}
+	b := rm.bucket(seqId)
+	return b.Get(seqId)
 }
 
 func (rm *RpcMonitor) NewCancel(seqId uint64) dto.CancelRpc {
 	return func() {
-		rm.Remove(seqId)
+		state := rm.Remove(seqId)
+		if state != nil {
+			state.callbacks = nil
+			state.cbParams = nil
+			state.Release()
+		}
 	}
 }
 
 func (rm *RpcMonitor) NewMultiCancel(seqIds ...uint64) dto.CancelRpc {
 	return func() {
-		rm.locker.Lock()
-		defer rm.locker.Unlock()
 		for _, seqId := range seqIds {
 			if seqId == 0 {
 				continue
 			}
-			_ = rm.remove(seqId)
+			state := rm.Remove(seqId)
+			if state != nil {
+				state.callbacks = nil
+				state.cbParams = nil
+				state.Release()
+			}
 		}
 	}
 }

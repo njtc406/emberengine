@@ -1,18 +1,17 @@
 package dedup
 
 import (
-	"github.com/bluele/gcache"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/def"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/bluele/gcache"
+	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+
 	"github.com/patrickmn/go-cache"
 )
-
-var duplicator inf.IDeDuplicator
 
 type DeDuplicatorOption struct {
 	TTL      time.Duration
@@ -40,29 +39,18 @@ func WithSize(size int) Option {
 	}
 }
 
-func Init(conf *config.DeDuplicatorConf) {
-	if duplicator != nil {
-		return
-	}
-
+// NewDeDuplicator 创建一个新的去重器实例。
+// 每个 Node 持有独立的去重器，互不干扰。
+func NewDeDuplicator(conf *config.DeDuplicatorConf) (inf.IDeDuplicator, error) {
 	if conf == nil {
 		conf = &config.DeDuplicatorConf{}
 	}
-
 	option := &DeDuplicatorOption{
 		TTL:      conf.DeDuplicatorTTL,
 		CleanTTL: conf.DeDuplicatorCleanTTL,
 		Size:     conf.DeDuplicatorSize,
 	}
-
-	duplicator = newDeDuplicator(conf.DeDuplicatorType, option)
-}
-
-func GetDeDuplicator() inf.IDeDuplicator {
-	if duplicator == nil {
-		duplicator = newDeDuplicator(def.DeDuplicatorTypeTTL, &DeDuplicatorOption{})
-	}
-	return duplicator
+	return newDeDuplicator(conf.DeDuplicatorType, option), nil
 }
 
 func newDeDuplicator(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
@@ -80,7 +68,6 @@ func newDeDuplicator(tp string, option *DeDuplicatorOption) inf.IDeDuplicator {
 }
 
 func reqIdKey(serviceUid string, id uint64) string {
-	//return fmt.Sprintf("rpc_%s_reqid_%d", serviceUid, id)
 	return "rpc_" + serviceUid + "_reqid_" + strconv.FormatUint(id, 10)
 }
 
@@ -105,6 +92,10 @@ func NewTTLDeDuplicator(ttl, cleanTTL time.Duration) *TTLDeDuplicator {
 // 如果没见过，会立即插入一条标记
 func (d *TTLDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	key := reqIdKey(serviceUid, id)
+	return d.SeenKey(key)
+}
+
+func (d *TTLDeDuplicator) SeenKey(key string) bool {
 	_, found := d.reqCache.Get(key)
 	if found {
 		return true
@@ -112,6 +103,14 @@ func (d *TTLDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	// 第一次见，先插入标记
 	d.reqCache.SetDefault(key, struct{}{})
 	return false
+}
+
+// Close 释放 go-cache 内部 janitor goroutine，防止 goroutine 泄漏。
+func (d *TTLDeDuplicator) Close() {
+	if d.reqCache != nil {
+		d.reqCache.Flush()
+		d.reqCache = nil
+	}
 }
 
 type LRUDeDuplicator struct {
@@ -129,9 +128,29 @@ func (d *LRUDeDuplicator) Seen(serviceUid string, id uint64) bool {
 	defer d.mu.Unlock()
 
 	key := reqIdKey(serviceUid, id)
+	return d.seenKeyLocked(key)
+}
+
+func (d *LRUDeDuplicator) SeenKey(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.seenKeyLocked(key)
+}
+
+func (d *LRUDeDuplicator) seenKeyLocked(key string) bool {
 	if _, err := d.cache.Get(key); err == nil {
 		return true
 	}
 	d.cache.SetWithExpire(key, struct{}{}, d.ttl)
 	return false
+}
+
+// Close 清空 LRU 缓存。gcache 无后台 goroutine，Purge 即可。
+func (d *LRUDeDuplicator) Close() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cache != nil {
+		d.cache.Purge()
+	}
 }

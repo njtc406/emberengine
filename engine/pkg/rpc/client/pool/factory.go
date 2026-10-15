@@ -7,8 +7,9 @@ package pool
 
 import (
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"sync"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 )
@@ -18,6 +19,8 @@ type SenderCreator func(addr string) inf.IRpcSender
 
 // PoolManager 连接池管理器
 type PoolManager struct {
+	log.ILoggerX // 持有 ILoggerX
+
 	pools       map[string]*ConnectionPool // key: addr_type
 	poolMutex   sync.RWMutex
 	creators    map[string]SenderCreator // RPC类型对应的创建器
@@ -25,8 +28,9 @@ type PoolManager struct {
 }
 
 // NewPoolManager 创建新的连接池管理器
-func NewPoolManager() *PoolManager {
+func NewPoolManager(logger log.ILoggerX) *PoolManager {
 	return &PoolManager{
+		ILoggerX:    logger,
 		pools:       make(map[string]*ConnectionPool),
 		creators:    make(map[string]SenderCreator),
 		poolConfigs: make(map[string]*PoolConfig),
@@ -93,7 +97,7 @@ func (pm *PoolManager) GetOrCreatePool(address, rpcType string) (*ConnectionPool
 	}
 
 	// 创建新的连接池
-	pool := NewConnectionPool(address, rpcType, creator, config)
+	pool := NewConnectionPool(address, rpcType, creator, config, pm.ILoggerX)
 
 	// 启动连接池
 	if err := pool.Start(); err != nil {
@@ -101,7 +105,9 @@ func (pm *PoolManager) GetOrCreatePool(address, rpcType string) (*ConnectionPool
 	}
 
 	pm.pools[poolKey] = pool
-	log.SysLogger.Infof("创建新的连接池: %s, 类型: %s", address, rpcType)
+	if pm.ILoggerX != nil {
+		pm.Infof("创建新的连接池: %s, 类型: %s", address, rpcType)
+	}
 
 	return pool, nil
 }
@@ -123,7 +129,9 @@ func (pm *PoolManager) Close() {
 
 	for poolKey, pool := range pm.pools {
 		pool.Stop()
-		log.SysLogger.Infof("关闭连接池: %s", poolKey)
+		if pm.ILoggerX != nil {
+			pm.Infof("关闭连接池: %s", poolKey)
+		}
 	}
 
 	// 清空池映射
@@ -168,18 +176,8 @@ func (pm *PoolManager) RemovePool(address, rpcType string) {
 	if pool, exists := pm.pools[poolKey]; exists {
 		pool.Stop()
 		delete(pm.pools, poolKey)
-		log.SysLogger.Infof("移除连接池: %s", poolKey)
+		if pm.ILoggerX != nil {
+			pm.Infof("移除连接池: %s", poolKey)
+		}
 	}
-}
-
-// 全局连接池管理器实例
-var globalPoolManager *PoolManager
-var poolManagerOnce sync.Once
-
-// GetGlobalPoolManager 获取全局连接池管理器
-func GetGlobalPoolManager() *PoolManager {
-	poolManagerOnce.Do(func() {
-		globalPoolManager = NewPoolManager()
-	})
-	return globalPoolManager
 }

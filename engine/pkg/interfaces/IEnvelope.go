@@ -1,38 +1,42 @@
 // Package interfaces
-// @Title  信封接口
+// @Title  rpc数据信封接口
 // @Description  desc
 // @Author  yr  2024/11/14
 // @Update  yr  2024/11/14
 package interfaces
 
 import (
+	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"time"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type IEnvelope interface {
 	IDataDef
-	IEvent
-	IContext
 
 	// Set
 
 	SetMeta(meta IEnvelopeMeta)
 	SetData(data IEnvelopeData)
+	SetPriority(priority def.Priority)
+	SetDispatchKey(key string)
 
 	// Get
 
 	GetMeta() IEnvelopeMeta
 	GetData() IEnvelopeData
+	GetPriority() def.Priority
+	GetDispatchKey() string
 
 	// Option
 
-	SetDone()
-	RunCompletions()
-	Wait()
-	ToProtoMsg() *actor.Message
-	Clone() IEnvelope
+	ToProtoMsg(ctx context.Context) (*actor.Message, error)
+
+	// Release 释放信封资源
+	Release()
 }
 
 type IEnvelopeMeta interface {
@@ -42,32 +46,20 @@ type IEnvelopeMeta interface {
 	SetSenderPid(sender *actor.PID)
 	SetReceiverPid(receiver *actor.PID)
 	SetDispatcher(client IRpcDispatcher)
-	SetTimeout(timeout time.Duration)
 	SetReqId(reqId uint64)
-	SetCallback(cbs []dto.CompletionFunc)
-	SetTimerId(id uint64)
-	SetCallbackParams(params []interface{})
-	SetDone()
+	SetDeadline(deadline int64)
+	SetIdempotencyKey(key string)
+	SetCallbacks(callbacks dto.CompletionFuncs, cbParams []interface{})
 
 	// Get
 
 	GetSenderPid() *actor.PID
 	GetReceiverPid() *actor.PID
 	GetDispatcher() IRpcDispatcher
-	GetTimeout() time.Duration
 	GetReqId() uint64
-	GetTimerId() uint64
-	GetCallBacks() []dto.CompletionFunc
-	GetCallbackParams() []interface{}
-	GetDone() <-chan struct{}
-
-	// check
-
-	NeedCallback() bool // 是否需要回调
-
-	// Option
-
-	Clone() IEnvelopeMeta
+	GetDeadline() int64
+	GetIdempotencyKey() string
+	GetCallback() (dto.CompletionFuncs, []interface{})
 }
 
 type IEnvelopeData interface {
@@ -79,9 +71,7 @@ type IEnvelopeData interface {
 	SetRequest(req interface{})
 	SetResponse(res interface{})
 	SetError(err error)
-	SetErrStr(err string)
 	SetNeedResponse(need bool)
-	SetRequestBuff(reqBuff []byte)
 
 	// Get
 
@@ -89,8 +79,7 @@ type IEnvelopeData interface {
 	GetRequest() interface{}
 	GetResponse() interface{}
 	GetError() error
-	GetErrStr() string
-	GetRequestBuff(int32) ([]byte, string, error)
+	GetRequestBuff() (*anypb.Any, error)
 
 	// Check
 

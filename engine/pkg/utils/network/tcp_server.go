@@ -3,10 +3,11 @@ package network
 import (
 	"errors"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
 )
 
 const (
@@ -67,6 +68,9 @@ func (server *TCPServer) init() error {
 	if server.LenMsgLen <= 0 {
 		server.LenMsgLen = Default_LenMsgLen
 		//log.Info("invalid LenMsgLen", log.Int("reset", server.LenMsgLen))
+	}
+	if server.LenMsgLen != 1 && server.LenMsgLen != 2 && server.LenMsgLen != 4 {
+		server.LenMsgLen = Default_LenMsgLen
 	}
 
 	if server.MaxMsgLen <= 0 {

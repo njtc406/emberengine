@@ -6,11 +6,14 @@
 package timingwheel
 
 import (
+	"errors"
 	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/engine/pkg/log"
 )
 
 // ITimerScheduler 定时器调度器接口
@@ -18,25 +21,25 @@ import (
 type ITimerScheduler interface {
 	AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	// AfterAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
-	AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+	AfterAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 
 	TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	// TickerAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
-	TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+	TickerAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error)
 
 	CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
 	// CronAsyncFunc 异步任务,执行函数是在独立的goroutine中执行
-	CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error)
+	CronAsyncFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error)
 
 	CancelTimer(taskId uint64)
 	Stop()
 
-	GetTimerCbChannel() chan ITimer
+	GetTimerCbChannel() <-chan ITimer
 }
 
-var (
-	defaultSeed uint64 = 10000
-)
+const defaultSeed uint64 = 10000
+
+var ErrClosed = errors.New("timingwheel: closed")
 
 // timerBucket 定时器桶，用于存储和管理定时器任务
 type timerBucket struct {
@@ -67,23 +70,42 @@ func (b *timerBucket) remove(timerId uint64) *Timer {
 	return nil
 }
 
-type taskScheduler struct {
-	closed    int32
-	shards    []*timerBucket
-	c         chan ITimer
-	tw        *TimingWheel // 关联的timingwheel实例
-	timerPool pool.IPool[*Timer]
+type jobScheduler struct {
+	closed int32
+	addMu  sync.RWMutex
+	shards []*timerBucket
+	c      chan ITimer
+	sendMu sync.RWMutex
+	tw     *TimingWheel // 关联的timingwheel实例
+	logger log.ILoggerX
 }
 
-// NewTaskScheduler 创建一个新的任务调度器
+// NewJobScheduler 创建一个新的任务调度器
 // chanSize: 回调通道大小
 // bucketSize: 桶数量，用于分片存储任务以提高并发性能
-func NewTaskScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler {
+func NewJobScheduler(jobName string, chanSize, bucketSize int, tw inf.INodeTimingWheel, logger log.ILoggerX) (ITimerScheduler, error) {
 	if chanSize <= 0 {
 		chanSize = 100000
 	}
 	if bucketSize <= 0 {
 		bucketSize = 10
+	}
+	var wheel *TimingWheel
+	if tw != nil {
+		if w, ok := tw.(*TimingWheel); ok {
+			wheel = w
+		} else {
+			if logger != nil {
+				logger.Errorf("timing wheel type invalid: %T", tw)
+			}
+			return nil, fmt.Errorf("timing wheel type invalid for scheduler[%s]: %T", jobName, tw)
+		}
+	}
+	if wheel == nil {
+		if logger != nil {
+			logger.Errorf("timing wheel is nil, scheduler[%s] requires node-injected timing wheel", jobName)
+		}
+		return nil, fmt.Errorf("timing wheel is nil for scheduler[%s]", jobName)
 	}
 	shards := make([]*timerBucket, bucketSize)
 	for i := range shards {
@@ -91,49 +113,39 @@ func NewTaskScheduler(chanSize, bucketSize int, t *TimingWheel) ITimerScheduler 
 			tasks: make(map[uint64]*Timer),
 		}
 	}
-	return &taskScheduler{
+	return &jobScheduler{
 		shards: shards,
 		c:      make(chan ITimer, chanSize),
-		tw:     t,
-		timerPool: pool.NewSyncPoolWrapper(
-			func() *Timer {
-				return &Timer{}
-			},
-			pool.NewStatsRecorder("timerPool"),
-			pool.WithRef(func(t *Timer) {
-				t.Ref()
-			}),
-			pool.WithUnRef(func(t *Timer) {
-				t.UnRef()
-			}),
-			pool.WithReset(func(t *Timer) {
-				t.Reset()
-			}),
-		),
-	}
+		tw:     wheel,
+		logger: logger,
+	}, nil
 }
 
-func (scheduler *taskScheduler) getShard(timerId uint64) *timerBucket {
+func (scheduler *jobScheduler) getShard(timerId uint64) *timerBucket {
 	return scheduler.shards[timerId%uint64(len(scheduler.shards))]
 }
 
-func (scheduler *taskScheduler) add(t *Timer) bool {
+func (scheduler *jobScheduler) add(t *Timer) bool {
+	scheduler.addMu.RLock()
+	defer scheduler.addMu.RUnlock()
+
+	if scheduler.isClosed() {
+		return false
+	}
 
 	if !t.isActive() {
-		fmt.Println("task is not active")
 		// 任务已经被取消
 		return false
 	}
 
 	if !scheduler.getShard(t.timerId).add(t) {
-		fmt.Println("task had add")
 		return false
 	}
 
 	return true
 }
 
-func (scheduler *taskScheduler) remove(taskId uint64) *Timer {
+func (scheduler *jobScheduler) remove(taskId uint64) *Timer {
 	shard := scheduler.getShard(taskId)
 	if shard == nil {
 		return nil
@@ -142,12 +154,33 @@ func (scheduler *taskScheduler) remove(taskId uint64) *Timer {
 	return shard.remove(taskId)
 }
 
-func (scheduler *taskScheduler) GetTimerCbChannel() chan ITimer {
+func (scheduler *jobScheduler) GetTimerCbChannel() <-chan ITimer {
 	return scheduler.c
 }
 
+func (scheduler *jobScheduler) postTimer(t *Timer) bool {
+	scheduler.sendMu.RLock()
+	defer scheduler.sendMu.RUnlock()
+
+	if scheduler.isClosed() {
+		return false
+	}
+
+	select {
+	case scheduler.c <- t:
+		return true
+	default:
+		return false
+	}
+}
+
+// isClosed 返回调度器是否已关闭
+func (scheduler *jobScheduler) isClosed() bool {
+	return atomic.LoadInt32(&scheduler.closed) == 1
+}
+
 // AfterFunc 延时任务
-func (scheduler *taskScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) AfterFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
@@ -156,35 +189,24 @@ func (scheduler *taskScheduler) AfterFunc(d time.Duration, name string, f TimerC
 	t.taskScheduler = scheduler
 
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
-	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
-		return 0, fmt.Errorf("after task add failed")
-	}
-
-	scheduler.tw.AfterFunc(d, t)
-
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, false)
 }
 
 // AfterAsyncFunc 异步执行任务
-func (scheduler *taskScheduler) AfterAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) AfterAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
-	t.asyncTask = f
+	t.asyncTask = true
+	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 	// 加入任务(先加入调度器,防止在timingwheel中执行时,调度器还未加入)
-	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
-		return 0, fmt.Errorf("after async task add failed")
-	}
-	scheduler.tw.AfterFunc(d, t)
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, false)
 }
 
 // TickerFunc 循环任务
-func (scheduler *taskScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) TickerFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
@@ -193,37 +215,20 @@ func (scheduler *taskScheduler) TickerFunc(d time.Duration, name string, f Timer
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
-	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
-		return 0, fmt.Errorf("ticker task add failed")
-	}
-
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	// 加入任务
-
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, true)
 }
 
 // TickerAsyncFunc 异步循环任务
-func (scheduler *taskScheduler) TickerAsyncFunc(d time.Duration, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) TickerAsyncFunc(d time.Duration, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	t := scheduler.createTimer()
 	t.name = name
 	t.interval = d
-	t.asyncTask = f
+	t.asyncTask = true
+	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
-	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
-		return 0, fmt.Errorf("ticker async task add failed")
-	}
-	// 加入任务
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	return t.GetTimerId(), nil
+	return scheduler.register(t, d, true)
 }
 
 // CronFunc 循环任务,请注意,这个函数的精度只到秒
@@ -231,48 +236,62 @@ func (scheduler *taskScheduler) TickerAsyncFunc(d time.Duration, name string, f 
 // spec: cron表达式 秒 分 时 日 月 周(可选) | @every 5s
 // 示例: 0 */1 * * * 每分钟执行一次
 // 示例: @every 5s 每5秒执行一次
-func (scheduler *taskScheduler) CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) CronFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	// 创建task
 	t := scheduler.createTimer()
 	t.name = name
 	t.spec = spec
+	t.isCron = true // 标记为cron定时器
 	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
 	// 加入任务
-	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
-		return 0, fmt.Errorf("cron task add failed")
-	}
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	return t.GetTimerId(), nil
+	return scheduler.register(t, 0, true)
 }
 
 // CronAsyncFunc 异步循环任务(任务不会被保存下来)
-func (scheduler *taskScheduler) CronAsyncFunc(spec string, name string, f func(...interface{}), args ...interface{}) (uint64, error) {
+func (scheduler *jobScheduler) CronAsyncFunc(spec string, name string, f TimerCallback, args ...interface{}) (uint64, error) {
 	t := scheduler.createTimer()
 	t.name = name
 	t.spec = spec
-	t.asyncTask = f
+	t.isCron = true // 标记为cron定时器
+	t.asyncTask = true
+	t.task = f
 	t.taskArgs = args
 	t.taskScheduler = scheduler
 
 	// 加入任务
-	if !scheduler.add(t) {
-		scheduler.releaseTimer(t)
-		return 0, fmt.Errorf("cron async task add failed")
-	}
-	// 创建task
-	if err := scheduler.tw.ScheduleFunc(t); err != nil {
-		return 0, err
-	}
-	return t.GetTimerId(), nil
+	return scheduler.register(t, 0, true)
 }
 
-func (scheduler *taskScheduler) CancelTimer(timerId uint64) {
+func (scheduler *jobScheduler) register(timer *Timer, delay time.Duration, periodic bool) (uint64, error) {
+	scheduler.addMu.RLock()
+	defer scheduler.addMu.RUnlock()
+	if scheduler.isClosed() || scheduler.tw.IsClosed() {
+		timer.stop()
+		return 0, ErrClosed
+	}
+	if !scheduler.getShard(timer.timerId).add(timer) {
+		timer.stop()
+		return 0, fmt.Errorf("timer already registered")
+	}
+	if periodic {
+		if err := scheduler.tw.ScheduleFunc(timer); err != nil {
+			scheduler.CancelTimer(timer.timerId)
+			return 0, err
+		}
+	} else {
+		scheduler.tw.AfterFunc(delay, timer)
+	}
+	if scheduler.tw.IsClosed() {
+		scheduler.CancelTimer(timer.timerId)
+		return 0, ErrClosed
+	}
+	return timer.timerId, nil
+}
+
+func (scheduler *jobScheduler) CancelTimer(timerId uint64) {
 	if timerId == 0 {
 		return
 	}
@@ -280,32 +299,42 @@ func (scheduler *taskScheduler) CancelTimer(timerId uint64) {
 	if t == nil {
 		return
 	}
-	scheduler.releaseTimer(t)
+	t.stop()
+	scheduler.tw.timers.Delete(t)
 }
 
-func (scheduler *taskScheduler) Stop() {
+func (scheduler *jobScheduler) Stop() {
+	scheduler.addMu.Lock()
+	defer scheduler.addMu.Unlock()
+
+	if scheduler.isClosed() {
+		return
+	}
 	atomic.StoreInt32(&scheduler.closed, 1)
+
+	var timers []*Timer
 	for _, shard := range scheduler.shards {
 		shard.Lock()
 		for timerId, t := range shard.tasks {
-			scheduler.releaseTimer(t)
+			timers = append(timers, t)
 			delete(shard.tasks, timerId)
 		}
 		shard.Unlock()
 	}
-	close(scheduler.c)
-}
-
-func (scheduler *taskScheduler) createTimer() *Timer {
-	t := scheduler.timerPool.Get()
-	t.SetTimerId(scheduler.tw.genTimerId())
-	return t
-}
-
-func (scheduler *taskScheduler) releaseTimer(t *Timer) {
-	if t.IsRef() {
-		// 防止重复释放
+	for _, t := range timers {
 		t.stop()
-		scheduler.timerPool.Put(t)
+		scheduler.tw.timers.Delete(t)
 	}
+
+	scheduler.sendMu.Lock()
+	close(scheduler.c)
+	for range scheduler.c {
+	}
+	scheduler.sendMu.Unlock()
+}
+
+func (scheduler *jobScheduler) createTimer() *Timer {
+	t := &Timer{}
+	t.timerId = scheduler.tw.genTimerId()
+	return t
 }

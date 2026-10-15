@@ -6,11 +6,16 @@
 package msgenvelope
 
 import (
-	"errors"
+	"sync"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"sync"
+	"github.com/njtc406/emberengine/engine/pkg/utils/errorx"
+	"google.golang.org/protobuf/types/known/anypb"
 )
+
+// 编译期检查 Data 实现 IEnvelopeData
+var _ inf.IEnvelopeData = (*Data)(nil)
 
 func NewData() inf.IEnvelopeData {
 	return &Data{} // data不使用缓存池, 因为多个共用相同的data时,前面的释放会导致后面的都取不到了
@@ -25,7 +30,7 @@ type Data struct {
 	response    interface{} // 回复数据
 	needResp    bool        // 是否需要回复
 	err         error       // 错误
-	requestBuff []byte      // 编码好的数据
+	requestBuff *anypb.Any  // 编码好的数据
 	typeName    string      // 类型名
 }
 
@@ -38,7 +43,7 @@ func (e *Data) Reset() {
 	e.response = nil
 	e.needResp = false
 	e.err = nil
-	e.requestBuff = e.requestBuff[:0]
+	e.requestBuff = nil
 	e.typeName = ""
 }
 
@@ -58,6 +63,9 @@ func (e *Data) SetRequest(req interface{}) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.request = req
+	// request 改变后，缓存的 Any 需要失效，避免复用旧编码。
+	e.requestBuff = nil
+	e.err = nil
 }
 
 func (e *Data) SetResponse(res interface{}) {
@@ -72,26 +80,10 @@ func (e *Data) SetError(err error) {
 	e.err = err
 }
 
-func (e *Data) SetErrStr(err string) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	if err == "" {
-		e.err = nil
-		return
-	}
-	e.err = errors.New(err)
-}
-
 func (e *Data) SetNeedResponse(need bool) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 	e.needResp = need
-}
-
-func (e *Data) SetRequestBuff(reqBuff []byte) {
-	e.locker.Lock()
-	defer e.locker.Unlock()
-	e.requestBuff = reqBuff
 }
 
 func (e *Data) GetMethod() string {
@@ -118,31 +110,28 @@ func (e *Data) GetError() error {
 	return e.err
 }
 
-func (e *Data) GetErrStr() string {
+func (e *Data) GetErrBytes() []byte {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
-	if e.err == nil {
-		return ""
-	}
-	return e.err.Error()
+	return errorx.MarshalToBytes(e.err)
 }
 
-func (e *Data) GetRequestBuff(tpId int32) ([]byte, string, error) {
+func (e *Data) GetRequestBuff() (*anypb.Any, error) {
 	e.locker.Lock()
 	defer e.locker.Unlock()
 
 	if e.request == nil {
-		return nil, "", nil
+		// 允许请求为nil, 因为有的方法是不需要参数的
+		return nil, nil
 	}
 
-	if len(e.requestBuff) > 0 {
-		return e.requestBuff, e.typeName, e.err
+	if e.requestBuff != nil {
+		return e.requestBuff, nil
 	}
 
-	e.requestBuff, e.typeName, e.err = codec.Encode(tpId, e.request)
-	//e.requestBuff, e.typeName, e.err = serializer.Serialize(e.request, tpId)
+	e.requestBuff, e.err = codec.EncodeToAny(e.request)
 
-	return e.requestBuff, e.typeName, e.err
+	return e.requestBuff, e.err
 }
 
 func (e *Data) IsReply() bool {

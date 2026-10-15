@@ -7,6 +7,7 @@ package codec
 
 import (
 	"fmt"
+
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
@@ -39,26 +40,21 @@ func (j *jsonCodec) Type() int32 {
 	return def.Json
 }
 
-func (j *jsonCodec) Encode(msg interface{}) ([]byte, string, error) {
+func (j *jsonCodec) Encode(msg interface{}) ([]byte, error) {
 	pb, ok := msg.(proto.Message)
 	if !ok {
-		return nil, "", fmt.Errorf("jsonCodec: msg must be proto.Message")
+		return nil, fmt.Errorf("jsonCodec: msg must be proto.Message")
 	}
 	data, err := j.opts.Marshal(pb)
 	if err != nil {
-		return nil, "", err
-	}
-	typeName := getProtoTypeName(msg.(proto.Message))
-	return data, typeName, err
-}
-
-func (j *jsonCodec) Decode(typeName string, data []byte) (interface{}, error) {
-	t, err := getProtoType(typeName)
-	if err != nil {
 		return nil, err
 	}
-	msg := t.New().Interface()
-	return msg, protojson.Unmarshal(data, msg)
+
+	return data, nil
+}
+
+func (j *jsonCodec) Decode(data []byte, resp proto.Message) error {
+	return protojson.Unmarshal(data, resp)
 }
 
 func (j *jsonCodec) Stats() []*pool.Stats {

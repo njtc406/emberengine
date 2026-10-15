@@ -6,6 +6,11 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/node"
 	"github.com/njtc406/emberengine/engine/pkg/services"
@@ -19,5 +24,13 @@ func init() {
 }
 
 func main() {
-	node.Start(node.WithConfPath("./example/configs/node_master"))
+	n, err := node.New().Start(node.WithConfPath("./example/configs/node_master"))
+	if err != nil {
+		panic(err)
+	}
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+	<-exitCh
+	fmt.Println("exit signal received")
+	n.Stop()
 }

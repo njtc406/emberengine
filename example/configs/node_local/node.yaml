@@ -2,6 +2,7 @@
 
 NodeConf:
   NodeId: 1
+  NodeType: test
   # 系统状态(debug/release)
   SystemStatus: debug
   # 系统数据目录(持久化)
@@ -26,7 +27,7 @@ ClusterConf:
     # etcd用户名
     UserName: root
     # etcd密码
-    Password: 123456
+    Password: 123456  # 仅用于示例，生产环境请使用环境变量
     # 是否开启日志
     NoLogger: true
   RPCServers:
@@ -43,7 +44,11 @@ ServiceConf:
     - ClassName: Service3
       ServiceName: Service3
       Type: test
-      ServerId: 1
+      Partition: 1
+      Visibility: "node"
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -61,7 +66,11 @@ ServiceConf:
     - ClassName: Service2
       ServiceName: Service2
       Type: test
-      ServerId: 1
+      Partition: 1
+      Visibility: "node"
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         # 定时器队列长度
         TimerSize: 1000
@@ -80,8 +89,12 @@ ServiceConf:
       ServiceName: Service1
       # 服务类型
       Type: test
-      # 服务器ID
-      ServerId: 1
+      # 服务分区ID(用于服务路由隔离)
+      Partition: 1
+      Visibility: "node"
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       # 定时器配置
       TimerConf:
         # 定时器队列长度
@@ -103,7 +116,10 @@ ServiceConf:
     - ClassName: PprofService
       ServiceName: PprofService
       Type: test
-      ServerId: 1
+      Partition: 1
+      StopPolicy:
+        GraceTimeout: 0s
+        DrainPolicy: "execute"
       TimerConf:
         TimerSize: 1000
         TimerBucketSize: 100
@@ -123,6 +139,8 @@ SystemLogger:
   Name: "system-local"
   # 日志级别
   Level: debug
+  # 输出格式: text / json
+  OutputFormat: text
   # 是否打印调用文件信息
   Caller: true
   # 是否打印完整调用文件信息

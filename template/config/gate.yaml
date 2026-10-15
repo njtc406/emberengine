@@ -3,6 +3,17 @@
 # 连接类型
 Type: ws
 
+# 重启策略配置（监听失败后的自动重启）
+# RestartPolicy:
+#   # 是否启用自动重启（默认 true）
+#   Enable: true
+#   # 最大重启次数（默认 5，超过后停止重启）
+#   MaxRestart: 5
+#   # 初始退避时间（默认 500ms）
+#   InitialBackoff: 500ms
+#   # 最大退避时间（默认 10s）
+#   MaxBackoff: 10s
+
 # 网关服配置
 WSServerConf:
   Router: "/ember/ws"

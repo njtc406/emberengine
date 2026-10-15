@@ -6,44 +6,65 @@
 package msgenvelope
 
 import (
+	"context"
+	"sync"
+
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/dto"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/engine/pkg/utils/emberctx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/util"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"golang.org/x/net/context"
-	"sync"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
-var msgEnvelopePool = pool.NewSyncPoolWrapper(
-	func() *MsgEnvelope {
-		return &MsgEnvelope{}
-	},
-	pool.NewStatsRecorder("msgEnvelopePool"),
-	pool.WithRef(func(t *MsgEnvelope) {
-		t.Ref()
-	}),
-	pool.WithUnRef(func(t *MsgEnvelope) {
-		t.UnRef()
-	}),
-	pool.WithReset(func(t *MsgEnvelope) {
-		t.Reset()
-	}),
-)
+var msgEnvelopePool pool.IPool[*MsgEnvelope]
+var msgEnvelopePoolOnce sync.Once
 
+func getMsgEnvelopePool() pool.IPool[*MsgEnvelope] {
+	msgEnvelopePoolOnce.Do(func() {
+		msgEnvelopePool = pool.NewSyncPoolWrapper(
+			func() *MsgEnvelope {
+				return &MsgEnvelope{}
+			},
+			func() pool.IStatsRecorder {
+				if isDebug() {
+					return pool.NewStatsRecorder("msgEnvelopePool")
+				} else {
+					return pool.NewNoStatsRecorder()
+				}
+			}(),
+			pool.WithRef(func(t *MsgEnvelope) {
+				t.Ref()
+			}),
+			pool.WithUnRef(func(t *MsgEnvelope) bool {
+				return t.UnRef()
+			}),
+			pool.WithReset(func(t *MsgEnvelope) {
+				t.Reset()
+			}),
+		)
+	})
+	return msgEnvelopePool
+}
+
+// MsgEnvelope 消息信封
+//
+// 作为信息传递的载体，包含了所有的调用信息
 type MsgEnvelope struct {
 	dto.DataRef
 	// 可能会在多线程环境下面被操作,所以需要锁!
 	locker *sync.RWMutex
-	xcontext.XContext
 
 	meta *Meta
 	data *Data
+
+	// 优先级
+	priority def.Priority
+	// 分发键
+	dispatchKey string
 }
 
 func (e *MsgEnvelope) Reset() {
@@ -51,7 +72,6 @@ func (e *MsgEnvelope) Reset() {
 		e.locker = &sync.RWMutex{}
 	}
 
-	e.XContext.Reset()
 	e.meta = nil
 	e.data = nil
 }
@@ -78,54 +98,72 @@ func (e *MsgEnvelope) SetData(data inf.IEnvelopeData) {
 	}
 }
 
+func (e *MsgEnvelope) SetPriority(priority def.Priority) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.priority = priority
+}
+
+func (e *MsgEnvelope) SetDispatchKey(key string) {
+	e.locker.Lock()
+	defer e.locker.Unlock()
+	e.dispatchKey = key
+}
+
 //--------------------------------get------------------------------------
 
 func (e *MsgEnvelope) GetMeta() inf.IEnvelopeMeta {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+	if e.meta == nil {
+		return nil
+	}
 	return e.meta
 }
 
 func (e *MsgEnvelope) GetData() inf.IEnvelopeData {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+	if e.data == nil {
+		return nil
+	}
 	return e.data
 }
 
 func (e *MsgEnvelope) GetType() int32 {
-	tp := e.GetHeader(def.DefaultTypeKey)
+	// MsgEnvelope 始终是 RPC 消息类型
+	return int32(event.RpcMsg)
+}
 
-	tpV, ok := tp.(int32)
-	if ok {
-		return tpV
-	} else {
-		tpS, ok := tp.(string)
-		if ok {
-			return util.ToIntT[int32](tpS)
-		}
-	}
-	return event.RpcMsg
+func (e *MsgEnvelope) GetDispatcherKey() string {
+	// RPC 消息不使用分发键
+	return ""
+}
+
+func (e *MsgEnvelope) GetPriority() def.Priority {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.priority
+}
+
+func (e *MsgEnvelope) GetDispatchKey() string {
+	e.locker.RLock()
+	defer e.locker.RUnlock()
+	return e.dispatchKey
 }
 
 //-----------------------------Option-----------------------------------
 
-func (e *MsgEnvelope) SetDone() {
-	e.meta.SetDone()
-}
-
-func (e *MsgEnvelope) RunCompletions() {
-	for _, cb := range e.meta.GetCallBacks() {
-		cb(e.data.GetResponse(), e.data.GetError(), e.meta.GetCallbackParams()...)
-	}
-}
-
-func (e *MsgEnvelope) Wait() {
-	<-e.meta.GetDone()
-}
-
-func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
+func (e *MsgEnvelope) ToProtoMsg(ctx context.Context) (*actor.Message, error) {
 	e.locker.RLock()
 	defer e.locker.RUnlock()
+
+	if e.meta == nil || e.data == nil {
+		return nil, def.ErrMsgSerializeFailed
+	}
+	if e.meta.GetReceiverPid() == nil {
+		return nil, def.ErrServiceNotFound
+	}
 
 	var err error
 	msg := NewMessage()
@@ -136,57 +174,52 @@ func (e *MsgEnvelope) ToProtoMsg() *actor.Message {
 		}
 	}()
 
-	msg.TypeId = 0 // 默认使用protobuf(后面有其他需求再修改这里)
-	msg.TypeName = ""
-	msg.SenderPid = e.meta.GetSenderPid()
-	msg.ReceiverPid = e.meta.GetReceiverPid()
+	// PID 作为子消息嵌入到 Message 的 SenderPid / ReceiverPid 字段时，
+	// 必须使用独立 wire 副本；直接对原 PID 调用 PrepareForMarshal 会与并发 RPC
+	// 形成对 IsMaster 字段的非原子写竞争（-race 下可复现，且会污染 endpoint
+	// 选主链路）。改用 actor.SnapshotForWire 在副本上做投影，原 PID 不动。
+	if senderPid := e.meta.GetSenderPid(); senderPid != nil {
+		msg.SenderPid = actor.SnapshotForWire(senderPid)
+	}
+	if receiverPid := e.meta.GetReceiverPid(); receiverPid != nil {
+		msg.ReceiverPid = actor.SnapshotForWire(receiverPid)
+	}
+	// 从 ctx 获取调度信息
+	msg.Priority = int32(e.GetPriority())
+	msg.DispatcherKey = e.GetDispatchKey()
 	msg.Method = e.data.GetMethod()
 	msg.Request = nil
 	msg.Response = nil
-	msg.Err = e.data.GetErrStr()
-	msg.MessageHeader = e.ToHeaders()
+	msg.Err = e.data.GetErrBytes()
+	msg.ContextHeaders = emberctx.ToHeaders(ctx)
 	msg.Reply = e.data.IsReply()
 	msg.ReqId = e.meta.GetReqId()
 	msg.NeedResp = e.data.NeedResponse()
+	msg.Deadline = e.meta.GetDeadline()
+	msg.IdempotencyKey = e.meta.GetIdempotencyKey()
 
-	var byteData []byte
-	var typeName string
+	var anyData *anypb.Any
 
 	if req := e.data.GetRequest(); req != nil {
-		byteData, typeName, err = e.data.GetRequestBuff(msg.TypeId)
+		// 请求数据可能是多个请求共用的,所以只需要其中一个编码好就可以了
+		anyData, err = e.data.GetRequestBuff()
 		if err != nil {
-			log.SysLogger.WithContext(e.GetContext()).Errorf("serialize message[%+v] is error: %s", e, err)
-			return nil
+			return nil, err
 		}
 
-		msg.Request = byteData
+		msg.Request = anyData
 	}
 
 	if resp := e.data.GetResponse(); resp != nil {
-		byteData, typeName, err = codec.Encode(msg.TypeId, resp)
-		//byteData, typeName, err = serializer.Serialize(resp, msg.TypeId)
+		// 回复数据是独立的,直接编码
+		anyData, err = codec.EncodeToAny(resp)
 		if err != nil {
-			log.SysLogger.WithContext(e.GetContext()).Errorf("serialize message[%+v] is error: %s", e, err)
-			return nil
+			return nil, err
 		}
-		msg.Response = byteData
+		msg.Response = anyData
 	}
 
-	msg.TypeName = typeName
-
-	return msg
-}
-
-func (e *MsgEnvelope) Clone() inf.IEnvelope {
-	envelope := NewMsgEnvelope(e.XContext.Clone())
-	envelope.meta = e.meta.Clone().(*Meta)
-	envelope.data = e.data
-	return envelope
-}
-
-func (e *MsgEnvelope) IncRef() {
-	// envelope不会被并发处理,每个envelope只会被唯一一个服务处理,只有data是共享
-	// 所以不需要引用计数
+	return msg, nil
 }
 
 func (e *MsgEnvelope) Release() {
@@ -196,15 +229,15 @@ func (e *MsgEnvelope) Release() {
 		// envelope/meta 是可复用资源，需要回收到对象池
 		// data 可能是外部创建并可能被多个服务共享的，不归 MsgEnvelope 释放
 		if e.meta != nil && e.meta.IsRef() {
-			metaPool.Put(e.meta)
+			putMeta(e.meta)
+			e.meta = nil
 		}
 
-		msgEnvelopePool.Put(e)
+		getMsgEnvelopePool().Put(e)
 	}
 }
 
-func NewMsgEnvelope(ctx context.Context) *MsgEnvelope {
-	ep := msgEnvelopePool.Get()
-	ep.XContext = xcontext.New(ctx)
+func NewMsgEnvelope() *MsgEnvelope {
+	ep := getMsgEnvelopePool().Get()
 	return ep
 }

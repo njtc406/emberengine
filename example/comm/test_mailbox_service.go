@@ -12,14 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox"
+	"github.com/njtc406/emberengine/engine/pkg/actor"
+	mbjob "github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/core"
 	"github.com/njtc406/emberengine/engine/pkg/def"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
+	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -93,67 +92,53 @@ func (s *MailboxTestService) OnInit() error {
 
 // registerEventHandlers 注册事件处理器
 func (s *MailboxTestService) registerEventHandlers() {
-	// 注册系统消息处理器
-	s.RegisterUserHandler(EventTypeSystem, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleSystemMessage(data)
-			}
-		}
-	})
+	reg := s.GetEventHandlerRegistry()
+	if reg == nil {
+		s.GetLogger().Errorf("[%s] event handler registry is nil", s.GetName())
+		return
+	}
 
-	// 注册紧急消息处理器
-	s.RegisterUserHandler(EventTypeUrgent, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleUrgentMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeSystem), "mailbox_test_system", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleSystemMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册高优先级消息处理器
-	s.RegisterUserHandler(EventTypeHigh, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleHighPriorityMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeUrgent), "mailbox_test_urgent", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleUrgentMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册普通消息处理器
-	s.RegisterUserHandler(EventTypeNormal, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleNormalMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeHigh), "mailbox_test_high", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleHighPriorityMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册低优先级消息处理器
-	s.RegisterUserHandler(EventTypeLow, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleLowPriorityMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeNormal), "mailbox_test_normal", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleNormalMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册批量消息处理器
-	s.RegisterUserHandler(EventTypeBatch, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleBatchMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeLow), "mailbox_test_low", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleLowPriorityMessage(v.Value)
 		}
+		return nil
 	})
-
-	// 注册后台消息处理器
-	s.RegisterUserHandler(EventTypeBackground, func(ev inf.IEvent, _ bool, _ *profiler.Analyzer) {
-		if msg, ok := ev.(*event.Event); ok {
-			if data, ok := msg.Data.(string); ok {
-				s.HandleBackgroundMessage(data)
-			}
+	_ = reg.RegisterEvent(def.EventType(EventTypeBatch), "mailbox_test_batch", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleBatchMessage(v.Value)
 		}
+		return nil
+	})
+	_ = reg.RegisterEvent(def.EventType(EventTypeBackground), "mailbox_test_background", func(ctx context.Context, data any) error {
+		if v, ok := data.(*wrapperspb.StringValue); ok {
+			s.HandleBackgroundMessage(v.Value)
+		}
+		return nil
 	})
 }
 
@@ -177,94 +162,68 @@ func (s *MailboxTestService) setupMailboxConfig() {
 
 // useDefaultConfig 使用默认配置
 func (s *MailboxTestService) useDefaultConfig() {
-	config := mailbox.CreateDefaultMultiLevelConfig()
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用默认多级优先级配置 (加权轮询策略)", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	s.GetLogger().Infof("[%s] 使用默认配置（配置在启动时已指定）", s.GetName())
 }
 
 // useAbsolutePriorityConfig 使用绝对优先策略
 func (s *MailboxTestService) useAbsolutePriorityConfig() {
-	priorityMap := map[def.Priority]mailbox.PriorityConfig{
-		def.PrioritySys:        {BatchSize: 100, Weight: 100},
-		def.PriorityUrgent:     {BatchSize: 50, Weight: 50},
-		def.PriorityHigh:       {BatchSize: 30, Weight: 30},
-		def.PriorityNormal:     {BatchSize: 20, Weight: 20},
-		def.PriorityLow:        {BatchSize: 10, Weight: 10},
-		def.PriorityBatch:      {BatchSize: 5, Weight: 5},
-		def.PriorityBackground: {BatchSize: 2, Weight: 1},
-	}
-	config := mailbox.CreateAbsolutePriorityConfig(priorityMap)
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用绝对优先策略配置", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	s.GetLogger().Infof("[%s] 使用绝对优先策略配置（配置在启动时已指定）", s.GetName())
 }
 
 // useFairnessConfig 使用防饥饿策略
 func (s *MailboxTestService) useFairnessConfig() {
-	priorityMap := map[def.Priority]mailbox.PriorityConfig{
-		def.PrioritySys:        {BatchSize: 64, Weight: 20},
-		def.PriorityUrgent:     {BatchSize: 32, Weight: 10},
-		def.PriorityHigh:       {BatchSize: 24, Weight: 8},
-		def.PriorityNormal:     {BatchSize: 16, Weight: 6},
-		def.PriorityLow:        {BatchSize: 12, Weight: 4},
-		def.PriorityBatch:      {BatchSize: 8, Weight: 2},
-		def.PriorityBackground: {BatchSize: 4, Weight: 1},
-	}
-	config := mailbox.CreateFairnessPriorityConfig(priorityMap)
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用防饥饿策略配置", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	s.GetLogger().Infof("[%s] 使用防饥饿策略配置（配置在启动时已指定）", s.GetName())
 }
 
 // useCustomConfig 使用自定义配置
 func (s *MailboxTestService) useCustomConfig() {
-	// 游戏场景：战斗消息高优先级，日志消息低优先级
-	priorityMap := map[def.Priority]mailbox.PriorityConfig{
-		def.PrioritySys:        {BatchSize: 128, Weight: 30}, // 系统消息：最高优先级
-		def.PriorityUrgent:     {BatchSize: 64, Weight: 15},  // 战斗消息：紧急处理
-		def.PriorityHigh:       {BatchSize: 32, Weight: 10},  // 玩家操作：高优先级
-		def.PriorityNormal:     {BatchSize: 16, Weight: 6},   // 普通逻辑
-		def.PriorityLow:        {BatchSize: 8, Weight: 3},    // AI处理
-		def.PriorityBatch:      {BatchSize: 4, Weight: 2},    // 批量更新
-		def.PriorityBackground: {BatchSize: 2, Weight: 1},    // 日志、统计等
-	}
-	config := mailbox.CreateMultiLevelConfig(def.StrategyWeighted, priorityMap)
-	s.GetMailbox().SetWorkerConfig(config)
-	log.SysLogger.Infof("[%s] 使用自定义游戏场景配置", s.GetName())
+	// TODO: 新的统一Worker不再支持动态配置，配置应在启动时指定
+	s.GetLogger().Infof("[%s] 使用自定义游戏场景配置（配置在启动时已指定）", s.GetName())
 }
 
 // scheduleTests 调度测试任务
 func (s *MailboxTestService) scheduleTests() {
 	// 测试1: 基础优先级测试 - 1秒后执行
-	s.AfterFunc(time.Second*1, "基础优先级测试", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*1, "基础优先级测试", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testBasicPriority()
 		return nil
 	})
 
 	// 测试2: 混合优先级并发测试 - 3秒后执行
-	s.AfterFunc(time.Second*3, "混合优先级并发测试", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*3, "混合优先级并发测试", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testMixedPriorityConcurrent()
 		return nil
 	})
 
 	// 测试3: 优先级顺序验证测试 - 6秒后执行
-	s.AfterFunc(time.Second*6, "优先级顺序验证测试", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*6, "优先级顺序验证测试", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testPriorityOrder()
 		return nil
 	})
 
 	// 测试4: 性能压测 - 9秒后执行
-	s.AfterFunc(time.Second*9, "性能压测", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*9, "性能压测", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testPerformance()
 		return nil
 	})
 
 	// 测试5: 调度策略验证 - 15秒后执行
-	s.AfterFunc(time.Second*15, "调度策略验证", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*15, "调度策略验证", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.testSchedulingStrategy()
 		return nil
 	})
 
 	// 统计报告 - 20秒后输出
-	s.AfterFunc(time.Second*20, "统计报告", func(timer *timingwheel.Timer, args ...interface{}) error {
+	s.AfterFunc(time.Second*20, "统计报告", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
+		_ = ctx
 		s.printStatistics()
 		return nil
 	})
@@ -273,7 +232,7 @@ func (s *MailboxTestService) scheduleTests() {
 // testBasicPriority 测试基础优先级功能
 func (s *MailboxTestService) testBasicPriority() {
 	ctx := context.Background()
-	log.SysLogger.Infof("========== 测试1: 基础优先级测试 开始 ==========")
+	s.GetLogger().Infof("========== 测试1: 基础优先级测试 开始 ==========")
 
 	// 发送不同优先级的消息
 	s.PostSystemPriorityMessage(ctx, "系统消息测试")
@@ -284,13 +243,13 @@ func (s *MailboxTestService) testBasicPriority() {
 	s.PostBatchMessage(ctx, "批量消息测试")
 	s.PostBackgroundMessage(ctx, "后台消息测试")
 
-	log.SysLogger.Infof("========== 测试1: 基础优先级测试 完成 ==========")
+	s.GetLogger().Infof("========== 测试1: 基础优先级测试 完成 ==========")
 }
 
 // testMixedPriorityConcurrent 测试混合优先级并发
 func (s *MailboxTestService) testMixedPriorityConcurrent() {
 	ctx := context.Background()
-	log.SysLogger.Infof("========== 测试2: 混合优先级并发测试 开始 ==========")
+	s.GetLogger().Infof("========== 测试2: 混合优先级并发测试 开始 ==========")
 
 	var wg sync.WaitGroup
 	// 每种优先级发送10条消息
@@ -320,13 +279,13 @@ func (s *MailboxTestService) testMixedPriorityConcurrent() {
 	}
 
 	wg.Wait()
-	log.SysLogger.Infof("========== 测试2: 混合优先级并发测试 完成 ==========")
+	s.GetLogger().Infof("========== 测试2: 混合优先级并发测试 完成 ==========")
 }
 
 // testPriorityOrder 测试优先级顺序
 func (s *MailboxTestService) testPriorityOrder() {
 	ctx := context.Background()
-	log.SysLogger.Infof("========== 测试3: 优先级顺序验证测试 开始 ==========")
+	s.GetLogger().Infof("========== 测试3: 优先级顺序验证测试 开始 ==========")
 
 	// 先发送低优先级消息
 	for i := 0; i < 20; i++ {
@@ -342,13 +301,13 @@ func (s *MailboxTestService) testPriorityOrder() {
 		s.PostSystemPriorityMessage(ctx, fmt.Sprintf("系统消息插队-%d", i))
 	}
 
-	log.SysLogger.Infof("========== 测试3: 优先级顺序验证测试 完成 ==========")
+	s.GetLogger().Infof("========== 测试3: 优先级顺序验证测试 完成 ==========")
 }
 
 // testPerformance 性能压测
 func (s *MailboxTestService) testPerformance() {
 	ctx := context.Background()
-	log.SysLogger.Infof("========== 测试4: 性能压测 开始 ==========")
+	s.GetLogger().Infof("========== 测试4: 性能压测 开始 ==========")
 
 	startTime := time.Now()
 	totalMessages := 10000
@@ -373,15 +332,15 @@ func (s *MailboxTestService) testPerformance() {
 	wg.Wait()
 	duration := time.Since(startTime)
 
-	log.SysLogger.Infof("========== 测试4: 性能压测 完成 ==========")
-	log.SysLogger.Infof("发送 %d 条消息耗时: %v", totalMessages, duration)
-	log.SysLogger.Infof("平均每秒处理: %.2f 条消息", float64(totalMessages)/duration.Seconds())
+	s.GetLogger().Infof("========== 测试4: 性能压测 完成 ==========")
+	s.GetLogger().Infof("发送 %d 条消息耗时: %v", totalMessages, duration)
+	s.GetLogger().Infof("平均每秒处理: %.2f 条消息", float64(totalMessages)/duration.Seconds())
 }
 
 // testSchedulingStrategy 测试调度策略
 func (s *MailboxTestService) testSchedulingStrategy() {
 	ctx := context.Background()
-	log.SysLogger.Infof("========== 测试5: 调度策略验证 开始 ==========")
+	s.GetLogger().Infof("========== 测试5: 调度策略验证 开始 ==========")
 
 	// 持续发送低优先级消息，同时间隔发送高优先级消息
 	// 验证调度策略是否能正确处理
@@ -426,7 +385,7 @@ func (s *MailboxTestService) testSchedulingStrategy() {
 	close(done)
 	wg.Wait()
 
-	log.SysLogger.Infof("========== 测试5: 调度策略验证 完成 ==========")
+	s.GetLogger().Infof("========== 测试5: 调度策略验证 完成 ==========")
 }
 
 // getRandomPriority 获取随机优先级（用于性能测试）
@@ -456,11 +415,11 @@ func (s *MailboxTestService) getRandomPriority(seed int) def.Priority {
 func (s *MailboxTestService) printStatistics() {
 	s.stats.duration = time.Since(s.stats.startTime)
 
-	log.SysLogger.Infof("==================== Mailbox 测试统计报告 ====================")
-	log.SysLogger.Infof("测试持续时间: %v", s.stats.duration)
-	log.SysLogger.Infof("")
+	s.GetLogger().Infof("==================== Mailbox 测试统计报告 ====================")
+	s.GetLogger().Infof("测试持续时间: %v", s.stats.duration)
+	s.GetLogger().Infof("")
 
-	log.SysLogger.Infof("各优先级消息处理统计:")
+	s.GetLogger().Infof("各优先级消息处理统计:")
 	s.printPriorityStats("系统消息", s.stats.sysCount.Load(), s.stats.sysProcessTime.Load())
 	s.printPriorityStats("紧急消息", s.stats.urgentCount.Load(), s.stats.urgentProcessTime.Load())
 	s.printPriorityStats("高优先级", s.stats.highCount.Load(), s.stats.highProcessTime.Load())
@@ -479,15 +438,15 @@ func (s *MailboxTestService) printStatistics() {
 		s.stats.lowProcessTime.Load() + s.stats.batchProcessTime.Load() +
 		s.stats.backgroundProcessTime.Load()
 
-	log.SysLogger.Infof("")
-	log.SysLogger.Infof("总计:")
-	log.SysLogger.Infof("  总消息数: %d", totalCount)
-	log.SysLogger.Infof("  总处理时间: %v", time.Duration(totalProcessTime))
+	s.GetLogger().Infof("")
+	s.GetLogger().Infof("总计:")
+	s.GetLogger().Infof("  总消息数: %d", totalCount)
+	s.GetLogger().Infof("  总处理时间: %v", time.Duration(totalProcessTime))
 	if totalCount > 0 {
-		log.SysLogger.Infof("  平均处理时间: %v", time.Duration(totalProcessTime/totalCount))
-		log.SysLogger.Infof("  吞吐量: %.2f 条/秒", float64(totalCount)/s.stats.duration.Seconds())
+		s.GetLogger().Infof("  平均处理时间: %v", time.Duration(totalProcessTime/totalCount))
+		s.GetLogger().Infof("  吞吐量: %.2f 条/秒", float64(totalCount)/s.stats.duration.Seconds())
 	}
-	log.SysLogger.Infof("==============================================================")
+	s.GetLogger().Infof("==============================================================")
 }
 
 // printPriorityStats 打印单个优先级的统计
@@ -496,7 +455,7 @@ func (s *MailboxTestService) printPriorityStats(name string, count int64, totalT
 	if count > 0 {
 		avgTime = totalTime / count
 	}
-	log.SysLogger.Infof("  %s: 数量=%d, 总耗时=%v, 平均=%v",
+	s.GetLogger().Infof("  %s: 数量=%d, 总耗时=%v, 平均=%v",
 		name, count, time.Duration(totalTime), time.Duration(avgTime))
 }
 
@@ -522,15 +481,35 @@ func (s *MailboxTestService) postMessageWithPriority(ctx context.Context, priori
 
 // ==================== 各优先级消息处理方法 ====================
 
+func (s *MailboxTestService) postPriorityEvent(ctx context.Context, eventType def.EventType, priority def.Priority, message string) {
+	anyMsg, err := codec.EncodeToAny(wrapperspb.String(message))
+	if err != nil {
+		s.GetLogger().Errorf("[%s] encode event payload failed: %v", s.GetName(), err)
+		return
+	}
+
+	evt := &actor.Event{
+		Type:          int32(eventType),
+		Priority:      int32(priority),
+		DispatcherKey: message,
+		Payload:       anyMsg,
+	}
+
+	j := mbjob.NewEventBusJob()
+	j.SetContext(ctx)
+	j.SetPriority(priority)
+	j.SetDispatcherKey(message)
+	j.SetPayload(evt)
+
+	// PostJob 内部已接管 Job 生命周期；失败时由 mailbox 负责 Release+OnJobDiscarded，调用方禁止再次 Release。
+	if err := s.PostJob(j); err != nil {
+		s.GetLogger().Errorf("[%s] post event job failed: %v", s.GetName(), err)
+	}
+}
+
 // PostSystemPriorityMessage 系统优先级消息
 func (s *MailboxTestService) PostSystemPriorityMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeSystem
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PrioritySys)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeSystem), def.PrioritySys, message)
 }
 
 func (s *MailboxTestService) HandleSystemMessage(message string) {
@@ -547,13 +526,7 @@ func (s *MailboxTestService) HandleSystemMessage(message string) {
 
 // PostUrgentMessage 紧急消息
 func (s *MailboxTestService) PostUrgentMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeUrgent
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityUrgent)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeUrgent), def.PriorityUrgent, message)
 }
 
 func (s *MailboxTestService) HandleUrgentMessage(message string) {
@@ -569,13 +542,7 @@ func (s *MailboxTestService) HandleUrgentMessage(message string) {
 
 // PostHighPriorityMessage 高优先级消息
 func (s *MailboxTestService) PostHighPriorityMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeHigh
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityHigh)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeHigh), def.PriorityHigh, message)
 }
 
 func (s *MailboxTestService) HandleHighPriorityMessage(message string) {
@@ -591,13 +558,7 @@ func (s *MailboxTestService) HandleHighPriorityMessage(message string) {
 
 // PostNormalMessage 普通消息
 func (s *MailboxTestService) PostNormalMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeNormal
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityNormal)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeNormal), def.PriorityNormal, message)
 }
 
 func (s *MailboxTestService) HandleNormalMessage(message string) {
@@ -613,13 +574,7 @@ func (s *MailboxTestService) HandleNormalMessage(message string) {
 
 // PostLowPriorityMessage 低优先级消息
 func (s *MailboxTestService) PostLowPriorityMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeLow
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityLow)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeLow), def.PriorityLow, message)
 }
 
 func (s *MailboxTestService) HandleLowPriorityMessage(message string) {
@@ -635,13 +590,7 @@ func (s *MailboxTestService) HandleLowPriorityMessage(message string) {
 
 // PostBatchMessage 批量消息
 func (s *MailboxTestService) PostBatchMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeBatch
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityBatch)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeBatch), def.PriorityBatch, message)
 }
 
 func (s *MailboxTestService) HandleBatchMessage(message string) {
@@ -657,13 +606,7 @@ func (s *MailboxTestService) HandleBatchMessage(message string) {
 
 // PostBackgroundMessage 后台消息
 func (s *MailboxTestService) PostBackgroundMessage(ctx context.Context, message string) {
-	evt := event.NewEvent()
-	evt.Type = EventTypeBackground
-	evt.Data = message
-	evt.Context = ctx
-	evt.SetHeader(def.DefaultPriorityKey, def.PriorityBackground)
-
-	s.GetMailbox().PostMessage(evt)
+	s.postPriorityEvent(ctx, def.EventType(EventTypeBackground), def.PriorityBackground, message)
 }
 
 func (s *MailboxTestService) HandleBackgroundMessage(message string) {
@@ -682,5 +625,5 @@ func (s *MailboxTestService) OnStart() error {
 }
 
 func (s *MailboxTestService) OnRelease() {
-	log.SysLogger.Infof("[%s] 服务释放", s.GetName())
+	s.GetLogger().Infof("[%s] 服务释放", s.GetName())
 }

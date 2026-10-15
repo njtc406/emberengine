@@ -6,11 +6,10 @@
 package interfaces
 
 import (
-	"context"
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
 )
 
 // IService 服务接口
@@ -19,15 +18,15 @@ type IService interface {
 	ILifecycle
 	IIdentifiable
 	IServiceHandler
-	IEventChannel
-	IProfiler
+	IMailboxChannel
+	IServiceProfiler
 	ILogger
 	IRpcHandler
 }
 
 // ILifecycle 服务生命周期
 type ILifecycle interface {
-	Init(src interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{})
+	Init(src interface{}, serviceInitConf *config.ServiceInitConf, cfg interface{}) error
 	Start() error
 	Stop()
 	OnInit() error
@@ -40,21 +39,24 @@ type IServiceHandler interface {
 	GetServiceCfg() interface{}
 	GetMailbox() IMailbox
 	IsPrivate() bool
+	IsRemoteCallable() bool
+	GetVisibility() def.ServiceVisibility
 	IsPrimarySecondaryMode() bool
 	GetRpcHandler() IRpcHandler
+	GetNodeContext() INodeContext
+	GetRouter() INodeRouter
 }
 
 type IIdentifiable interface {
 	IServer
 	INamed
-	IActor
-	OnSetup(svc IService)
 	IsClosed() bool // 服务是否已经关闭
+	GetStatus() int32
 }
 
-type IProfiler interface {
+type IServiceProfiler interface {
 	OpenProfiler()
-	GetProfiler() *profiler.Profiler // TODO 需要将这个做成interface
+	GetProfiler() IProfiler
 }
 
 type INamed interface {
@@ -64,15 +66,16 @@ type INamed interface {
 
 type IServer interface {
 	IActor
-	GetServerId() int32
+	GetPartition() int32
 }
 
+// IActor 表示一个可寻址的 Actor 实体
 type IActor interface {
 	SetPid(pid *actor.PID)
 	GetPid() *actor.PID
 }
 
 type ILogger interface {
-	GetLogger() log.ILogger
-	LoggerWithCtx(ctx context.Context) *log.Entry
+	// GetLogger 获取日志记录器
+	GetLogger() log.ILoggerX
 }

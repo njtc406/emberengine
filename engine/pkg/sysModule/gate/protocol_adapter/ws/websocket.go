@@ -8,6 +8,10 @@ package ws
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	glbConfig "github.com/njtc406/emberengine/engine/pkg/config"
@@ -17,14 +21,14 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx"
 	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"github.com/njtc406/emberengine/engine/pkg/utils/jwtx"
-	"net/http"
-	"strings"
 )
 
 type WebSocketAdapter struct {
-	server     *httpx.GinServer
-	md         inf.IModule
-	sessionMgr inf.ISessionManager
+	server         *httpx.GinServer
+	md             inf.IModule
+	sessionMgr     inf.ISessionManager
+	jwtSecret      string
+	allowedOrigins []string
 }
 
 func NewWebSocketAdapter() *WebSocketAdapter {
@@ -47,8 +51,18 @@ func (w *WebSocketAdapter) ListenAndServe(md inf.IModule, conf interface{}) erro
 	if !ok {
 		return fmt.Errorf("invalid websocket configuration")
 	}
+	w.jwtSecret = cfg.JWTSecret
+	w.allowedOrigins = cfg.AllowedOrigins
+	status := glbConfig.Release
+	if service := md.GetService(); service != nil {
+		if nodeCtx := service.GetNodeContext(); nodeCtx != nil {
+			if c := nodeCtx.GetConfig(); c != nil {
+				status = c.GetStatus()
+			}
+		}
+	}
 
-	if err := w.server.Init(md.GetService().GetLogger(), glbConfig.GetStatus(), cfg.HttpConf); err != nil {
+	if err := w.server.Init(md.GetService().GetLogger(), status, cfg.HttpConf); err != nil {
 		return err
 	}
 	pool := router_center.NewGroupHandlerPool()
@@ -63,9 +77,7 @@ func (w *WebSocketAdapter) router(rg *gin.RouterGroup) {
 	upGrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			return true // 允许跨域
-		},
+		CheckOrigin:     w.buildCheckOrigin(),
 	}
 
 	rg.GET("", func(gc *gin.Context) {
@@ -97,7 +109,13 @@ func (w *WebSocketAdapter) Auth(c *gin.Context) {
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	tokenString = strings.TrimSpace(tokenString)
 
-	claims, err := jwtx.ParseJwtToken(tokenString)
+	var claims *jwtx.EmberClaims
+	var err error
+	if w.jwtSecret != "" {
+		claims, err = jwtx.ParseJwtTokenWithSecret(w.jwtSecret, tokenString)
+	} else {
+		claims, err = jwtx.ParseJwtToken(tokenString)
+	}
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -112,4 +130,37 @@ func (w *WebSocketAdapter) Auth(c *gin.Context) {
 func (w *WebSocketAdapter) Shutdown(ctx context.Context) error {
 	w.server.Stop()
 	return nil
+}
+
+// buildCheckOrigin 根据 allowedOrigins 配置构建 CheckOrigin 函数。
+// 空列表时使用 gorilla/websocket 默认同源策略；包含 "*" 时允许所有来源。
+func (w *WebSocketAdapter) buildCheckOrigin() func(r *http.Request) bool {
+	if len(w.allowedOrigins) == 0 {
+		return nil // gorilla/websocket 默认同源检查
+	}
+	for _, o := range w.allowedOrigins {
+		if o == "*" {
+			return func(_ *http.Request) bool { return true }
+		}
+	}
+	allowed := make(map[string]struct{}, len(w.allowedOrigins))
+	for _, o := range w.allowedOrigins {
+		o = strings.TrimRight(strings.ToLower(strings.TrimSpace(o)), "/")
+		if o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		normalized := strings.ToLower(u.Scheme + "://" + u.Host)
+		_, ok := allowed[normalized]
+		return ok
+	}
 }

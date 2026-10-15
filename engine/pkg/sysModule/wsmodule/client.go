@@ -40,7 +40,7 @@ package wsmodule
 //	c.wg.Add(1)
 //	go c.listen()
 //	// 连接事件
-//	c.mgr.NotifyEvent(&event.Event{
+//	c.mgr.TriggerEvent(&event.Event{
 //		Type: event.SysEventWebSocket,
 //		Data: &WSPack{
 //			Type:      WPTConnected,
@@ -59,8 +59,8 @@ package wsmodule
 //	for {
 //		msg, err := c.conn.ReadMsg()
 //		if err != nil {
-//			log.SysLogger.Errorf("c.conn.ReadMsg err %v", err)
-//			c.mgr.NotifyEvent(&event.Event{
+//			logger.Errorf("c.conn.ReadMsg err %v", err)
+//			c.mgr.TriggerEvent(&event.Event{
 //				Type: event.SysEventWebSocket,
 //				Data: &WSPack{
 //					Type:      WPTDisConnected,
@@ -74,8 +74,8 @@ package wsmodule
 //		// 消息解析(这里只是最外层的解析)
 //		info, err := c.mgr.Unmarshal(msg)
 //		if err != nil {
-//			log.SysLogger.Errorf("Client receive msg error: %s", err)
-//			c.mgr.NotifyEvent(&event.Event{
+//			logger.Errorf("Client receive msg error: %s", err)
+//			c.mgr.TriggerEvent(&event.Event{
 //				Type: event.SysEventWebSocket,
 //				Data: &WSPack{
 //					Type:      WPTUnknownPack,
@@ -96,10 +96,10 @@ package wsmodule
 //
 //		ctx := xcontext.New(nil)
 //		// DispatchKey是为了保证角色消息尽量被服务的同一worker处理,减少时序问题(当接收者是多线程时)
-//		ctx.SetHeader(def.DefaultDispatcherKey, c.roleId)
+//		ctx.AddHeader(def.DefaultDispatcherKey, c.roleId)
 //
 //		if err := c.mgr.IRawProcessor.MsgRoute(ctx, c.sessionId, c.roleId, pack.Data); err != nil {
-//			log.SysLogger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
+//			logger.WithContext(pack.Ctx).Errorf("Client router msg error: %s", err)
 //		}
 //	}
 //}
@@ -123,7 +123,7 @@ package wsmodule
 //			err := c.conn.WriteMsg(buffer.Bytes())
 //			if err != nil {
 //				// TODO 这里看要不要处理一下这个错误,是直接踢掉玩家还是怎么,按理说是需要保证玩家收到每条消息的,如果没收到某个消息,可能造成状态不一致
-//				c.mgr.NotifyEvent(&event.Event{
+//				c.mgr.TriggerEvent(&event.Event{
 //					Type: event.SysEventWebSocket,
 //					Data: &WSPack{
 //						Type:      WPTWriteErr,
@@ -161,7 +161,7 @@ package wsmodule
 //
 //func (c *Client) OnClose() {
 //	// 这个事件放在这是为了保证只调用一次
-//	c.mgr.NotifyEvent(&event.Event{
+//	c.mgr.TriggerEvent(&event.Event{
 //		Type: event.SysEventWebSocket,
 //		Data: &WSPack{
 //			Type:      WPTDisConnected,
@@ -185,7 +185,7 @@ package wsmodule
 //	c.roleId = roleId
 //	// 绑定玩家数据才算运行中
 //	c.status.Store(running)
-//	c.mgr.NotifyEvent(&event.Event{
+//	c.mgr.TriggerEvent(&event.Event{
 //		Type: event.SysEventWebSocket,
 //		Data: &WSPack{
 //			Type:      WPTReady,

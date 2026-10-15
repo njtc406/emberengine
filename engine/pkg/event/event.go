@@ -1,63 +1,38 @@
+// Package event
+// 模块名: 模块名
+// 功能描述: 描述
+// 作者:  yr  2026/2/1 15:23
+// 最后更新:  yr  2026/2/1 15:23
 package event
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/dto"
-	"github.com/njtc406/emberengine/engine/pkg/utils/pool"
-	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
-	"sync/atomic"
+	"context"
+
+	"github.com/njtc406/emberengine/engine/pkg/def"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 )
 
-type Event struct {
-	dto.DataRef
-	xcontext.XContext
-
-	Type int32
-	Data interface{}
-
-	refCount atomic.Int32
+type Event[T any] struct {
+	Context   context.Context
+	EventType def.EventType
+	Data      T
 }
 
-var emptyEvent Event
-
-func (e *Event) Reset() {
-	*e = emptyEvent
+func (e *Event[T]) GetContext() context.Context {
+	return e.Context
+}
+func (e *Event[T]) GetEventType() def.EventType {
+	return e.EventType
 }
 
-func (e *Event) GetType() int32 {
-	if e.IsRef() {
-		return e.Type
-	}
-	return UnknownEvent
+func (e *Event[T]) GetData() any {
+	return e.Data
 }
 
-func (e *Event) IncRef() {
-	e.refCount.Add(1)
+type DiscoveryEvent struct {
+	Event[*mvccpb.KeyValue]
 }
 
-func (e *Event) Release() {
-	if e.refCount.Add(-1) <= 0 { // 有的地方可能不需要inc,这里-1就会变成负数
-		eventPool.Put(e)
-	}
-}
-
-var eventPool = pool.NewSyncPoolWrapper(
-	func() *Event {
-		return &Event{}
-	},
-	pool.NewStatsRecorder("eventPool"),
-	pool.WithRef(func(t *Event) {
-		t.Ref()
-	}),
-	pool.WithUnRef(func(t *Event) {
-		t.UnRef()
-	}),
-	pool.WithReset(func(t *Event) {
-		t.Reset()
-	}),
-)
-
-func NewEvent() *Event {
-	evt := eventPool.Get() // 事件使用时,会使用incRef来保证所有地方都释放之后才真正释放
-	evt.XContext = xcontext.New(nil)
-	return evt
+func NewDiscoveryEvent() *DiscoveryEvent {
+	return &DiscoveryEvent{}
 }

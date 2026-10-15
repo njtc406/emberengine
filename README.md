@@ -1,56 +1,253 @@
-# EmberEngine 🔥
-> 分布式、高性能、模块化的 Go 语言 Actor 框架
-
+# EmberEngine ![EmberEngine Logo](./resources/ember-logo-1.png)
+>
+> 以 Actor + RPC 为内核的分布式服务框架/容器
+> 
 > *只考虑自己的叫想法，能平衡各方的才叫设计。*
 
 ---
 
 ## ✨ 简介
 
-**Ember** 是一个基于 Actor 模型 + RPC 通信 的分布式框架，目标是为游戏服务器、实时服务网格、可伸缩微服务提供一种高并发、安全、易维护的解决方案。
+**Ember** 是一个以服务 **容器框架** ,为所有服务提供统一的运行环境。
+
+它提供了一套统一的运行模型（**Node → Service → Module**），
+可以在同一套框架下承载多种类型的 long-running 服务：
+
+- 游戏服务器（逻辑服、房间服、网关服等）；
+- 实时服务网格、内部 RPC 服务；
+- HTTP / Web 服务（通过 `sysModule/httpmodule` 嵌入 gin 等框架）；
+
+可以将任意类型的服务（如游戏逻辑服、房间服、网关服等）都运行在 Ember 框架下，统一集群下所有服务的调用方式
+
+目标是为游戏服务器、实时服务以及可伸缩微服务提供一种 **高并发、安全、易维护、易扩展** 的统一运行时。
 
 核心特点：
 
-- 模块化、层级清晰：Node → Service → Module 架构；
-- 高并发 Actor 设计：并行事件驱动 + 安全队列；
-- 自动扩缩容：可配置策略，动态调整资源；
-- 灵活路由机制：支持 UID、Pid、ServiceType 等多维选择；
-- 内置时间轮：支持低成本高性能定时器。
-- 并发模式: 服务可以运行在多线程模式下，也可以运行在单线程模式下，通过配置参数控制。
-- 集群事件： 支持集群事件, 按需订阅
-- 主从模式： 服务支持主从模式, 主节点空缺时从节点自动切换为主节点，防止单点故障。
+- **服务容器化运行时**：统一的 Node → Service → Module 架构，node只是service容器,service可以运行在任意node上,module是业务承载层,service的功能完全由module构成
+- **服务解耦**：每个服务都是独立的 Actor，通过消息队列通信，实现高度解耦和可伸缩性
+- **服务可扩展**：通过 Module 机制，可动态添加或替换服务的功能模块，无需重启服务；
+- **同时支持actor模式和并发模式**：对于需要严格顺序执行的业务逻辑, 可以选择actor模式; 对于高并发场景, 可以选择并发模式
+- **自动扩缩容**：可配置策略，动态调整资源；
+- **灵活路由机制**：实现了路由选择器, 可以根据不同的路由策略, 选择不同的服务实例进行调用
+- **内置时间轮**：支持低成本高性能定时器；
+- **集群事件**： 支持集群事件（全局事件/server事件/特定事件）, 合理使用事件可以实现服务之间的解耦和通信
+
 ---
 
 ## 🧠 架构概览
 
-```
+### 核心概念
 
-```
+- **Node**  
+  服务容器，对应一个进程，可以承载任意数量的服务
+
+- **Service**  
+  服务，提供业务功能，由任意个module组成，每个service有自己的mailbox, 用于接收和处理消息
+
+- **Module**  
+  业务模块，实现具体的业务功能，挂载到service中使用
+  Service本身也是一个Module
+
+整体结构示意：
+
+```text
       +-----------------------------+
       |           Node              |
-      |  (一个进程，包含多个服务)     |
+      |  (一个进程, 包含多个服务)     |
       +-----------------------------+
               |        |       |
     +---------+        |       +-----------+
     |                  |                   |
+    v                  v                   v
++---------------+  +---------------+   +---------------+
+|   Service A   |  |   Service B   |   |   Service C   |
+|   (Actor/...) |  |   (HTTP/...)  |   |   (自定义...) |
++-------+-------+  +-------+-------+   +-------+-------+
+        |                  |                   |
+   +----+----+        +----+----+         +----+----+
+   | Module  |        | Module  |         | Module  |
+   | (e.g.   |        | (e.g.   |         |  ... )  |
+   | http)   |        | ws)     |         |         |
+   +---------+        +---------+         +---------+
+
+* 每个 Service 拥有自己的mailbox；
 ```
 
-+---------------+  +---------------+   +---------------+
-\|   Service A   |  |   Service B   |   |   Service C   |
-\|   (Actor)     |  |   (Actor)     |   |   (Actor)     |
-+-------+-------+  +-------+-------+   +-------+-------+
-\|                  |                   |
-+----+----+        +----+----+         +----+----+
-\| Module  |        | Module  |         | Module  |
-+---------+        +---------+         +---------+
-
-* 每个 Service 拥有自己的消息队列；
-* Module 为最小功能单元，组织为树状结构；
-* Node 级别管理生命周期与扩缩容。
-
-````
-
 ---
+
+## 📦 系统介绍
+### **Mailbox**  
+- 服务的消息队列, 用于接收和处理消息
+- 目前有两种工作模式：
+  - Actor 模式：每个 Service 都是一个 Actor，消息按顺序处理；
+  - 并发模式：Service 内部可以开启多个 goroutine 并发处理消息；
+- 支持优先级：可以为每个消息设置优先级，高优先级消息会优先处理；
+  - duel: 双队列模式,只有低级和高级两种队列，高优先级消息会优先处理
+  - priority： 多优先级模式，支持 sys/urgent/high/normal/low/batch 六级优先级
+- mailbox挂起后，将只会处理urgent级别以上的调用和服务自身的回调消息，方便控制运行时状态（如暂停/恢复/重启等）
+
+### **Event**  
+- 事件系统, 用于服务之间的解耦和通信
+
+### **Cluster**  
+- 集群，将服务组成集群，扩展服务的功能
+
+### **RPC**  
+- 远程调用系统, 用于服务之间的通信
+- 支持同步/异步/广播调用
+- 支持service和module级别的函数调用
+  - 服务初始化时, 会自动注册service下所有以API/Api/RPC/Rpc开头的方法
+  - 如果服务包含RPC/Rpc开头的方法，则会自动将服务注册到集群， 其他服务可以通过服务发现调用该服务的方法
+  - 否则，只能被同node上的其他服务调用，不能跨node调用
+
+#### RPC → Mailbox 完整调用时序
+
+本地调用与跨节点调用最终都会汇聚为 `RpcJob`，进入目标 Service 的 Mailbox。Mailbox 通过中间件、WorkerPool 和 QueueManager 完成路由、排队和执行；需要回复时，再通过 Dispatcher 返回同步结果或投递异步回调。
+
+```mermaid
+sequenceDiagram
+  autonumber
+
+  participant Caller as 调用方业务
+  participant Call as MessageBus / CallState
+  participant Sender as RPC Sender
+  participant Transport as gRPC / NATS / rpcx
+  participant Listener as 远端 Listener
+  participant Handler as Remote RPC Handler
+  participant Factory as SenderFactory
+  participant Dispatcher as RpcDispatcher
+  participant Mailbox as 目标 Service Mailbox
+  participant MW as Mailbox Middleware
+  participant Pool as WorkerPool
+  participant Worker as Worker
+  participant Queue as QueueManager
+  participant Service as core.Service
+  participant Registry as JobHandlerRegistry
+  participant Biz as Service / Module 方法
+
+  Caller->>Call: Call / AsyncCall / Send
+  Call->>Call: 创建 ReqId、CallState、deadline
+  Call->>Dispatcher: DeliverRequest(ctx, envelope)
+  Dispatcher->>Dispatcher: 根据目标 PID 选择 Sender
+
+  alt 同节点本地调用
+    Dispatcher->>Sender: localSender.DeliverRequest
+    Sender->>Sender: Envelope 包装为 RpcJob
+    Sender->>Mailbox: PostJob(rpcJob)
+  else 跨节点调用
+    Dispatcher->>Sender: grpcSender / natsSender / rpcxSender
+    Sender->>Transport: 序列化并发送 actor.Message
+    Transport->>Listener: 接收请求
+    Listener->>Handler: RpcMessageHandler(factory, message)
+    Handler->>Handler: PID 同步、幂等检查、鉴权
+    Handler->>Handler: 解码请求并重建 Context / Envelope
+    Handler->>Factory: GetDispatcher(receiverPID)
+    Factory-->>Handler: 目标 Dispatcher
+    Handler->>Dispatcher: DeliverRequest(ctx, envelope)
+    Dispatcher->>Sender: 选择目标节点 localSender
+    Sender->>Sender: Envelope 包装为 RpcJob
+    Sender->>Mailbox: PostJob(rpcJob)
+  end
+
+  Mailbox->>Mailbox: 检查运行/挂起状态
+  Mailbox->>MW: ExecuteOnReceive(job)
+
+  alt 挂起、中间件拒绝或分发失败
+    Mailbox->>Service: OnJobDiscarded(job, reason)
+    Mailbox->>MW: ExecuteOnComplete(error)
+    Mailbox->>Mailbox: job.Release()
+    Mailbox-->>Caller: 返回投递错误
+  else 接受任务
+    MW-->>Mailbox: Accept / Skip
+    Mailbox->>Pool: DispatchJob(job)
+    Pool->>Pool: DispatcherKey 一致性哈希选择 Worker
+    Pool->>Worker: SubmitJob(job)
+    Worker->>Queue: Submit(job)
+    Worker->>Worker: Wake
+
+    loop Worker 主循环
+      Worker->>Queue: NextJob()
+      Queue-->>Worker: RpcJob
+    end
+
+    alt 串行 Actor 模式
+      Worker->>Service: ExecuteJob(ctx, job)
+    else RW 模式：只读任务
+      Worker->>Worker: 投递 readCh，获取 RLock
+      Worker->>Service: ExecuteJob(ctx, job)
+    else RW 模式：写任务
+      Worker->>Worker: 等待先序读注册并获取 WLock
+      Worker->>Service: ExecuteJob(ctx, job)
+    end
+
+    Service->>Registry: InvokeJob(ctx, rpcJob)
+    Registry->>Registry: 检查 deadline，创建超时 Context
+    Registry->>Service: handleRpcJob(ctx, envelope)
+    Service->>Service: HandleRequest(ctx, envelope)
+    Service->>Biz: 调用注册的 Service / Module 方法
+    Biz-->>Service: response / error
+
+    opt NeedResponse = true
+      Service->>Service: 构造独立 Response Envelope
+      Service->>Dispatcher: DeliverResponse(ctx, response)
+
+      alt 调用方在本节点
+        Dispatcher->>Sender: localSender.DeliverResponse
+        Sender->>Call: RpcMonitor.Remove(reqId)
+        Call->>Call: SetResult + Complete
+
+        alt 同步 Call
+          Call-->>Caller: 唤醒 Wait，返回结果
+        else AsyncCall
+          Call->>Mailbox: PostJob(callback RpcJob)
+          Mailbox->>Pool: DispatchJob(callback)
+          Pool->>Worker: SubmitJob(callback)
+          Worker->>Service: ExecuteJob(callback)
+          Service->>Biz: 执行 CompletionFunc
+        end
+      else 调用方在远端节点
+        Dispatcher->>Sender: remote Sender
+        Sender->>Transport: 序列化并发送 Reply
+        Transport->>Listener: 调用方节点接收 Reply
+        Listener->>Handler: RpcMessageHandler(reply)
+        Handler->>Call: RpcMonitor.Remove(reqId)
+        Call->>Call: SetResult + Complete
+        Call-->>Caller: 返回结果或投递异步回调
+      end
+    end
+
+    Service-->>Worker: ExecuteJob 返回
+    Worker->>MW: ExecuteOnComplete(result)
+    Worker->>Worker: Envelope.Release + Job.Release
+  end
+```
+
+核心执行链路可以简化为：
+
+```text
+MessageBus
+  → RpcDispatcher.DeliverRequest
+  → localSender 或远程 Transport
+  → Remote Handler（跨节点）
+  → 目标 RpcDispatcher
+  → Mailbox.PostJob
+  → Mailbox Middleware
+  → WorkerPool.DispatchJob
+  → Worker.SubmitJob
+  → QueueManager.Submit / NextJob
+  → Service.ExecuteJob
+  → JobHandlerRegistry.InvokeJob
+  → handleRpcJob / HandleRequest
+  → Service 或 Module 业务方法
+```
+
+> 当前 Mailbox 默认双队列和多优先级队列的底层实现是 MPSC 队列。`engine/pkg/utils/mpmc` 是独立的 MPMC 无锁环形队列，目前不是 Mailbox 生产调用链的必经组件。
+
+### **Timer**  
+- 定时器系统, 用于服务之间的定时任务
+
+### **Log**  
+- 日志系统, 支持服务级独立日志记录
 
 ## 🚀 快速开始
 
@@ -69,7 +266,7 @@ go mod download
 ### 3. 运行示例
 
 ```bash
-cd example/node_master
+cd example/node1
 go run main.go
 ```
 
@@ -113,21 +310,6 @@ err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).AsyncCall(ctx, 
 // 或发送消息（不等待响应）
 err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).Send(ctx, "APITest2", nil)
 ```
-
----
-
-## 🧩 核心模块介绍
-
-| 模块名          | 说明                          |
-| ------------ |-----------------------------|
-| `actor`      | Actor 基础结构，实现消息投递、生命周期管理    |
-| `messagebus` | 负责消息传输与调度，支持本地直调与 RPC       |
-| `selector`   | 多维度选择器，支持 UID、Pid、Type 路由方式 |
-| `repository` | 本地缓存服务注册表，支持查询与动态变更         |
-| `discovery`  | etcd 实现服务注册与发现，支持事件监听与主从选举  |
-| `event`      | 支持集群事件广播（全局/命名空间：serverId）  |
-| `scheduler`  | 动态扩缩容策略器，支持嵌套策略组合           |
-
 ---
 
 ## ❓ FAQ
@@ -138,17 +320,12 @@ err := serviceInstance.Select(rpc.WithServiceName(ServiceName2)).Send(ctx, "APIT
 
 * **Q:** 支持热更新吗？
 
-  * **A:** 暂不支持二进制热更，但可通过主从切换、重载 Worker 达到平滑迁移。
+  * **A:** 暂不支持二进制热更，但可通过主从切换、重载 service 达到平滑迁移。
 
 * **Q:** 如何实现消息的顺序性？
 
-  * **A:** 对于同一 UID，通过 `%` 哈希绑定固定 Worker，可以保证有序。
+  * **A:** 对于同一 dispatchKey（如 UID），通过 `%` 哈希绑定固定 Worker，可以保证有序(在未开启自动扩缩容的情况下)。
 
----
-
-## 🛠 TODO
-* 将rpc拆分为独立项目,方便其他项目使用
-* 移动internal中的代码到pkg目录下
 ---
 
 ## 🤝 贡献指南

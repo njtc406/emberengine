@@ -1,11 +1,12 @@
 package timingwheel_test
 
 import (
+	"context"
 	"fmt"
+	"time"
+
 	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
-	"os"
-	"time"
 )
 
 type EveryScheduler struct {
@@ -16,46 +17,45 @@ func (s *EveryScheduler) Next(prev time.Time) time.Time {
 	return prev.Add(s.Interval)
 }
 
-var signCh = make(chan os.Signal, 1)
-
-func printTask(t *timingwheel.Timer, args ...interface{}) error {
-	fmt.Println(">>>>>>>>>>>>>task:", t.GetName())
+func printTask(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
+	_ = ctx
+	fmt.Println("task:", t.GetName())
 	return nil
 }
 
 func Example_scheduleTimer() {
-	logger, err := log.NewDefaultLogger("", nil, true)
+	logger, err := log.NewDefaultLogger(nil)
 	if err != nil {
 		panic(err)
 	}
-	timingwheel.Start(time.Millisecond, 100, logger)
-	defer timingwheel.Stop()
-	var beginTime time.Time
-	go func() {
-		beginTime = time.Now()
-		//tId, err := dp.AfterFunc(time.Second*5, printTask, nil, nil, "hello")
-		//tId, err := dp.TickerFunc(time.Hour*3, printTask, nil, nil, "hello")
-		tId, err := dp.CronFunc("0 */1 * * * *", "", printTask, "hello")
-		if err != nil {
-			fmt.Println("err:", err)
-			dp.CancelTimer(tId)
-		} else {
-			fmt.Println("tId:", tId)
-		}
-	}()
+	tw := timingwheel.NewTimingWheel(time.Millisecond, 100, log.NewLoggerX(logger, log.Fields{"pkg": "tw"}))
+	tw.Start()
+	defer tw.Stop()
 
-	go func() {
-		for {
-			select {
-			case job := <-dp.GetTimerCbChannel():
-				fmt.Println("job:", job)
-				job.Do()
-				fmt.Println("sub time:", time.Now().Sub(beginTime))
-				fmt.Println("now:", time.Now())
-				//return
-			}
-		}
-	}()
-	<-signCh
-	fmt.Println("main exit")
+	dp, err := timingwheel.NewJobScheduler(
+		"example",
+		1000,
+		10,
+		tw,
+		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_example"}),
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer dp.Stop()
+
+	_, err = dp.AfterFunc(10*time.Millisecond, "hello", printTask)
+	if err != nil {
+		panic(err)
+	}
+
+	select {
+	case job := <-dp.GetTimerCbChannel():
+		_ = job.Do(context.Background())
+	case <-time.After(2 * time.Second):
+		panic("timeout waiting timer callback")
+	}
+
+	// Output:
+	// task: hello
 }

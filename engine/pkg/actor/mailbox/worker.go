@@ -1,731 +1,851 @@
 // Package mailbox
-// @Title  服务的工作线程,接收并处理事件
-// @Description  desc
-// @Author  yr  2025/2/8
-// @Update  yr  2025/2/8
+// @Title  统一Worker实现
+// @Description  统一的消息处理Worker，支持双队列和多优先级队列两种模式
+// @Author  yr  2025/11/27
+// @Update  yr  2025/11/27
 package mailbox
 
 import (
-	"fmt"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"reflect"
+	"context"
+	"runtime"
 	"runtime/debug"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/profiler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/mpsc"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/idle"
 )
 
+const (
+	QueueModeDual     = "dual"
+	QueueModePriority = "priority"
+)
+
+const (
+	workerStateRunning int32 = iota
+	workerStateClosing
+	workerStateClosed
+)
+
+// watchdogCanceler 看门狗调度器的最小接口，解耦 Worker 对 timingwheel 包的直接依赖。
+// WorkerPool 在 Start 时创建适配器注入到 WorkerEnv。
+type watchdogCanceler interface {
+	// Schedule 注册一个超时回调，返回 ID 用于取消。d <= 0 或调度失败时返回 0。
+	Schedule(d time.Duration, onExpire func()) uint64
+	// Cancel 取消尚未触发的超时回调。id == 0 时为 no-op。
+	Cancel(id uint64)
+}
+
+// Worker 统一的消息处理 Worker，实现 IMailboxWorker。
+// WorkerEnv 封装 Worker 运行所需的外部依赖。
+// 由 WorkerPool 在创建 Worker 时注入，Worker 不再直接引用 WorkerPool。
+type WorkerEnv struct {
+	logger            log.ILoggerX
+	invoker           inf.IMessageInvoker
+	middlewareChain   *MiddlewareChain
+	rw                *RWController
+	watchdogScheduler watchdogCanceler // 时间轮看门狗（nil = 使用 time.AfterFunc 降级）
+
+	// 预构的 RWContextInfo，SourceService 在 Pool 生命周期内是常量，
+	// 避免 execRead 路径上每条 Job 重建 struct + 字符串拷贝。
+	rwReadCtxInfo def.RWContextInfo
+
+	// 调试计数开关：SubmitJob 热路径上的 count.Add(1) 仅在启用时
+	// 起作用，release 环境默认 false 可避免每条 Job 一次 atomic.Add。
+	// 由 WorkerPool.statsEnabled 控制，与 dispatch 分布统计同步开关。
+	statsEnabled bool
+}
+
+// Worker 统一的消息处理 Worker，实现 IMailboxWorker。
+//
+// 职责：
+//   - 接收 SubmitEvent 调用，将事件提交至内部队列管理器（IQueueManager）；
+//   - 在独立 goroutine 中循环从队列获取事件并执行；
+//   - 使用 idle.AdaptiveController 在队列为空时进行条件等待或退避，避免空转占用 CPU；
+//   - 在 Stop 时，通过 queueManager.DrainAll 将队列中剩余事件处理完毕，保证关闭过程无消息丢失。
 type Worker struct {
-	workerId int
-	closed   atomic.Bool
-	config   *WorkerConfig
-	pool     *WorkerPool
-	wg       sync.WaitGroup
+	workerId        int32
+	state           atomic.Int32 // workerStateRunning / workerStateClosing / workerStateClosed
+	submitters      atomic.Int64
+	env             *WorkerEnv
+	wg              sync.WaitGroup
+	inflightReads   sync.WaitGroup // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
+	inflightReadCnt atomic.Int64   // per-Worker：当前 in-flight 读 goroutine 数（WaitGroup 无法查询计数）
+	writeRequested  atomic.Int32   // per-Worker 写排队计数：execWrite Add(1) 后同 Worker 的 launchRead 让步，
+	// 避免同 Worker 读饱和导致写长期等待；跨 Worker 读不再让步（mu 本身会串行化 W/R 抢占）。
+	pendingJob inf.IMailboxJob // 单值字段：TryLock/读路径轮询检测到 closed=true 时暂存已出队未执行 Job。
+	// 不变量：Worker 主循环单 goroutine 执行，两个写入点（execWrite 等读 / TryLock）任一命中后立即 return，
+	// 主循环下一轮检查 state==closed 退出 → defer 消费。storePending() 内置覆盖检测，
+	// 静态分析下不会出现覆盖；若运行期出现（说明协议被破坏），记录 ERROR 并直接 OnJobDiscarded
+	// 老 pendingJob 防止泄漏。
+	queueManager IQueueManager // 队列管理器（可以是双队列或多优先级队列）
+	// per-Worker RW 指标（跨 goroutine 安全，WorkerPool 汇总时遍历累加）
+	rwReadDurationSum atomic.Int64             // 读操作累计耗时（纳秒），除以 rwReadCount 得平均值
+	rwReadCount       atomic.Int64             // 本 Worker 累计读操作数（用于计算平均读耗时）
+	rwWriteWaitSum    atomic.Int64             // 写操作累计等待耗时（纳秒）
+	rwWriteWaitCount  atomic.Int64             // 本 Worker 累计写等待次数
+	idler             *idle.AdaptiveController // 自适应空闲控制器
+	count             atomic.Int64
+	drainPolicy       DrainPolicy
 
-	priorityQueues map[def.Priority]queue[inf.IEvent] // 多级优先级队列
-	scheduler      *PriorityScheduler                 // 优先级调度器
-
-	// 事件驱动通知机制 - 优化：使用原子计数器避免信号丢失
-	mutex          sync.Mutex
-	cond           *sync.Cond
-	pendingSignals atomic.Int64 // 待处理信号计数器，避免消息丢失
-
-	// 性能优化：预计算的批次限制和优先级排序列表
-	totalBatchLimit    int                  // 预计算的总批次限制
-	sortedPriorities   []def.Priority       // 预排序的优先级列表（数值越小优先级越高）
-	priorityBatchSizes map[def.Priority]int // 预计算的批次大小映射
-
-	// 非空队列跟踪优化
-	nonEmptyQueues map[def.Priority]struct{} // 非空队列集合，避免全量扫描
-	nonEmptyMutex  sync.RWMutex              // 保护非空队列集合的锁
-
-	// 内存复用优化
-	availablePrioritiesPool sync.Pool // 用于复用 availablePriorities 切片
-
-	// 时间片公平调度机制（防止低优先级饿死）
-	timeSliceTracker    map[def.Priority]*timeSliceInfo // 每个优先级的时间片信息
-	lastLowPriorityTime atomic.Int64                    // 上次处理低优先级消息的时间（纳秒）
-	fairnessThresholdNs int64                           // 公平性阈值（纳秒）
+	// ---- RW 读路径解耦 ----
+	// readCh: 主循环 dequeue 到读 Job 后非阻塞投递的通道；readPipeline 负责消费。
+	// 容量满 = 入队侧回压：主循环直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
+	// 不再让读 Job 在主循环里同步等待 gate（writeRequested/readSem）。
+	readCh         chan inf.IMailboxJob // nil = RW 未启用或运行时尚未初始化（execRead 走兜底同步路径）
+	readPipelineWg sync.WaitGroup       // 跟踪 readPipeline goroutine 退出
+	stopDeadlineNS int64                // BeginStop 设置的统一停止 deadline，用于 readPipeline 关闭阶段让步退出
+	// readsDispatched：主循环投递到 readCh 的累计读 Job 数（含被回压丢弃的）
+	// readsLaunched：readPipeline 已完成 RLock + inflightReads.Add 的累计读 Job 数
+	// 用途：execWrite 在 mu.WLock 之前必须先等待 readsLaunched.Load() 追平
+	// 写 Job dequeue 时刻的 readsDispatched 快照，保证"先序读已注册到 inflightReads"，
+	// 否则 mu.WLock 可能抢在 readPipeline 的 mu.RLock 之前，破坏 read-before-write 顺序。
+	readsDispatched atomic.Uint64
+	readsLaunched   atomic.Uint64
 }
 
-// timeSliceInfo 时间片信息
-type timeSliceInfo struct {
-	lastProcessedTime atomic.Int64 // 上次处理时间（纳秒）
-	processedCount    atomic.Int64 // 在当前时间片内处理的消息数
-	timeSliceBudget   int64        // 时间片预算（纳秒）
-}
-
-// calculateTimeSliceBudget 根据优先级计算时间片预算（纳秒）
-func (w *Worker) calculateTimeSliceBudget(priority def.Priority) int64 {
-	// 根据优先级分配不同的时间片：优先级越高，时间片越大
-	switch {
-	case priority <= def.PriorityHigh: // 高优先级
-		return 50_000_000 // 50ms
-	case priority == def.PriorityNormal: // 普通优先级
-		return 30_000_000 // 30ms
-	case priority == def.PriorityLow: // 低优先级
-		return 20_000_000 // 20ms
-	default: // 后台优先级
-		return 10_000_000 // 10ms
-	}
-}
-
-func newWorker(pool *WorkerPool, id int, config *WorkerConfig) *Worker {
-	if config == nil {
-		config = DefaultWorkerConfig()
-	}
-
+// newWorker 创建统一Worker
+func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPolicy DrainPolicy) inf.IMailboxWorker {
 	w := &Worker{
-		workerId:            id,
-		config:              config,
-		pool:                pool,
-		priorityQueues:      make(map[def.Priority]queue[inf.IEvent]),
-		priorityBatchSizes:  make(map[def.Priority]int),
-		nonEmptyQueues:      make(map[def.Priority]struct{}),
-		timeSliceTracker:    make(map[def.Priority]*timeSliceInfo),
-		fairnessThresholdNs: 100_000_000, // 默认100ms公平性阈值
-	}
-	w.cond = sync.NewCond(&w.mutex)
-
-	// 初始化内存池用于复用切片
-	w.availablePrioritiesPool.New = func() interface{} {
-		return make([]def.Priority, 0, 16) // 预分配容量以减少扩容
+		workerId:    workerId,
+		env:         env,
+		drainPolicy: drainPolicy,
 	}
 
-	// 初始化多级优先级系统（必须启用）
-	var prioritiesConfig map[def.Priority]PriorityConfig
-	if config.MultiLevel != nil && config.MultiLevel.Enabled {
-		w.scheduler = NewPriorityScheduler(config.MultiLevel)
-		prioritiesConfig = config.MultiLevel.Priorities
-	} else {
-		// 如果没有配置多级优先级，使用默认配置
-		defaultConfig := &MultiLevelConfig{
-			Enabled:    true,
-			Strategy:   def.StrategyAbsolute,
-			Priorities: newDefaultPriorityMap(),
-		}
-		w.scheduler = NewPriorityScheduler(defaultConfig)
-		prioritiesConfig = defaultConfig.Priorities
-	}
+	// 根据配置创建队列管理器
+	w.queueManager = createQueueManager(conf, env.logger)
 
-	// 为每个优先级创建队列并预计算优化数据
-	totalBatchSize := 0
-	for lv, pc := range prioritiesConfig {
-		w.priorityQueues[lv] = mpsc.New[inf.IEvent]()
-		w.priorityBatchSizes[lv] = pc.BatchSize
-		totalBatchSize += pc.BatchSize
-		w.sortedPriorities = append(w.sortedPriorities, lv)
-
-		// 初始化时间片信息（根据优先级高低分配不同的时间片）
-		timeSliceBudgetNs := w.calculateTimeSliceBudget(lv)
-		w.timeSliceTracker[lv] = &timeSliceInfo{
-			timeSliceBudget: timeSliceBudgetNs,
+	// 创建空闲控制器
+	idlerConf := conf.SchedulePolicy.IdlerConf
+	if idlerConf == nil {
+		idlerConf = &config.WorkerIdlerConf{
+			EnableCond: true,
 		}
 	}
+	w.idler = idle.NewAdaptiveController(
+		idlerConf.EnableCond,
+		idlerConf.BackoffBaseDelay,
+		idlerConf.BackoffMaxDelay,
+		idlerConf.MaxIdleBeforeBackoff,
+		idlerConf.BackoffMaxRetries,
+	)
 
-	// 预排序优先级列表（数值越小优先级越高）
-	sort.Slice(w.sortedPriorities, func(i, j int) bool {
-		return w.sortedPriorities[i] < w.sortedPriorities[j]
-	})
-
-	// 设置预计算的总批次限制
-	if totalBatchSize <= 0 {
-		w.totalBatchLimit = 32 // 默认值
-	} else {
-		const maxReasonableBatch = 128
-		if totalBatchSize > maxReasonableBatch {
-			w.totalBatchLimit = maxReasonableBatch
-		} else {
-			w.totalBatchLimit = totalBatchSize
+	// RW 启用时为读路径创建独立通道
+	// 容量取 max(ReadDispatchChanCap, MaxConcurrentReads, 256)，留足缓冲避免无谓回压
+	if conf.EnableRWMode {
+		capN := conf.ReadDispatchChanCap
+		if capN <= 0 {
+			capN = conf.MaxConcurrentReads
 		}
+		if capN < 256 {
+			capN = 256
+		}
+		w.readCh = make(chan inf.IMailboxJob, capN)
 	}
 
 	return w
 }
 
-// SubmitEvent 提交事件（修复版：确保非空队列集合正确更新）
-func (w *Worker) SubmitEvent(e inf.IEvent) error {
-	// 检查Worker是否已关闭（双重检查）
-	if w.closed.Load() {
-		return def.ErrWorkerClosed
+// createQueueManager 根据配置创建队列管理器
+func createQueueManager(conf *config.MailboxConf, logger log.ILoggerX) IQueueManager {
+	// 确定队列模式
+	queueMode := conf.QueueMode
+	if queueMode == "" {
+		queueMode = QueueModeDual // 默认双队列模式
 	}
 
-	// 检查优先级是否有效
-	priority := e.GetPriority()
-	que, exists := w.priorityQueues[priority]
-	if !exists {
-		return fmt.Errorf("invalid priority: %d", priority)
-	}
+	switch queueMode {
+	case QueueModeDual:
+		// 双队列模式（系统队列 + 用户队列）
+		return NewDualQueueManager()
 
-	// 再次检查Worker状态（关键：在获取队列后再次检查）
-	if w.closed.Load() {
-		return def.ErrWorkerClosed
-	}
+	case QueueModePriority:
+		// 多优先级队列模式
+		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf, logger)
 
-	// 空->非空边沿唤醒，降低等待时间
-	emptyBefore := que.Empty()
-	// 提交消息到对应的优先级队列
-	que.Push(e)
-
-	// 最后检查：只有在Worker未关闭时才发送信号
-	if !w.closed.Load() {
-		if emptyBefore {
-			w.signalNewMessage() // 立即唤醒
-		} else {
-			w.signalNewMessageSafely() // 合并信号
-		}
+	default:
+		return NewDualQueueManager()
 	}
-	return nil
 }
 
 // GetWorkerId 获取Worker的ID
-func (w *Worker) GetWorkerId() int {
+func (w *Worker) GetWorkerId() int32 {
 	return w.workerId
 }
 
-// SubmitEventWithPriority 提交指定优先级的事件
-func (w *Worker) SubmitEventWithPriority(e inf.IEvent, priority def.Priority) error {
-	// 设置事件的优先级
-	xctx, ok := e.(interface{ SetHeader(string, any) })
-	if ok {
-		xctx.SetHeader(def.DefaultPriorityKey, priority)
+// SubmitJob 提交任务到队列
+func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
+	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
+	if w.state.Load() != workerStateRunning {
+		return def.ErrMailboxWorkerClosed
+	}
+	w.submitters.Add(1)
+	// If Stop flipped state concurrently, back out and refuse.
+	if w.state.Load() != workerStateRunning {
+		w.submitters.Add(-1)
+		return def.ErrMailboxWorkerClosed
+	}
+	defer w.submitters.Add(-1)
+
+	if w.queueManager == nil {
+		return def.ErrMailboxWorkerChannelNotInit
 	}
 
-	// 使用现有的SubmitEvent方法处理
-	return w.SubmitEvent(e)
+	// 提交到队列管理器
+	err := w.queueManager.Submit(job)
+	if err != nil {
+		return err
+	}
+	// 计数开关化：release 环境默认 statsEnabled=false 时跳过热路径 atomic.Add
+	if w.env.statsEnabled {
+		w.count.Add(1)
+	}
+
+	// 唤醒Worker
+	if w.idler != nil {
+		w.idler.Wake()
+	}
+
+	return nil
 }
 
+// Start 启动 Worker，在独立 goroutine 中运行 run 主循环。
 func (w *Worker) Start() {
 	w.wg.Add(1)
 	go w.run()
+	// RW 启用时启动专职的读派发流水线
+	if w.readCh != nil {
+		w.readPipelineWg.Add(1)
+		go w.runReadPipeline()
+	}
 }
 
+// run 是 Worker 的主循环。
+//
+// 循环逻辑：
+//  1. 尝试从 queueManager.NextJob() 获取下一个事件；
+//  2. 若获取成功，根据 enableRW 决定走 RW 或串行路径；
+//  3. 若当前没有事件，则调用 idler.Idle() 进行条件等待或退避；
+//  4. 当 closed 标记为 true 时，循环退出，并在 defer 中处理所有残留事件。
+//
+// RW 模式下，主循环不再同步执行读 Job 的 gate spin / RLock /
+// goroutine spawn——而是把读 Job 投递到 readCh 由 readPipeline goroutine 异步处理。
+// 主循环仅负责：① 写 Job 同步执行（走 execWrite，内部等待先序读注册后取 WLock）；
+// ② 读 Job 投递到 readCh（满则按入队侧回压语义直接 OnJobDiscarded）；
+// ③ 系统消息（priority queue 优先返回）由主循环立即处理，不再被 read gate 阻塞。
 func (w *Worker) run() {
 	defer w.wg.Done()
 
-	// busy-wait 模式，接近旧版mailbox1路径（无条件变量）
-	if w.config != nil && w.config.WaitMode == "busy" {
-		w.runBusy()
-		return
-	}
-
-	var e inf.IEvent
-	var ok bool
-
+	// 退出时：先关闭 readCh 让 readPipeline 排空 + 退出，
+	// 再等待本 Worker 的 in-flight 读完成（带超时兜底），最后在 WLock 下 drain 残留消息
 	defer func() {
-		// 退出时处理所有剩余消息
-		for priority, que := range w.priorityQueues {
-			for !que.Empty() {
-				if e, ok = que.Pop(); ok {
-					w.safeExecMultiLevel(e, priority)
-				}
+		if atomic.LoadInt64(&w.stopDeadlineNS) == 0 {
+			atomic.StoreInt64(&w.stopDeadlineNS, time.Now().Add(w.env.rw.stopTimeout).UnixNano())
+		}
+
+		stopTimedOut := false
+		// ① 关闭 readCh，等待 readPipeline 处理完通道里残留的读 Job 后退出。
+		//    readPipeline 在 launchRead 内部检测到 state==closed 时会按 drainPolicy
+		//    discardExec 这些已投递但未注册的读 Job，保证 OnJobDiscarded 对称。
+		if w.readCh != nil {
+			close(w.readCh)
+			pipelineDone := make(chan struct{})
+			go func() {
+				w.readPipelineWg.Wait()
+				close(pipelineDone)
+			}()
+			select {
+			case <-pipelineDone:
+			case <-time.After(w.env.rw.stopTimeout):
+				stopTimedOut = true
+				w.env.logger.Errorf("Worker %d: StopTimeout (%v) exceeded while waiting read pipeline, force continue without waiting",
+					w.workerId, w.env.rw.stopTimeout)
+				// 硬超时：不再阻塞等待 pipelineDone，直接继续后续清理流程
 			}
 		}
-	}()
 
-	for !w.closed.Load() {
-		// 阻塞等待新消息通知
-		w.waitForNewMessages()
-
-		// 被唤醒后处理所有可用消息（但先检查是否关闭）
-		for !w.closed.Load() {
-			processedAny := w.processAvailableMessages()
-			if !processedAny {
-				break // 没有更多消息，回到等待状态
+		// ② 等待本 Worker 的 in-flight 读 goroutine 完成（带超时保护）
+		if w.env.rw.enabled.Load() {
+			deadline := time.Now().Add(w.env.rw.stopTimeout)
+			for w.inflightReadCnt.Load() != 0 && time.Now().Before(deadline) {
+				runtime.Gosched()
+				time.Sleep(time.Millisecond)
 			}
-			// 继续处理，直到没有消息为止
-		}
-	}
-}
-
-// runBusy 忙等处理循环（微睡眠退避），避免条件变量唤醒开销
-func (w *Worker) runBusy() {
-	backoff := 1
-	const maxBackoff = 8
-	for !w.closed.Load() {
-		if processed := w.processAvailableMessages(); !processed {
-			if backoff < maxBackoff {
-				backoff <<= 1
-			}
-			time.Sleep(time.Microsecond * time.Duration(backoff))
-		} else {
-			backoff = 1
-		}
-	}
-}
-
-func (w *Worker) stop() {
-	//log.SysLogger.Debugf("worker %d process lowPriCount:%d  highPriCount:%d", w.workerId, w.lowPriCount.Load(), w.highPriCount.Load())
-	// 首先设置关闭标志，阻止新的 SubmitEvent
-	if w.closed.Swap(true) {
-		return // 已经关闭过了
-	}
-
-	// 使用条件变量唤醒worker（但不会处理新消息）
-	w.signalNewMessage()
-	w.wg.Wait()
-
-	// 清理资源，但不置空mailbox为nil，避免panic风险
-	w.pool = nil
-	w.workerId = 0
-	w.config = nil
-
-	// 清理多级优先级相关资源（优化：保留空壳避免panic）
-	if w.scheduler != nil {
-		w.scheduler = nil
-		// 保留空的 map 结构，不删除键，避免 SubmitEvent 在 race 下 panic
-		// 只清空预排序列表和非空集合
-		w.sortedPriorities = w.sortedPriorities[:0]
-		w.nonEmptyMutex.Lock()
-		for k := range w.nonEmptyQueues {
-			delete(w.nonEmptyQueues, k)
-		}
-		w.nonEmptyMutex.Unlock()
-
-		// 重置信号计数器
-		w.pendingSignals.Store(0)
-	}
-}
-
-// signalNewMessage 安全地通知worker有新消息（强制发送）
-func (w *Worker) signalNewMessage() {
-	w.mutex.Lock()
-	w.pendingSignals.Store(1) // 强制设置信号
-	w.cond.Signal()           // 唤醒等待的goroutine
-	w.mutex.Unlock()
-}
-
-// signalNewMessageSafely 安全发送信号，避免重复信号（优化版）
-func (w *Worker) signalNewMessageSafely() {
-	// 使用原子操作增加信号计数
-	if w.pendingSignals.Add(1) == 1 {
-		// 只有在从 0 变为 1 时才发送信号，避免重复唤醒
-		w.mutex.Lock()
-		w.cond.Signal()
-		w.mutex.Unlock()
-	}
-}
-
-// waitForNewMessages 使用原子计数器等待新消息（修复版：避免信号丢失和死锁）
-func (w *Worker) waitForNewMessages() {
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
-
-	// 使用for循环防止虚假唤醒，检查是否有待处理信号
-	for w.pendingSignals.Load() == 0 && !w.closed.Load() {
-		w.cond.Wait()
-	}
-
-	// 醒来后消耗一个信号（如果有的话）
-	// 使用循环CAS，但要确保不会死锁
-	for {
-		current := w.pendingSignals.Load()
-		if current <= 0 {
-			// 没有信号可消耗（可能被其他地方消耗或虚假唤醒），直接返回
-			break
-		}
-		// 尝试将信号计数减1
-		if w.pendingSignals.CompareAndSwap(current, current-1) {
-			// 成功消耗一个信号
-			break
-		}
-		// CAS失败，说明有并发修改，重试
-		// 注意：重新检查current是否>0，避免无限循环
-	}
-}
-
-// processAvailableMessages 处理当前可用的消息（高性能优化版本）
-func (w *Worker) processAvailableMessages() bool {
-	processedAny := false
-	totalProcessed := 0
-
-	// 使用预计算的总批次限制
-	maxBatchTotal := w.totalBatchLimit
-
-	// 从对象池获取可复用的切片
-	availablePrioritySlice := w.availablePrioritiesPool.Get().([]def.Priority)
-	availablePriorities := availablePrioritySlice[:0] // 重置长度但保留容量
-	defer func() {
-		// 归还对象到池中
-		w.availablePrioritiesPool.Put(availablePriorities[:0])
-	}()
-
-	// 收集非空优先级（简单扫描，避免锁竞争）
-	for _, priority := range w.sortedPriorities {
-		if !w.priorityQueues[priority].Empty() {
-			availablePriorities = append(availablePriorities, priority)
-		}
-	}
-	// 没有消息可处理
-	if len(availablePriorities) == 0 {
-		return false
-	}
-	// 记录当前时间用于时间片统计
-	currentTime := time.Now().UnixNano()
-
-	// 如果只有一个非空优先级队列，走快路径，避免排序/策略选择
-	if len(availablePriorities) == 1 {
-		selectedPriority := availablePriorities[0]
-		que := w.priorityQueues[selectedPriority]
-		for totalProcessed < maxBatchTotal {
-			remainingBatch := maxBatchTotal - totalProcessed
-			processedCount := 0
-			// 在忙等模式下使用批量弹出以提升吞吐，否则逐条 Pop 以控制GC
-			if w.config != nil && w.config.WaitMode == "busy" {
-				batchLimit := w.priorityBatchSizes[selectedPriority]
-				if batchLimit > remainingBatch {
-					batchLimit = remainingBatch
-				}
-				batch := que.BatchPop(batchLimit)
-				for _, e := range batch {
-					w.safeExecMultiLevel(e, selectedPriority)
-					processedAny = true
-					processedCount++
-				}
+			if w.inflightReadCnt.Load() == 0 {
+				// per-Worker：仅等待本 Worker spawn 的读 goroutine。
+				// inflightReadCnt 归零后 Wait 只用于收口 Done 的纳秒级窗口。
+				w.inflightReads.Wait()
 			} else {
-				// 使用逐条 Pop（避免 BatchPop 大切片分配导致 GC 抖动）
-				for i := 0; i < remainingBatch; i++ {
-					if e, ok := que.Pop(); ok {
-						w.safeExecMultiLevel(e, selectedPriority)
-						processedAny = true
-						processedCount++
-					} else {
-						break
-					}
-				}
-			}
-			totalProcessed += processedCount
-			w.updateTimeSliceInfo(selectedPriority, currentTime, int64(processedCount))
-			if processedCount == 0 || que.Empty() {
-				break
+				stopTimedOut = true
+				w.env.logger.Errorf("Worker %d: StopTimeout (%v) exceeded, "+
+					"read goroutines still in-flight. "+
+					"Drain forced to DrainDiscard to avoid data race with leaked goroutines.",
+					w.workerId, w.env.rw.stopTimeout)
 			}
 		}
-		return processedAny
-	}
-	for totalProcessed < maxBatchTotal && len(availablePriorities) > 0 {
-		// 检查是否需要强制处理低优先级消息（防止饿死）
-		selectedPriority := w.scheduler.NextPriorityWithOrdering(availablePriorities)
-		if selectedPriority == -1 {
-			break
-		}
 
-		// 获取对应的队列和批量大小（使用预计算值）
-		que := w.priorityQueues[selectedPriority]
-		batchSize := w.priorityBatchSizes[selectedPriority]
-
-		// 限制本次批量大小，避免超过总批次限制
-		remainingBatch := maxBatchTotal - totalProcessed
-		if batchSize > remainingBatch {
-			batchSize = remainingBatch
-		}
-
-		// 批量处理该优先级的消息（使用BatchPop减少原子操作）
-		batch := que.BatchPop(batchSize)
-		processedCount := 0
-		for _, e := range batch {
-			w.safeExecMultiLevel(e, selectedPriority)
-			processedAny = true
-			processedCount++
-		}
-		// 队列可能已空，必要时从可用列表中移除
-		if processedCount < batchSize && que.Empty() {
-			w.removeFromAvailable(&availablePriorities, selectedPriority)
-		}
-
-		// 更新总处理计数和时间片信息
-		totalProcessed += processedCount
-		w.updateTimeSliceInfo(selectedPriority, currentTime, int64(processedCount))
-
-		// 如果这次没有处理任何消息，退出循环
-		if processedCount == 0 {
-			// 快路径：队列空了，移除并继续
-			w.removeFromAvailable(&availablePriorities, selectedPriority)
-			break
-		}
-	}
-
-	return processedAny
-}
-
-// getBatchSizeForPriority 获取指定优先级的批量大小（使用预计算值）
-func (w *Worker) getBatchSizeForPriority(priority def.Priority) int {
-	if batchSize, ok := w.priorityBatchSizes[priority]; ok {
-		return batchSize
-	}
-	return 8 // 默认值
-}
-
-// sortAvailablePriorities 高效排序可用优先级（优化版：避免内存分配）
-func (w *Worker) sortAvailablePriorities(available []def.Priority) {
-	// 使用基于预排序列表的排序算法，复杂度O(n)，无内存分配
-	if len(available) <= 1 {
-		return
-	}
-
-	// 原地排序：遍历预排序列表，将匹配的优先级依次放置到available前面
-	writeIndex := 0
-	for _, sortedPriority := range w.sortedPriorities {
-		// 在available中查找匹配的优先级
-		for readIndex := writeIndex; readIndex < len(available); readIndex++ {
-			if available[readIndex] == sortedPriority {
-				// 找到匹配，交换到writeIndex位置
-				if readIndex != writeIndex {
-					available[writeIndex], available[readIndex] = available[readIndex], available[writeIndex]
-				}
-				writeIndex++
-				break
-			}
-		}
-	}
-}
-
-// removeFromAvailable 从可用列表中移除指定优先级
-func (w *Worker) removeFromAvailable(available *[]def.Priority, priority def.Priority) {
-	slice := *available
-	for i, p := range slice {
-		if p == priority {
-			// 快速移除：将最后一个元素移动到当前位置
-			slice[i] = slice[len(slice)-1]
-			*available = slice[:len(slice)-1]
+		if w.queueManager == nil {
 			return
 		}
+
+		// 确定有效的 Drain 策略（超时后强制降级为 DrainDiscard）
+		effectiveDrainPolicy := w.drainPolicy
+		if stopTimedOut {
+			effectiveDrainPolicy = DrainDiscard
+		}
+
+		// RW 启用时，Drain 必须与可能仍在飞行的读 goroutine 互斥访问 invoker。
+		// - 无残留：跳过 WLock 获取，避免被其它 Worker 仍在飞行的读 goroutine 阻塞
+		//   （per-Worker stopTimeout 是独立约束，不应被全局 RW 锁竞争耦合）；
+		// - StopTimeout 超时：直接走 unsafe drain（不获取 WLock，跳过 invoker 调用），
+		//   因为此时仍有泄漏读 goroutine 持有 RLock，强行 Lock 等同于无限阻塞；
+		// - 正常关闭（未超时）且有残留：用阻塞式 Lock，等待读 goroutine 已全部 Done，可立即拿到。
+		var (
+			rwLockHeld    bool
+			rwUnsafeDrain bool
+		)
+		hasResidual := w.pendingJob != nil || (w.queueManager != nil && !w.queueManager.IsEmpty())
+		if w.env.rw.enabled.Load() {
+			if stopTimedOut {
+				if hasResidual {
+					rwUnsafeDrain = true
+					w.env.rw.unsafeDrainEvents.Add(1) // 事件级计数：进入 unsafe drain 路径
+					w.env.logger.Errorf("Worker %d: stop timeout reached with residual jobs, drain in unsafe mode "+
+						"(skip invoker.OnJobDiscarded) to avoid race with leaked read goroutines", w.workerId)
+				} else {
+					w.env.logger.Warnf("Worker %d: stop timeout reached but no residual jobs, skip unsafe drain", w.workerId)
+				}
+			} else if hasResidual {
+				w.env.rw.mu.Lock()
+				rwLockHeld = true
+			}
+		}
+
+		switch effectiveDrainPolicy {
+		case DrainDiscard:
+			if w.pendingJob != nil {
+				w.discardExec(w.pendingJob, rwUnsafeDrain)
+				w.pendingJob = nil
+			}
+			w.queueManager.DrainAll(func(e inf.IMailboxJob) {
+				w.discardExec(e, rwUnsafeDrain)
+			})
+		default:
+			if w.pendingJob != nil {
+				w.safeExec(w.pendingJob)
+				w.pendingJob = nil
+			}
+			w.queueManager.DrainAll(func(e inf.IMailboxJob) {
+				w.safeExec(e)
+			})
+			if rwLockHeld {
+				w.env.rw.mu.Unlock()
+				rwLockHeld = false
+			}
+		}
+		// DrainDiscard 分支收尾释放 WLock
+		if rwLockHeld {
+			w.env.rw.mu.Unlock()
+		}
+	}()
+
+	// 主处理循环
+	for w.state.Load() != workerStateClosed {
+		e, ok := w.queueManager.NextJob()
+		if !ok {
+			w.idler.Idle()
+			continue
+		}
+
+		if w.env.rw.enabled.Load() || w.env.rw.IsDisabling() {
+			w.execWithRW(e)
+		} else {
+			w.safeExec(e) // 未启用 RW，保持原有串行行为
+		}
 	}
 }
 
-// safeExecMultiLevel 安全执行多级优先级消息（增强错误处理）
-func (w *Worker) safeExecMultiLevel(e inf.IEvent, priority def.Priority) {
+// BeginStop 发起停止（非阻塞）。
+func (w *Worker) BeginStop() {
+	// First, stop accepting new submissions.
+	if !w.state.CompareAndSwap(workerStateRunning, workerStateClosing) {
+		return // already stopping/stopped
+	}
+	atomic.StoreInt64(&w.stopDeadlineNS, time.Now().Add(w.env.rw.stopTimeout).UnixNano())
+
+	// Wait for in-flight SubmitJob calls to finish.
+	// 阶梯退避：先 Gosched，超过阈值后改用 microsecond 级 Sleep，避免长时间 CPU 燃烧。
+	// 总体超时保护：避免上层死循环投递导致永久阻塞。
+	const spinBudget = 1024
+	deadline := time.Now().Add(w.env.rw.stopTimeout)
+	spins := 0
+	sleep := time.Duration(0)
+	for w.submitters.Load() != 0 {
+		if time.Now().After(deadline) {
+			w.env.logger.Errorf("Worker %d: BeginStop deadline exceeded, submitters=%d still in-flight, forcing stop",
+				w.workerId, w.submitters.Load())
+			break
+		}
+		if spins < spinBudget {
+			runtime.Gosched()
+			spins++
+			continue
+		}
+		if sleep == 0 {
+			sleep = time.Microsecond
+		} else if sleep < 100*time.Microsecond {
+			sleep *= 2
+		}
+		time.Sleep(sleep)
+	}
+
+	// Now stop the run loop.
+	w.state.Store(workerStateClosed)
+
+	// 唤醒可能在等待的Worker
+	if w.idler != nil {
+		w.idler.Wake()
+	}
+
+	// NOTE: 不在这里 Wait，避免在 worker 自身 goroutine 内调用导致自等死锁。
+}
+
+// Wait 等待 worker 完全退出。
+func (w *Worker) Wait() {
+	w.wg.Wait()
+	if w.env != nil && w.env.logger != nil && w.env.statsEnabled {
+		w.env.logger.Infof("Worker %d processed %d events", w.workerId, w.count.Load())
+	}
+}
+
+// Stop 便捷方法：BeginStop + Wait。
+func (w *Worker) Stop() {
+	w.BeginStop()
+	w.Wait()
+}
+
+// discardExec 在 DrainDiscard 策略下处理残留消息：不执行业务，仅触发 OnComplete 并回收引用。
+//
+// rwUnsafe=true 表示当前未持有 WLock 且 RW 模式启用（drain 抢锁超时降级），
+// 此时跳过 invoker.OnJobDiscarded 调用，避免与可能仍在飞行的读 goroutine 形成
+// 对 Service 共享状态的并发访问。Job/mctx 仍按正常路径释放。
+func (w *Worker) discardExec(job inf.IMailboxJob, rwUnsafe bool) {
+	ctx := job.GetContext()
+	mctx := job.GetMiddlewareContext()
+	defer func() {
+		// rwUnsafe 路径下跳过普通 OnComplete，避免自定义中间件回写 invoker 共享字段
+		// 与泄漏读 goroutine 形成 race；框架级清理仍会执行，用于释放 Sentinel entry 等内部资源。
+		if mctx != nil && !rwUnsafe {
+			w.env.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxNotRunning, nil)
+		} else if mctx != nil {
+			w.env.middlewareChain.ExecuteFrameworkCleanup(mctx, def.ErrMailboxNotRunning, nil)
+		}
+		// 不执行业务，直接释放 job
+		if job != nil {
+			job.Release()
+		}
+	}()
+
+	// 记录日志
+	w.env.logger.WithContext(ctx).Warnf("Worker %d discard job %v (rwUnsafe=%v)", w.workerId, job, rwUnsafe)
+	// RW 可观测性：丢弃计数
+	w.env.rw.drainDiscardTotal.Add(1)
+	if rwUnsafe {
+		// 不通知业务层，避免 race；上层应通过 drainDiscardTotal 与日志感知
+		return
+	}
+	w.safeNotifyJobDiscarded(job, def.ErrMailboxNotRunning)
+}
+
+func (w *Worker) safeNotifyJobDiscarded(job inf.IMailboxJob, reason error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.SysLogger.WithContext(e.GetContext()).Errorf("exec multi-level def.Priority event error (def.Priority=%d): %v\ntrace:%s", priority, r, debug.Stack())
+			if w.env == nil || w.env.logger == nil {
+				return
+			}
+			logger := w.env.logger
+			if job != nil && job.GetContext() != nil {
+				logger = logger.WithContext(job.GetContext())
+			}
+			logger.Errorf("Worker %d OnJobDiscarded panic: %v\ntrace:%s", w.workerId, r, debug.Stack())
+		}
+	}()
+	if w.env == nil || w.env.invoker == nil {
+		return
+	}
+	w.env.invoker.OnJobDiscarded(job, reason)
+}
+
+// safeExec 在同步执行路径中提供 panic 保护、OnComplete 回调与 Job 回收。
+func (w *Worker) safeExec(job inf.IMailboxJob) {
+	w.safeExecInternal(job, false)
+}
+
+// safeExecSkipProfiler RW 模式下读 goroutine 专用（跳过同步运行路径上共享的状态）。
+// skipShared=true 供读并发路径使用。
+func (w *Worker) safeExecSkipProfiler(job inf.IMailboxJob) {
+	w.safeExecInternal(job, true)
+}
+
+// safeExecInternal 统一的 Job 执行逻辑：panic 恢复 + 中间件 OnComplete + Job Release。
+// skipShared=true 供 RW 模式读 goroutine 调用：注入 RW 读上下文、采集读时长。
+func (w *Worker) safeExecInternal(job inf.IMailboxJob, skipShared bool) {
+	ctx := job.GetContext()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	mctx := job.GetMiddlewareContext()
+	var execErr error
+	var panicVal interface{}
+
+	// 读 goroutine 路径：向 context 中注入 RWContextInfo，
+	// 业务层可通过 ctx.Value(def.RWContextKey) 检测当前是否在 ReadOnly 上下文中执行。
+	// 框架层在 Service.PostJob 中检测此标记，拒绝 ReadOnly handler 的自投递。
+	// 复用 WorkerEnv 中预构的 RWContextInfo，避免热路径 struct 重建。
+	if skipShared && w.env.rw.enabled.Load() {
+		ctx = context.WithValue(ctx, def.RWContextKey, w.env.rwReadCtxInfo)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			panicVal = r
+			w.env.logger.WithContext(ctx).Errorf("exec error: %v\ntrace:%s", r, debug.Stack())
 
 			// 双重保护：EscalateFailure 可能也会 panic
 			func() {
 				defer func() {
 					if r2 := recover(); r2 != nil {
-						log.SysLogger.WithContext(e.GetContext()).Errorf("EscalateFailure also panicked: %v", r2)
+						w.env.logger.WithContext(ctx).Errorf("EscalateFailure also panicked: %v\ntrace:%s", r2, debug.Stack())
 					}
 				}()
-				w.pool.invoker.EscalateFailure(r, e)
+				w.env.invoker.EscalateFailure(ctx, r, job)
 			}()
+		}
+
+		// 调用中间件链的 OnComplete（逆序执行）
+		if mctx != nil {
+			w.env.middlewareChain.ExecuteOnComplete(mctx, execErr, panicVal)
+		}
+
+		// job 执行后需要释放
+		if job != nil {
+			job.Release()
 		}
 	}()
 
-	var analyzer *profiler.Analyzer
-	if w.pool.profiler != nil {
-		analyzer = w.pool.profiler.Push(fmt.Sprintf("[ STATE-P%d ]%s", priority, reflect.TypeOf(e).String()))
+	// ---------- 执行前取消检查 ----------
+	// 默认 mailbox 语义是“入队即执行”。只有显式实现 ICancelableJob 并返回 true 的 Job，
+	// 才在出队后、执行业务前响应 ctx 取消。这样可避免 RPC/请求类任务超时后继续浪费资源，
+	// 同时不影响 EventBus/系统消息等 fire-and-forget 任务。
+	if cancelable, ok := job.(inf.ICancelableJob); ok && cancelable.IsCancelOnContextDone() {
+		select {
+		case <-ctx.Done():
+			execErr = ctx.Err()
+			w.safeNotifyJobDiscarded(job, execErr)
+			return
+		default:
+		}
+	}
+
+	// ---------- watchdog: 单 Job 执行超时告警 ----------
+	if maxExec := w.env.rw.maxJobExecTime; maxExec > 0 {
+		onExpire := func() {
+			w.env.rw.longJobTotal.Add(1)
+			w.env.logger.WithContext(ctx).Warnf(
+				"Worker %d job execution exceeds %v: %v",
+				w.workerId, maxExec, job,
+			)
+		}
+		if wd := w.env.watchdogScheduler; wd != nil {
+			// 优先使用时间轮（O(1) 入队/取消，消除 per-Job timer 堆操作）
+			wdId := wd.Schedule(maxExec, onExpire)
+			defer wd.Cancel(wdId)
+		} else {
+			// 降级：时间轮未就绪时仍使用标准库 AfterFunc
+			timer := time.AfterFunc(maxExec, onExpire)
+			defer timer.Stop()
+		}
+	}
+
+	// ---------- 执行 Job + 读时长采集 ----------
+	var readStart time.Time
+	if skipShared {
+		readStart = time.Now()
 	}
 
 	// 调用消息处理器
-	w.pool.invoker.InvokeMessage(e)
-
-	if analyzer != nil {
-		analyzer.Pop() // 记录分析日志
-		analyzer = nil
+	if err := w.env.invoker.ExecuteJob(ctx, job); err != nil {
+		execErr = err
 	}
 
-	for _, ms := range w.pool.middlewares {
-		ms.MessageReceived(e)
+	if skipShared {
+		elapsed := time.Since(readStart).Nanoseconds()
+		w.rwReadDurationSum.Add(elapsed)
+		w.rwReadCount.Add(1)
 	}
 }
 
-// GetMsgLen 获取所有队列的总长度（更新后的接口）
-func (w *Worker) GetMsgLen() int {
-	total := 0
-	for _, que := range w.priorityQueues {
-		total += que.Len()
+// ---- RW 读写分离核心方法 ----
+
+// getRWMode 从 Job 中安全获取 RWMode（兜底为 RWModeWrite）
+func getRWMode(job inf.IMailboxJob) def.RWMode {
+	if rwJob, ok := job.(inf.IRWModeJob); ok {
+		return rwJob.GetRWMode()
 	}
-	return total
+	return def.RWModeWrite // 未实现 IRWModeJob 的 Job 默认为写
 }
 
-// GetPriorityQueueLen 获取指定优先级队列的长度
-func (w *Worker) GetPriorityQueueLen(priority def.Priority) int {
-	que, exists := w.priorityQueues[priority]
-	if !exists {
-		return 0
+// execWithRW 根据 Job 的 RWMode 走读派发或同步写。
+// 读 Job 不再在主循环里同步取 gate/RLock，改为投递到 readPipeline。
+func (w *Worker) execWithRW(job inf.IMailboxJob) {
+	if getRWMode(job) == def.RWModeRead && w.env.rw.enabled.Load() && !w.env.rw.IsDisabling() {
+		w.dispatchRead(job)
+	} else {
+		w.execWrite(job)
 	}
-	return que.Len()
 }
 
-// GetTotalQueueLen 获取所有队列的总长度
-func (w *Worker) GetTotalQueueLen() int {
-	return w.GetMsgLen()
+// dispatchRead 主循环侧：把读 Job 投递到 readPipeline。
+//
+// 不在此处取 gate（writeRequested/readSem）/RLock/spawn，
+// 让出主循环 CPU 给等待中的写 Job 与系统消息（priority queue 优先返回 SysCtl 等）。
+//
+// 顺序契约（read-vs-write）：
+//   - 同 dispatcherKey 的 Job 由 hashring 路由到同一 Worker；
+//   - 主循环按 mpsc 出队顺序处理：Read1（投 readCh）→ Write2（execWrite 同步）；
+//   - execWrite 在 mu.WLock 之前先等待 readsLaunched 追平 readsDispatched 快照，
+//     即"先序读已完成 inflightReads.Add + mu.RLock"，避免写抢在读 spawn 之前；
+//   - 这保证 Read1 看到 Write2 写入之前的状态，Write2 看到 Read1 完成之后的状态。
+//
+// 回压（readCh 满）：按入队侧失败语义直接 OnJobDiscarded(ErrMailboxWorkerIsFull)，
+// 由调用方 invoker 感知，不再让主循环热自旋。
+func (w *Worker) dispatchRead(job inf.IMailboxJob) {
+	w.readsDispatched.Add(1)
+
+	// 先尝试非阻塞投递（绝大多数情况下 readCh 不会满）
+	select {
+	case w.readCh <- job:
+		return
+	default:
+	}
+	w.readsLaunched.Add(1)
+
+	// readCh 满 = 入队侧回压：直接丢弃 + 通知业务（OnJobDiscarded 对称）
+	w.env.rw.drainDiscardTotal.Add(1)
+	w.env.logger.WithContext(job.GetContext()).Warnf(
+		"Worker %d: readCh full (cap=%d), discard read job (read backpressure)",
+		w.workerId, cap(w.readCh))
+
+	// OnJobDiscarded 必须在 mctx 归池之前调用，避免业务读 mctx 时已被回收
+	mctx := job.GetMiddlewareContext()
+	w.safeNotifyJobDiscarded(job, def.ErrMailboxWorkerIsFull)
+	if mctx != nil {
+		w.env.middlewareChain.ExecuteOnComplete(mctx, def.ErrMailboxWorkerIsFull, nil)
+	}
+	job.Release()
 }
 
-// GetPriorityStatistics 获取优先级统计信息（增强版）
-func (w *Worker) GetPriorityStatistics() map[def.Priority]map[string]interface{} {
-	stats := make(map[def.Priority]map[string]interface{})
-	for priority, que := range w.priorityQueues {
-		priorityStats := map[string]interface{}{
-			"queue_length": int64(que.Len()),
-			"batch_size":   int64(w.getBatchSizeForPriority(priority)),
+// runReadPipeline 是 readPipeline goroutine 主循环。
+//
+// 专职处理读 Job 的 gate spin（writeRequested / readSem）+ RLock + spawn 真正执行 goroutine。
+// 主循环退出时会 close(readCh)，本 goroutine 依次处理通道里残留的读 Job 后退出；
+// 残留读 Job 的处理：launchRead 内部检测到 state==closed 时按 drainPolicy 走 discardExec，
+// 与 OnJobDiscarded 契约保持对称。
+func (w *Worker) runReadPipeline() {
+	defer w.readPipelineWg.Done()
+	for job := range w.readCh {
+		w.launchRead(job)
+	}
+}
+
+// launchRead readPipeline 侧：执行原 execRead 的 gate spin + RLock + spawn 全部逻辑。
+//
+// 关键不变量：
+//   - inflightReads.Add(1) + readsLaunched.Add(1) 必须在 mu.RLock 之后、spawn goroutine 之前
+//     完成，让 execWrite 能可靠等待"先序读已注册"；
+//   - readsLaunched 单调递增，与 readsDispatched 配对（包括降级路径也要算入，
+//     否则 execWrite 永远等不到追平）。
+//
+// Stop 处理（DrainExecute 语义）：
+//   - main run defer 在 readPipelineWg.Wait 之前会 close(readCh)，使 runReadPipeline 排空通道里所有残留读 Job 再退出；
+//   - launchRead 在 stop 后**不做早退**：main run 退出时 writer 一定已释放（writeRequested→0），
+//     gate ① 立刻通过；readSem 由已 spawn 的 readFunc 归还，gate ② 至多 backoff 至 readDuration；
+//     最终所有残留读都被 spawn → main run defer 的 inflightReads.Wait（带 stopTimeout 兜底）等其完成。
+//   - 这与 DrainExecute 语义一致：通道残留的读不丢；只有 stopTimeout 超时才会进入 unsafe drain 路径。
+func (w *Worker) launchRead(job inf.IMailboxJob) {
+	bo := idle.NewSpinBackoff(5 * time.Millisecond)
+	for {
+		if w.state.Load() == workerStateClosed && w.stopDeadlineExceeded() {
+			w.readsLaunched.Add(1)
+			w.discardExec(job, true)
+			return
 		}
-
-		// 添加时间片相关统计
-		if timeSlice, exists := w.timeSliceTracker[priority]; exists {
-			priorityStats["time_slice_budget_ns"] = timeSlice.timeSliceBudget
-			priorityStats["last_processed_time"] = timeSlice.lastProcessedTime.Load()
-			priorityStats["processed_count"] = timeSlice.processedCount.Load()
-			currentTime := time.Now().UnixNano()
-			lastTime := timeSlice.lastProcessedTime.Load()
-			if lastTime > 0 {
-				priorityStats["time_since_last_processed_ms"] = (currentTime - lastTime) / 1_000_000
-			}
-		}
-
-		stats[priority] = priorityStats
-	}
-	return stats
-}
-
-// GetSchedulerStatistics 获取调度器统计信息（新增）
-func (w *Worker) GetSchedulerStatistics() map[string]interface{} {
-	if w.scheduler == nil {
-		return nil
-	}
-	return map[string]interface{}{
-		"strategy":          string(w.scheduler.strategy),
-		"priorities":        len(w.scheduler.priorities),
-		"total_batch_limit": w.totalBatchLimit,
-		"sorted_priorities": w.sortedPriorities,
-	}
-}
-
-// selectPriorityWithFairness 基于公平性和时间片选择优先级
-func (w *Worker) selectPriorityWithFairness(availablePriorities []def.Priority, currentTime int64) def.Priority {
-	// 检查是否需要强制处理低优先级消息（防止饿死）
-	lastLowPriorityTime := w.lastLowPriorityTime.Load()
-	if lastLowPriorityTime > 0 && (currentTime-lastLowPriorityTime) > w.fairnessThresholdNs {
-		// 超过公平性阈值，强制选择低优先级消息
-		for _, priority := range availablePriorities {
-			if priority >= def.PriorityLow {
-				w.lastLowPriorityTime.Store(currentTime)
-				return priority
-			}
-		}
-	}
-
-	// 正常调度：使用时间片机制选择优先级
-	return w.selectPriorityByTimeSlice(availablePriorities, currentTime)
-}
-
-// selectPriorityByTimeSlice 基于时间片机制选择优先级
-func (w *Worker) selectPriorityByTimeSlice(availablePriorities []def.Priority, currentTime int64) def.Priority {
-	// 优先使用调度器的正常选择
-	schedulerSelected := w.scheduler.NextPriorityWithOrdering(availablePriorities)
-	if schedulerSelected == -1 {
-		return -1
-	}
-
-	// 检查选中的优先级是否超过时间片限制
-	timeSlice, exists := w.timeSliceTracker[schedulerSelected]
-	if !exists {
-		return schedulerSelected
-	}
-
-	lastProcessedTime := timeSlice.lastProcessedTime.Load()
-	if lastProcessedTime == 0 || (currentTime-lastProcessedTime) > timeSlice.timeSliceBudget {
-		// 时间片已过期或是第一次处理，可以处理
-		return schedulerSelected
-	}
-
-	// 时间片未过期，尝试选择其他优先级
-	for _, priority := range availablePriorities {
-		if priority == schedulerSelected {
+		// gate ①：让步本 Worker 的 pending writer，避免同 Worker 读-写饥饿。
+		// 仅检查本 Worker 的 writeRequested：execWrite 与 launchRead 都是 per-Worker，
+		// 跨 Worker 的写 Job 在 mu 层面串行化，这里不需要跨 Worker 让步。
+		// stop 后 main run 已退出，无新 writer；剩余 writeRequested 会在原 execWrite 释放 WLock 后归 0。
+		if w.writeRequested.Load() > 0 {
+			bo.Backoff()
 			continue
 		}
-		timeSlice, exists := w.timeSliceTracker[priority]
-		if !exists {
-			return priority
+		// gate ②：信号量令牌（非阻塞 try-send）。
+		// readSem 由前序已 spawn 的 readFunc 归还，最长等待 ≈ 一次 read 业务执行时长。
+		if w.env.rw.readSem != nil {
+			select {
+			case w.env.rw.readSem <- struct{}{}:
+				// 获取令牌成功
+			default:
+				bo.Backoff()
+				continue
+			}
 		}
-		lastProcessedTime := timeSlice.lastProcessedTime.Load()
-		if lastProcessedTime == 0 || (currentTime-lastProcessedTime) > timeSlice.timeSliceBudget {
-			return priority
-		}
+		break
 	}
 
-	// 所有优先级都在时间片内，返回调度器选择的优先级
-	return schedulerSelected
-}
+	// 获取读锁
+	w.env.rw.mu.RLock()
 
-// updateTimeSliceInfo 更新时间片信息
-func (w *Worker) updateTimeSliceInfo(priority def.Priority, currentTime int64, processedCount int64) {
-	timeSlice, exists := w.timeSliceTracker[priority]
-	if !exists {
+	// 【关键：RLock-after-check 重检查（§10.14 动态开关安全协议）】
+	// 防止在 SetRWEnabled(false) 切换窗口内误 spawn 读 goroutine。
+	// 降级路径仍要 +1 readsLaunched（保持单调性，详见函数注释）。
+	if !w.env.rw.enabled.Load() {
+		w.env.rw.mu.RUnlock()
+		if w.env.rw.readSem != nil {
+			<-w.env.rw.readSem
+		}
+		w.readsLaunched.Add(1)
+		w.execWrite(job)
 		return
 	}
 
-	timeSlice.lastProcessedTime.Store(currentTime)
-	timeSlice.processedCount.Add(processedCount)
+	// 【关键时序】inflightReads.Add 必须在 spawn goroutine 之前、
+	// 在 RLock + enableRW 重检查之后同步执行。
+	// readsLaunched.Add 与 inflightReads.Add 紧邻：execWrite 看到 readsLaunched
+	// 追平后，再 mu.WLock 即可正确等待这些 inflight readers。
+	w.inflightReads.Add(1)
+	w.inflightReadCnt.Add(1)
+	w.env.rw.readTotal.Add(1)
+	w.readsLaunched.Add(1)
 
-	// 如果处理的是低优先级消息，更新全局记录
-	if priority >= def.PriorityLow {
-		w.lastLowPriorityTime.Store(currentTime)
+	readFunc := func() {
+		// WaitGroup + 锁 + 信号量泄漏防护
+		var rlockReleased atomic.Bool
+		defer func() {
+			// 归还信号量令牌
+			if w.env.rw.readSem != nil {
+				<-w.env.rw.readSem
+			}
+			// 释放读锁（必须在 Done 之前）
+			if rlockReleased.CompareAndSwap(false, true) {
+				w.env.rw.mu.RUnlock()
+			}
+			// 可观测性：in-flight 读数量递减
+			w.inflightReadCnt.Add(-1)
+			// WaitGroup Done（最后释放）
+			w.inflightReads.Done()
+		}()
+
+		w.safeExecSkipProfiler(job) // 读 goroutine 跳过共享 Profiler
 	}
-}
 
-// GetFairnessStatistics 获取公平性统计信息
-func (w *Worker) GetFairnessStatistics() map[string]interface{} {
-	currentTime := time.Now().UnixNano()
-	lastLowPriorityTime := w.lastLowPriorityTime.Load()
-
-	stats := map[string]interface{}{
-		"fairness_threshold_ms":  w.fairnessThresholdNs / 1_000_000,
-		"last_low_priority_time": lastLowPriorityTime,
-	}
-
-	if lastLowPriorityTime > 0 {
-		stats["time_since_last_low_priority_ms"] = (currentTime - lastLowPriorityTime) / 1_000_000
-		stats["is_starvation_risk"] = (currentTime - lastLowPriorityTime) > w.fairnessThresholdNs
+	// 优先使用读 goroutine 池，失败则 fallback 到裸 goroutine
+	if w.env.rw.readPool != nil {
+		if err := w.env.rw.readPool.Go(readFunc); err != nil {
+			go readFunc()
+		}
 	} else {
-		stats["time_since_last_low_priority_ms"] = 0
-		stats["is_starvation_risk"] = false
+		go readFunc()
 	}
-
-	return stats
 }
 
-// GetWorkerHealthStatus 获取Worker健康状态
-func (w *Worker) GetWorkerHealthStatus() map[string]interface{} {
-	totalQueueLength := w.GetTotalQueueLen()
-	pendingSignals := w.pendingSignals.Load()
-	currentTime := time.Now().UnixNano()
-
-	status := map[string]interface{}{
-		"worker_id":          w.workerId,
-		"is_closed":          w.closed.Load(),
-		"total_queue_length": totalQueueLength,
-		"pending_signals":    pendingSignals,
-		"current_time_ns":    currentTime,
-		"total_batch_limit":  w.totalBatchLimit,
-	}
-
-	// 添加非空队列信息
-	w.nonEmptyMutex.RLock()
-	nonEmptyCount := len(w.nonEmptyQueues)
-	nonEmptyPriorities := make([]def.Priority, 0, nonEmptyCount)
-	for priority := range w.nonEmptyQueues {
-		nonEmptyPriorities = append(nonEmptyPriorities, priority)
-	}
-	w.nonEmptyMutex.RUnlock()
-
-	status["non_empty_queue_count"] = nonEmptyCount
-	status["non_empty_priorities"] = nonEmptyPriorities
-
-	return status
+func (w *Worker) stopDeadlineExceeded() bool {
+	deadline := atomic.LoadInt64(&w.stopDeadlineNS)
+	return deadline > 0 && time.Now().UnixNano() >= deadline
 }
 
-// GetDetailedStatistics 获取详细的综合统计信息
-func (w *Worker) GetDetailedStatistics() map[string]interface{} {
-	return map[string]interface{}{
-		"priority_statistics":  w.GetPriorityStatistics(),
-		"scheduler_statistics": w.GetSchedulerStatistics(),
-		"fairness_statistics":  w.GetFairnessStatistics(),
-		"health_status":        w.GetWorkerHealthStatus(),
+// execWrite 写操作：等待先序读注册 → mu.WLock → 独占执行。
+//
+// 顺序保证：在 mu.WLock 之前必须先等待 readsLaunched.Load() 追平
+// 进入函数时刻的 readsDispatched 快照，否则 mu.WLock 可能抢在 readPipeline
+// 的 mu.RLock 之前，破坏 read-before-write 的提交顺序。
+//
+// 等待的代价：通常远小于 RLock + 业务 Read 执行时长（读 Job 已 dequeue 仅差
+// readPipeline 的 gate 阶段）；read gate 内部最多停留 5ms（SpinBackoff 上限）。
+func (w *Worker) execWrite(job inf.IMailboxJob) {
+	// ① 等待主循环投递到 readPipeline 的所有先序读完成 RLock + inflightReads.Add
+	target := w.readsDispatched.Load()
+	if target > w.readsLaunched.Load() {
+		bo := idle.NewSpinBackoff(5 * time.Millisecond)
+		for w.readsLaunched.Load() < target {
+			if w.state.Load() == workerStateClosed {
+				w.storePending(job)
+				return
+			}
+			bo.Backoff()
+		}
 	}
+
+	// ② 取 mu.WLock，沿用原 TryLock + 退避 + closed 兜底语义
+	w.env.rw.writeTotal.Add(1)   // 全局写计数
+	writeWaitStart := time.Now() // 写等待计时开始
+	w.writeRequested.Add(1)
+	bo := idle.NewSpinBackoff(5 * time.Millisecond)
+	for !w.env.rw.mu.TryLock() {
+		if w.state.Load() == workerStateClosed {
+			w.writeRequested.Add(-1)
+			// Worker 正在停止但无法获取写锁，暂存到 pendingJob 由 Drain 处理
+			w.storePending(job)
+			return
+		}
+		bo.Backoff()
+	}
+	// 写等待耗时指标
+	writeWait := time.Since(writeWaitStart)
+	w.rwWriteWaitSum.Add(writeWait.Nanoseconds())
+	w.rwWriteWaitCount.Add(1)
+	if writeWait > 100*time.Millisecond {
+		w.env.logger.Warnf("Worker %d write lock wait %v (>100ms), possible long-running readers",
+			w.workerId, writeWait)
+	}
+	// defer 保证 Unlock 在 Add(-1) 之前执行（LIFO）
+	// 确保 writeRequested.Add(-1) 在 Unlock 之后：
+	// 同 Worker 的读路径看到 writeRequested==0 时 WLock 必定已释放
+	defer w.writeRequested.Add(-1)
+	defer w.env.rw.mu.Unlock()
+	w.safeExec(job)
+}
+
+// storePending 把已出队但因 worker closed 无法执行的 Job 暂存到 pendingJob。
+//
+// 不变量断言：Worker 主循环单 goroutine 执行，两个调用点（execWrite 等读 /
+// TryLock）任一命中后立即 return，下一轮主循环 state==closed 退出 → defer drain
+// 消费 pendingJob 后置 nil；因此 storePending 永远不应看到非 nil 的旧值。
+//
+// 若发生覆盖（说明上层协议被破坏），记录 ERROR 并对老 Job 调用 OnJobDiscarded 防泄漏，
+// 比静默丢弃更易在调试期暴露问题，并保持 OnJobDiscarded 对称契约。
+func (w *Worker) storePending(job inf.IMailboxJob) {
+	if old := w.pendingJob; old != nil {
+		// 不变量被破坏：上层协议错误。记录 + 释放老 Job 防泄漏。
+		if w.env != nil && w.env.logger != nil {
+			w.env.logger.Errorf("Worker %d: pendingJob overwritten unexpectedly (state=%d), old job discarded",
+				w.workerId, w.state.Load())
+		}
+		if w.env != nil && w.env.invoker != nil {
+			w.safeNotifyJobDiscarded(old, def.ErrMailboxWorkerClosed)
+		}
+		old.Release()
+	}
+	w.pendingJob = job
+}
+
+// GetJobLen 获取队列中的任务总数
+func (w *Worker) GetJobLen() int {
+	if w.queueManager == nil {
+		return 0
+	}
+	return w.queueManager.GetJobLen()
 }

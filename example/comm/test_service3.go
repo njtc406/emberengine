@@ -6,8 +6,9 @@
 package comm
 
 import (
+	"context"
+
 	"github.com/njtc406/emberengine/engine/pkg/core"
-	"github.com/njtc406/emberengine/engine/pkg/log"
 	"github.com/njtc406/emberengine/example/msg"
 )
 
@@ -27,21 +28,21 @@ func (s *Service3) OnRelease() {
 
 }
 
-func (s *Service3) RPCTest2() {
+func (s *Service3) RPCTest2(ctx context.Context) {
 	//time.Sleep(time.Second * 4) // 模拟耗时操作
-	log.SysLogger.Debugf("call %s func RPCTest2", s.GetName())
+	s.WithContext(ctx).Debug("call func RPCTest2")
 }
 
 func (s *Service3) RPCSum(req *msg.Msg_Test_Req) *msg.Msg_Test_Resp {
 	//time.Sleep(time.Second * 2)
-	log.SysLogger.Debugf("call %s func RPCSum", s.GetName())
+	s.Debug("call func RPCSum")
 	return &msg.Msg_Test_Resp{
 		Ret: req.A + req.B,
 	}
 }
 
 func (s *Service3) RpcTestWithError(_ *msg.Msg_Test_Req) (*msg.Msg_Test_Resp, error) {
-	log.SysLogger.Debugf("call %s func RpcTestWithError", s.GetName())
+	s.Debug("call func RpcTestWithError")
 	return nil, nil
 	//return nil, fmt.Errorf("rpc test")
 }

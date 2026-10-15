@@ -6,58 +6,107 @@
 package client
 
 import (
+	"context"
+	"sync/atomic"
+
+	"github.com/njtc406/emberengine/engine/pkg/actor/mailbox/job"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/monitor"
-	"sync/atomic"
 )
 
 // localSender 本地服务的Client
 type localSender struct {
-	closed int32
+	closed     int32
+	rpcMonitor *monitor.RpcMonitor
 }
 
-func newLClient(_ string) inf.IRpcSender {
-	return &localSender{}
+func newLClient(_ string, rm *monitor.RpcMonitor) inf.IRpcSender {
+	return &localSender{rpcMonitor: rm}
 }
 
 func (lc *localSender) Close() {
 	atomic.StoreInt32(&lc.closed, 1)
 }
 
-func (lc *localSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+// DeliverRequest 将请求投递到目标服务的 mailbox。
+func (lc *localSender) DeliverRequest(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
 	if lc == nil || lc.IsClosed() {
 		return def.ErrServiceIsClosedOrExited
 	}
-
-	// clone一个envelope,保持envelope本身的归属性,不然释放很麻烦
-	return dispatcher.PostMessage(envelope.Clone())
-}
-
-func (lc *localSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	originEnvelope := monitor.GetRpcMonitor().Remove(envelope.GetMeta().GetReqId()) // 回复时先移除监控,防止超时
-	if originEnvelope == nil {
-		return def.ErrEnvelopeNotFound
+	if envelope == nil {
+		return nil
 	}
 
-	if lc == nil || lc.IsClosed() {
-		originEnvelope.Release() // 调用者已经下线,丢弃回复
-		return def.ErrServiceIsClosedOrExited
-	}
-
-	if originEnvelope.GetMeta().NeedCallback() {
-		// 本地调用的回复消息,直接发送到对应service的邮箱处理
-		return dispatcher.PostMessage(originEnvelope)
-	} else {
-		// 同步调用,直接设置调用结束
-		originEnvelope.SetDone()
+	// 本地请求：投递到对端 mailbox。
+	// envelope 的最终 Release 由对端 mailbox 统一处理。
+	rpcJob := job.NewRpcJob()
+	rpcJob.SetContext(ctx)
+	rpcJob.SetPayload(envelope)
+	rpcJob.SetPriority(envelope.GetPriority())
+	rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
+	rpcJob.SetDeadline(envelope.GetMeta().GetDeadline())
+	// PostJob 拥有 Job 所有权：err 时 dispatcher 已内化 Release+OnJobDiscarded。
+	if err := dispatcher.PostJob(rpcJob); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (lc *localSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
-	return lc.SendRequest(dispatcher, envelope)
+// DeliverResponse 处理回复信息：唤醒同步 Call 等待方，或投递异步回调到调用方 mailbox。
+func (lc *localSender) DeliverResponse(ctx context.Context, dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
+	if lc == nil || lc.IsClosed() {
+		return def.ErrServiceIsClosedOrExited
+	}
+	if envelope == nil {
+		return nil
+	}
+
+	meta := envelope.GetMeta()
+	data := envelope.GetData()
+	if meta == nil || data == nil {
+		return def.ErrRpcMsgMetaOrDataIsNil
+	}
+
+	// 移除 monitor 监听
+	rm := lc.rpcMonitor
+	if rm == nil {
+		envelope.Release()
+		return nil
+	}
+	state := rm.Remove(meta.GetReqId())
+	if state != nil {
+		if state.NeedCallback() {
+			// 异步回调：将 callback 信息写入 envelope meta，投递到调用方 mailbox 执行
+			meta.SetCallbacks(state.GetCallbacks())
+			rpcJob := job.NewRpcJob()
+			rpcJob.SetContext(ctx)
+			rpcJob.SetPayload(envelope)
+			rpcJob.SetPriority(envelope.GetPriority())
+			rpcJob.SetDispatcherKey(envelope.GetDispatchKey())
+			rpcJob.SetDeadline(meta.GetDeadline())
+			// PostJob 拥有 Job 所有权
+			if err := dispatcher.PostJob(rpcJob); err != nil {
+				// PostJob 失败：rpcJob 已由 Mailbox 释放（Job 与 payload 生命周期正交），
+				// 需手动释放 envelope（payload）和 state。
+				envelope.Release()
+				state.Release()
+				return err
+			}
+			// PostJob 成功：envelope 由 Worker 执行后在 handleRpcJob 的 defer 中释放。
+			// state 已完成使命（callbacks 已转移给 envelope meta），释放回池。
+			state.Release()
+			return nil
+		}
+
+		// 同步 Call：直接设置结果并唤醒等待方
+		state.SetResult(data.GetResponse(), data.GetError())
+		state.Complete()
+	}
+
+	// state 为 nil 说明已超时被清除，直接释放回复 envelope
+	envelope.Release()
+	return nil
 }
 
 func (lc *localSender) IsClosed() bool {

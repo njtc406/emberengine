@@ -2,17 +2,20 @@ package etcd
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/njtc406/emberengine/engine/pkg/actor"
 	disc "github.com/njtc406/emberengine/engine/pkg/cluster/discovery"
 	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/engine/pkg/def"
 	"github.com/njtc406/emberengine/engine/pkg/event"
 	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/syncx"
+	"github.com/njtc406/emberengine/engine/pkg/utils/xcontext"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/connectivity"
@@ -24,8 +27,16 @@ const (
 	defaultMasterKey = "/ember/master"
 )
 
+var runtimeDebug atomic.Bool
+
+func SetDebug(enabled bool) {
+	runtimeDebug.Store(enabled)
+}
+
 // EtcdDiscovery 具体后端实现（保持统一接口编排）
 type EtcdDiscovery struct {
+	log.ILoggerX
+
 	conf        *config.DiscoveryConf
 	etcdConf    *config.ETCDConf
 	client      *clientv3.Client
@@ -33,7 +44,7 @@ type EtcdDiscovery struct {
 	cancel      context.CancelFunc
 	initialized atomic.Bool
 	started     atomic.Bool
-	watchers    sync.Map // map[string]*watcher
+	watchers    *syncx.Map[string, *watcher] // map[string]*watcher
 
 	// 组件接口
 	watcher  disc.IDiscoveryServiceWatcher
@@ -44,32 +55,44 @@ type EtcdDiscovery struct {
 	provider disc.IClientProvider
 	closed   atomic.Bool
 
-	proc    inf.IEventProcessor
-	handler inf.IEventHandler
+	handler *event.Handler
+	evtCh   inf.IEventChannel
 }
 
 func NewEtcdDiscovery() *EtcdDiscovery { return &EtcdDiscovery{} }
 
-func init() { disc.Register("etcd", NewEtcdDiscovery()) }
+func (e *EtcdDiscovery) SetLogger(logger log.ILoggerX) {
+	e.ILoggerX = logger
+}
 
-func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf) error {
+func init() {
+	disc.Register("etcd", func() inf.IDiscovery {
+		return NewEtcdDiscovery()
+	})
+}
+
+func (e *EtcdDiscovery) Init(conf *config.ClusterConf, eventProcessor inf.IEventProcessor, evtCh inf.IEventChannel) error {
+	if e.ILoggerX == nil {
+		return fmt.Errorf("etcd discovery logger is nil")
+	}
 	if len(conf.ETCDConf.Endpoints) == 0 {
-		log.SysLogger.Debugf("etcd end points is empty")
+		e.Debugf("etcd end points is empty")
 		return nil
 	}
 	e.etcdConf = conf.ETCDConf
-	log.SysLogger.Debugf("etcd discovery conf: %+v", e.etcdConf)
+	e.Debugf("etcd discovery conf: %+v", e.etcdConf)
 	e.conf = normalizeConf(conf.DiscoveryConf)
-	e.proc = proc
-	e.handler = event.NewHandler()
-	e.handler.Init(proc)
+	e.handler = event.NewTriggerHandler()
+	e.handler.Init(eventProcessor)
+	e.evtCh = evtCh
+	e.watchers = syncx.NewMap[string, *watcher]()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.ctx = ctx
 	e.cancel = cancel
 
 	if err := e.connect(); err != nil {
-		log.SysLogger.Errorf("etcd discovery init failed: %v, endpoints: %v", err, conf.ETCDConf.Endpoints)
+		e.Errorf("etcd discovery init failed: %v, endpoints: %v", err, conf.ETCDConf.Endpoints)
 		return err
 	}
 	e.initialized.Store(true)
@@ -82,8 +105,12 @@ func (e *EtcdDiscovery) Init(proc inf.IEventProcessor, conf *config.ClusterConf)
 	e.registry = &etcdServiceRegistry{d: e}
 	e.election = &etcdMasterElection{d: e}
 
-	proc.RegEventReceiverFunc(event.SysEventServiceReg, e.handler, e.onRegister)
-	proc.RegEventReceiverFunc(event.SysEventServiceDis, e.handler, e.onUnregister)
+	if err := event.RegisterHandler(e.handler, event.SysEventServiceReg, "service_register", e.onRegister); err != nil {
+		return fmt.Errorf("register service_register error: %w", err)
+	}
+	if err := event.RegisterHandler(e.handler, event.SysEventServiceDis, "service_unregister", e.onUnregister); err != nil {
+		return fmt.Errorf("register service_unregister error: %w", err)
+	}
 	return nil
 }
 
@@ -111,8 +138,8 @@ func (e *EtcdDiscovery) Close() {
 		e.health.Stop()
 	}
 	e.cancel()
-	e.watchers.Range(func(k, v any) bool {
-		v.(*watcher).Stop()
+	e.watchers.Range(func(k string, v *watcher) bool {
+		v.Stop()
 		e.watchers.Delete(k)
 		return true
 	})
@@ -125,85 +152,102 @@ func (e *EtcdDiscovery) Close() {
 
 func (e *EtcdDiscovery) isConnect() bool {
 	if !e.initialized.Load() || e.closed.Load() {
-		log.SysLogger.Error("etcd discovery not initialized or closed")
+		e.Error("etcd discovery not initialized or closed")
 		return false
 	}
 	if e.client == nil {
-		log.SysLogger.Error("etcd client is nil")
+		e.Error("etcd client is nil")
 		return false
 	}
 	return true
 }
 
 func (e *EtcdDiscovery) syncInitialState() {
-	log.SysLogger.Infof("syncing initial state from path: %s", e.conf.Path)
+	if e.ILoggerX != nil {
+		e.Infof("syncing initial state from path: %s", e.conf.Path)
+	}
 	resp, err := e.provider.GetPrefix(e.ctx, e.conf.Path)
 	if err != nil {
-		log.SysLogger.Errorf("sync services failed: %v", err)
+		if e.ILoggerX != nil {
+			e.Errorf("sync services failed: %v", err)
+		}
 		return
 	}
-	log.SysLogger.Infof("found %d existing services in etcd", len(resp.Kvs))
+	if e.ILoggerX != nil {
+		e.Infof("found %d existing services in etcd", len(resp.Kvs))
+	}
 	for _, kv := range resp.Kvs {
-		log.SysLogger.Debugf("syncing service: key=%s", string(kv.Key))
+		if e.ILoggerX != nil {
+			e.Debugf("syncing service: key=%s", string(kv.Key))
+		}
 		data := *kv
-		ent := event.NewEvent()
-		ent.Type = event.SysEventETCDPut
-		ent.Data = &data
-		if err = e.proc.PushEvent(ent); err != nil {
-			log.SysLogger.Errorf("sync service error: %v", err)
+		evt := event.NewDiscoveryEvent()
+		evt.Context = xcontext.New(nil)
+		evt.EventType = event.SysEventETCDPut
+		evt.Data = &data
+
+		if err := e.evtCh.PushEvent(evt); err != nil {
+			if e.ILoggerX != nil {
+				e.WithContext(evt.Context).Errorf("push discovery event failed: %v", err)
+			}
 		}
 	}
 }
 
-func (e *EtcdDiscovery) onRegister(ev inf.IEvent) {
+func (e *EtcdDiscovery) onRegister(ctx context.Context, svc inf.IService) error {
 	if !e.started.Load() {
-		return
-	}
-	ent := ev.(*event.Event)
-	svc, ok := ent.Data.(inf.IService)
-	if !ok {
-		log.SysLogger.Panic("invalid service registration data")
+		return fmt.Errorf("etcd discovery not started")
 	}
 	pid := svc.GetPid()
-	if _, ok = e.watchers.Load(pid.GetServiceUid()); ok {
-		return
+	if v, ok := e.watchers.Load(pid.GetServiceUid()); ok {
+		return v.registerService()
 	}
 	w := newWatcher(svc, e)
 	e.watchers.Store(pid.GetServiceUid(), w)
 	if err := w.Start(); err != nil {
 		e.watchers.Delete(pid.GetServiceUid())
-		log.SysLogger.Errorf("start service[%s] watcher failed: %v", svc.GetName(), err)
+		e.WithContext(ctx).Errorf("start service[%s] watcher failed: %v", svc.GetName(), err)
+		return err
 	}
+	return nil
 }
 
-func (e *EtcdDiscovery) onUnregister(ev inf.IEvent) {
+func (e *EtcdDiscovery) onUnregister(ctx context.Context, pid *actor.PID) error {
 	if !e.started.Load() {
-		return
+		e.WithContext(ctx).Errorf("etcd discovery not started")
+		return fmt.Errorf("etcd discovery not started")
 	}
-	ent := ev.(*event.Event)
-	pid := ent.Data.(*actor.PID)
 	if v, ok := e.watchers.LoadAndDelete(pid.GetServiceUid()); ok {
-		v.(*watcher).Stop()
+		v.Stop()
 	}
+	return nil
 }
 
 func (e *EtcdDiscovery) watchLoop() {
-	log.SysLogger.Infof("etcd watchLoop started, watching path: %s", e.conf.Path)
+	if e.ILoggerX != nil {
+		e.Infof("etcd watchLoop started, watching path: %s", e.conf.Path)
+	}
 	watchChan := e.provider.WatchPrefix(e.ctx, e.conf.Path)
 	for {
 		select {
 		case <-e.ctx.Done():
-			log.SysLogger.Info("etcd watchLoop stopped")
+			if e.ILoggerX != nil {
+				e.Info("etcd watchLoop stopped")
+			}
 			return
 		case resp := <-watchChan:
 			if err := resp.Err(); err != nil {
-				log.SysLogger.Errorf("watch error: %v", err)
+				if e.ILoggerX != nil {
+					e.Errorf("watch error: %v", err)
+				}
 				watchChan = e.provider.WatchPrefix(e.ctx, e.conf.Path)
 				continue
 			}
-			log.SysLogger.Debugf("etcd watch received %d events", len(resp.Events))
+			if e.ILoggerX != nil {
+				e.Debugf("etcd watch received %d events", len(resp.Events))
+			}
 			for _, ev := range resp.Events {
-				var evType int
+				var evType def.EventType
 				switch ev.Type {
 				case clientv3.EventTypePut:
 					evType = event.SysEventETCDPut
@@ -212,13 +256,19 @@ func (e *EtcdDiscovery) watchLoop() {
 				default:
 					continue
 				}
-				log.SysLogger.Debugf("etcd event: type=%v, key=%s", ev.Type, string(ev.Kv.Key))
+				if e.ILoggerX != nil {
+					e.Debugf("etcd event: type=%v, key=%s", ev.Type, string(ev.Kv.Key))
+				}
 				data := *ev.Kv
-				ent := event.NewEvent()
-				ent.Type = int32(evType)
-				ent.Data = &data
-				if err := e.proc.PushEvent(ent); err != nil {
-					log.SysLogger.Errorf("etcd event error: %v", err)
+				evt := event.NewDiscoveryEvent()
+				evt.Context = xcontext.New(nil)
+				evt.EventType = evType
+				evt.Data = &data
+
+				if err := e.evtCh.PushEvent(evt); err != nil {
+					if e.ILoggerX != nil {
+						e.WithContext(evt.Context).Errorf("push discovery event failed: %v", err)
+					}
 				}
 			}
 		}
@@ -241,7 +291,7 @@ func (e *EtcdDiscovery) healthCheck() {
 }
 
 func (e *EtcdDiscovery) connect() error {
-	client, err := createEtcdClient(e.etcdConf)
+	client, err := createEtcdClient(e.etcdConf, e.ILoggerX)
 	if err != nil {
 		return err
 	}
@@ -250,8 +300,8 @@ func (e *EtcdDiscovery) connect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err = client.Get(ctx, "__health_check__")
-	if err != nil && err != context.DeadlineExceeded {
-		log.SysLogger.Warnf("etcd connection validation warning: %v", err)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		e.Warnf("etcd connection validation warning: %v", err)
 	}
 	// 检查连接状态
 	if !isEtcdClientConnected(client) {
@@ -260,20 +310,20 @@ func (e *EtcdDiscovery) connect() error {
 	return nil
 }
 
-func (d *EtcdDiscovery) watchKey(ctx context.Context, key string, options ...clientv3.OpOption) <-chan clientv3.WatchResponse {
-	return d.client.Watch(ctx, key, options...)
+func (e *EtcdDiscovery) watchKey(ctx context.Context, key string, options ...clientv3.OpOption) <-chan clientv3.WatchResponse {
+	return e.client.Watch(ctx, key, options...)
 }
 
 func (e *EtcdDiscovery) reconnectAndRecover() {
 	oldClient := e.client
 	if err := e.connect(); err != nil {
-		log.SysLogger.Errorf("etcd reconnect failed: %v", err)
+		e.Errorf("etcd reconnect failed: %v", err)
 		return
 	}
 	if oldClient != nil {
 		_ = oldClient.Close()
 	}
-	e.watchers.Range(func(key, value any) bool { value.(*watcher).Restart(); return true })
+	e.watchers.Range(func(key string, value *watcher) bool { value.Restart(); return true })
 }
 
 // 工具
@@ -287,7 +337,7 @@ func normalizeConf(conf *config.DiscoveryConf) *config.DiscoveryConf {
 	return conf
 }
 
-func createEtcdClient(conf *config.ETCDConf) (*clientv3.Client, error) {
+func createEtcdClient(conf *config.ETCDConf, engLogger log.ILoggerX) (*clientv3.Client, error) {
 	// 确保 DialTimeout 有合理的默认值
 	dialTimeout := conf.DialTimeout
 	if dialTimeout == 0 {
@@ -300,7 +350,7 @@ func createEtcdClient(conf *config.ETCDConf) (*clientv3.Client, error) {
 		Password:    conf.Password,
 	}
 	var loggerCfg zap.Config
-	if config.IsDebug() {
+	if runtimeDebug.Load() {
 		loggerCfg = zap.NewDevelopmentConfig()
 	} else {
 		loggerCfg = zap.NewProductionConfig()
@@ -308,12 +358,14 @@ func createEtcdClient(conf *config.ETCDConf) (*clientv3.Client, error) {
 	if conf.NoLogger {
 		cfg.Logger = zap.NewNop()
 	} else {
-		logger, err := loggerCfg.Build()
+		zlogger, err := loggerCfg.Build()
 		if err != nil {
-			log.SysLogger.Errorf("failed to create etcd logger, err:%v", err)
+			if engLogger != nil {
+				engLogger.Errorf("failed to create etcd logger, err:%v", err)
+			}
 			return nil, err
 		}
-		cfg.Logger = logger
+		cfg.Logger = zlogger
 	}
 	return clientv3.New(cfg)
 }

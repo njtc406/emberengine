@@ -1,39 +1,23 @@
 // Package mailbox
-// 模块名: 模块名
-// 功能描述: 描述
+// 多优先级队列调度器配置与调度策略实现。
 // 作者:  yr  2025/8/28 0028 0:28
 // 最后更新:  yr  2025/8/28 0028 0:28
 package mailbox
 
 import (
-	"sync"
-
+	"github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/def"
 )
 
-// PriorityConfig 单个优先级配置
-type PriorityConfig struct {
-	BatchSize int `json:"batch_size"` // 该级别批量处理大小
-	Weight    int `json:"weight"`     // 调度权重（用于加权策略）
-}
-
 // MultiLevelConfig 多级队列配置
 type MultiLevelConfig struct {
-	Enabled    bool                            `json:"enabled"`    // 是否启用多级队列
-	Priorities map[def.Priority]PriorityConfig `json:"priorities"` // 优先级配置列表
-	Strategy   def.ScheduleStrategy            `json:"strategy"`   // 调度策略
+	Enabled    bool                                    `json:"enabled"`    // 是否启用多级队列
+	Priorities map[def.Priority]*config.PriorityConfig `json:"priorities"` // 优先级配置列表
+	Strategy   def.ScheduleStrategy                    `json:"strategy"`   // 调度策略
 }
 
-// WorkerConfig Worker配置参数
-type WorkerConfig struct {
-	// 多级队列配置（必需）
-	MultiLevel *MultiLevelConfig `json:"multi_level"`
-	// 等待模式：cond 或 busy（默认 busy 更接近旧版高吞吐路径）
-	WaitMode string `json:"wait_mode"`
-}
-
-func newDefaultPriorityMap() map[def.Priority]PriorityConfig {
-	return map[def.Priority]PriorityConfig{
+func newDefaultPriorityMap() map[def.Priority]*config.PriorityConfig {
+	return map[def.Priority]*config.PriorityConfig{
 		def.PrioritySys:    {BatchSize: 64, Weight: 20},
 		def.PriorityUrgent: {BatchSize: 32, Weight: 10},
 		def.PriorityHigh:   {BatchSize: 16, Weight: 5},
@@ -43,46 +27,109 @@ func newDefaultPriorityMap() map[def.Priority]PriorityConfig {
 	}
 }
 
-func newDefaultMultiLevelConfig() *MultiLevelConfig {
-	return &MultiLevelConfig{
-		Enabled:    true,
-		Strategy:   def.StrategyAbsolute,
-		Priorities: newDefaultPriorityMap(),
+// DefaultMultiLevelQueueConf 返回默认的多优先级队列配置
+func DefaultMultiLevelQueueConf() *config.MultiLevelQueueConf {
+	return &config.MultiLevelQueueConf{
+		Strategy:        def.StrategyAbsolute,
+		TotalBatchLimit: 32,
+		PriorityBatches: newDefaultPriorityMap(),
 	}
 }
 
-// DefaultWorkerConfig 返回默认配置
-func DefaultWorkerConfig() *WorkerConfig {
-	return &WorkerConfig{
-		MultiLevel: newDefaultMultiLevelConfig(),
-		WaitMode:   "busy",
+// DefaultWorkerConfig 返回多优先级队列的默认 worker 配置。
+func DefaultWorkerConfig() *config.MultiLevelWorkerConf {
+	return &config.MultiLevelWorkerConf{
+		WaitMode:        "busy",
+		Strategy:        def.StrategyAbsolute,
+		TotalBatchLimit: 32,
+		PriorityBatches: newDefaultPriorityMap(),
 	}
+}
+
+// clonePriorityBatches 深拷贝优先级配置 map（map + struct 双层拷贝）。
+func clonePriorityBatches(src map[def.Priority]*config.PriorityConfig) map[def.Priority]*config.PriorityConfig {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[def.Priority]*config.PriorityConfig, len(src))
+	for priority, pc := range src {
+		if pc == nil {
+			dst[priority] = &config.PriorityConfig{}
+			continue
+		}
+		dst[priority] = &config.PriorityConfig{BatchSize: pc.BatchSize, Weight: pc.Weight}
+	}
+	return dst
+}
+
+// normalizeMultiLevelQueueConf 返回 conf 的规范化副本，不修改调用方原始配置。
+func normalizeMultiLevelQueueConf(conf *config.MultiLevelQueueConf) *config.MultiLevelQueueConf {
+	if conf == nil {
+		return DefaultMultiLevelQueueConf()
+	}
+	normalized := &config.MultiLevelQueueConf{
+		Strategy:        conf.Strategy,
+		TotalBatchLimit: conf.TotalBatchLimit,
+		PriorityBatches: clonePriorityBatches(conf.PriorityBatches),
+	}
+	if len(normalized.PriorityBatches) == 0 {
+		normalized.PriorityBatches = newDefaultPriorityMap()
+	}
+	return normalized
+}
+
+// normalizeMultiLevelWorkerConf 返回 conf 的规范化副本，不修改调用方原始配置。
+func normalizeMultiLevelWorkerConf(conf *config.MultiLevelWorkerConf) *config.MultiLevelWorkerConf {
+	if conf == nil {
+		return DefaultWorkerConfig()
+	}
+	normalized := &config.MultiLevelWorkerConf{
+		WaitMode:        conf.WaitMode,
+		Strategy:        conf.Strategy,
+		TotalBatchLimit: conf.TotalBatchLimit,
+		PriorityBatches: clonePriorityBatches(conf.PriorityBatches),
+	}
+	if len(normalized.PriorityBatches) == 0 {
+		normalized.PriorityBatches = newDefaultPriorityMap()
+	}
+	return normalized
 }
 
 // PriorityScheduler 多级优先级调度器
+//
+// NOTE: PriorityScheduler 不是并发安全的。
+// counters map 由单个 Worker goroutine 独占使用（每个 Worker 拥有独立的 PriorityQueueManager/Scheduler），
+// 不需要额外的锁或 atomic 保护；该调度器的并发边界是单 Worker 独占。
 type PriorityScheduler struct {
 	strategy   def.ScheduleStrategy
-	priorities map[def.Priority]PriorityConfig
+	priorities map[def.Priority]*config.PriorityConfig
 	weights    map[def.Priority]int
 	counters   map[def.Priority]int // 用于加权轮询和防饥饿
-	mutex      sync.RWMutex
+
+	// weighted/fairness 策略下"相同最高优先级"集合的复用 buffer：
+	// 避免每次 NextJob 调用重复 allocate samePriorityQueues。
+	// 单 worker 独占 scheduler，无需锁保护。
+	samePriorityBuf []def.Priority
 }
 
 // NewPriorityScheduler 创建新的优先级调度器
-func NewPriorityScheduler(config *MultiLevelConfig) *PriorityScheduler {
-	if config == nil || !config.Enabled {
-		return nil
-	}
+func NewPriorityScheduler(conf *config.MultiLevelWorkerConf) *PriorityScheduler {
+	return newPrioritySchedulerFromNormalized(normalizeMultiLevelWorkerConf(conf))
+}
 
+// newPrioritySchedulerFromNormalized 从已规范化的配置构造调度器，不做二次深拷贝。
+// 调用方须保证 conf 已是独立副本（由 normalizeMultiLevelWorkerConf 生成）。
+func newPrioritySchedulerFromNormalized(conf *config.MultiLevelWorkerConf) *PriorityScheduler {
 	scheduler := &PriorityScheduler{
-		strategy:   config.Strategy,
-		priorities: config.Priorities,
-		weights:    make(map[def.Priority]int),
-		counters:   make(map[def.Priority]int),
+		strategy:        conf.Strategy,
+		priorities:      conf.PriorityBatches,
+		weights:         make(map[def.Priority]int),
+		counters:        make(map[def.Priority]int),
+		samePriorityBuf: make([]def.Priority, 0, len(conf.PriorityBatches)),
 	}
 
 	// 初始化权重映射
-	for lv, pc := range config.Priorities {
+	for lv, pc := range conf.PriorityBatches {
 		scheduler.weights[lv] = pc.Weight
 		scheduler.counters[lv] = 0
 	}
@@ -121,8 +168,8 @@ func (ps *PriorityScheduler) weightedPriorityWithOrdering(available []def.Priori
 	// 找到最高优先级（数组第一个元素）
 	highestPriority := available[0]
 
-	// 收集所有相同最高优先级的队列
-	var samePriorityQueues []def.Priority
+	// 复用预分配 buffer，避免 per-NextJob 分配
+	samePriorityQueues := ps.samePriorityBuf[:0]
 	for _, p := range available {
 		if p == highestPriority {
 			samePriorityQueues = append(samePriorityQueues, p)
@@ -171,8 +218,8 @@ func (ps *PriorityScheduler) fairnessPriorityWithOrdering(available []def.Priori
 	// 找到最高优先级（数组第一个元素）
 	highestPriority := available[0]
 
-	// 收集所有相同最高优先级的队列
-	var samePriorityQueues []def.Priority
+	// 复用预分配 buffer，避免 per-NextJob 分配
+	samePriorityQueues := ps.samePriorityBuf[:0]
 	for _, p := range available {
 		if p == highestPriority {
 			samePriorityQueues = append(samePriorityQueues, p)
@@ -192,90 +239,6 @@ func (ps *PriorityScheduler) fairnessPriorityWithOrdering(available []def.Priori
 	minCounter := 1<<63 - 1
 
 	for _, p := range samePriorityQueues {
-		counter := ps.counters[p]
-		if selectedPriority == -1 || counter < minCounter {
-			minCounter = counter
-			selectedPriority = p
-		}
-	}
-
-	if selectedPriority != -1 {
-		ps.counters[selectedPriority]++
-	}
-
-	return selectedPriority
-}
-
-// NextPriority 原有方法，保持向后兼容
-func (ps *PriorityScheduler) NextPriority(availablePriorities []def.Priority) def.Priority {
-	if ps == nil || len(availablePriorities) == 0 {
-		return -1
-	}
-	// 单线程 worker 内调用，无需加锁
-	switch ps.strategy {
-	case def.StrategyAbsolute:
-		return ps.absolutePriority(availablePriorities)
-	case def.StrategyWeighted:
-		return ps.weightedPriority(availablePriorities)
-	case def.StrategyFairness:
-		return ps.fairnessPriority(availablePriorities)
-	default:
-		return ps.absolutePriority(availablePriorities)
-	}
-}
-
-// absolutePriority 绝对优先策略：总是选择数值最小的优先级
-func (ps *PriorityScheduler) absolutePriority(available []def.Priority) def.Priority {
-	minPriority := available[0]
-	for _, p := range available[1:] {
-		if p < minPriority {
-			minPriority = p
-		}
-	}
-	return minPriority
-}
-
-// weightedPriority 加权轮询策略：根据权重分配处理机会
-func (ps *PriorityScheduler) weightedPriority(available []def.Priority) def.Priority {
-	// 检查并重置计数器（防止溢出）
-	ps.resetCountersIfNeeded()
-
-	// 找到计数器值最小且有权重的优先级
-	var selectedPriority def.Priority = -1
-	minRatio := float64(1<<63 - 1)
-
-	for _, p := range available {
-		weight, exists := ps.weights[p]
-		if !exists || weight <= 0 {
-			continue
-		}
-
-		counter := ps.counters[p]
-		ratio := float64(counter) / float64(weight)
-
-		if selectedPriority == -1 || ratio < minRatio {
-			minRatio = ratio
-			selectedPriority = p
-		}
-	}
-
-	if selectedPriority != -1 {
-		ps.counters[selectedPriority]++
-	}
-
-	return selectedPriority
-}
-
-// fairnessPriority 防饥饿策略：确保每个优先级都有处理机会
-func (ps *PriorityScheduler) fairnessPriority(available []def.Priority) def.Priority {
-	// 检查并重置计数器（防止溢出）
-	ps.resetCountersIfNeeded()
-
-	// 找到计数器值最小的优先级
-	var selectedPriority def.Priority = -1
-	minCounter := 1<<63 - 1
-
-	for _, p := range available {
 		counter := ps.counters[p]
 		if selectedPriority == -1 || counter < minCounter {
 			minCounter = counter

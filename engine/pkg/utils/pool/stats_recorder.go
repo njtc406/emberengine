@@ -78,6 +78,69 @@ pool_name:    %-15s
 func NewStatsRecorder(name string) IStatsRecorder {
 	return &Stats{Name: name}
 }
+
+type switchableStatsRecorder struct {
+	enabled   func() bool
+	statsData *Stats
+}
+
+func NewSwitchableStatsRecorder(name string, enabled func() bool) IStatsRecorder {
+	if enabled == nil {
+		enabled = func() bool { return false }
+	}
+	return &switchableStatsRecorder{
+		enabled:   enabled,
+		statsData: &Stats{Name: name},
+	}
+}
+
+func (s *switchableStatsRecorder) incHit() {
+	if s.enabled() {
+		s.statsData.incHit()
+	}
+}
+
+func (s *switchableStatsRecorder) incMiss() {
+	if s.enabled() {
+		s.statsData.incMiss()
+	}
+}
+
+func (s *switchableStatsRecorder) incCurrentSize() {
+	if s.enabled() {
+		s.statsData.incCurrentSize()
+	}
+}
+
+func (s *switchableStatsRecorder) decCurrentSize() {
+	if s.enabled() {
+		s.statsData.decCurrentSize()
+	}
+}
+
+func (s *switchableStatsRecorder) incOverflow() {
+	if s.enabled() {
+		s.statsData.incOverflow()
+	}
+}
+
+func (s *switchableStatsRecorder) incTotalAlloc() {
+	if s.enabled() {
+		s.statsData.incTotalAlloc()
+	}
+}
+
+func (s *switchableStatsRecorder) stats() Stats {
+	return s.statsData.stats()
+}
+
+func (s *switchableStatsRecorder) String() string {
+	if !s.enabled() {
+		return ""
+	}
+	return s.statsData.String()
+}
+
 func (s *Stats) incHit() {
 	atomic.AddInt64(&s.HitCount, 1)
 }

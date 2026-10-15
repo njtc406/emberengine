@@ -1,9 +1,11 @@
 package timingwheel_test
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/log"
+	"context"
 	"testing"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/log"
 
 	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
 )
@@ -12,20 +14,34 @@ func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
-var dp = timingwheel.NewTaskScheduler(10000000, 10, timingwheel.GetTimingWheel())
+var dp timingwheel.ITimerScheduler
 
-func printTask1(t *timingwheel.Timer, args ...interface{}) error {
+func printTask1(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+	_ = ctx
+	_ = t
 	return nil
 }
 
 func BenchmarkTimingWheel_StartStop(b *testing.B) {
-	logger, err := log.NewDefaultLogger("", nil, true)
+	logger, err := log.NewDefaultLogger(&log.LoggerConf{})
 	if err != nil {
 		b.Fatalf("Failed to create logger: %v", err)
 	}
-	timingwheel.Start(time.Millisecond, 20, logger)
-	defer timingwheel.Stop()
+	tw := timingwheel.NewTimingWheel(time.Millisecond, 200, log.NewLoggerX(logger, log.Fields{"pkg": "tw"}))
+	tw.Start()
+	defer tw.Stop()
+
+	dp, err = timingwheel.NewJobScheduler(
+		"benchmark test",
+		10000000,
+		10,
+		tw,
+		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_benchmark"}),
+	)
+	if err != nil {
+		b.Fatalf("Failed to create scheduler: %v", err)
+	}
 
 	cases := []struct {
 		name string

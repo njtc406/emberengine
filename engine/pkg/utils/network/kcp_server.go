@@ -1,10 +1,11 @@
 package network
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/utils/network/processor"
-	"github.com/xtaci/kcp-go"
 	"sync"
 	"time"
+
+	"github.com/njtc406/emberengine/engine/pkg/utils/network/processor"
+	"github.com/xtaci/kcp-go"
 )
 
 type KCPServer struct {
@@ -87,6 +88,9 @@ type KcpCfg struct {
 func (kp *KCPServer) Init(kcpCfg *KcpCfg) {
 	kp.kcpCfg = kcpCfg
 	kp.msgParser.Init()
+	if kp.kcpCfg.LenMsgLen != 1 && kp.kcpCfg.LenMsgLen != 2 && kp.kcpCfg.LenMsgLen != 4 {
+		kp.kcpCfg.LenMsgLen = Default_LenMsgLen
+	}
 	kp.msgParser.LenMsgLen = kp.kcpCfg.LenMsgLen
 	kp.msgParser.MaxMsgLen = kp.kcpCfg.MaxMsgLen
 	kp.msgParser.MinMsgLen = kp.kcpCfg.MinMsgLen

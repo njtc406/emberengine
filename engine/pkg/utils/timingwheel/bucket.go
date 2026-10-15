@@ -7,12 +7,11 @@ import (
 )
 
 type bucket struct {
-	// 64-bit atomic operations require 64-bit alignment, but 32-bit
-	// compilers do not ensure it. So we must keep the 64-bit field
-	// as the first field of the struct.
+	// 64 位的原子操作要求 64 位对齐，但 32 位的编译器并不保证对齐。
+	// 因此必须将 64 位字段放在结构体的第一个字段位置。
 	//
-	// For more explanations, see https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	// and https://go101.org/article/memory-layout.html.
+	// 详细说明见: https://golang.org/pkg/sync/atomic/#pkg-note-BUG
+	// 以及: https://go101.org/article/memory-layout.html
 	expiration int64
 
 	mu     sync.Mutex
@@ -36,6 +35,10 @@ func (b *bucket) SetExpiration(expiration int64) bool {
 
 func (b *bucket) Add(t *Timer) {
 	b.mu.Lock()
+	if !t.isActive() {
+		b.mu.Unlock()
+		return
+	}
 
 	e := b.timers.PushBack(t)
 	t.setBucket(b)
@@ -67,23 +70,24 @@ func (b *bucket) Remove(t *Timer) bool {
 
 func (b *bucket) Flush(reinsert func(*Timer)) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	timers := make([]*Timer, 0, b.timers.Len())
 
 	for e := b.timers.Front(); e != nil; {
 		next := e.Next()
 
 		t := e.Value.(*Timer)
 		b.remove(t)
-		// Note that this operation will either execute the timer's task, or
-		// insert the timer into another bucket belonging to a lower-level wheel.
-		//
-		// In either case, no further lock operation will happen to b.mu.
-		if t.isActive() && reinsert != nil {
-			reinsert(t)
-		}
+		timers = append(timers, t)
 
 		e = next
 	}
 
 	b.SetExpiration(-1)
+	b.mu.Unlock()
+
+	for _, t := range timers {
+		if t.isActive() && reinsert != nil {
+			reinsert(t)
+		}
+	}
 }

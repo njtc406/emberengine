@@ -49,7 +49,7 @@ func (h *Handler) OnMessage(s inf.ISession, msg []byte) {
 	// 处理消息
 	if !h.limiter.Allow() {
 		// 限流!直接踢下线
-		h.GetLogger().Errorf("user[%s] connId[%d] reach msg limit, kick out", s.GetUid(), s.GetSessionId())
+		h.GetLogger().Errorf("user[%d] connId[%d] reach msg limit, kick out", s.GetUid(), s.GetSessionId())
 		// TODO 考虑做成hook函数,由业务来决定
 		h.sessionMgr.Kick(s.GetSessionId(), "msg limit")
 		return

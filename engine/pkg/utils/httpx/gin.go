@@ -8,16 +8,18 @@ package httpx
 import (
 	"context"
 	"fmt"
-	"github.com/gin-contrib/gzip"
-	"github.com/gin-gonic/gin"
-	log2 "github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
-	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/gin-contrib/gzip"
+	"github.com/gin-gonic/gin"
+	"github.com/njtc406/emberengine/engine/pkg/log"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 )
 
 // Conf 配置信息
@@ -40,6 +42,8 @@ type Conf struct {
 	Account map[string]string
 	// 证书文件
 	CAFile *CAFile
+	// 安全响应头配置(nil 表示使用默认配置)
+	SecurityHeaders *SecurityHeadersConf
 }
 
 func (c *Conf) GetHttpDir() string {
@@ -63,7 +67,7 @@ type GinServer struct {
 	server  *http.Server
 	router  *router_center.GroupHandlerPool
 	conf    *Conf
-	logger  log2.ILogger
+	logger  log.ILoggerX
 
 	middleware     []gin.HandlerFunc
 	beforeServHook []func()
@@ -80,17 +84,16 @@ func NewGinServer() *GinServer {
 	}
 }
 
-func (gs *GinServer) Init(logger log2.ILogger, systemMod string, conf *Conf) error {
+func (gs *GinServer) Init(logger log.ILoggerX, systemMod string, conf *Conf) error {
 	gs.conf = conf
 	gs.logger = logger
-	gin.DefaultWriter = io.MultiWriter(gs.logger.WriterLevel(log2.InfoLevel))       // 设置默认日志输出为info级别
-	gin.DefaultErrorWriter = io.MultiWriter(gs.logger.WriterLevel(log2.ErrorLevel)) // 设置默认错误日志输出为error级别
 	// 运行模式
 	gin.SetMode(systemMod)
 	// 设置中间件
 	gs.handler.Use(
 		gzip.Gzip(gzip.DefaultCompression),
-		gin.LoggerWithFormatter(gs.logFormatter), // 这个设置的是默认日志的输出格式
+		gs.customLoggerMiddleware(),
+		gs.securityHeadersMiddleware(),
 		gin.Recovery(),
 	)
 	// 自定义中间件
@@ -215,4 +218,78 @@ func (gs *GinServer) WithMiddleware(middleware ...gin.HandlerFunc) *GinServer {
 func (gs *GinServer) SetRouter(router *router_center.GroupHandlerPool) *GinServer {
 	gs.router = router
 	return gs
+}
+
+func (gs *GinServer) securityHeadersMiddleware() gin.HandlerFunc {
+	conf := DefaultSecurityHeadersConf()
+	if gs.conf != nil && gs.conf.SecurityHeaders != nil {
+		conf = *gs.conf.SecurityHeaders
+	}
+	return SecurityHeaders(conf)
+}
+
+func (gs *GinServer) customLoggerMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		p := c.Request.URL.Path
+		rawQuery := sanitizeQuery(c.Request.URL.RawQuery)
+		c.Next()
+		// 构建日志消息
+		entry := gs.logger.WithFields(log.Fields{
+			"status":     c.Writer.Status(),
+			"method":     c.Request.Method,
+			"path":       p,
+			"query":      rawQuery,
+			"ip":         c.ClientIP(),
+			"latency":    time.Since(start),
+			"user_agent": c.Request.UserAgent(),
+		})
+		// 添加错误信息（如果有）
+		if len(c.Errors) > 0 {
+			entry = entry.WithField("errors", c.Errors.String())
+		}
+		// 根据状态码级别决定日志级别
+		status := c.Writer.Status()
+		switch {
+		case status >= 500:
+			entry.Error("Request completed with server error")
+		case status >= 400:
+			entry.Warn("Request completed with client error")
+		default:
+			entry.Info("Request completed successfully")
+		}
+	}
+}
+
+// sensitiveQueryKeys 包含需要在日志中脱敏的查询参数名称。
+var sensitiveQueryKeys = map[string]struct{}{
+	"token":        {},
+	"secret":       {},
+	"password":     {},
+	"passwd":       {},
+	"access_token": {},
+	"api_key":      {},
+	"apikey":       {},
+}
+
+// sanitizeQuery 对 URL 查询字符串中的敏感参数进行脱敏处理。
+func sanitizeQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "[parse_error]"
+	}
+	redacted := false
+	for key := range values {
+		if _, ok := sensitiveQueryKeys[strings.ToLower(key)]; ok {
+			values.Set(key, "[REDACTED]")
+			redacted = true
+		}
+	}
+	if !redacted {
+		return rawQuery // 无敏感参数，原样返回避免重编码
+	}
+	return values.Encode()
 }

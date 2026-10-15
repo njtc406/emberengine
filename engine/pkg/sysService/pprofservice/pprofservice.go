@@ -6,11 +6,11 @@
 package pprofservice
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/njtc406/emberengine/engine/pkg/log"
-	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 	"net/http"
 	_ "net/http/pprof"
+
+	"github.com/gin-gonic/gin"
+	"github.com/njtc406/emberengine/engine/pkg/utils/httpx/router_center"
 
 	systemConfig "github.com/njtc406/emberengine/engine/pkg/config"
 	"github.com/njtc406/emberengine/engine/pkg/core"
@@ -20,7 +20,7 @@ import (
 	"github.com/njtc406/emberengine/engine/pkg/sysService/pprofservice/config"
 )
 
-func init() {
+func RegisterPprofService() {
 	services.SetService("PprofService", func() inf.IService { return &PprofService{} })
 	systemConfig.RegisterServiceConf(&systemConfig.ServiceConfig{
 		ServiceName:   "PprofService",
@@ -46,7 +46,13 @@ func (ps *PprofService) getConf() *config.PprofConf {
 }
 
 func (ps *PprofService) OnInit() error {
-	ps.httpModule = httpmodule.NewHttpModule(ps.getConf().PprofConf, log.SysLogger, systemConfig.GetStatus())
+	status := systemConfig.Release
+	if ctx := ps.GetNodeContext(); ctx != nil {
+		if cfg := ctx.GetConfig(); cfg != nil {
+			status = cfg.GetStatus()
+		}
+	}
+	ps.httpModule = httpmodule.NewHttpModule(ps.getConf().PprofConf, status)
 	ps.httpModule.SetRouter(ps.initRouter())
 	_, err := ps.AddModule(ps.httpModule)
 	if err != nil {
@@ -68,7 +74,7 @@ func (ps *PprofService) routerHandler(r *gin.RouterGroup) {
 
 func (ps *PprofService) OnStart() error {
 	if err := ps.httpModule.OnStart(); err != nil {
-		log.SysLogger.Panic(err)
+		return err
 	}
 	return nil
 }

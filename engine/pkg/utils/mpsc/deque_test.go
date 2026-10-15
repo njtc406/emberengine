@@ -80,7 +80,9 @@ func TestMpscQueueConsistency(t *testing.T) {
 			_, present := seen[s]
 			if present {
 				log.Printf("item have already been seen %v", s)
-				t.FailNow()
+				t.Errorf("item have already been seen %v", s)
+				wg.Done()
+				return
 			}
 			seen[s] = s
 			if i == cmax*c {
@@ -94,8 +96,9 @@ func TestMpscQueueConsistency(t *testing.T) {
 		jj := j
 		go func() {
 			for i := 0; i < cmax; i++ {
-				val := fmt.Sprintf("%v %v", jj, i)
-				q.Push(&val)
+				p := new(string)
+				*p = fmt.Sprintf("%v %v", jj, i)
+				q.Push(p)
 			}
 		}()
 	}
@@ -105,8 +108,8 @@ func TestMpscQueueConsistency(t *testing.T) {
 	// queue should be empty
 	for i := 0; i < 100; i++ {
 		r, ok := q.Pop()
-		if !ok {
-			log.Printf("unexpected result %+v", r)
+		if ok {
+			log.Printf("unexpected non-empty result %+v", r)
 			t.FailNow()
 		}
 	}
