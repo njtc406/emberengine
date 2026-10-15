@@ -6,8 +6,10 @@
 package client
 
 import (
-	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"context"
 	"time"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 
 	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
@@ -19,94 +21,63 @@ type EnhancedSender struct {
 	address string
 	rpcType string
 	poolMgr *pool.PoolManager
+	logger  log.ILoggerX
 }
 
-// NewEnhancedSender 创建新的增强发送器
-func NewEnhancedSender(address, rpcType string) *EnhancedSender {
+// NewEnhancedSender 使用节点持有的连接池和日志器创建增强发送器。
+// 连接池的注册、配置和关闭仍由调用方负责。
+func NewEnhancedSender(address, rpcType string, poolMgr *pool.PoolManager, logger log.ILoggerX) *EnhancedSender {
 	return &EnhancedSender{
 		address: address,
 		rpcType: rpcType,
-		poolMgr: pool.GetGlobalPoolManager(),
+		poolMgr: poolMgr,
+		logger:  logger,
 	}
 }
 
-// SendRequest 发送请求
+// SendRequest 发送请求并转移 envelope 所有权，调用后不得再使用 envelope。
 func (es *EnhancedSender) SendRequest(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	start := time.Now()
-
-	conn, err := es.poolMgr.GetConnection(es.address, es.rpcType)
-	if err != nil {
-		log.SysLogger.Errorf("获取连接失败: %v", err)
-		return err
-	}
-
-	// 检查熔断器状态
-	if !conn.IsHealthy() {
-		log.SysLogger.Warnf("连接 %s 不健康，跳过请求", conn.ID)
-		return def.ErrRPCHadClosed
-	}
-
-	// 更新连接状态为活跃
-	conn.SetState(pool.StateActive)
-
-	// 执行实际请求
-	err = conn.Sender.SendRequest(dispatcher, envelope)
-
-	// 记录请求结果和更新指标
-	responseTime := time.Since(start)
-	success := err == nil
-	conn.UpdateMetrics(success, responseTime)
-
-	// 恢复连接状态为空闲
-	conn.SetState(pool.StateIdle)
-
-	if !success {
-		log.SysLogger.Errorf("发送请求失败: %v", err)
-	}
-
-	return err
+	return es.deliver(dispatcher, envelope, false)
 }
 
-// SendRequestAndRelease 发送请求并释放envelope
+// SendRequestAndRelease 与 SendRequest 相同，底层 DeliverRequest 已负责释放 envelope。
 func (es *EnhancedSender) SendRequestAndRelease(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	defer envelope.Release()
 	return es.SendRequest(dispatcher, envelope)
 }
 
-// SendResponse 发送响应
+// SendResponse 发送响应并转移 envelope 所有权。
 func (es *EnhancedSender) SendResponse(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope) error {
-	start := time.Now()
+	return es.deliver(dispatcher, envelope, true)
+}
 
+func (es *EnhancedSender) deliver(dispatcher inf.IRpcDispatcher, envelope inf.IEnvelope, response bool) error {
+	start := time.Now()
 	conn, err := es.poolMgr.GetConnection(es.address, es.rpcType)
 	if err != nil {
-		log.SysLogger.Errorf("获取连接失败: %v", err)
+		if es.logger != nil {
+			es.logger.Errorf("获取连接失败: %v", err)
+		}
+		envelope.Release()
 		return err
 	}
-
-	// 检查熔断器状态
 	if !conn.IsHealthy() {
-		log.SysLogger.Warnf("连接 %s 不健康，跳过响应", conn.ID)
+		if es.logger != nil {
+			es.logger.Warnf("连接 %s 不健康，跳过发送", conn.ID)
+		}
+		envelope.Release()
 		return def.ErrRPCHadClosed
 	}
-
-	// 更新连接状态为活跃
 	conn.SetState(pool.StateActive)
-
-	// 执行实际响应
-	err = conn.Sender.SendResponse(dispatcher, envelope)
-
-	// 记录请求结果和更新指标
-	responseTime := time.Since(start)
-	success := err == nil
-	conn.UpdateMetrics(success, responseTime)
-
-	// 恢复连接状态为空闲
-	conn.SetState(pool.StateIdle)
-
-	if !success {
-		log.SysLogger.Errorf("发送响应失败: %v", err)
+	if response {
+		err = conn.Sender.DeliverResponse(context.Background(), dispatcher, envelope)
+	} else {
+		err = conn.Sender.DeliverRequest(context.Background(), dispatcher, envelope)
 	}
-
+	conn.UpdateMetrics(err == nil, time.Since(start))
+	conn.SetState(pool.StateIdle)
+	if err != nil && es.logger != nil {
+		es.logger.Errorf("发送失败: %v", err)
+	}
 	return err
 }
 

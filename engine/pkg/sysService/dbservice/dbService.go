@@ -11,7 +11,6 @@ import (
 	systemConfig "github.com/njtc406/emberengine/v2/engine/pkg/config"
 	"github.com/njtc406/emberengine/v2/engine/pkg/core"
 	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 	"github.com/njtc406/emberengine/v2/engine/pkg/services"
 	mongodbmodule "github.com/njtc406/emberengine/v2/engine/pkg/sysModule/mongomodule"
 	"github.com/njtc406/emberengine/v2/engine/pkg/sysModule/mysqlmodule"
