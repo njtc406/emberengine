@@ -2,7 +2,6 @@ package network
 
 import (
 	"crypto/tls"
-	"github.com/njtc406/emberengine/v2/v2/engine/pkg/log"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/njtc406/emberengine/v2/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 
 	"github.com/gorilla/websocket"
 )
