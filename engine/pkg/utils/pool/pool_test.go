@@ -28,7 +28,7 @@ func BenchmarkSyncPoolWrapper_GetPut(b *testing.B) {
 /*
 goos: windows
 goarch: amd64
-pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
+pkg: github.com/njtc406/emberengine/v2/engine/pkg/utils/pool
 cpu: AMD Ryzen 7 5700X 8-Core Processor
 BenchmarkSyncPoolWrapper_GetPut
     pool_test.go:17: stats: {Name:test CurrentSize:1 HitCount:1 MissCount:0 T
@@ -63,7 +63,7 @@ func BenchmarkSyncPoolWrapper_GetPutParallel(b *testing.B) {
 /*
 goos: windows
 goarch: amd64
-pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
+pkg: github.com/njtc406/emberengine/v2/engine/pkg/utils/pool
 cpu: AMD Ryzen 7 5700X 8-Core Processor
 BenchmarkSyncPoolWrapper_GetPutParallel
     pool_test.go:49: stats: {Name:test CurrentSize:1 HitCount:1 MissCount:1 T
@@ -97,7 +97,7 @@ func BenchmarkPerPPoolWrapper_GetPut(b *testing.B) {
 /*
 goos: windows
 goarch: amd64
-pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
+pkg: github.com/njtc406/emberengine/v2/engine/pkg/utils/pool
 cpu: AMD Ryzen 7 2700 Eight-Core Processor
 BenchmarkPerPPoolWrapper_GetPut
     pool_test.go:80: stats: {Name:test HitCount:0 MissCount:1 OverflowCount:0
@@ -130,7 +130,7 @@ func BenchmarkPerPPoolWrapper_GetPutParallel(b *testing.B) {
 }
 
 /*
-pkg: github.com/njtc406/emberengine/engine/pkg/utils/pool
+pkg: github.com/njtc406/emberengine/v2/engine/pkg/utils/pool
 cpu: AMD Ryzen 7 2700 Eight-Core Processor
 BenchmarkPerPPoolWrapper_GetPutParallel
     pool_test.go:112: stats: {Name:test HitCount:0 MissCount:1 OverflowCount:

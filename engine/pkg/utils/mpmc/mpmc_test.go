@@ -91,7 +91,7 @@ cpu: AMD Ryzen 7 5700X 8-Core Processor
 BenchmarkMPMCQueueParallel-16            5703537               213.3 ns/op             0 B/op          0 allocs/op
 BenchmarkChannel-16                      6220136               193.2 ns/op             0 B/op          0 allocs/op
 PASS
-ok      github.com/njtc406/emberengine/engine/utils/mpmc        2.970s
+ok      github.com/njtc406/emberengine/v2/engine/utils/mpmc        2.970s
 
 goos: windows
 goarch: amd64
@@ -99,7 +99,7 @@ cpu: AMD Ryzen 7 5700X 8-Core Processor
 BenchmarkMPMCQueueParallel-16            5599890               215.2 ns/op             0 B/op          0 allocs/op
 BenchmarkChannel-16                      6589651               194.5 ns/op             0 B/op          0 allocs/op
 PASS
-ok      github.com/njtc406/emberengine/engine/utils/mpmc        3.023s
+ok      github.com/njtc406/emberengine/v2/engine/utils/mpmc        3.023s
 
 ========================================================
 上面两次测试是queue中使用了runtime.Gosched()出让cpu
@@ -107,21 +107,21 @@ ok      github.com/njtc406/emberengine/engine/utils/mpmc        3.023s
 
 goos: windows
 goarch: amd64
-pkg: github.com/njtc406/emberengine/engine/utils/mpmc
+pkg: github.com/njtc406/emberengine/v2/engine/utils/mpmc
 cpu: AMD Ryzen 7 5700X 8-Core Processor
 BenchmarkMPMCQueueParallel-16           96434905                12.48 ns/op            0 B/op          0 allocs/op
 BenchmarkChannel-16                      6193010               192.2 ns/op             0 B/op          0 allocs/op
 PASS
-ok      github.com/njtc406/emberengine/engine/utils/mpmc        3.734s
+ok      github.com/njtc406/emberengine/v2/engine/utils/mpmc        3.734s
 
 goos: windows
 goarch: amd64
-pkg: github.com/njtc406/emberengine/engine/utils/mpmc
+pkg: github.com/njtc406/emberengine/v2/engine/utils/mpmc
 cpu: AMD Ryzen 7 5700X 8-Core Processor
 BenchmarkMPMCQueueParallel-16           81360896                12.45 ns/op            0 B/op          0 allocs/op
 BenchmarkChannel-16                      6096594               195.8 ns/op             0 B/op          0 allocs/op
 PASS
-ok      github.com/njtc406/emberengine/engine/utils/mpmc        2.557s
+ok      github.com/njtc406/emberengine/v2/engine/utils/mpmc        2.557s
 
 ========================================================
 这两次测试queue使用了指数退避出让cpu,比起runtime.Gosched()性能提升了10几倍,同时也比原始的channel更快
