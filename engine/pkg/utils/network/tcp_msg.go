@@ -3,7 +3,8 @@ package network
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/bytespool"
 
 	"io"
 	"math"
@@ -30,7 +31,7 @@ func (p *MsgParser) getMaxMsgLen() uint32 {
 	case 4:
 		return math.MaxUint32
 	default:
-		panic("LenMsgLen value must be 1 or 2 or 4")
+		return math.MaxUint16
 	}
 }
 

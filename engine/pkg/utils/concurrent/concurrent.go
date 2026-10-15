@@ -7,51 +7,53 @@ package concurrent
 
 import (
 	"fmt"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/asynclib"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 	"github.com/panjf2000/ants/v2"
+	"golang.org/x/net/context"
 )
 
 type IConcurrent interface {
 	OpenConcurrent(poolSize, callbackChannelSize int)
-	AsyncDo(name string, f func() error, cb func(err error))
-	GetChannel() chan IConcurrentCallback
+	AsyncDo(name string, ctx context.Context, f func(ctx context.Context) error, cb func(ctx context.Context, err error))
+	GetChannel() chan inf.IConcurrentCallback
 	Close()
-}
-
-type IConcurrentCallback interface {
-	inf.INamed
-	DoCallback()
 }
 
 // TaskScheduler 是并发任务调度器
 type TaskScheduler struct {
-	pool *ants.Pool
-	c    chan IConcurrentCallback
+	pool   *ants.Pool
+	c      chan inf.IConcurrentCallback
+	logger log.ILoggerX
 }
 
 // NewTaskScheduler 创建一个新的任务调度器
-func NewTaskScheduler() IConcurrent {
-	return &TaskScheduler{}
+func NewTaskScheduler(logger log.ILoggerX) IConcurrent {
+	return &TaskScheduler{logger: logger}
 }
 
 // OpenConcurrent 初始化并发调度器 第一个参数为线程池大小, 第二个参数为回调函数的通道大小
 func (s *TaskScheduler) OpenConcurrent(poolSize, callbackChannelSize int) {
 	if s.pool == nil {
-		s.pool = asynclib.NewAntsPool(poolSize)
+		p, err := ants.NewPool(poolSize, ants.WithPreAlloc(true))
+		if err != nil {
+			s.logger.Errorf("concurrent: create pool failed: %v", err)
+			return
+		}
+		s.pool = p
 	}
 	if s.c == nil {
-		s.c = make(chan IConcurrentCallback, callbackChannelSize)
+		s.c = make(chan inf.IConcurrentCallback, callbackChannelSize)
 	}
 }
 
-func (s *TaskScheduler) GetChannel() chan IConcurrentCallback {
+func (s *TaskScheduler) GetChannel() chan inf.IConcurrentCallback {
 	return s.c
 }
 
 // AsyncDo 添加一个任务到调度器
-func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
+func (s *TaskScheduler) AsyncDo(name string, ctx context.Context, fn func(ctx context.Context) error, cb func(ctx context.Context, err error)) {
 	if s.pool == nil || (fn == nil && cb == nil) {
 		return
 	}
@@ -80,7 +82,7 @@ func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
 			}
 		}()
 
-		task.err = fn()
+		task.err = fn(ctx)
 	})
 	if err != nil {
 		// 任务提交失败,直接回调
@@ -88,7 +90,7 @@ func (s *TaskScheduler) AsyncDo(name string, fn func() error, cb func(error)) {
 	}
 }
 
-func (s *TaskScheduler) notifyCallback(name string, cb func(error), err error) {
+func (s *TaskScheduler) notifyCallback(name string, cb func(context.Context, error), err error) {
 	if cb == nil {
 		return
 	}
@@ -97,7 +99,7 @@ func (s *TaskScheduler) notifyCallback(name string, cb func(error), err error) {
 		case s.c <- &CallbackEvent{name: name, cb: cb, err: err}:
 		default:
 			// 通道满了时，可根据需要记录日志或采取其他措施
-			log.SysLogger.Errorf("callback channel full or closed")
+			s.logger.Errorf("callback channel full or closed")
 		}
 	}
 }
@@ -116,21 +118,21 @@ func (s *TaskScheduler) Close() {
 
 // Task 表示一个并发任务(如果后续有大量并发任务,那么这里就改用pool创建)
 type Task struct {
-	fn       func() error
-	callback func(error)
+	fn       func(ctx context.Context) error
+	callback func(context.Context, error)
 	err      error
 }
 
 // CallbackEvent 表示一个回调事件
 type CallbackEvent struct {
 	name string
-	cb   func(error)
+	cb   func(ctx context.Context, err error)
 	err  error
 }
 
-func (c *CallbackEvent) DoCallback() {
+func (c *CallbackEvent) DoCallback(ctx context.Context) {
 	if c.cb != nil {
-		c.cb(c.err)
+		c.cb(ctx, c.err)
 	}
 }
 

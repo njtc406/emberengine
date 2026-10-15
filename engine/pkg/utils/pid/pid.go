@@ -14,13 +14,13 @@ import (
 )
 
 // RecordPID 记录pid
-func RecordPID(cachePath string, nodeID int32, nodeType string) {
-	_ = os.WriteFile(path.Join(cachePath, fmt.Sprintf("%s_%d", nodeType, nodeID)+".pid"), ([]byte)(strconv.Itoa(GetPid())), 0644)
+func RecordPID(cachePath, nodeID, nodeType string) {
+	_ = os.WriteFile(path.Join(cachePath, fmt.Sprintf("%s_%s", nodeType, nodeID)+".pid"), ([]byte)(strconv.Itoa(GetPid())), 0644)
 }
 
 // DeletePID 删除pid
-func DeletePID(cachePath string, nodeID int32, nodeType string) {
-	_ = os.Remove(path.Join(cachePath, fmt.Sprintf("%s_%d", nodeType, nodeID)+".pid"))
+func DeletePID(cachePath, nodeID, nodeType string) {
+	_ = os.Remove(path.Join(cachePath, fmt.Sprintf("%s_%s", nodeType, nodeID)+".pid"))
 }
 
 // GetPid 获取pid

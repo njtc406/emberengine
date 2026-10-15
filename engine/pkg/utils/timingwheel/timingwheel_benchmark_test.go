@@ -1,25 +1,47 @@
 package timingwheel_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/timingwheel"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/timingwheel"
 )
 
 func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
-var dp = timingwheel.NewTaskScheduler(10000000, 1)
+var dp timingwheel.ITimerScheduler
 
-func printTask1(t *timingwheel.Timer, args ...interface{}) {
+func printTask1(ctx context.Context, t *timingwheel.Timer, args ...interface{}) error {
 	//fmt.Println(">>>>>>>>>>>>>taskId:", taskId)
+	_ = ctx
+	_ = t
+	return nil
 }
 
 func BenchmarkTimingWheel_StartStop(b *testing.B) {
-	timingwheel.Start(time.Millisecond, 20)
-	defer timingwheel.Stop()
+	logger, err := log.NewDefaultLogger(&log.LoggerConf{})
+	if err != nil {
+		b.Fatalf("Failed to create logger: %v", err)
+	}
+	tw := timingwheel.NewTimingWheel(time.Millisecond, 200, log.NewLoggerX(logger, log.Fields{"pkg": "tw"}))
+	tw.Start()
+	defer tw.Stop()
+
+	dp, err = timingwheel.NewJobScheduler(
+		"benchmark test",
+		10000000,
+		10,
+		tw,
+		log.NewLoggerX(logger, log.Fields{"pkg": "timingwheel_benchmark"}),
+	)
+	if err != nil {
+		b.Fatalf("Failed to create scheduler: %v", err)
+	}
 
 	cases := []struct {
 		name string
@@ -31,19 +53,20 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			base := make([]*timingwheel.Timer, c.N)
+			base := make([]uint64, c.N)
 			for i := 0; i < len(base); i++ {
-				base[i] = dp.AfterFunc(genD(i), "", printTask1)
+				base[i], err = dp.AfterFunc(genD(i), "", printTask1)
 			}
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				dp.AfterFunc(time.Second, "", printTask1).Stop()
+				tId, _ := dp.AfterFunc(time.Second, "", printTask1)
+				dp.CancelTimer(tId)
 			}
 
 			b.StopTimer()
 			for i := 0; i < len(base); i++ {
-				base[i].Stop()
+				dp.CancelTimer(base[i])
 			}
 		})
 	}

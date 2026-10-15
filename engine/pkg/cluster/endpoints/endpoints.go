@@ -6,56 +6,74 @@
 package endpoints
 
 import (
+	"context"
+	"fmt"
+	"sync/atomic"
+
 	"github.com/google/uuid"
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	"github.com/njtc406/emberengine/engine/pkg/cluster/endpoints/repository"
-	"github.com/njtc406/emberengine/engine/pkg/config"
-	"github.com/njtc406/emberengine/engine/pkg/event"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/client"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/remote"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	disc "github.com/njtc406/emberengine/v2/engine/pkg/cluster/discovery"
+	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/endpoints/repository"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	"github.com/njtc406/emberengine/v2/engine/pkg/event"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/client"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgbus"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote"
+	remotehandler "github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote/handler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 	"go.etcd.io/etcd/api/v3/mvccpb"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
-var endMgr = &EndpointManager{}
-
 type EndpointManager struct {
-	inf.IEventProcessor
-	inf.IEventHandler
+	log.ILoggerX // 持有 ILoggerX
+
+	eventProcessor *event.Processor
+	eventHandler   *event.Handler
 
 	nodeUid       string
 	isClusterMode bool
 	remotes       map[string]*remote.Remote // 远程服务监听器
-	stopped       bool                      // 是否已停止
+	stopped       atomic.Bool               // 是否已停止
 	repository    *repository.Repository    // 服务存储仓库
+	senderMgr     *client.SenderManager
 }
 
-func GetEndpointManager() *EndpointManager {
-	return endMgr
+// NewEndpointManager 创建新的 EndpointManager 实例（Phase 2 per-Node 模式推荐使用）。
+func NewEndpointManager() *EndpointManager {
+	return &EndpointManager{}
+}
+func (em *EndpointManager) Init(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager) (*EndpointManager, error) {
+	return em.InitWithDeps(eventProcessor, clusterConf, logger, senderMgr, nil, nil, nil)
 }
 
-func (em *EndpointManager) Init(eventProcessor inf.IEventProcessor) *EndpointManager {
+func (em *EndpointManager) InitWithDeps(eventProcessor *event.Processor, clusterConf *config.ClusterConf, logger log.ILoggerX, senderMgr *client.SenderManager, rpcHandler *remotehandler.Handler, natsConf *config.NatsConf, busFactory *msgbus.MessageBusFactory) (*EndpointManager, error) {
+	em.ILoggerX = logger
+	em.senderMgr = senderMgr
 	em.nodeUid = uuid.NewString()
 	em.remotes = make(map[string]*remote.Remote)
-	for _, cfg := range config.Conf.ClusterConf.RPCServers {
-		em.remotes[cfg.Type] = remote.NewRemote().Init(cfg, em)
+	for _, cfg := range clusterConf.RPCServers {
+		rt, err := remote.NewRemote().Init(cfg, em, em.ILoggerX, rpcHandler, natsConf)
+		if err != nil {
+			return nil, fmt.Errorf("init remote server[%s] failed: %w", cfg.Type, err)
+		}
+		em.remotes[cfg.Type] = rt
 	}
 
-	em.IEventProcessor = eventProcessor
+	em.eventProcessor = eventProcessor
 
 	// 事件管理
-	em.IEventProcessor = eventProcessor
-	em.IEventHandler = event.NewHandler()
-	em.IEventHandler.Init(em.IEventProcessor)
+	em.eventHandler = event.NewTriggerHandler()
+	em.eventHandler.Init(em.eventProcessor)
 
-	em.repository = repository.NewRepository()
+	em.repository = repository.NewRepository(busFactory)
 
-	return em
+	return em, nil
 }
 
-func (em *EndpointManager) Start() {
+func (em *EndpointManager) Start() error {
 	em.repository.Start()
 	// 启动rpc监听服务器
 	for _, rt := range em.remotes {
@@ -63,140 +81,188 @@ func (em *EndpointManager) Start() {
 	}
 
 	// 新增、修改服务事件
-	em.IEventProcessor.RegEventReceiverFunc(event.SysEventETCDPut, em.IEventHandler, em.updateServiceInfo)
+	if err := event.RegisterHandler(em.eventHandler, event.SysEventETCDPut, "service_update", em.updateServiceInfo); err != nil {
+		return fmt.Errorf("register service_update error: %w", err)
+	}
 	// 删除服务事件
-	em.IEventProcessor.RegEventReceiverFunc(event.SysEventETCDDel, em.IEventHandler, em.removeServiceInfo)
+	if err := event.RegisterHandler(em.eventHandler, event.SysEventETCDDel, "service_update", em.removeServiceInfo); err != nil {
+		return fmt.Errorf("register service_update error: %w", err)
+	}
+	return nil
 }
 
 func (em *EndpointManager) Stop() {
-	em.stopped = true
+	em.stopped.Store(true)
 	for _, rt := range em.remotes {
 		rt.Close()
 	}
 	em.repository.Stop()
-	client.Close() // 关闭所有连接
-	log.SysLogger.Debugf("endpoints manager stopped")
+	em.Debugf("endpoints manager stopped")
 }
 
 func (em *EndpointManager) SetClusterMode(isClusterMode bool) {
 	em.isClusterMode = isClusterMode
 }
 
-// updateServiceInfo 更新远程服务信息事件
-func (em *EndpointManager) updateServiceInfo(e inf.IEvent) {
-	//log.SysLogger.Debugf("endpoints receive update service event: %+v", e)
-	ev := e.(*event.Event)
-	kv := ev.Data.(*mvccpb.KeyValue)
-	if kv.Value != nil {
-		var pid actor.PID
-		if err := protojson.Unmarshal(kv.Value, &pid); err != nil {
-			log.SysLogger.Errorf("unmarshal pid error: %v", err)
-			return
-		}
-
-		if pid.GetNodeUid() == em.nodeUid {
-			//log.SysLogger.Debugf("endpointmgr ignore -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
-			// 本地服务,忽略
-			return
-		}
-		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr add remote service: %s", pid.String())
-		em.repository.Add(string(kv.Key), client.NewDispatcher(&pid, nil))
-	}
+func (em *EndpointManager) GetNodeUid() string {
+	return em.nodeUid
 }
 
-type delKey struct {
-	Key string
+// updateServiceInfo 更新远程服务信息事件
+func (em *EndpointManager) updateServiceInfo(ctx context.Context, kv *mvccpb.KeyValue) error {
+	if kv == nil || kv.Key == nil {
+		em.WithContext(ctx).Errorf("update service error: key is nil")
+		return fmt.Errorf("key is nil")
+	}
+
+	pid, status, visibility, err := disc.UnmarshalServiceEntry(kv.Value)
+	if err != nil {
+		em.WithContext(ctx).Errorf("unmarshal pid error: %v", err)
+		return fmt.Errorf("unmarshal pid error: %v", err)
+	}
+
+	if pid.GetNodeUid() == em.nodeUid {
+		em.WithContext(ctx).Debugf("endpointmgr ignore local service -> remote: %s local: %s  pid:%s", pid.GetNodeUid(), em.nodeUid, pid.String())
+		// 本地服务,忽略
+		return nil
+	}
+	em.WithContext(ctx).Infof("endpointmgr add remote service: %s, key: %s", pid.String(), string(kv.Key))
+	em.repository.AddWithMeta(string(kv.Key), client.NewDispatcher(em.senderMgr, pid, nil), status, visibility)
+	return nil
 }
 
 // removeServiceInfo 删除远程服务信息事件
-func (em *EndpointManager) removeServiceInfo(e inf.IEvent) {
-	ev := e.(*event.Event)
-	kv := ev.Data.(*mvccpb.KeyValue)
-	if kv.Key != nil {
-		//log.SysLogger.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>endpointmgr remove remote service: %s", string(kv.Key))
-		em.repository.Remove(string(kv.Key))
-	} else {
-		log.SysLogger.Errorf("remove service error: key is nil")
+func (em *EndpointManager) removeServiceInfo(ctx context.Context, kv *mvccpb.KeyValue) error {
+	if kv == nil || kv.Key == nil {
+		em.WithContext(ctx).Errorf("remove service error: key is nil")
+		return fmt.Errorf("key is nil")
 	}
+	em.Infof("endpointmgr remove remote service: %s", string(kv.Key))
+	em.repository.Remove(string(kv.Key))
+	return nil
 }
 
 // AddService 添加本地服务到服务发现中
 func (em *EndpointManager) AddService(svc inf.IService) {
 	pid := svc.GetPid()
 	if pid == nil {
-		log.SysLogger.Errorf("add service error: pid is nil")
+		em.Errorf("add service error: pid is nil")
 		return
 	}
 
 	defer func() {
-		log.SysLogger.Debugf("add local service: %s, pid: %v", svc.GetName(), svc.GetPid().String())
+		em.Debugf("add local service: %s, pid: %v", svc.GetName(), svc.GetPid().String())
 	}()
 
 	// 先加入本地集群
-	em.repository.Add("", client.NewDispatcher(pid, svc.GetMailbox()))
+	em.repository.AddWithMeta("", client.NewDispatcher(em.senderMgr, pid, svc.GetMailbox()), svc.GetStatus(), svc.GetVisibility())
 
-	// 私有服务不发布,没有开启集群也不发布
-	if svc.IsPrivate() || !em.isClusterMode {
+	// cluster visibility 控制服务发现发布；主从模式即使是 node visibility，
+	// 也需要启动主从 watcher 参与独立的主从选举通道。
+	if (svc.GetVisibility() != def.ServiceVisibilityCluster && !svc.IsPrimarySecondaryMode()) || !em.isClusterMode {
 		return
 	}
 
-	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
+	// em.Debugf("add service to cluster, pid: %v", pid.String())
 
 	// 这是同步执行的
 	// 将服务信息发布到集群
-	ev := event.NewEvent()
-	defer ev.Release()
-	ev.Type = event.SysEventServiceReg
-	ev.Data = svc
-	em.IEventProcessor.EventHandler(ev)
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceReg, svc)
+}
 
-	return
+func (em *EndpointManager) ServiceReady(svc inf.IService) {
+	pid := svc.GetPid()
+	if pid == nil {
+		em.Errorf("service ready error: pid is nil")
+		return
+	}
+	em.repository.UpdateStatus(pid.GetServiceUid(), svc.GetStatus())
+	if (svc.GetVisibility() != def.ServiceVisibilityCluster && !svc.IsPrimarySecondaryMode()) || !em.isClusterMode {
+		return
+	}
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceReg, svc)
 }
 
 func (em *EndpointManager) RemoveService(svc inf.IService) {
 	pid := svc.GetPid()
 	em.repository.Remove(pid.GetServiceUid())
 
-	if svc.IsPrivate() {
+	if (svc.GetVisibility() != def.ServiceVisibilityCluster && !svc.IsPrimarySecondaryMode()) || !em.isClusterMode || em.eventProcessor == nil {
 		return
 	}
 
-	//log.SysLogger.Debugf("add service to cluster ,pid: %v", pid.String())
+	// em.Debugf("remove service from cluster, pid: %v", pid.String())
 
-	// 将服务信息发布到集群
-	ev := event.NewEvent()
-	defer ev.Release()
-	ev.Type = event.SysEventServiceDis
-	ev.Data = pid
-	em.IEventProcessor.EventHandler(ev)
+	// 通知集群服务下线
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())
 }
 
-func (em *EndpointManager) ToPrivateService(svc inf.IService) {
-	ev := event.NewEvent()
-	defer ev.Release()
-	ev.Type = event.SysEventServiceDis
-	ev.Data = svc.GetPid()
-	em.IEventProcessor.EventHandler(ev)
+func (em *EndpointManager) ToNodeService(svc inf.IService) {
+	if svc == nil || svc.GetPid() == nil {
+		return
+	}
+	em.repository.UpdateVisibility(svc.GetPid().GetServiceUid(), def.ServiceVisibilityNode)
+	if svc.IsPrimarySecondaryMode() {
+		// 主从 watcher 与服务发现可见性解耦。动态降级为 node 时，不能停止
+		// 主从 watcher，否则会释放 master lease 并退出主从小集群。
+		return
+	}
+	if !em.isClusterMode || em.eventProcessor == nil {
+		return
+	}
+	em.eventProcessor.Trigger(xcontext.New(nil), event.SysEventServiceDis, svc.GetPid())
 }
 
 func (em *EndpointManager) GetRepository() *repository.Repository {
 	return em.repository
 }
 
+func (em *EndpointManager) RouteByPid(sender, receiver *actor.PID) inf.IBus {
+	if em.repository == nil {
+		return nil
+	}
+
+	var senderDispatcher inf.IRpcDispatcher
+	if sender != nil {
+		senderDispatcher = em.repository.SelectByServiceUid(sender.GetServiceUid())
+	}
+
+	if receiver == nil {
+		return em.repository.NewBus(senderDispatcher, nil, def.ErrServiceNotFound)
+	}
+
+	receiverDispatcher := em.GetDispatcher(receiver)
+	if receiverDispatcher == nil || actor.IsRetired(receiverDispatcher.GetPid()) {
+		return em.repository.NewBus(senderDispatcher, receiverDispatcher, def.ErrServiceNotFound)
+	}
+
+	return em.repository.NewBus(senderDispatcher, receiverDispatcher, nil)
+}
+
 func (em *EndpointManager) GetDispatcher(pid *actor.PID) inf.IRpcDispatcher {
+	if em.repository == nil || pid == nil {
+		return nil
+	}
+	if pid.GetNodeUid() == em.nodeUid {
+		cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
+		if cli == nil || !em.repository.IsRemoteCallable(pid.GetServiceUid()) {
+			return nil
+		}
+		return cli
+	}
 	cli := em.repository.SelectByServiceUid(pid.GetServiceUid())
 	if cli == nil {
 		// 有一种情况下可能是空的,就是调用者是私有服务,那么此时就单独创建一个,放入临时仓库
-		return em.repository.AddTmp(client.NewTmpDispatcher(pid, nil))
+		return em.repository.AddTmp(client.NewTmpDispatcher(em.senderMgr, pid, nil))
 	}
 	return cli
 }
 
-func (em *EndpointManager) CreatePid(serverId int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID {
+func (em *EndpointManager) CreatePid(partition int32, serviceId, serviceType, serviceName string, version int64, rpcType string) *actor.PID {
 	rt, ok := em.remotes[rpcType]
 	if !ok {
-		return actor.NewPID("", em.nodeUid, serverId, serviceId, serviceType, serviceName, version, "")
+		return actor.NewPID("", em.nodeUid, partition, serviceId, serviceType, serviceName, version, "")
 	} else {
-		return actor.NewPID(rt.GetAddress(), em.nodeUid, serverId, serviceId, serviceType, serviceName, version, rpcType)
+		return actor.NewPID(rt.GetAddress(), em.nodeUid, partition, serviceId, serviceType, serviceName, version, rpcType)
 	}
 }

@@ -6,10 +6,11 @@
 package mpmc
 
 import (
-	"math/bits"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/util"
 )
 
 const maxBackoff uint32 = 8 // 最大退避时间(最大退避3次)
@@ -38,15 +39,17 @@ type Queue[T any] struct {
 	tail      int64 // 生产者写入位置
 	_padding4 [8]int64
 	buffer    []slot[T]
+	_padding5 [8]int64
+	_nil      T // 用于返回零值
 }
 
 // NewQueue 创建一个新的 Queue，capacity 会向上取整为 2 的幂次方
 func NewQueue[T any](capacity int64) *Queue[T] {
-	if capacity == 0 {
-		panic("capacity must be > 0")
+	if capacity <= 0 {
+		capacity = 1
 	}
 	if capacity&(capacity-1) != 0 {
-		capacity = roundUpToPowerOfTwo(capacity)
+		capacity = util.RoundUpToPowerOfTwoInt64(capacity)
 	}
 	buffer := make([]slot[T], capacity)
 	// 初始化每个槽的 sequence 为槽的下标
@@ -62,17 +65,47 @@ func NewQueue[T any](capacity int64) *Queue[T] {
 	}
 }
 
-// roundUpToPowerOfTwo 向上取整到 2 的幂次方
-func roundUpToPowerOfTwo(v int64) int64 {
-	if v <= 0 {
-		return 1024
-	}
-	// 将 v-1 转换为 uint64 后计算前导零
-	return int64(1) << (64 - bits.LeadingZeros64(uint64(v-1)))
-}
-
 // Push 入队操作 并发安全
 // 如果队列满了则返回 false，否则返回 true。
+//func (q *Queue[T]) Push(item T) bool {
+//	var pos, seq, dif int64
+//	var spin int           // 冲突计数
+//	const maxSpin = 10     // 忙等最大次数
+//	const maxBackoff = 256 // 最大退避时间（微秒）
+//	var cell *slot[T]
+//
+//	for {
+//		pos = atomic.LoadInt64(&q.tail)
+//		cell = &q.buffer[pos&q.mask]
+//		seq = atomic.LoadInt64(&cell.sequence)
+//		dif = seq - pos
+//
+//		if dif == 0 {
+//			if atomic.CompareAndSwapInt64(&q.tail, pos, pos+1) {
+//				break // 成功抢到位置
+//			}
+//		} else if dif < 0 {
+//			return false // 队列满了
+//		} else {
+//			if spin < maxSpin {
+//				spin++
+//				runtime.Gosched() // 先忙等
+//			} else {
+//				backoff := 1 << (spin - maxSpin)
+//				if backoff > maxBackoff {
+//					backoff = maxBackoff
+//				}
+//				time.Sleep(time.Microsecond * time.Duration(backoff))
+//				spin++
+//			}
+//		}
+//	}
+//
+//	cell.value = item
+//	atomic.StoreInt64(&cell.sequence, pos+1)
+//	return true
+//}
+
 func (q *Queue[T]) Push(item T) bool {
 	var pos, seq, dif int64
 	var backoff uint32 = 1 // 初始退避 1 微秒
@@ -105,6 +138,49 @@ func (q *Queue[T]) Push(item T) bool {
 
 // Pop 出队操作 并发安全
 // 如果队列为空，则返回零值和 false；否则返回出队的数据和 true。
+//func (q *Queue[T]) Pop() (T, bool) {
+//	var pos, seq, dif int64
+//	var spin int
+//	const maxSpin = 10
+//	const maxBackoff = 256
+//	var zero T
+//
+//	for {
+//		pos = atomic.LoadInt64(&q.head)
+//		cell := &q.buffer[pos&q.mask]
+//		seq = atomic.LoadInt64(&cell.sequence)
+//		dif = seq - (pos + 1)
+//
+//		if dif == 0 {
+//			if atomic.CompareAndSwapInt64(&q.head, pos, pos+1) {
+//				break
+//			}
+//		} else if dif < 0 {
+//			// 队列为空
+//			return zero, false
+//		} else {
+//			// 忙等 + 指数退避
+//			if spin < maxSpin {
+//				spin++
+//				runtime.Gosched()
+//			} else {
+//				backoff := 1 << (spin - maxSpin)
+//				if backoff > maxBackoff {
+//					backoff = maxBackoff
+//				}
+//				time.Sleep(time.Microsecond * time.Duration(backoff))
+//				spin++
+//			}
+//		}
+//	}
+//
+//	// 成功获取 cell，读取数据并设置新的 sequence 值
+//	cell := &q.buffer[pos&q.mask]
+//	ret := cell.value
+//	atomic.StoreInt64(&cell.sequence, pos+q.mask+1)
+//	return ret, true
+//}
+
 func (q *Queue[T]) Pop() (T, bool) {
 	var pos, seq, dif int64
 	var backoff uint32 = 1
@@ -122,8 +198,7 @@ func (q *Queue[T]) Pop() (T, bool) {
 			}
 		} else if dif < 0 {
 			// 队列为空
-			var zero T
-			return zero, false
+			return q._nil, false
 		} else {
 			// 使用指数退避来减少忙等开销
 			if backoff < maxBackoff {
@@ -136,6 +211,8 @@ func (q *Queue[T]) Pop() (T, bool) {
 	}
 	// 读取槽中的数据
 	ret := q.buffer[pos&q.mask].value
+	// 清空槽中的数据，避免内存泄漏
+	q.buffer[pos&q.mask].value = q._nil
 	// 更新槽的序号为 pos + q.size，以便后续生产者写入时判断该槽可用
 	atomic.StoreInt64(&q.buffer[pos&q.mask].sequence, pos+q.mask+1)
 	return ret, true

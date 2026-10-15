@@ -1,0 +1,183 @@
+# Mailbox 设计与使用说明
+
+Mailbox 是 Ember 中 service 的消息入口，负责接收事件、分发到 worker 并按配置的队列/扩缩容策略处理。
+
+## 核心概念
+
+- **Mailbox**：每个 service 拥有一个 mailbox，用于接收并排队待处理的事件。
+- **WorkerPool**：每个 mailbox 内部维护一个 worker 池，由一个或多个 worker 组成。
+- **Worker**：实际执行消息处理逻辑的协程，从队列中拉取事件并调用 `IMessageInvoker`。
+- **QueueManager**：封装队列模型，负责入队/出队策略，目前支持：
+  - `dual`：双队列（系统队列 + 用户队列），系统队列优先；
+  - `priority`：多优先级队列，支持 sys/urgent/high/normal/low/batch 六级优先级。
+- **WorkerSchedulePolicy**：控制 worker 数量、虚拟节点、空闲策略和扩缩容策略。
+- **AutoScaler / AutoScalerStrategy**：根据当前负载自动调整 worker 数量。
+
+## 并发模型：单 worker 与多 worker
+
+Mailbox 的并发行为由 `WorkerSchedulePolicy.InitialWorkerNum` 决定：
+
+- **单 worker 模式（Actor-like）**
+  - `WorkerNum = 1`,且没有自动扩容策略,即运行过程中始终只有一个worker。
+  - WorkerPool 只创建一个 worker，所有消息在单个 goroutine 中按顺序处理。
+  - 对于同一个 service：
+    - 不会有多个线程同时执行业务逻辑；
+    - 可以将内部状态视为“单线程上下文”；
+    - 行为是经典 Actor 模型。
+
+- **多 worker 模式（并发服务模型）**
+  - `WorkerNum > 1`, 这里的workerNum指运行后的实际worker数量,不管初始是不是1。
+  - WorkerPool 创建多个 worker，并基于一致性哈希环（`evt.GetDispatcherKey()`）将事件路由到具体 worker：
+    - 相同 dispatcherKey 的消息会落在同一 worker 上，保持局部顺序；
+    - 不同 dispatcherKey 的消息可以在多个 worker 上并发处理。
+  - 此时 service 内部如有共享状态，需要自行保证并发安全（锁、无锁结构等）。
+
+> 总结：想要“ Actor 模型”的语义，请使用单 worker 配置；想要更高吞吐量，请配置多 worker 并注意并发安全。
+
+## 配置入口：MailboxConf 与 WorkerSchedulePolicy
+
+Mailbox 相关配置由 `config.MailboxConf` 描述，其中最重要的是两部分：
+
+- `QueueMode string`
+  - `"dual"`：双队列模式（系统队列 + 用户队列），系统队列始终优先处理；
+  - `"priority"`：多优先级队列模式，通过 `MultiLevelQueueConf` 控制调度策略。
+
+- `SchedulePolicy *config.WorkerSchedulePolicy`
+  - `InitialWorkerNum int`：初始 worker 数量。
+    - `1`：单 worker，顺序执行，Actor-like。
+    - `>1`：多 worker，并发执行，通过 hash ring 均衡分配。
+  - `VirtualWorkerRate int`：hash ring 虚拟节点倍率，用于改善多 worker 场景下的负载均衡。
+  - `EnableAutoScaling bool`：是否启用自动扩缩容。
+  - `ScalingStrategy *config.WorkerStrategyConfig`：扩缩容策略配置（策略名称、参数、最小/最大 worker 数、冷却时间等）。
+  - `IdlerConf *config.WorkerIdlerConf`：空闲控制策略（是否使用条件变量、退避时间、最大重试次数等）。
+  - `MultiLevelQueueConf *config.MultiLevelQueueConf`：多优先级队列调度策略，仅在 `QueueMode = "priority"` 时生效。
+
+### 常用配置示例
+
+参见 `config_example.go` 中的示例函数：
+
+- `ExampleSingleWorkerConfig`：单 worker（Actor）模式。
+- `ExampleDualQueueConfig`：多 worker + 双队列模式。
+- `ExamplePriorityQueueConfig_Absolute`：多优先级队列 + 绝对优先策略。
+- `ExamplePriorityQueueConfig_Weighted`：多优先级队列 + 加权策略。
+- `ExamplePriorityQueueConfig_Fairness`：多优先级队列 + 公平策略。
+- `ExampleAutoScalingConfig`：启用自动扩缩容的配置示例。
+
+可以直接参考这些示例来为具体 service 选择合适的 mailbox 行为。
+
+## 扩缩容与触发时机
+
+自动扩缩容的核心在于：
+
+- `AutoScalerStrategy`：给定当前所有 worker 的状态，判断是否需要扩容或缩容；
+- `AutoScaler`：基于策略结果、最小/最大 worker 数和冷却时间，计算新的 worker 数量。
+
+WorkerPool 通过统一调度循环触发扩缩容：
+
+- 定时触发：按 `ResizeCoolDown` 间隔拉取 worker 状态并调用 `AutoScaler.ShouldResize`；
+- 事件触发：当入队采样发现负载变化时唤醒调度循环，仍由 `AutoScaler.ShouldResize` 做最终决策；
+- 所有策略共享同一个决策入口，避免定时触发和事件触发产生两套扩缩容语义。
+
+## 中间件与挂起机制
+
+### Mailbox 中间件
+
+- Mailbox 支持中间件（`IMailboxMiddleware`），用于在**消息入队前**与**消息处理完成后**执行自定义逻辑（限流、熔断、统计、埋点、追踪等）。
+- 执行位置与顺序：
+  - **入队前（OnReceive）**：在 `Mailbox.PostMessage` 中调用 `middlewareChain.ExecuteOnReceive`，按注册顺序依次执行。
+  - **处理后（OnComplete）**：在 `Worker.safeExec` 的 defer 中调用 `middlewareChain.ExecuteOnComplete`，按逆序执行（洋葱模型）。
+- `OnReceive` 的返回值决定是否入队：
+  - `Continue()`：继续执行剩余中间件，最终入队。
+  - `Reject(err)`：拒绝消息入队，`PostMessage` 直接返回该错误。
+  - `Skip()`：跳过剩余中间件，直接入队（用于快速路径）。
+- 回调一致性：
+  - 只有当消息最终成功入队并被 worker 执行后，才会触发 `OnComplete`。
+  - `OnComplete` 仅对实际执行过 `OnReceive` 的中间件回调。
+- panic 隔离：
+  - `MiddlewareChain` 会 recover `OnReceive` / `OnComplete` / `OnStart` / `OnStop` 中的 panic；
+  - `OnReceive` panic 会转换为 Reject error，走正常拒绝与 Job 释放流程；
+  - `OnComplete` panic 会被记录，并继续执行剩余中间件，确保 context 归池。
+
+#### 内置中间件
+
+- `DispatchKeyStatsMiddleware`：debug 辅助，统计 dispatcherKey 热点与 TopN（仅 debug 模式可配置启用）。
+- `RateLimitMiddleware`：基于令牌桶的入队限流，支持配置跳过紧急消息。
+- `SentinelMiddleware`：基于 Sentinel 的限流 / 熔断 / 系统保护；配置中的 CircuitBreakerConf 会映射到 Sentinel circuit breaker。
+
+#### Sentinel 细粒度 resource
+
+Sentinel 按 resource 精确匹配规则。默认 resource 是 serviceName；如需按 JobType 限流或熔断，请使用 `NewSentinelMiddlewareWithJobType`，它会把运行时入口映射为 `serviceName:jobType`，并自动声明所有内置 JobType resource。
+
+```go
+mw := NewSentinelMiddlewareWithJobType("battle",
+  WithJobTypeFlowRule(def.MailboxJobTypeRpc, 1000),
+  WithJobTypeFlowRule(def.MailboxJobTypeTimer, 100),
+  WithJobTypeErrorCountRule(def.MailboxJobTypeRpc, 20),
+)
+```
+
+- `WithFlowRule` / `WithCircuitBreakerRule` 表示默认规则，会复制到 serviceName 与已声明的细粒度 resource。
+- `WithResourceFlowRule` / `WithResourceCircuitBreakerRule` 可直接给任意自定义 resource 注册规则。
+- `WithSentinelFlowRulesForResource` / `WithSentinelCircuitBreakerRulesForResource` 可传入完整 Sentinel 原生规则。
+- 若直接使用 `WithResourceFunc` 自定义动态 resource，应同时用 `WithSentinelRuleResources` 声明所有可能的静态 resource；否则启动时会打印 warn，提示规则只会作用于 serviceName。
+- 自定义 `MailboxJobType` 不会被 `NewSentinelMiddlewareWithJobType` 自动枚举；需要额外使用 `WithSentinelRuleResources("battle:1001")`，或直接用 `WithResourceFlowRule("battle:1001", ...)` / `WithSentinelFlowRulesForResource("battle:1001", ...)` 注册规则。
+
+在 `NewSentinelMiddlewareWithJobType` 下，serviceName 和每个声明的 JobType resource 都会独立计算 QPS / 熔断阈值。若期望整个 service 共享总 QPS，请使用 `NewSentinelMiddleware(serviceName, WithFlowRule(...))`，不要启用 JobType 细粒度 resource。
+
+#### 启用方式：配置 + 自定义合并
+
+- 从配置创建：使用 `CreateMiddlewaresFromConfig(conf, serviceName, logger, isDebug)` 生成中间件列表。
+- 自定义注入：将你实现的 `IMailboxMiddleware` 放入 `customMiddlewares`。
+- 推荐：用 `MergeMiddlewares(configMiddlewares, customMiddlewares)` 合并（配置在前，自定义在后），然后传给 `NewMailbox`。
+
+### 挂起与恢复（Suspend/Resume）
+
+- `defaultMailbox` 提供简单的挂起机制：
+  - `Suspend()`：标记 mailbox 已挂起；
+  - `Resume()`：恢复 mailbox 接收；
+  - 挂起后，不满足 `ISuspendPolicy` 放行条件的消息会被拒绝，返回 `ErrMailboxSuspended`；
+- 适用场景：
+  - 服务进入“只处理紧急/控制消息”的降级模式；
+  - 热更新 / 维护窗口中，先挂起普通业务流量，只保留管理流量。
+
+## 使用建议与注意事项
+
+1. **选择合适的 worker 数量**
+   - 对顺序敏感、状态机类逻辑：优先考虑单 worker 模式。
+   - CPU 密集或高并发场景：根据 CPU 核心数和业务特性配置 4~16 个 worker，再通过压测调整。
+
+2. **正确使用 dispatcherKey**
+   - `evt.GetDispatcherKey()` 决定了事件在多 worker 模式下被分配到哪个 worker；
+   - 相同 dispatcherKey 的事件会保持顺序，适合用来绑定“会话/玩家/房间”等需要顺序的实体；
+   - 不同 dispatcherKey 之间可以并行，避免所有请求都挤在同一个 worker。
+
+3. **注意中间件的开销**
+   - 在压测场景下，请关闭不必要的 debug 日志和重型中间件逻辑，以免干扰基准测试。
+
+4. **扩缩容策略从简单开始**
+   - 推荐先使用 `MaxLoadStrategy` + 合理的 `ResizeCoolDown`；
+  - 再根据业务特性逐步引入 `CompositeStrategy` 或其他装饰器策略。
+
+5. **关闭时的 drain 行为**
+   - 调用 `Worker.Stop()` 时，worker 会在退出前通过 `queueManager.DrainAll` 处理完队列中的所有剩余事件；
+   - 这保证了在正常关闭流程中不会丢消息，但也意味着关闭时可能需要等待一段时间。
+
+6. **RW 模式只通过配置启用**
+  - `EnableRWMode=true` 必须在 mailbox / worker 创建前配置；
+  - 运行时允许 `SetRWEnabled(false)` 关闭 RW 用于降级或维护；
+  - 不支持运行时从关闭状态动态开启 RW，`SetRWEnabled(true)` 会返回 `ErrRWDynamicEnableUnsupported`。
+
+7. **停止顺序允许阻塞**
+  - Node / Service 停止需要满足“先起后退”的依赖顺序；
+  - `BeginStop` 可以阻塞等待 mailbox 内部后台流程按顺序退出，上层可按服务依赖自行设置整体 timeout。
+
+## 相关文件
+
+- `mailbox.go`：默认 Mailbox 实现（suspend/resume + middleware + WorkerPool 封装）。
+- `worker_pool.go`：Worker 池管理、事件分发、自动扩缩容调度入口。
+- `worker.go`：统一 Worker 实现，从队列中取事件并调用 `IMessageInvoker`。
+- `queue_manager.go` / `queue_manager_dual.go` / `queue_manager_priority.go`：队列管理与调度策略。
+- `scaler.go` / `strategy.go` / `strategy_factory.go`：扩缩容策略与执行器。
+- `config_example.go`：常见 Mailbox 配置示例。
+- `../../../../docs/ACTOR_REVIEW_2026_04_29.md`：2026-04-29 复审、修复记录与 Sentinel 细粒度 resource 问题说明。
+

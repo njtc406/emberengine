@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/njtc406/emberengine/engine/pkg/utils/bytespool"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/bytespool"
 )
 
 // TODO 文件需要修改
@@ -110,7 +110,6 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16, msg []byte) *Json
 
 func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
 	if jsonProcessor.unknownMessageHandler == nil {
-		//log.SysLogger.Debugf("Unknown message, clientId=%s", clientId)
 		return
 	}
 

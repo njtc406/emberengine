@@ -6,98 +6,150 @@
 package handler
 
 import (
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
-	"github.com/njtc406/emberengine/engine/internal/monitor"
-	"github.com/njtc406/emberengine/engine/pkg/actor"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/utils/codec"
-	"github.com/njtc406/emberengine/engine/pkg/utils/dedup"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/authz"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/monitor"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/codec"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/errorx"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/xcontext"
 )
 
-func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
+type Handler struct {
+	rpcMonitor *monitor.RpcMonitor
+	logger     log.ILoggerX
+	dedup      inf.IDeDuplicator
+	authorizer *authz.Authorizer
+}
+
+func NewHandler(rm *monitor.RpcMonitor, logger log.ILoggerX, dedup inf.IDeDuplicator) *Handler {
+	return &Handler{rpcMonitor: rm, logger: logger, dedup: dedup}
+}
+
+// SetAuthorizer 注入授权引擎（可选，nil 或未启用时跳过授权检查）。
+func (h *Handler) SetAuthorizer(a *authz.Authorizer) {
+	h.authorizer = a
+}
+
+// authorizeRequest 在 dispatch 前校验调用方是否有权访问目标服务的方法。
+// 返回 nil 表示允许，非 nil 表示拒绝。
+func (h *Handler) authorizeRequest(req *actor.Message) error {
+	if h.authorizer == nil || !h.authorizer.IsEnabled() {
+		return nil
+	}
+	sender := req.GetSenderPid()
+	receiver := req.GetReceiverPid()
+	if sender == nil || receiver == nil {
+		return fmt.Errorf("authz: missing sender or receiver pid")
+	}
+	principal := authz.PrincipalFromPID(sender)
+	return h.authorizer.Authorize(principal, receiver.GetName(), req.GetMethod())
+}
+
+func (h *Handler) RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
+	if req == nil {
+		return errors.New("rpc request is nil")
+	}
+	// proto 反序列化后同步 PID 的 MasterFlag 原子字段，避免 IsMasterNode() 读取到 false
+	if p := req.GetSenderPid(); p != nil {
+		p.SyncMasterFlag()
+	}
+	if p := req.GetReceiverPid(); p != nil {
+		p.SyncMasterFlag()
+	}
+
+	headers := make(map[string]any, len(req.ContextHeaders)+2)
+	for k, v := range req.ContextHeaders {
+		headers[k] = v
+	}
+
 	if req.Reply {
 		// 回复
 		// 需要回复的信息都会加入monitor中,找到对应的信封数据
-		if envelope := monitor.GetRpcMonitor().Remove(req.ReqId); envelope != nil {
-			meta := envelope.GetMeta()
-			data := envelope.GetData()
-
-			// 异步回调,直接发送到对应服务处理,服务处理完后会自己释放envelope
-			sender := meta.GetDispatcher()
-			if sender != nil && sender.IsClosed() {
-				// 调用者已经下线,丢弃回复
-				// TODO 这里需要想想能不能直接丢弃,看要不要带一个标记,比如true时表示这个回复必须处理,那么可能就需要重新加载service
-				envelope.Release()
-				return nil
-			}
-			// 解析回复数据
-			response, err := codec.Decode(req.TypeId, req.TypeName, req.Response)
-			//response, err := serializer.Deserialize(req.Response, req.TypeName, req.TypeId)
-			defer func() {
-				if err != nil {
-					envelope.GetData().SetError(err)
-				}
-				if meta.NeedCallback() {
-					if err = sender.PostMessage(envelope); err != nil {
-						envelope.Release()
-						log.SysLogger.WithContext(envelope.GetContext()).Errorf("call back envelope error: %s", err)
-					}
-				} else {
-					// 同步回调,回复结果
-					envelope.SetDone()
-				}
-			}()
-			if err != nil {
-				envelope.Release()
-				return err
+		rm := h.rpcMonitor
+		if rm == nil {
+			return nil
+		}
+		if state := rm.Remove(req.ReqId); state != nil {
+			response, err := codec.DecodeFromAny(req.Response)
+			if err == nil && len(req.Err) > 0 {
+				err = errorx.UnmarshalFromBytes(req.Err)
 			}
 
-			// TODO 这里需要注意,当相同的data被重复使用时,response可能被下一个覆盖,虽然按理说如果是call那么一定是排队的,但是怕以后忘记了,先注释一下
-			// 后续如果有了其他的需求,再来考虑这里的覆盖问题
-			data.SetReply()
-			data.SetRequest(nil)
-			data.SetNeedResponse(false) // 已经是回复了
-			data.SetResponse(response)
-			data.SetErrStr(req.Err)
-
-			//log.SysLogger.Debugf("call back envelope: %+v", envelope)
-			return err
+			state.SetResult(response, err)
+			state.Complete()
+			return nil
 		} else {
 			// 已经超时,丢弃返回
-			fields := make(map[string]interface{})
-			if req.MessageHeader != nil {
-				for k, v := range req.MessageHeader {
-					fields[k] = v
-				}
+			// 迟到的回复：通常是调用方已超时/取消后的正常现象，避免刷屏按 debug 处理。
+			if l := h.logger; l != nil {
+				l.Debugf("rpc call late reply dropped (state not found): %s", req.String())
 			}
-
-			log.SysLogger.WithFields(fields).Warnf("rpc call timeout, envelope not found: %s", req.String())
 			return nil
 		}
 	} else {
-		// 检查重复
-		if dedup.GetRpcReqDuplicator().Seen(req.ReqId) {
-			fields := make(map[string]interface{})
-			if req.MessageHeader != nil {
-				for k, v := range req.MessageHeader {
-					fields[k] = v
-				}
-			}
-			log.SysLogger.WithFields(fields).Errorf("duplicate reqId:%d rpc request: %s", req.ReqId, req.String())
-			return nil
+		senderPid := req.GetSenderPid()
+		if senderPid == nil {
+			return errors.New("rpc request sender pid is nil")
 		}
 
-		// 调用
-		request, err := codec.Decode(req.TypeId, req.TypeName, req.Request)
-		//request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
-		if err != nil {
+		if key := req.GetIdempotencyKey(); key != "" {
+			// TODO 需要考虑GetRpcReqDuplicator这里在不同的节点中使用不同的模式,TTL或者LRU,防止在高并发节点在TTL模式下被瞬间击穿,会导致map容量爆炸式增加
+			dedupIns := h.dedup
+			if dedupIns == nil {
+				return errors.New("deduplicator is nil")
+			}
+			if dedupIns.SeenKey(key) {
+				if l := h.logger; l != nil {
+					l.Errorf("duplicate idempotency key:%s rpc request: %s", key, req.String())
+				}
+				return nil
+			}
+		}
+		// 授权检查：在 payload decode 之前拦截未授权请求，避免消耗反序列化成本
+		if err := h.authorizeRequest(req); err != nil {
+			if l := h.logger; l != nil {
+				sender, receiver := "<nil>", "<nil>"
+				if p := req.GetSenderPid(); p != nil {
+					sender = p.GetServiceUid()
+				}
+				if p := req.GetReceiverPid(); p != nil {
+					receiver = p.GetName()
+				}
+				l.Warnf("rpc authz denied: sender=%s receiver=%s method=%s reqId=%d err=%v",
+					sender, receiver, req.GetMethod(), req.ReqId, err)
+			}
 			return err
 		}
+		if sf == nil {
+			return errors.New("rpc sender factory is nil")
+		}
+		// 调用：Request 为空时无需解码 Any（nil payload 的 send 是常见场景）
+		var request interface{}
+		if req.Request != nil {
+			var err error
+			request, err = codec.DecodeFromAny(req.Request)
+			//request, err := serializer.Deserialize(req.Request, req.TypeName, req.TypeId)
+			if err != nil {
+				return err
+			}
+		}
+
+		// 从 headers 构建 context
+		ctx := xcontext.New(context.Background())
+		ctx.AddHeaders(headers)
 
 		// 构建消息
-		envelope := msgenvelope.NewMsgEnvelope(nil)
-		envelope.SetHeaders(req.MessageHeader)
+		envelope := msgenvelope.NewMsgEnvelope()
+		envelope.SetDispatchKey(req.DispatcherKey)
+		envelope.SetPriority(def.Priority(req.Priority))
 
 		data := msgenvelope.NewData()
 		data.SetMethod(req.Method)
@@ -108,21 +160,27 @@ func RpcMessageHandler(sf inf.IRpcSenderFactory, req *actor.Message) error {
 
 		meta := msgenvelope.NewMeta()
 		meta.SetReceiverPid(req.ReceiverPid)
+		meta.SetSenderPid(req.SenderPid)
 		meta.SetReqId(req.ReqId)
+		meta.SetDeadline(req.Deadline)
+		meta.SetIdempotencyKey(req.IdempotencyKey)
+
 		if req.NeedResp {
-			// 需要回复的才设置sender
-			meta.SetSenderPid(req.SenderPid)
 			meta.SetDispatcher(sf.GetDispatcher(req.SenderPid))
 		}
 		envelope.SetMeta(meta)
 		envelope.SetData(data)
 
-		err = sf.GetDispatcher(req.ReceiverPid).SendRequest(envelope)
+		dispatcher := sf.GetDispatcher(req.ReceiverPid)
+		if dispatcher == nil {
+			envelope.Release()
+			return errors.New("rpc receiver dispatcher is nil")
+		}
+		err := dispatcher.DeliverRequest(ctx, envelope)
 		if err != nil {
+			envelope.Release()
 			return err
 		}
-
-		dedup.GetRpcReqDuplicator().MarkDone(req.ReqId)
 
 		return nil
 	}

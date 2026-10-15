@@ -5,21 +5,24 @@
 // 最后更新:  yr  2025/7/13 0013 22:08
 package interfaces
 
-import "context"
+import (
+	"context"
+)
 
 type IContext interface {
 	context.Context
 	IReset
 
-	SetHeaders(headers map[string]string)
-	SetHeader(key string, value any)
-
-	GetHeader(key string) string
-	GetHeaders() map[string]string
 	GetContext() context.Context
 
+	SetHeaders(headers map[string]any) IContext
+	SetHeadersWithMap(headers map[string]string) IContext
+	AddHeader(key string, value any) IContext
+	AddHeaders(headers map[string]any) IContext
+
+	GetHeader(key string) any
+	GetHeaders() map[string]any
+	ToHeaders() map[string]string
+
 	GetTranceId() string
-	GetDispatcherKey() string
-	GetPriority() int32
-	GetType() int32
 }

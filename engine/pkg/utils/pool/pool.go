@@ -6,12 +6,75 @@
 package pool
 
 import (
+	"fmt"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	_ "unsafe"
 )
 
 const cacheLineSize = 64
+
+var (
+	_                    IPool[any] = (*SyncPoolWrapper[any])(nil)
+	defaultStatsRegistry            = NewPoolStatsRegistry()
+)
+
+type PoolStatsRegistry struct {
+	mu     sync.RWMutex
+	states map[string]IStatsRecorder
+}
+
+func NewPoolStatsRegistry() *PoolStatsRegistry {
+	return &PoolStatsRegistry{states: make(map[string]IStatsRecorder)}
+}
+
+func (r *PoolStatsRegistry) Register(name string, recorder IStatsRecorder) {
+	if r == nil || recorder == nil || name == "" {
+		return
+	}
+	r.mu.Lock()
+	r.states[name] = recorder
+	r.mu.Unlock()
+}
+
+func (r *PoolStatsRegistry) GetStats() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.RLock()
+	names := make([]string, 0, len(r.states))
+	for name := range r.states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	stats := make([]string, 0, len(names))
+	for _, name := range names {
+		stat := r.states[name].String()
+		if stat == "" {
+			continue
+		}
+		stats = append(stats, stat)
+	}
+	r.mu.RUnlock()
+	return fmt.Sprintf("%s", strings.Join(stats, "\n"))
+}
+
+func SetDefaultPoolStatsRegistry(r *PoolStatsRegistry) {
+	if r == nil {
+		return
+	}
+	defaultStatsRegistry = r
+}
+
+func GetDefaultPoolStatsRegistry() *PoolStatsRegistry {
+	return defaultStatsRegistry
+}
+
+func GetPoolStats() string {
+	return defaultStatsRegistry.GetStats()
+}
 
 type SyncPoolWrapper[T any] struct {
 	pool      sync.Pool
@@ -19,7 +82,7 @@ type SyncPoolWrapper[T any] struct {
 	newFunc   func() T
 	resetFunc func(T)
 	refFunc   func(T)
-	unrefFunc func(T)
+	unrefFunc func(T) bool
 }
 
 type Option[T any] func(p *SyncPoolWrapper[T])
@@ -36,7 +99,7 @@ func WithRef[T any](f func(T)) Option[T] {
 	}
 }
 
-func WithUnref[T any](f func(T)) Option[T] {
+func WithUnRef[T any](f func(T) bool) Option[T] {
 	return func(p *SyncPoolWrapper[T]) {
 		p.unrefFunc = f
 	}
@@ -54,21 +117,32 @@ func NewSyncPoolWrapper[T any](newFunc func() T, recorder IStatsRecorder, opts .
 		recorder: recorder,
 	}
 
-	p.pool = sync.Pool{New: func() any {
-		p.recorder.incTotalAlloc()
-		p.recorder.incMiss()
-		return newFunc()
-	}}
+	// 注意：sync.Pool 无法直接得知“Get 是否命中”。
+	// 这里显式判断 nil（表示本轮需新分配），从而统计 hit/miss。
+	// current 用作“in-use”（未归还数），用于泄露观测：正常情况下最终应回到 0。
+	p.pool = sync.Pool{}
 
 	for _, opt := range opts {
 		opt(p)
 	}
 
+	// 注册统计记录器
+	defaultStatsRegistry.Register(p.recorder.stats().Name, p.recorder)
+
 	return p
 }
 func (p *SyncPoolWrapper[T]) Get() T {
-	val := p.pool.Get().(T)
-	p.recorder.decCurrentSize() // 这个地方的计数只是代表借出了多少个,配合put来查看有没有泄露
+	raw := p.pool.Get()
+	var val T
+	if raw == nil {
+		p.recorder.incTotalAlloc()
+		p.recorder.incMiss()
+		val = p.newFunc()
+	} else {
+		p.recorder.incHit()
+		val = raw.(T)
+	}
+	p.recorder.incCurrentSize() // syncPool: in-use（未归还数）
 
 	if p.resetFunc != nil {
 		p.resetFunc(val)
@@ -82,16 +156,15 @@ func (p *SyncPoolWrapper[T]) Get() T {
 
 func (p *SyncPoolWrapper[T]) Put(t T) {
 	if p.unrefFunc != nil {
-		p.unrefFunc(t)
+		if !p.unrefFunc(t) { // 这里是为了防止reset中误标记
+			return
+		}
 	}
 	if p.resetFunc != nil {
 		p.resetFunc(t)
 	}
-	if p.unrefFunc != nil {
-		p.unrefFunc(t) // 这里是为了防止reset中误标记
-	}
 
-	p.recorder.incCurrentSize()
+	p.recorder.decCurrentSize()
 	p.pool.Put(t)
 }
 
@@ -121,7 +194,7 @@ func WithPRef[T any](f func(T)) POption[T] {
 	}
 }
 
-func WithPUnref[T any](f func(T)) POption[T] {
+func WithPUnref[T any](f func(T) bool) POption[T] {
 	return func(p *PerPPoolWrapper[T]) {
 		p.unrefFunc = f
 	}
@@ -139,7 +212,7 @@ type PerPPoolWrapper[T any] struct {
 	newFunc    func() T
 	resetFunc  func(T)
 	refFunc    func(T)
-	unrefFunc  func(T)
+	unrefFunc  func(T) bool
 	localPools []*pPool[T] // 每个P一个本地池
 	globalPool sync.Pool   // 全局后备池
 }
@@ -189,6 +262,9 @@ func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecord
 	for _, opt := range options {
 		opt(p)
 	}
+
+	// 注册统计记录器
+	defaultStatsRegistry.Register(p.recorder.stats().Name, p.recorder)
 	return p
 }
 
@@ -239,13 +315,12 @@ func (p *PerPPoolWrapper[T]) Get() T {
 // 跨 goroutine 释放对象将导致缓存污染，增加误命中风险或内存泄露。
 func (p *PerPPoolWrapper[T]) Put(obj T) {
 	if p.unrefFunc != nil {
-		p.unrefFunc(obj)
+		if !p.unrefFunc(obj) {
+			return
+		}
 	}
 	if p.resetFunc != nil {
 		p.resetFunc(obj)
-	}
-	if p.unrefFunc != nil {
-		p.unrefFunc(obj) // 防止 reset 中标记失效
 	}
 
 	pid := procPin()

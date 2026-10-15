@@ -1,0 +1,93 @@
+syntax = "proto3";
+package actor;
+option go_package = ".;actor";
+import "google/protobuf/any.proto";
+
+message PID {
+  string Address = 1;         // 服务地址
+  string Name = 2;            // 服务名称
+  string ServiceType = 3;     // 服务类型
+  string ServiceId = 4;       // 同类型服务内唯一标识
+  int32 State = 5;            // 服务状态(0: 正常, 1: 退休)
+  int32 Partition = 6;        // 服务分区ID(用于服务路由隔离)
+  int64 Version = 7;          // 服务版本号
+  string RpcType = 8;         // rpc类型(默认使用nats)
+  string NodeUid = 9;         // 节点唯一标识(这个主要是用来区分本地服务用的)
+  bool IsMaster = 10;         // 是否是主服务(主从) -- 仅用于序列化传输
+  string ServiceUid = 11;     // 服务实例唯一id
+  int32 MasterFlag = 12;      // 运行时原子化主从标志 (0=从, 1=主, 使用 atomic 访问)
+}
+
+message Message {
+  // === 路由信息 ===
+  PID SenderPid                       = 1;  // 发送者
+  PID ReceiverPid                     = 2;  // 接收者
+  
+  // === 调度属性（显式字段） ===
+  int32 Priority                      = 3;  // 优先级
+  string DispatcherKey                = 4;  // 分发键（用于分区/顺序保证）
+  
+  // === RPC 信息 ===
+  string Method                       = 5;  // 调用方法
+  google.protobuf.Any Request         = 6;  // 方法参数
+  google.protobuf.Any Response        = 7;  // 方法返回值
+  bytes Err                           = 8;  // 错误信息(ErrorDetail protobuf 编码)
+  bool Reply                          = 9;  // 是否是回复
+  uint64 ReqId                        = 10; // 请求ID
+  bool NeedResp                       = 11; // 是否需要回复
+  int32 CompressType                  = 12; // 压缩类型(0无压缩)
+  
+  // === 上下文元数据（仅用于 tracing/metadata） ===
+  map<string, string> ContextHeaders  = 13; // 上下文头（traceId 等）
+  int64 Deadline                      = 14; // 事件处理截止时间(单位: 纳秒)
+  string IdempotencyKey               = 15; // 业务幂等键（由调用方显式传入）
+}
+
+service GrpcListener {
+  rpc RPCCall(Message) returns (RpcCallResponse) ;
+}
+
+message RpcCallResponse{
+}
+
+message Event {
+  // === 事件标识 ===
+  int32 Type                     = 1;  // 事件类型
+  
+  // === 调度属性（显式字段） ===
+  int32 Priority                      = 2;  // 优先级
+  string DispatcherKey                = 3;  // 分发键（用于分区/顺序保证）
+  int64 Deadline                      = 4;  // 事件处理截止时间(单位: 纳秒)
+  
+  // === 路由信息 ===
+  int32 Partition                     = 5;  // 目标分区ID
+  string ServiceUid                   = 6;  // 目标服务实例唯一id
+  
+  // === 数据 ===
+  google.protobuf.Any Payload            = 7;  // 实际事件数据
+  
+  // === 上下文元数据（仅用于 tracing/metadata） ===
+  map<string, string> ContextHeaders  = 8;  // 上下文头（traceId 等）
+}
+
+message MasterStateData {
+  bool OldStateIsMaster = 1;
+  int64 PrevEpoch = 2;
+  int64 NewEpoch = 3;
+}
+
+// ErrorDetail 结构化错误信息，用于 RPC 错误跨节点传输。
+// 通过 proto 编码写入 Message.Err (bytes)，保留错误码、调用位置、上下文字段和完整错误链。
+message ErrorDetail {
+  int32 code              = 1;  // 错误码 (0 表示未设置)
+  string msg              = 2;  // 当前层错误描述
+  string file             = 3;  // 创建位置文件路径
+  int32 line              = 4;  // 创建位置行号
+  repeated ErrorField fields = 5;  // 结构化上下文键值对
+  ErrorDetail cause       = 6;  // 被包装的底层错误 (错误链)
+}
+
+message ErrorField {
+  string key              = 1;
+  string val              = 2;
+}

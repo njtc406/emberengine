@@ -21,7 +21,7 @@ type Queue[T any] struct {
 	head, tail *node[T]
 	_nil       T
 	pool       sync.Pool
-	len        int64
+	len        atomic.Int64
 }
 
 func New[T any]() *Queue[T] {
@@ -49,7 +49,7 @@ func (q *Queue[T]) Push(x T) bool {
 
 	// release node to consumer
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&prev.next)), unsafe.Pointer(n))
-	atomic.AddInt64(&q.len, 1)
+	q.len.Add(1)
 	return true
 }
 
@@ -66,10 +66,39 @@ func (q *Queue[T]) Pop() (T, bool) {
 		tail.next = nil
 		q.pool.Put(tail)
 
-		atomic.AddInt64(&q.len, -1)
+		q.len.Add(-1)
 		return v, true
 	}
 	return q._nil, false
+}
+
+func (q *Queue[T]) BatchPop(n int) []T {
+	if n <= 0 {
+		return nil
+	}
+	if n > q.Len() {
+		n = q.Len()
+	}
+
+	var results []T
+	for i := 0; i < n; i++ {
+		tail := q.tail
+		next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next)))) // acquire
+		if next == nil {
+			break
+		}
+
+		q.tail = next
+		v := next.val
+		tail.val = q._nil
+		tail.next = nil
+		q.pool.Put(tail)
+
+		results = append(results, v)
+		q.len.Add(-1)
+	}
+
+	return results
 }
 
 // Empty returns true if the queue is empty
@@ -82,5 +111,5 @@ func (q *Queue[T]) Empty() bool {
 }
 
 func (q *Queue[T]) Len() int {
-	return int(atomic.LoadInt64(&q.len))
+	return int(q.len.Load())
 }

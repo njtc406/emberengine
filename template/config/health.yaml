@@ -1,0 +1,5 @@
+# Health / Ready / Metrics 端点配置
+# 被 HealthService 使用，提供 /health、/ready、/metrics 运维入口
+Addr: 0.0.0.0:9090
+ReadHeaderTimeout: 10s
+IdleTimeout: 30s

@@ -5,17 +5,19 @@
 // 最后更新:  yr  2025/7/19 0019 18:50
 package interfaces
 
-import "github.com/njtc406/emberengine/engine/pkg/utils/pool"
+import (
+	"google.golang.org/protobuf/proto"
+)
 
 // IEncoder 编码器接口
 type IEncoder interface {
-	Encode(msg interface{}) ([]byte, string, error)
+	Encode(msg interface{}) ([]byte, error)
 	Type() int32
 }
 
 // IDecoder 解码器接口
 type IDecoder interface {
-	Decode(typeName string, data []byte) (interface{}, error)
+	Decode(data []byte, resp proto.Message) error
 	Type() int32
 }
 
@@ -23,5 +25,4 @@ type IDecoder interface {
 type ICodec interface {
 	IEncoder
 	IDecoder
-	Stats() []*pool.Stats
 }

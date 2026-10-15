@@ -1,0 +1,157 @@
+// Package mailbox
+// @Title  中间件工厂
+// @Description  根据配置创建中间件
+// @Author  yr  2025/2/8
+// @Update  yr  2025/2/8
+package mailbox
+
+import (
+	"time"
+
+	"github.com/alibaba/sentinel-golang/core/circuitbreaker"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+)
+
+// CreateMiddlewaresFromConfig 根据配置创建中间件列表
+//
+// 参数：
+//   - conf: 邮箱配置
+//   - serviceName: 服务名（用于 Sentinel 资源标识；空字符串退化为 "mailbox"）
+//   - logger: 日志器
+//   - isDebug: 是否为 debug 模式
+//
+// 返回：
+//   - 中间件列表
+func CreateMiddlewaresFromConfig(conf *config.MailboxConf, serviceName string, logger log.ILoggerX, isDebug bool) []inf.IMailboxMiddleware {
+	if conf == nil || conf.MiddlewareConf == nil {
+		// 没有配置中间件，使用默认配置
+		return createDefaultMiddlewares(logger, isDebug)
+	}
+
+	if serviceName == "" {
+		serviceName = "mailbox"
+	}
+
+	mconf := conf.MiddlewareConf
+	var middlewares []inf.IMailboxMiddleware
+
+	// 1. DispatchKey 统计中间件（仅 debug 模式）
+	if isDebug && mconf.EnableDispatchKeyStats {
+		interval := mconf.DispatchKeyStatsInterval
+		if interval <= 0 {
+			interval = 10 * time.Second
+		}
+		topN := mconf.DispatchKeyStatsTopN
+		if topN <= 0 {
+			topN = 10
+		}
+		maxKeys := mconf.DispatchKeyStatsMaxKeys
+		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, interval, topN, maxKeys))
+	}
+
+	// 2. 熔断中间件：配置统一映射为 Sentinel circuit breaker，资源名 = serviceName。
+	//
+	// 顺序契约：CB 排在 RateLimit 之前。RateLimit.OnReceive() 调用 limiter.Allow()
+	// 即消费 token，若链下游拒绝则 token 浪费 → 限流口径偏严；CB Open 时直接 Reject，
+	// 不再走到 RateLimit。
+	//
+	// CircuitBreakerConf 映射为 Sentinel `circuitbreaker.Rule`：
+	//   - FailureThreshold ≥ 1   → ErrorCount 策略，Threshold = MinRequestAmount = 该值
+	//   - CooldownDuration > 0   → RetryTimeoutMs
+	//   - WindowDuration   > 0   → StatIntervalMs
+	//   - SuccessThreshold / HalfOpenMaxAllowed: Sentinel 半开行为内置（单试探请求决定恢复），
+	//     不再单独配置；如需更复杂规则请直接通过用户中间件添加 SentinelMiddleware。
+	//
+	// 注意：与已注册的 SentinelMiddleware（用户自定义）共享同一资源名时，规则将合并加载。
+	if mconf.CircuitBreakerConf != nil && mconf.CircuitBreakerConf.Enable {
+		cconf := mconf.CircuitBreakerConf
+		failureThreshold := cconf.FailureThreshold
+		if failureThreshold <= 0 {
+			failureThreshold = 5
+		}
+
+		retryTimeoutMs := uint32(30000)
+		if cconf.CooldownDuration > 0 {
+			retryTimeoutMs = uint32(cconf.CooldownDuration / time.Millisecond)
+			if retryTimeoutMs == 0 {
+				retryTimeoutMs = 1
+			}
+		}
+		statIntervalMs := uint32(60000)
+		if cconf.WindowDuration > 0 {
+			statIntervalMs = uint32(cconf.WindowDuration / time.Millisecond)
+			if statIntervalMs == 0 {
+				statIntervalMs = 1
+			}
+		}
+
+		cbRule := &circuitbreaker.Rule{
+			Resource:         serviceName,
+			Strategy:         circuitbreaker.ErrorCount,
+			RetryTimeoutMs:   retryTimeoutMs,
+			MinRequestAmount: uint64(failureThreshold),
+			StatIntervalMs:   statIntervalMs,
+			Threshold:        float64(failureThreshold),
+		}
+
+		sm := NewSentinelMiddleware(serviceName,
+			WithSentinelLogger(logger),
+			func(m *SentinelMiddleware) { m.circuitBreakerRules = append(m.circuitBreakerRules, cbRule) },
+		)
+		middlewares = append(middlewares, sm)
+	}
+
+	// 3. 限流中间件放在最后：上游已 Reject 时不会走到这里，token 才不浪费。
+	if mconf.RateLimitConf != nil && mconf.RateLimitConf.Enable {
+		rconf := mconf.RateLimitConf
+		rate := rconf.Rate
+		if rate <= 0 {
+			rate = 10000
+		}
+		burst := rconf.Burst
+		if burst <= 0 {
+			burst = 1000
+		}
+
+		opts := []RateLimitOption{
+			WithRateLimitLogger(logger),
+		}
+
+		// 跳过紧急消息的限流
+		if rconf.SkipUrgent {
+			opts = append(opts, WithRateLimitSkipFunc(func(mctx inf.IMiddlewareContext) bool {
+				return mctx.Job().GetPriority() <= def.PriorityUrgent
+			}))
+		}
+
+		middlewares = append(middlewares, NewRateLimitMiddleware(rate, burst, opts...))
+	}
+
+	return middlewares
+}
+
+// createDefaultMiddlewares 创建默认中间件（无配置时使用）
+func createDefaultMiddlewares(logger log.ILoggerX, isDebug bool) []inf.IMailboxMiddleware {
+	var middlewares []inf.IMailboxMiddleware
+
+	// debug 模式下启用 DispatchKey 统计
+	if isDebug {
+		middlewares = append(middlewares, NewDispatchKeyStatsMiddleware(logger, 10*time.Second, 10, 0))
+	}
+
+	return middlewares
+}
+
+// MergeMiddlewares 合并配置中间件和用户自定义中间件
+//
+// 配置中间件在前，用户自定义中间件在后
+func MergeMiddlewares(configMiddlewares, customMiddlewares []inf.IMailboxMiddleware) []inf.IMailboxMiddleware {
+	result := make([]inf.IMailboxMiddleware, 0, len(configMiddlewares)+len(customMiddlewares))
+	result = append(result, configMiddlewares...)
+	result = append(result, customMiddlewares...)
+	return result
+}

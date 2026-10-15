@@ -60,7 +60,6 @@ func (areaPool *memAreaPool) getPosByteSize(size int) int {
 func (areaPool *memAreaPool) releaseByteSlice(byteBuff []byte) bool {
 	pos := areaPool.getPosByteSize(cap(byteBuff))
 	if pos > len(areaPool.pool) || pos == -1 {
-		panic("assert!")
 		return false
 	}
 

@@ -19,6 +19,7 @@ type IStatsRecorder interface {
 	incOverflow()
 	incTotalAlloc()
 	stats() Stats
+	String() string
 }
 
 type nopStats struct{}
@@ -35,6 +36,9 @@ func (nopStats) incOverflow()    {}
 func (nopStats) incTotalAlloc()  {}
 func (nopStats) stats() Stats {
 	return Stats{}
+}
+func (nopStats) String() string {
+	return ""
 }
 
 type Stats struct {
@@ -55,13 +59,88 @@ type Stats struct {
 	MaxObservedSize int64 // 最大对象数(本地)
 }
 
+//func (s *Stats) String() string {
+//	return fmt.Sprintf("pool_name:	%s, hit:	%d, miss:	%d, current:	%d, total_alloc:	%d, max_observed:	%d, overflow:	%d", s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
+//}
+
 func (s *Stats) String() string {
-	return fmt.Sprintf("pool_name: %s, hit: %d, miss: %d, current: %d, total_alloc: %d, max_observed: %d, overflow: %d", s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
+	return fmt.Sprintf(`
+pool_name:    %-15s
+	hit:          %-8d
+	miss:         %-8d  
+	current:      %-8d
+	total_alloc:  %-8d
+	max_observed: %-8d
+	overflow:     %-8d`,
+		s.Name, s.HitCount, s.MissCount, s.CurrentSize, s.TotalAlloc, s.MaxObservedSize, s.OverflowCount)
 }
 
 func NewStatsRecorder(name string) IStatsRecorder {
 	return &Stats{Name: name}
 }
+
+type switchableStatsRecorder struct {
+	enabled   func() bool
+	statsData *Stats
+}
+
+func NewSwitchableStatsRecorder(name string, enabled func() bool) IStatsRecorder {
+	if enabled == nil {
+		enabled = func() bool { return false }
+	}
+	return &switchableStatsRecorder{
+		enabled:   enabled,
+		statsData: &Stats{Name: name},
+	}
+}
+
+func (s *switchableStatsRecorder) incHit() {
+	if s.enabled() {
+		s.statsData.incHit()
+	}
+}
+
+func (s *switchableStatsRecorder) incMiss() {
+	if s.enabled() {
+		s.statsData.incMiss()
+	}
+}
+
+func (s *switchableStatsRecorder) incCurrentSize() {
+	if s.enabled() {
+		s.statsData.incCurrentSize()
+	}
+}
+
+func (s *switchableStatsRecorder) decCurrentSize() {
+	if s.enabled() {
+		s.statsData.decCurrentSize()
+	}
+}
+
+func (s *switchableStatsRecorder) incOverflow() {
+	if s.enabled() {
+		s.statsData.incOverflow()
+	}
+}
+
+func (s *switchableStatsRecorder) incTotalAlloc() {
+	if s.enabled() {
+		s.statsData.incTotalAlloc()
+	}
+}
+
+func (s *switchableStatsRecorder) stats() Stats {
+	return s.statsData.stats()
+}
+
+func (s *switchableStatsRecorder) String() string {
+	if !s.enabled() {
+		return ""
+	}
+	return s.statsData.String()
+}
+
 func (s *Stats) incHit() {
 	atomic.AddInt64(&s.HitCount, 1)
 }

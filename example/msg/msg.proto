@@ -11,6 +11,49 @@ message Msg_Test_Resp {
   int32 Ret = 1;
 }
 
+// ========== 更真实的业务场景消息 ==========
+
+// 模拟用户请求（如获取玩家数据）
+message UserDataReq {
+  int64 UserId = 1;
+  string Token = 2;
+  int32 DataType = 3;
+}
+
+// 模拟用户响应（包含常见业务数据）
+message UserDataResp {
+  int32 Code = 1;
+  string Msg = 2;
+  int64 UserId = 3;
+  string Nickname = 4;
+  int32 Level = 5;
+  int64 Exp = 6;
+  int64 Gold = 7;
+  int64 Diamond = 8;
+  repeated int32 Items = 9;       // 道具列表
+  int64 LastLoginTime = 10;
+  int64 ServerTime = 11;
+}
+
+// 模拟战斗请求
+message BattleReq {
+  int64 PlayerId = 1;
+  int64 TargetId = 2;
+  int32 SkillId = 3;
+  repeated int32 Params = 4;
+}
+
+// 模拟战斗响应
+message BattleResp {
+  int32 Code = 1;
+  int32 Damage = 2;
+  bool IsCritical = 3;
+  int32 RemainHp = 4;
+  int64 Timestamp = 5;
+}
+
+// ========== 原有消息 ==========
+
 message TestData {
   int32 A = 1;
   int32 B = 2;

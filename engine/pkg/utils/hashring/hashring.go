@@ -7,9 +7,10 @@ package hashring
 
 import (
 	"fmt"
-	"github.com/cespare/xxhash/v2"
 	"sort"
 	"sync"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 const hashSalt = "ember_salt_key_y_w"
@@ -27,9 +28,9 @@ const hashSalt = "ember_salt_key_y_w"
 
 func hashEvent(key string) int {
 	if key == "" {
-		return 1
+		return 0
 	}
-	return int(xxhash.Sum64String(key)) // 用 64-bit 更好分布
+	return int(xxhash.Sum64String(key)) //64-bit分布更均匀
 }
 
 // HashRing 表示一个带虚拟节点的一致性哈希环。
@@ -61,7 +62,7 @@ func (h *HashRing[T]) Add(key T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for i := 0; i < h.replicas; i++ {
-		virtualNodeKey := fmt.Sprintf("%s-%d-%d", hashSalt, key, i)
+		virtualNodeKey := fmt.Sprintf("%s-%v-%d", hashSalt, key, i)
 		hash := hashEvent(virtualNodeKey)
 		h.nodes = append(h.nodes, hash)
 		h.ring[hash] = key
@@ -82,6 +83,22 @@ func (h *HashRing[T]) Remove(key T) {
 		}
 	}
 	h.nodes = newNodes
+	sort.Ints(h.nodes)
+}
+
+func (h *HashRing[T]) RemoveMany(keys map[T]struct{}) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var newNodes []int
+	for _, hash := range h.nodes {
+		if _, ok := keys[h.ring[hash]]; ok {
+			delete(h.ring, hash)
+		} else {
+			newNodes = append(newNodes, hash)
+		}
+	}
+	h.nodes = newNodes
+	sort.Ints(h.nodes)
 }
 
 // Get 根据传入的 key 计算哈希值，并在哈希环中查找对应的值。
@@ -95,10 +112,15 @@ func (h *HashRing[T]) Get(hashKey string) (T, bool) {
 		return zero, false
 	}
 	hash := hashEvent(hashKey)
-	// 二分查找第一个 >= hash 的虚拟节点
-	idx := sort.Search(len(h.nodes), func(i int) bool {
-		return h.nodes[i] >= hash
-	})
+	var idx int
+	if hash == 0 {
+		idx = 0
+	} else {
+		// 二分查找第一个 >= hash 的虚拟节点
+		idx = sort.Search(len(h.nodes), func(i int) bool {
+			return h.nodes[i] >= hash
+		})
+	}
 	if idx == len(h.nodes) {
 		idx = 0
 	}

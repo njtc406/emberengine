@@ -6,7 +6,7 @@
 package interfaces
 
 import (
-	"github.com/njtc406/emberengine/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/config"
 )
 
 //type IRemoteServer interface {

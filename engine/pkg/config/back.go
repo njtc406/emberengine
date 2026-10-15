@@ -22,7 +22,7 @@ package config
 //
 //	// 解析本地配置
 //	if err := parseNodeConfig(confPath); err != nil {
-//		panic(err)
+//		return err
 //	}
 //
 //	// 初始化目录
@@ -30,12 +30,12 @@ package config
 //
 //	// 解析启动的服务
 //	if err := parseStartService(); err != nil {
-//		panic(err)
+//		return err
 //	}
 //
 //	// 解析服务配置
 //	if err := parseServiceConf(confPath); err != nil {
-//		panic(err)
+//		return err
 //	}
 //
 //	fmt.Println("=============配置解析完成===================")
@@ -107,7 +107,7 @@ package config
 //// createDirIfNotExists 创建目录
 //func createDirIfNotExists(dir string) {
 //	if err := os.MkdirAll(dir, 0755); err != nil { // 0755 避免权限问题
-//		panic(err)
+//		return err
 //	}
 //}
 //

@@ -18,8 +18,8 @@ func (r *RedisBase) RedisKey(format string, args ...interface{}) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func (r *RedisBase) HGet(tx *redis.Tx, key string, field string) (bool, string, error) {
-	if ret, err := tx.HGet(context.Background(), key, field).Result(); err != nil {
+func (r *RedisBase) HGet(ctx context.Context, tx *redis.Tx, key string, field string) (bool, string, error) {
+	if ret, err := tx.HGet(ctx, key, field).Result(); err != nil {
 		if errors.Is(err, redis.Nil) {
 			return false, "", nil
 		}
@@ -29,16 +29,16 @@ func (r *RedisBase) HGet(tx *redis.Tx, key string, field string) (bool, string, 
 	}
 }
 
-func (r *RedisBase) HSet(tx *redis.Tx, key string, fields map[string]interface{}) error {
-	if err := tx.HSet(context.Background(), key, fields).Err(); err != nil {
+func (r *RedisBase) HSet(ctx context.Context, tx *redis.Tx, key string, fields map[string]interface{}) error {
+	if err := tx.HSet(ctx, key, fields).Err(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (r *RedisBase) HGetAll(tx *redis.Client, key string, result interface{}) error {
-	if err := tx.HGetAll(context.Background(), key).Scan(result); err != nil {
+func (r *RedisBase) HGetAll(ctx context.Context, tx *redis.Client, key string, result interface{}) error {
+	if err := tx.HGetAll(ctx, key).Scan(result); err != nil {
 		return err
 	}
 	return nil

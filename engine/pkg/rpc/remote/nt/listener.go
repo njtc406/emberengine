@@ -7,32 +7,37 @@ package nt
 
 import (
 	"github.com/nats-io/nats.go"
-	"github.com/njtc406/emberengine/engine/internal/message/msgenvelope"
-	inf "github.com/njtc406/emberengine/engine/pkg/interfaces"
-	"github.com/njtc406/emberengine/engine/pkg/rpc/remote/handler"
-	"github.com/njtc406/emberengine/engine/pkg/utils/log"
-	"google.golang.org/protobuf/proto"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
+	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
+	"github.com/njtc406/emberengine/v2/engine/pkg/log"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/message/msgenvelope"
+	"github.com/njtc406/emberengine/v2/engine/pkg/rpc/remote/handler"
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/codec"
 )
 
 type NatsListener struct {
 	cliFactory inf.IRpcSenderFactory
+	logger     log.ILoggerX
+	handler    *handler.Handler
 }
 
 func (n *NatsListener) Handle(msg *nats.Msg) {
 	req := msgenvelope.NewMessage()
 	defer msgenvelope.ReleaseMessage(req)
-	err := proto.Unmarshal(msg.Data, req)
+	err := codec.Decode(def.ProtoBuf, msg.Data, req)
 	if err != nil {
-		log.SysLogger.Errorf("unmarshal nats message error: %v", err)
+		if n.logger != nil {
+			n.logger.Errorf("unmarshal nats message error: %v", err)
+		}
 		return
 	}
 
-	if err = handler.RpcMessageHandler(n.cliFactory, req); err != nil {
-		log.SysLogger.Errorf("handle nats message error: %v  req:%+v", err, req)
+	if n.handler == nil {
+		return
 	}
-
-	// request才有
-	//if err = msg.Ack(); err != nil {
-	//	log.SysLogger.Errorf("ack nats message error: %v", err)
-	//}
+	if err = n.handler.RpcMessageHandler(n.cliFactory, req); err != nil {
+		if n.logger != nil {
+			n.logger.Errorf("handle nats message error: %v  req:%+v", err, req)
+		}
+	}
 }
