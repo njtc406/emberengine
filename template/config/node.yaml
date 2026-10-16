@@ -181,6 +181,13 @@ ServiceConf:
         TimerBucketSize: 100
       # 邮箱配置
       Mailbox:
+        # 保持兼容默认值；Task 9 正确性和生产性能门槛通过前禁止灰度
+        QueueBackend: "unbounded"
+        # MaxQueueStorageBytes: 67108864 # bounded 必填；布局预算，不是 RSS 上限
+        # DualQueueCapacity: # 每个 Worker 的物理子队列容量
+        #   System: 64
+        #   User: 4096
+        # 切回 unbounded 后重启；不支持运行时热切换
         # 队列模式选择
         # - "dual":     双队列模式(系统队列+用户队列，简单高效，适用于大多数场景)
         # - "priority": 多优先级队列模式(支持6个优先级层级和多种调度策略)
@@ -328,21 +335,27 @@ ServiceConf:
             # 格式: priority: {BatchSize: 单次最多处理数, Weight: 权重(仅weighted策略使用)}
             PriorityBatches:
               -3: # PrioritySys - 系统消息
+                # Capacity: 4096 # bounded 时必填，每 Worker、每优先级独立容量（>=2 的 2 次幂）
                 BatchSize: 32
                 Weight: 20
               -2: # PriorityUrgent - 紧急消息
+                # Capacity: 4096 # bounded 时必填，每 Worker、每优先级独立容量（>=2 的 2 次幂）
                 BatchSize: 16
                 Weight: 10
               -1: # PriorityHigh - 高优先级消息
+                # Capacity: 4096 # bounded 时必填，每 Worker、每优先级独立容量（>=2 的 2 次幂）
                 BatchSize: 12
                 Weight: 5
               0: # PriorityNormal - 普通消息
+                # Capacity: 4096 # bounded 时必填，每 Worker、每优先级独立容量（>=2 的 2 次幂）
                 BatchSize: 8
                 Weight: 3
               1: # PriorityLow - 低优先级消息
+                # Capacity: 4096 # bounded 时必填，每 Worker、每优先级独立容量（>=2 的 2 次幂）
                 BatchSize: 4
                 Weight: 2
               2: # PriorityBatch - 批量消息
+                # Capacity: 4096 # bounded 时必填，每 Worker、每优先级独立容量（>=2 的 2 次幂）
                 BatchSize: 2
                 Weight: 1
       ServiceLogConf:

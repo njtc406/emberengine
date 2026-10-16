@@ -181,6 +181,11 @@ type TimerConf struct {
 // MailboxConf 邮箱配置
 // 职责：配置消息队列的队列模式和调度策略
 type MailboxConf struct {
+	// QueueBackend defaults to unbounded; bounded requires explicit per-queue capacities.
+	QueueBackend      string                 `binding:""`
+	DualQueueCapacity *DualQueueCapacityConf `binding:""`
+	// MaxQueueStorageBytes limits main queue object/slot layout, not allocator overhead or RSS.
+	MaxQueueStorageBytes uint64 `binding:""`
 	// QueueMode 队列模式
 	// - "dual":   双队列模式（系统队列+用户队列，适用于简单场景）
 	// - "priority": 多优先级队列模式（支持多个优先级队列和调度策略）
@@ -385,9 +390,17 @@ type MultiLevelWorkerConf struct {
 	PriorityBatches map[def.Priority]*PriorityConfig `binding:""` // 各优先级批量大小 {"sys":32, "urgent":16, "high":12, "normal":8}
 }
 
+// DualQueueCapacityConf specifies exact per-Worker bounded dual queue capacities.
+type DualQueueCapacityConf struct {
+	System int `binding:""`
+	User   int `binding:""`
+}
+
 // PriorityConfig 单个优先级配置
 // 职责：配置单个优先级队列的批量处理大小和调度权重
 type PriorityConfig struct {
+	// Capacity is per Worker, per physical queue; bounded requires a power of two >= 2.
+	Capacity int `json:"capacity" binding:""`
 	// BatchSize 批量处理大小
 	// 单次从该优先级队列最多弹出的消息数量
 	// 建议: 高优先级设置较大值（如32），低优先级设置较小值（如4）

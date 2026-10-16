@@ -1,0 +1,62 @@
+gc 1 @0.039s 0%: 0+0+1.0 ms clock, 0+0/0/0+4.0 ms cpu, 3->3->0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 2 @0.047s 0%: 0+0.51+0 ms clock, 0+0/0.51/0+0 ms cpu, 3->3->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.055s 0%: 0+1.0+0 ms clock, 0+0/0.50/0+0 ms cpu, 3->3->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @0.063s 1%: 0+1.5+0 ms clock, 0+1.5/1.5/0+0 ms cpu, 4->4->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @0.071s 1%: 0+0+0 ms clock, 0+0/0/0+0 ms cpu, 4->4->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.074s 1%: 0+1.0+0.77 ms clock, 0+0/0/0+3.1 ms cpu, 4->4->2 MB, 5 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 7 @0.079s 2%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 4->5->2 MB, 5 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 8 @0.083s 2%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 5->6->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 9 @0.090s 2%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 6->6->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 10 @0.098s 2%: 0+1.0+0 ms clock, 0+0/1.0/3.0+0 ms cpu, 6->6->2 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 11 @0.113s 2%: 0+1.1+0 ms clock, 0+2.1/1.1/0+0 ms cpu, 5->5->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 12 @0.117s 3%: 0+1.5+0 ms clock, 0+1.0/1.0/0+0 ms cpu, 5->5->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 13 @0.122s 3%: 0+2.0+0 ms clock, 0+1.0/2.0/0+0 ms cpu, 6->6->4 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 14 @0.131s 3%: 0+2.0+0 ms clock, 0+1.0/1.0/0+0 ms cpu, 7->7->4 MB, 8 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 15 @0.139s 3%: 0+2.0+0 ms clock, 0+1.0/1.0/0+0 ms cpu, 7->7->4 MB, 8 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 16 @0.146s 4%: 0+2.0+0 ms clock, 0+3.1/2.0/0+0 ms cpu, 7->8->4 MB, 9 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 17 @0.152s 4%: 0+1.0+0 ms clock, 0+1.0/1.0/0+0 ms cpu, 8->8->5 MB, 10 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 18 @0.159s 5%: 0+2.5+0 ms clock, 0+3.0/2.5/0+0 ms cpu, 9->10->6 MB, 11 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 19 @0.177s 5%: 0+2.0+0 ms clock, 0+0/1.7/2.8+0 ms cpu, 10->11->6 MB, 12 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 20 @0.189s 4%: 0+1.0+0 ms clock, 0+0/1.0/2.0+0 ms cpu, 12->12->7 MB, 14 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 21 @0.237s 4%: 0+7.8+0 ms clock, 0+1.5/7.8/0+0 ms cpu, 13->16->10 MB, 16 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 22 @0.256s 5%: 0+5.6+0 ms clock, 0+0/5.6/1.0+0 ms cpu, 17->18->8 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 23 @0.274s 5%: 0+5.6+0 ms clock, 0+0/5.6/0+0 ms cpu, 15->17->9 MB, 18 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 24 @0.292s 5%: 0+6.2+0 ms clock, 0+0/5.6/0+0 ms cpu, 17->19->10 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 25 @0.316s 5%: 0+2.5+0 ms clock, 0+0/2.5/2.0+0 ms cpu, 18->18->8 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 26 @0.352s 5%: 0.51+7.2+0 ms clock, 2.0+0/7.2/0.51+0 ms cpu, 14->18->11 MB, 17 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 27 @0.386s 5%: 0.50+7.0+0 ms clock, 2.0+0.13/7.0/2.6+0 ms cpu, 20->21->9 MB, 23 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 28 @0.418s 5%: 0+7.3+0 ms clock, 0+0/6.8/0+0 ms cpu, 16->19->11 MB, 19 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 29 @0.446s 5%: 0+5.3+0 ms clock, 0+0.51/5.3/3.8+0 ms cpu, 19->21->10 MB, 23 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 30 @0.471s 5%: 0+4.1+0 ms clock, 0+0/4.1/4.1+0 ms cpu, 18->18->10 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 31 @0.526s 5%: 0+6.8+0 ms clock, 0+0/6.8/0+0 ms cpu, 17->18->10 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+# github.com/njtc406/emberengine/engine/pkg/actor/mailbox
+# [github.com/njtc406/emberengine/engine/pkg/actor/mailbox]
+gc 1 @0.010s 5%: 0+1.0+0.64 ms clock, 0+0/0.51/1.0+2.5 ms cpu, 3->4->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 2 @0.017s 4%: 0+1.0+0 ms clock, 0+0/1.0/1.5+0 ms cpu, 4->4->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.021s 5%: 0+1.0+0 ms clock, 0+0/1.0/2.0+0 ms cpu, 5->6->5 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @0.028s 7%: 0+2.0+0.50 ms clock, 0+0.52/2.0/4.1+2.0 ms cpu, 9->10->7 MB, 10 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @0.037s 7%: 0+2.5+0.51 ms clock, 0+0/2.5/5.1+2.0 ms cpu, 13->14->10 MB, 15 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.057s 7%: 0+6.8+0 ms clock, 0+0.010/6.8/6.8+0 ms cpu, 18->19->15 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+# github.com/njtc406/emberengine/engine/pkg/actor/mailbox.test
+gc 1 @0.005s 2%: 0+0.52+0 ms clock, 0+0/0.50/1.0+0 ms cpu, 3->4->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 2 @0.006s 3%: 0+0.51+0 ms clock, 0+0/0.51/0.51+0 ms cpu, 7->7->7 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.008s 4%: 0+0.51+0 ms clock, 0+0/0.51/1.0+0 ms cpu, 15->15->15 MB, 15 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @0.012s 6%: 0.50+0+0 ms clock, 2.0+0/0/0+0 ms cpu, 28->28->28 MB, 30 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @0.032s 3%: 0+0.51+0 ms clock, 0+0/0.51/1.0+0 ms cpu, 54->55->54 MB, 57 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.062s 2%: 0+1.0+0 ms clock, 0+0.008/1.0/1.0+0 ms cpu, 107->107->106 MB, 108 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 7 @0.130s 1%: 0+0.51+0 ms clock, 0+0/0.51/1.0+0 ms cpu, 208->210->208 MB, 212 MB goal, 0 MB stacks, 0 MB globals, 4 P
+=== RUN   TestMailboxPerformanceSample
+gc 1 @0.010s 1%: 0+0.52+0 ms clock, 0+0/0.52/1.0+0 ms cpu, 3->4->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+=== RUN   TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady
+gc 2 @0.165s 0%: 0+0.99+0 ms clock, 0+0/0/0.99+0 ms cpu, 3->3->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.168s 0%: 0+0.51+0 ms clock, 0+0.51/0.51/1.0+0 ms cpu, 69->69->69 MB, 69 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @45.984s 0%: 0+2.0+0 ms clock, 0+0/2.0/6.1+0 ms cpu, 136->136->77 MB, 139 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @102.313s 0%: 0+2.5+0 ms clock, 0+0/2.5/7.1+0 ms cpu, 150->150->77 MB, 155 MB goal, 0 MB stacks, 0 MB globals, 4 P
+GC forced
+gc 6 @158.682s 0%: 0+3.1+0 ms clock, 0+1.0/3.1/5.6+0 ms cpu, 150->150->77 MB, 155 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 32 @161.578s 0%: 0.51+7.2+0 ms clock, 2.0+0/7.2/0+0 ms cpu, 15->15->9 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 7 @216.316s 0%: 0+3.0+0 ms clock, 0+0/2.5/7.6+0 ms cpu, 151->151->77 MB, 155 MB goal, 0 MB stacks, 0 MB globals, 4 P
+--- PASS: TestMailboxPerformanceSample (263.98s)
+    --- PASS: TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady (263.96s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	265.138s

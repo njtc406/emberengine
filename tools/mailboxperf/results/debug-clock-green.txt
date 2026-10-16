@@ -1,0 +1,11 @@
+=== RUN   TestClockResolvesShortWork
+--- PASS: TestClockResolvesShortWork (0.00s)
+=== RUN   TestCPUTimeMeasuresBusyWork
+    clock_test.go:31: busy process CPU=484.375ms wall=500.9242ms
+--- PASS: TestCPUTimeMeasuresBusyWork (0.50s)
+=== RUN   TestPercentiles
+--- PASS: TestPercentiles (0.00s)
+=== RUN   TestCPUTimeMonotonic
+--- PASS: TestCPUTimeMonotonic (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/internal/perftest	0.795s

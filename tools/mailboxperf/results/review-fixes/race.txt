@@ -1,0 +1,110 @@
+=== RUN   TestMailboxPerformanceComparison
+=== RUN   TestMailboxPerformanceComparison/missing
+=== RUN   TestMailboxPerformanceComparison/metadata
+=== RUN   TestMailboxPerformanceComparison/cpu-zero
+=== RUN   TestMailboxPerformanceComparison/loss
+=== RUN   TestMailboxPerformanceComparison/duplicate-round
+=== RUN   TestMailboxPerformanceComparison/p99
+=== RUN   TestMailboxPerformanceComparison/cpu
+=== RUN   TestMailboxPerformanceComparison/throughput
+--- PASS: TestMailboxPerformanceComparison (0.01s)
+    --- PASS: TestMailboxPerformanceComparison/missing (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/metadata (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu-zero (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/loss (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/duplicate-round (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/p99 (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/throughput (0.00s)
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors/execute
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors/discard
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors/release
+--- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors (0.00s)
+    --- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors/execute (0.00s)
+    --- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors/discard (0.00s)
+    --- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors/release (0.00s)
+=== RUN   TestPerfMemoryAccountingRejectsWrongDisposition
+--- PASS: TestPerfMemoryAccountingRejectsWrongDisposition (0.00s)
+=== RUN   TestMailboxPerformanceMemory
+    mailbox_performance_memory_test.go:180: candidate=bounded recovered=true executed=4097 rejected=28672 points=[
+          {
+            "Offered": 1,
+            "Accepted": 1,
+            "Rejected": 0,
+            "Occupancy": 0,
+            "HeapAlloc": 2723024,
+            "HeapObjects": 7088
+          },
+          {
+            "Offered": 4097,
+            "Accepted": 4097,
+            "Rejected": 0,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247392,
+            "HeapObjects": 15282
+          },
+          {
+            "Offered": 8193,
+            "Accepted": 4097,
+            "Rejected": 4096,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247520,
+            "HeapObjects": 15282
+          },
+          {
+            "Offered": 12289,
+            "Accepted": 4097,
+            "Rejected": 8192,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247712,
+            "HeapObjects": 15283
+          },
+          {
+            "Offered": 16385,
+            "Accepted": 4097,
+            "Rejected": 12288,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247616,
+            "HeapObjects": 15282
+          },
+          {
+            "Offered": 20481,
+            "Accepted": 4097,
+            "Rejected": 16384,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247904,
+            "HeapObjects": 15283
+          },
+          {
+            "Offered": 24577,
+            "Accepted": 4097,
+            "Rejected": 20480,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247808,
+            "HeapObjects": 15282
+          },
+          {
+            "Offered": 28673,
+            "Accepted": 4097,
+            "Rejected": 24576,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247904,
+            "HeapObjects": 15283
+          },
+          {
+            "Offered": 32769,
+            "Accepted": 4097,
+            "Rejected": 28672,
+            "Occupancy": 4096,
+            "HeapAlloc": 3247904,
+            "HeapObjects": 15283
+          }
+        ]
+--- PASS: TestMailboxPerformanceMemory (0.15s)
+=== RUN   TestMailboxPerformanceRejectsUnresolvedCurrentLatency
+--- PASS: TestMailboxPerformanceRejectsUnresolvedCurrentLatency (0.00s)
+=== RUN   TestMailboxPerformanceGateRequiresBaseline
+--- PASS: TestMailboxPerformanceGateRequiresBaseline (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	2.756s

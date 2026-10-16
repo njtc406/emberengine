@@ -1,0 +1,2 @@
+ok  	github.com/njtc406/emberengine/engine/internal/perftest	0.795s
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	6.044s

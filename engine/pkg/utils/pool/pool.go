@@ -217,26 +217,28 @@ type PerPPoolWrapper[T any] struct {
 	globalPool sync.Pool   // 全局后备池
 }
 
-// NewPerPPoolWrapper 创建一个基于 per-P 局部缓存的对象池，适用于高性能、低延迟且对 GC 极度敏感的场景
+// NewPerPPoolWrapper 创建依赖 Go runtime 内部 pin 机制的 per-P 对象缓存。
+// size 必须非负，表示每个 P 的本地槽位上限，不是池的对象总数或内存硬上限。
 //
-// 该对象池为每个逻辑 P 分配一个本地池（非线程安全），避免全局锁竞争与原子操作开销，
-// 因此适合在单一 goroutine 中频繁复用对象，生命周期受控，对GC频率极度敏感，性能要求极高的场景。
-// 极度不建议 在不同 goroutine 中配对调用 Get 与 Put，否则可能导致缓存失效、内存突增或逻辑错误
+// 使用契约：
+//   - 构造完成后安全发布；options 和回调配置不得在使用中并发修改。
+//   - 构造后 GOMAXPROCS 不得超过初始化值；本地数组不扩容，越界可能在 pin 时 fatal。
+//   - Get 后对象由调用方独占，Put 后不得再访问，也不得重复归还。
+//     可以通过 channel 等同步手段完整转移所有权，由另一 goroutine 归还；
+//     同 goroutine 配对并非必要条件，也不保证两次调用处于同一个 P。
+//   - new/reset/ref/unref 回调在 pin 区间外执行；回调共享状态须自行同步，
+//     不得发布尚在初始化/重置的对象或重入归还同一对象。
 //
-// 适用场景：
-//   - 游戏逻辑帧中高频创建/复用的临时对象（如消息体、组件快照等）；
-//   - rpc消息message结构等单goroutine频繁调用结构（请一定确保对象不会跨 goroutine!!）；
-//   - 对 GC 敏感的大对象池（避免被 GC 回收带来的性能抖动）；
+// 实现边界：所有本地 slice 访问须保持在短小、不可阻塞的 pin 区间内。
+// 本地访问不加互斥锁，但后备 sync.Pool、分配及 GC 不提供整体 lock-free 保证。
+// pin 使用内部运行时接口，不是公开的 Go 同步契约；升级工具链须重新验证。
+// 本实现未提供 TSan 可见的本地交接同步：-race 告警不能单独证明并行破坏，
+// 也不能据此忽略对象所有权或回调中的真实竞争。
 //
-// 不适用场景：
-//   - 对象在多个 goroutine 之间传递、释放或复用（例如 channel、异步任务）；
-//   - 对象生命周期难以控制或不明确；
-//   - 异步任务释放、跨模块释放等情况（推荐使用 sync.Pool）；
-//
-// 注意事项：
-//   - 本池设计为 **goroutine 局部缓存**，**禁止跨 goroutine 使用 Get 和 Put**；
-//   - Put 到错误 P 的本地池会导致缓存污染和性能下降；
-//   - 池中的对象不会被 GC 自动清理，需考虑内存占用长期增长的风险；
+// 内存边界：本地缓存中的对象会保留引用，不随 GC 自动清理；弹出时清空槽位。
+// 被引用对象可继续持有任意大小的对象图。全局后备 sync.Pool 则允许 GC 清理。
+// 适合 P 上限稳定、所有权清晰且愿意保留缓存的高频临时对象；
+// 需要动态扩 P 或标准工具链同步支持时，优先使用 SyncPoolWrapper。
 func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecorder, options ...POption[T]) IPool[T] {
 	if recorder == nil {
 		recorder = &nopStats{}
@@ -271,15 +273,18 @@ func NewPerPPoolWrapper[T any](size int, newFunc func() T, recorder IStatsRecord
 // Get 从当前逻辑 P 对应的本地池中获取一个对象。
 // 若本地池为空，则退回到全局 sync.Pool 获取（可能发生 GC 分配）。
 //
-// 本方法为 goroutine 局部缓存设计，不应跨 goroutine 获取对象。
-// 不遵守此限制可能导致缓存命中率下降，甚至破坏池内部结构
+// 返回对象的独占所有权；本地槽位访问在 pin 区间内，回调在 unpin 后执行。
+// 弹出时清空底层槽位，避免缓存继续持有已转交调用方的对象。
 func (p *PerPPoolWrapper[T]) Get() T {
 	pid := procPin()
 	local := p.localPools[pid]
 
 	if len(local.queue) > 0 {
-		obj := local.queue[len(local.queue)-1]
-		local.queue = local.queue[:len(local.queue)-1]
+		last := len(local.queue) - 1
+		obj := local.queue[last]
+		var zero T
+		local.queue[last] = zero
+		local.queue = local.queue[:last]
 		procUnpin()
 		p.recorder.incHit()
 		p.recorder.decCurrentSize()
@@ -311,8 +316,8 @@ func (p *PerPPoolWrapper[T]) Get() T {
 // Put 将对象放回当前逻辑 P 的本地池中，以备后续复用。
 // 若本地池已满，则放入全局 sync.Pool 作为后备缓存。
 //
-// 注意：仅允许将对象放回获取它的 goroutine 所在的本地池。
-// 跨 goroutine 释放对象将导致缓存污染，增加误命中风险或内存泄露。
+// 调用方必须拥有对象的独占归还权，且调用后不再访问对象。
+// 归还使用当前 P，不要求与 Get 的 P 或 goroutine 相同；跨 goroutine 须同步转移所有权。
 func (p *PerPPoolWrapper[T]) Put(obj T) {
 	if p.unrefFunc != nil {
 		if !p.unrefFunc(obj) {

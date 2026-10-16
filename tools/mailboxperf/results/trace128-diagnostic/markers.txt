@@ -1,0 +1,3 @@
+M=42500 P=1 G=50 Log Time=540311118384404 Task=0 Category="mailbox-block" Message="start"
+M=26524 P=3 G=50 Log Time=540323244177818 Task=0 Category="mailbox-first-rejection" Message="window=5 index=17134 actual_ns=12120808500 returned_ns=12120808500"
+M=26524 P=3 G=50 Log Time=540323244179324 Task=0 Category="mailbox-trace-stop" Message="first rejection"

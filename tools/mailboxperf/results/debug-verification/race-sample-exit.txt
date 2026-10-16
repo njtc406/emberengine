@@ -1,0 +1,1 @@
+Instrumented sample exit=1 (loss remains a failure; not performance comparison data)

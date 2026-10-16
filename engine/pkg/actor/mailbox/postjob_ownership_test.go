@@ -2,6 +2,9 @@ package mailbox
 
 import (
 	"context"
+	"fmt"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/boundedmpsc"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -349,4 +352,112 @@ func TestPostJob_MiddlewareReject_DiscardsAndReleasesJob(t *testing.T) {
 	}
 
 	mb.Stop()
+}
+
+// Keep the wrapper alive after the pooled underlying Job is released.
+type admissionOwnershipJob struct {
+	inf.IMailboxJob
+	releases atomic.Int64
+}
+
+func (j *admissionOwnershipJob) Release() {
+	if j.releases.Add(1) == 1 {
+		j.IMailboxJob.Release()
+	}
+}
+
+func TestWorkerAdmissionOutsideGateOwnership(t *testing.T) {
+	inv := &releaseTrackingInvoker{}
+	env := newWorkerForSafeExecTest(t, inv).env
+	w := newWorker(1, newSimpleConf(1), normalizedQueueSpec{backend: "unbounded", mode: QueueModeDual}, env, DrainExecute).(*Worker)
+	w.Start()
+	j := &admissionOwnershipJob{IMailboxJob: newJob()}
+	paused, resume := make(chan struct{}), make(chan struct{})
+	result := make(chan error, 1)
+	go func() { close(paused); <-resume; result <- w.SubmitJob(j) }()
+	awaitAdmission(t, paused)
+	w.Stop()
+	close(resume)
+	if err := <-result; err != def.ErrMailboxWorkerClosed {
+		t.Fatalf("got %v, want closed", err)
+	}
+	if j.releases.Load() != 0 {
+		t.Fatal("rejected Job ownership was consumed")
+	}
+	j.Release()
+	if j.releases.Load() != 1 || inv.executeCount.Load() != 0 || inv.discardCount.Load() != 0 {
+		t.Fatal("rejected Job must terminate only in caller")
+	}
+}
+
+// This test adapter exercises Worker with the real bounded queue without
+// changing production queue-manager configuration or Push(false) semantics.
+type admissionBoundedManager struct {
+	q *boundedmpsc.Queue[inf.IMailboxJob]
+}
+
+func (m *admissionBoundedManager) Submit(j inf.IMailboxJob) error {
+	if !m.q.Push(j) {
+		return def.ErrMailboxWorkerIsFull
+	}
+	return nil
+}
+func (m *admissionBoundedManager) NextJob() (inf.IMailboxJob, bool) { return nil, false }
+func (m *admissionBoundedManager) GetJobLen() int                   { return m.q.Len() }
+func (m *admissionBoundedManager) IsEmpty() bool                    { return m.q.Empty() }
+func (m *admissionBoundedManager) DrainAll(fn func(inf.IMailboxJob)) {
+	for {
+		j, ok := m.q.Pop()
+		if !ok {
+			return
+		}
+		fn(j)
+	}
+}
+
+func TestWorkerAdmissionFullQueueOwnership(t *testing.T) {
+	for _, policy := range []DrainPolicy{DrainExecute, DrainDiscard} {
+		t.Run(fmt.Sprint(policy), func(t *testing.T) {
+			inv := &releaseTrackingInvoker{}
+			w := newWorkerForSafeExecTest(t, inv)
+			q, err := boundedmpsc.New[inf.IMailboxJob](2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.queueManager = &admissionBoundedManager{q: q}
+			w.drainPolicy = policy
+			jobs := []*admissionOwnershipJob{{IMailboxJob: newJob()}, {IMailboxJob: newJob()}, {IMailboxJob: newJob()}}
+			for _, j := range jobs[:2] {
+				if err := w.SubmitJob(j); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := w.SubmitJob(jobs[2]); err != def.ErrMailboxWorkerIsFull {
+				t.Fatalf("got %v, want full", err)
+			}
+			for _, j := range jobs {
+				if j.releases.Load() != 0 {
+					t.Fatal("submission released Job")
+				}
+			}
+			jobs[2].Release()
+			w.BeginStop()
+			w.Start() // closed worker runs only final drain
+			w.Wait()
+			for i, j := range jobs {
+				if j.releases.Load() != 1 {
+					t.Errorf("job %d releases=%d", i, j.releases.Load())
+				}
+			}
+			if !q.Empty() {
+				t.Fatal("residual publication")
+			}
+			if policy == DrainExecute && (inv.executeCount.Load() != 2 || inv.discardCount.Load() != 0) {
+				t.Fatal("execute ownership mismatch")
+			}
+			if policy == DrainDiscard && (inv.executeCount.Load() != 0 || inv.discardCount.Load() != 2) {
+				t.Fatal("discard ownership mismatch")
+			}
+		})
+	}
 }

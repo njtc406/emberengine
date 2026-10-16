@@ -1,0 +1,11 @@
+=== RUN   TestMailboxPerfRetainedHeapDiagnostic
+    mailbox_performance_retention_test.go:37: v4 windows=1 jobs=65536 retainedBytes=9964048 allocatedBytes=10484872 objects=131090 GC=3 pauseTotal=0s pauseMax=0s forcedGCWall=1.0259ms
+    mailbox_performance_retention_test.go:37: v4 windows=4 jobs=262144 retainedBytes=39847392 allocatedBytes=41925064 objects=524297 GC=5 pauseTotal=0s pauseMax=0s forcedGCWall=14.0121ms
+    mailbox_performance_retention_test.go:37: v4 windows=32 jobs=2097152 retainedBytes=318768784 allocatedBytes=335354512 objects=4194315 GC=6 pauseTotal=0s pauseMax=0s forcedGCWall=48.6295ms
+--- PASS: TestMailboxPerfRetainedHeapDiagnostic (0.65s)
+=== RUN   TestMailboxPerfWindowProtocol
+    mailbox_performance_retention_test.go:44: bounded-window protocol unavailable: windows=0 err=unsupported fixed replication protocol "task2-v5-window"
+--- FAIL: TestMailboxPerfWindowProtocol (0.00s)
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.887s
+FAIL

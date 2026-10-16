@@ -1,0 +1,39 @@
+=== RUN   TestMailboxPerformanceSample
+=== RUN   TestMailboxPerformanceSample/dual-w1-rwfalse-hotfalse-steady
+=== RUN   TestMailboxPerformanceSample/dual-w1-rwfalse-hottrue-steady
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-steady
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwfalse-hottrue-steady
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwtrue-hotfalse-steady
+    mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v3-qpc Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor              OS:windows Arch:amd64 Go:go1.24.9 Commit:a68ab9a Procs:4} Candidate:bounded Scenario:dual-w4-rwtrue-hotfalse-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:56937 MainRejected:8599 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.9314464s CPU:890.625ms Completion:{P50:381.1196ms P99:995.7561ms P999:1.0139595s} RejectionRatio:0.1312103271484375 Drained:true}
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwtrue-hottrue-steady
+    mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v3-qpc Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor              OS:windows Arch:amd64 Go:go1.24.9 Commit:a68ab9a Procs:4} Candidate:bounded Scenario:dual-w4-rwtrue-hottrue-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:42987 MainRejected:22549 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.577197s CPU:843.75ms Completion:{P50:213.0156ms P99:493.6362ms P999:526.4495ms} RejectionRatio:0.3440704345703125 Drained:true}
+=== RUN   TestMailboxPerformanceSample/priority-w1-rwfalse-hotfalse-steady
+=== RUN   TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady
+=== RUN   TestMailboxPerformanceSample/priority-w4-rwfalse-hotfalse-steady
+=== RUN   TestMailboxPerformanceSample/priority-w4-rwfalse-hottrue-steady
+=== RUN   TestMailboxPerformanceSample/priority-w4-rwtrue-hotfalse-steady
+    mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v3-qpc Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor              OS:windows Arch:amd64 Go:go1.24.9 Commit:a68ab9a Procs:4} Candidate:bounded Scenario:priority-w4-rwtrue-hotfalse-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:61024 MainRejected:4512 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.9087208s CPU:1.234375s Completion:{P50:283.0333ms P99:986.6073ms P999:997.5883ms} RejectionRatio:0.06884765625 Drained:true}
+=== RUN   TestMailboxPerformanceSample/priority-w4-rwtrue-hottrue-steady
+    mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v3-qpc Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor              OS:windows Arch:amd64 Go:go1.24.9 Commit:a68ab9a Procs:4} Candidate:bounded Scenario:priority-w4-rwtrue-hottrue-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:49017 MainRejected:16519 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.586433s CPU:1.078125s Completion:{P50:182.0299ms P99:493.2025ms P999:534.5857ms} RejectionRatio:0.2520599365234375 Drained:true}
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-mostly-empty
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-resize
+=== RUN   TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-overload
+--- FAIL: TestMailboxPerformanceSample (43.70s)
+    --- PASS: TestMailboxPerformanceSample/dual-w1-rwfalse-hotfalse-steady (2.38s)
+    --- PASS: TestMailboxPerformanceSample/dual-w1-rwfalse-hottrue-steady (2.37s)
+    --- PASS: TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-steady (2.42s)
+    --- PASS: TestMailboxPerformanceSample/dual-w4-rwfalse-hottrue-steady (2.39s)
+    --- FAIL: TestMailboxPerformanceSample/dual-w4-rwtrue-hotfalse-steady (3.28s)
+    --- FAIL: TestMailboxPerformanceSample/dual-w4-rwtrue-hottrue-steady (2.93s)
+    --- PASS: TestMailboxPerformanceSample/priority-w1-rwfalse-hotfalse-steady (2.41s)
+    --- PASS: TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady (2.39s)
+    --- PASS: TestMailboxPerformanceSample/priority-w4-rwfalse-hotfalse-steady (2.48s)
+    --- PASS: TestMailboxPerformanceSample/priority-w4-rwfalse-hottrue-steady (2.38s)
+    --- FAIL: TestMailboxPerformanceSample/priority-w4-rwtrue-hotfalse-steady (3.33s)
+    --- FAIL: TestMailboxPerformanceSample/priority-w4-rwtrue-hottrue-steady (2.93s)
+    --- PASS: TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-mostly-empty (8.35s)
+    --- PASS: TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-resize (2.77s)
+    --- PASS: TestMailboxPerformanceSample/dual-w4-rwfalse-hotfalse-overload (0.90s)
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	45.273s
+FAIL

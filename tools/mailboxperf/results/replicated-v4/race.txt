@@ -1,0 +1,172 @@
+=== RUN   TestClockResolvesShortWork
+--- PASS: TestClockResolvesShortWork (0.00s)
+=== RUN   TestCPUTimeMeasuresBusyWork
+    clock_test.go:45: busy process CPU=500ms wall=500.0066ms
+--- PASS: TestCPUTimeMeasuresBusyWork (0.50s)
+=== RUN   TestCPUTimeMonotonic
+--- PASS: TestCPUTimeMonotonic (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/internal/perftest	2.087s
+testing: warning: no tests to run
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/utils/boundedmpsc	1.599s [no tests to run]
+=== RUN   TestPostJobBoundedFullOwnership
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:1
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=1 active=1 idle=0 total=4 max=4 min=4 avg=4.0 top=w0=4
+    worker.go:402: [INFO] Worker 0 processed 3 events
+--- PASS: TestPostJobBoundedFullOwnership (0.00s)
+=== RUN   TestMailboxBoundedUnboundedStopDrainOwnership
+=== RUN   TestMailboxBoundedUnboundedStopDrainOwnership/bounded/0
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:1
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=1 active=1 idle=0 total=4 max=4 min=4 avg=4.0 top=w0=4
+    worker.go:402: [INFO] Worker 0 processed 3 events
+=== RUN   TestMailboxBoundedUnboundedStopDrainOwnership/bounded/1
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:1
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=1 active=1 idle=0 total=5 max=5 min=5 avg=5.0 top=w0=5
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306a80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306a20 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:402: [INFO] Worker 0 processed 3 events
+=== RUN   TestMailboxBoundedUnboundedStopDrainOwnership/unbounded/0
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:1
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=1 active=1 idle=0 total=3 max=3 min=3 avg=3.0 top=w0=3
+    worker.go:402: [INFO] Worker 0 processed 67 events
+=== RUN   TestMailboxBoundedUnboundedStopDrainOwnership/unbounded/1
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:1
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=1 active=1 idle=0 total=4 max=4 min=4 avg=4.0 top=w0=4
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306a80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00009a4e0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306ea0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003074a0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00038aa80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aacc0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aade0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002bb4a0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002bb380 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002bb440 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003ab1a0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003ab140 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002ba9c0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000307140 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00038aa20 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00009a5a0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002bb5c0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aad20 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aaae0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aad80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306ba0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00038ac60 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003ab200 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00038ac00 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aac60 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003ab260 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aab40 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aaa80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000307200 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aae40 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc00038a600 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aaa20 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aac00 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aaba0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000307440 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003aaea0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306c00 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0003ab080 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000306d80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc000307320 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002bbc80 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 0 discard job &{0xc0002bb740 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=false)
+    worker.go:402: [INFO] Worker 0 processed 43 events
+--- PASS: TestMailboxBoundedUnboundedStopDrainOwnership (0.01s)
+    --- PASS: TestMailboxBoundedUnboundedStopDrainOwnership/bounded/0 (0.00s)
+    --- PASS: TestMailboxBoundedUnboundedStopDrainOwnership/bounded/1 (0.00s)
+    --- PASS: TestMailboxBoundedUnboundedStopDrainOwnership/unbounded/0 (0.00s)
+    --- PASS: TestMailboxBoundedUnboundedStopDrainOwnership/unbounded/1 (0.00s)
+=== RUN   TestRWBoundedUnboundedReadChFullOwnership
+=== RUN   TestRWBoundedUnboundedReadChFullOwnership/bounded
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:2
+    worker.go:620: [WARN] Worker 1: readCh full (cap=256), discard read job (read backpressure)
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=2 active=1 idle=1 total=259 max=259 min=0 avg=129.5 top=w1=259, w0=0
+    worker.go:402: [INFO] Worker 0 processed 0 events
+    worker.go:402: [INFO] Worker 1 processed 259 events
+=== RUN   TestRWBoundedUnboundedReadChFullOwnership/unbounded
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:2
+    worker.go:620: [WARN] Worker 1: readCh full (cap=256), discard read job (read backpressure)
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=2 active=1 idle=1 total=259 max=259 min=0 avg=129.5 top=w1=259, w0=0
+    worker.go:402: [INFO] Worker 0 processed 0 events
+    worker.go:402: [INFO] Worker 1 processed 259 events
+--- PASS: TestRWBoundedUnboundedReadChFullOwnership (0.32s)
+    --- PASS: TestRWBoundedUnboundedReadChFullOwnership/bounded (0.03s)
+    --- PASS: TestRWBoundedUnboundedReadChFullOwnership/unbounded (0.29s)
+=== RUN   TestRWBoundedUnboundedUnsafeDrainOwnership
+=== RUN   TestRWBoundedUnboundedUnsafeDrainOwnership/bounded
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:2
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=2 active=1 idle=1 total=2 max=2 min=0 avg=1.0 top=w1=2, w0=0
+    worker.go:402: [INFO] Worker 0 processed 0 events
+    worker.go:269: [ERROR] Worker 1: StopTimeout (20ms) exceeded while waiting read pipeline, force continue without waiting
+    worker.go:435: [WARN] Worker 1 discard job &{0xc000307080 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=true)
+    worker.go:288: [ERROR] Worker 1: StopTimeout (20ms) exceeded, read goroutines still in-flight. Drain forced to DrainDiscard to avoid data race with leaked goroutines.
+    worker.go:324: [WARN] Worker 1: stop timeout reached but no residual jobs, skip unsafe drain
+    worker.go:402: [INFO] Worker 1 processed 2 events
+=== RUN   TestRWBoundedUnboundedUnsafeDrainOwnership/unbounded
+    worker_pool.go:320: [DEBUG] Started service[] mailbox workers:2
+    worker_pool.go:837: [DEBUG] dispatch worker dist: workers=2 active=1 idle=1 total=2 max=2 min=0 avg=1.0 top=w1=2, w0=0
+    worker.go:402: [INFO] Worker 0 processed 0 events
+    worker.go:269: [ERROR] Worker 1: StopTimeout (20ms) exceeded while waiting read pipeline, force continue without waiting
+    worker.go:435: [WARN] Worker 1 discard job &{0xc00060bce0 {{} {0 0}} [] {{} {} 0} {{} {} 0} <nil> <nil>} (rwUnsafe=true)
+    worker.go:288: [ERROR] Worker 1: StopTimeout (20ms) exceeded, read goroutines still in-flight. Drain forced to DrainDiscard to avoid data race with leaked goroutines.
+    worker.go:324: [WARN] Worker 1: stop timeout reached but no residual jobs, skip unsafe drain
+    worker.go:402: [INFO] Worker 1 processed 2 events
+--- PASS: TestRWBoundedUnboundedUnsafeDrainOwnership (0.09s)
+    --- PASS: TestRWBoundedUnboundedUnsafeDrainOwnership/bounded (0.04s)
+    --- PASS: TestRWBoundedUnboundedUnsafeDrainOwnership/unbounded (0.04s)
+=== RUN   TestWorkerAdmissionFallbackOutsideGateOwnership
+--- PASS: TestWorkerAdmissionFallbackOutsideGateOwnership (0.00s)
+=== RUN   TestMailboxPerformanceComparison
+=== RUN   TestMailboxPerformanceComparison/missing
+=== RUN   TestMailboxPerformanceComparison/metadata
+=== RUN   TestMailboxPerformanceComparison/cpu-zero
+=== RUN   TestMailboxPerformanceComparison/loss
+=== RUN   TestMailboxPerformanceComparison/duplicate-round
+=== RUN   TestMailboxPerformanceComparison/p99
+=== RUN   TestMailboxPerformanceComparison/cpu
+=== RUN   TestMailboxPerformanceComparison/throughput
+--- PASS: TestMailboxPerformanceComparison (0.01s)
+    --- PASS: TestMailboxPerformanceComparison/missing (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/metadata (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu-zero (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/loss (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/duplicate-round (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/p99 (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/cpu (0.00s)
+    --- PASS: TestMailboxPerformanceComparison/throughput (0.00s)
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors/execute
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors/discard
+=== RUN   TestPerfMemoryAccountingRejectsCompensatingErrors/release
+--- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors (0.00s)
+    --- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors/execute (0.00s)
+    --- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors/discard (0.00s)
+    --- PASS: TestPerfMemoryAccountingRejectsCompensatingErrors/release (0.00s)
+=== RUN   TestPerfMemoryAccountingRejectsWrongDisposition
+--- PASS: TestPerfMemoryAccountingRejectsWrongDisposition (0.00s)
+=== RUN   TestMailboxPerformanceRejectsUnresolvedCurrentLatency
+--- PASS: TestMailboxPerformanceRejectsUnresolvedCurrentLatency (0.00s)
+=== RUN   TestMailboxPerfReplicationProtocol
+--- PASS: TestMailboxPerfReplicationProtocol (0.00s)
+=== RUN   TestMailboxPerformanceGateRequiresBaseline
+--- PASS: TestMailboxPerformanceGateRequiresBaseline (0.00s)
+=== RUN   TestWorkerAdmissionOutsideGateOwnership
+--- PASS: TestWorkerAdmissionOutsideGateOwnership (0.00s)
+=== RUN   TestWorkerAdmissionFullQueueOwnership
+=== RUN   TestWorkerAdmissionFullQueueOwnership/0
+=== RUN   TestWorkerAdmissionFullQueueOwnership/1
+    worker.go:435: [WARN] Worker 1 discard job &{0xc00014e2a0 {{} {} 0}} (rwUnsafe=false)
+    worker.go:435: [WARN] Worker 1 discard job &{0xc00014e480 {{} {} 0}} (rwUnsafe=false)
+--- PASS: TestWorkerAdmissionFullQueueOwnership (0.00s)
+    --- PASS: TestWorkerAdmissionFullQueueOwnership/0 (0.00s)
+    --- PASS: TestWorkerAdmissionFullQueueOwnership/1 (0.00s)
+=== RUN   TestWorkerPoolAdmissionShrinkOwnership
+    worker.go:435: [WARN] Worker 1 discard job &{0xc000594240 {{} {} 0}} (rwUnsafe=false)
+--- PASS: TestWorkerPoolAdmissionShrinkOwnership (0.05s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	3.081s

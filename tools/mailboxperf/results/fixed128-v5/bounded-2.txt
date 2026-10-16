@@ -1,0 +1,64 @@
+gc 1 @0.039s 0%: 0+0.51+0 ms clock, 0+0/0/0+0 ms cpu, 3->3->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 2 @0.048s 0%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 3->3->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.057s 1%: 0+1.0+0 ms clock, 0+2.0/1.0/0+0 ms cpu, 3->4->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @0.065s 1%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 3->3->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @0.072s 1%: 0+0+0 ms clock, 0+0/0/0+0 ms cpu, 4->4->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.077s 1%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 4->4->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 7 @0.081s 2%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 4->5->2 MB, 5 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 8 @0.085s 2%: 0+1.4+0 ms clock, 0+0/1.4/0+0 ms cpu, 5->5->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 9 @0.091s 3%: 0+2.0+0 ms clock, 0+3.0/2.0/0+0 ms cpu, 6->6->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 10 @0.097s 3%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 5->6->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 11 @0.106s 3%: 0+0.58+0 ms clock, 0+0/0.58/1.1+0 ms cpu, 6->6->2 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 12 @0.115s 3%: 0+1.0+0 ms clock, 0+0/1.0/0+0 ms cpu, 5->5->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 13 @0.120s 3%: 0+2.0+0 ms clock, 0+0/2.0/0+0 ms cpu, 5->6->3 MB, 6 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 14 @0.127s 3%: 0+1.5+0 ms clock, 0+1.0/0.52/0.007+0 ms cpu, 6->7->3 MB, 8 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 15 @0.135s 3%: 0+2.0+0 ms clock, 0+0/2.0/0+0 ms cpu, 7->7->4 MB, 8 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 16 @0.143s 4%: 0+1.0+0 ms clock, 0+1.0/1.0/0+0 ms cpu, 8->8->4 MB, 9 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 17 @0.149s 3%: 0+1.5+0 ms clock, 0+0/0/0+0 ms cpu, 8->8->5 MB, 9 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 18 @0.156s 4%: 0+1.0+0 ms clock, 0+2.0/1.0/0+0 ms cpu, 9->9->5 MB, 10 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 19 @0.175s 3%: 0+2.0+0 ms clock, 0+0/2.0/4.0+0 ms cpu, 10->10->6 MB, 11 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 20 @0.194s 3%: 0+2.0+0 ms clock, 0+0/2.0/5.0+0 ms cpu, 11->11->7 MB, 13 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 21 @0.205s 3%: 0+2.0+0 ms clock, 0+0/2.0/4.0+0 ms cpu, 12->13->7 MB, 15 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 22 @0.249s 3%: 0+4.1+0 ms clock, 0+1.5/4.1/0+0 ms cpu, 13->15->10 MB, 15 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 23 @0.264s 3%: 0+2.0+0 ms clock, 0+0/2.0/3.6+0 ms cpu, 17->18->8 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 24 @0.277s 3%: 0+5.1+0 ms clock, 0+0.008/4.6/0+0 ms cpu, 14->16->10 MB, 17 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 25 @0.294s 4%: 0+5.1+0 ms clock, 0+0/5.1/0+0 ms cpu, 17->20->11 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 26 @0.315s 4%: 0+5.6+0 ms clock, 0+0/5.1/0+0 ms cpu, 19->20->9 MB, 22 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 27 @0.336s 4%: 0+5.6+0 ms clock, 0+0.51/5.6/0+0 ms cpu, 17->19->10 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 28 @0.364s 4%: 0+6.2+0 ms clock, 0+0/6.2/0+0 ms cpu, 18->21->11 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 29 @0.385s 4%: 0+5.7+0 ms clock, 0+1.0/5.7/0+0 ms cpu, 20->23->12 MB, 23 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 30 @0.407s 4%: 0+6.6+0 ms clock, 0+0/6.6/0+0 ms cpu, 21->23->11 MB, 24 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 31 @0.457s 4%: 0+7.3+0 ms clock, 0+0/7.3/0.51+0 ms cpu, 20->21->10 MB, 23 MB goal, 0 MB stacks, 0 MB globals, 4 P
+# github.com/njtc406/emberengine/engine/pkg/actor/mailbox
+# [github.com/njtc406/emberengine/engine/pkg/actor/mailbox]
+gc 1 @0.010s 2%: 0+1.0+0 ms clock, 0+0/1.0/2.0+0 ms cpu, 3->3->2 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 2 @0.017s 2%: 0+1.0+0 ms clock, 0+0/1.0/2.0+0 ms cpu, 4->4->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.021s 3%: 0+1.1+0 ms clock, 0+0/1.1/2.3+0 ms cpu, 6->6->5 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @0.028s 4%: 0+2.0+0 ms clock, 0+0.52/2.0/3.0+0 ms cpu, 9->10->7 MB, 11 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @0.036s 5%: 0+2.5+0 ms clock, 0+0/2.5/5.1+0 ms cpu, 13->14->10 MB, 15 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.052s 5%: 0+4.1+0 ms clock, 0+0/4.1/6.6+0 ms cpu, 18->19->15 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+# github.com/njtc406/emberengine/engine/pkg/actor/mailbox.test
+gc 1 @0.004s 2%: 0+0.51+0 ms clock, 0+0/0.51/1.0+0 ms cpu, 3->4->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 2 @0.005s 6%: 0+0.51+0 ms clock, 0+0.51/0.51/0.51+0 ms cpu, 7->7->7 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.007s 6%: 0+0.51+0 ms clock, 0+0/0.51/1.0+0 ms cpu, 15->15->15 MB, 15 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @0.011s 4%: 0+0.51+0 ms clock, 0+0/0.014/1.0+0 ms cpu, 28->28->28 MB, 30 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @0.031s 2%: 0+0.52+0 ms clock, 0+0/0.52/1.5+0 ms cpu, 54->55->54 MB, 57 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.059s 1%: 0+0.51+0 ms clock, 0+0/0.51/1.0+0 ms cpu, 106->107->106 MB, 108 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 7 @0.117s 0%: 0+1.5+0 ms clock, 0+0/1.5/0+0 ms cpu, 207->210->208 MB, 212 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 1 @0.010s 1%: 0+0.51+0 ms clock, 0+0/0.51/0+0 ms cpu, 3->4->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+=== RUN   TestMailboxPerformanceSample
+=== RUN   TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady
+gc 2 @0.147s 0%: 0+0.99+0 ms clock, 0+0/0.99/1.9+0 ms cpu, 3->4->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 3 @0.149s 0%: 0+1.0+0 ms clock, 0+0/1.0/2.0+0 ms cpu, 69->69->69 MB, 69 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 4 @46.547s 0%: 0+2.0+0 ms clock, 0+0/2.0/5.1+0 ms cpu, 136->136->77 MB, 140 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 5 @99.915s 0%: 0+2.0+0 ms clock, 0+0/2.0/6.1+0 ms cpu, 146->146->77 MB, 155 MB goal, 0 MB stacks, 0 MB globals, 4 P
+GC forced
+gc 6 @153.341s 0%: 0+2.0+0 ms clock, 0+0/2.0/6.1+0 ms cpu, 146->146->77 MB, 155 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 32 @155.998s 0%: 0+7.1+0 ms clock, 0+0.51/7.1/0+0 ms cpu, 12->12->9 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 7 @206.806s 0%: 0+2.6+0 ms clock, 0+0/2.6/7.8+0 ms cpu, 146->146->77 MB, 155 MB goal, 0 MB stacks, 0 MB globals, 4 P
+    mailbox_performance_test.go:302: non-overload loss: {Protocol:task2-v5-window-fixed128 Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor              OS:windows Arch:amd64 Go:go1.24.9 Commit:5b703f3e675e3e83c03ccd91fee8fb516cdac4a5 Procs:4} Candidate:bounded Scenario:priority-w1-rwfalse-hottrue-steady Round:0 Workers:1 EffectiveRW:false Samples:8388608 Success:8387654 MainRejected:954 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:4m23.7262125s CPU:11.078125s Completion:{P50:9.1µs P99:912.6µs P999:57.1944ms} RejectionRatio:0.00011372566223144531 Drained:true Windows:128 CPUResolved:true WindowCompletions:[{P50:9.9µs P99:21.7µs P999:36.3µs} {P50:10.2µs P99:21µs P999:40.2µs} {P50:10.4µs P99:21µs P999:27.9µs} {P50:9.7µs P99:20.9µs P999:33.2µs} {P50:9.4µs P99:20.9µs P999:34.3µs} {P50:9.3µs P99:20.7µs P999:34.8µs} {P50:9.3µs P99:19.2µs P999:28µs} {P50:9.4µs P99:20.2µs P999:31µs} {P50:9.3µs P99:19.5µs P999:35µs} {P50:9.2µs P99:19.8µs P999:29.5µs} {P50:9.3µs P99:20.5µs P999:31.1µs} {P50:9.3µs P99:19.4µs P999:29.3µs} {P50:9.1µs P99:19.3µs P999:30.1µs} {P50:9.3µs P99:19.9µs P999:25.9µs} {P50:9.5µs P99:19.5µs P999:28.7µs} {P50:9.2µs P99:19.7µs P999:25.4µs} {P50:9.1µs P99:18.9µs P999:28µs} {P50:9.1µs P99:20.5µs P999:32µs} {P50:9µs P99:20.2µs P999:30.6µs} {P50:9.1µs P99:19.2µs P999:28.6µs} {P50:9.2µs P99:20.4µs P999:39.9µs} {P50:9.2µs P99:20µs P999:27µs} {P50:9.1µs P99:20.3µs P999:35.6µs} {P50:8.9µs P99:19.7µs P999:36.9µs} {P50:9.2µs P99:18.7µs P999:45.4µs} {P50:8.8µs P99:19.2µs P999:39.4µs} {P50:8.9µs P99:18.7µs P999:25.4µs} {P50:8.9µs P99:20.4µs P999:30.3µs} {P50:8.8µs P99:19.6µs P999:27.9µs} {P50:9µs P99:19.2µs P999:26.8µs} {P50:8.9µs P99:19.1µs P999:31.3µs} {P50:8.8µs P99:19.9µs P999:34.3µs} {P50:9µs P99:17.9µs P999:27.8µs} {P50:8.9µs P99:19.7µs P999:33.5µs} {P50:8.9µs P99:18.6µs P999:28.8µs} {P50:8.9µs P99:19.7µs P999:27.9µs} {P50:9µs P99:19.4µs P999:25.9µs} {P50:8.9µs P99:19.9µs P999:27.1µs} {P50:9.1µs P99:18.4µs P999:25.5µs} {P50:9µs P99:19.1µs P999:27µs} {P50:9µs P99:19.4µs P999:27.7µs} {P50:8.8µs P99:79.2µs P999:457.1µs} {P50:9.1µs P99:20.5µs P999:30.1µs} {P50:9.2µs P99:19µs P999:28.3µs} {P50:9.1µs P99:20.1µs P999:33.8µs} {P50:8.7µs P99:19.1µs P999:28.7µs} {P50:9.2µs P99:22.7µs P999:64.2µs} {P50:9.4µs P99:21µs P999:35.3µs} {P50:9.2µs P99:22µs P999:34.4µs} {P50:9.3µs P99:19.5µs P999:36.4µs} {P50:9.1µs P99:19.6µs P999:46.2µs} {P50:9µs P99:19.6µs P999:34.6µs} {P50:8.8µs P99:21µs P999:60.4µs} {P50:8.9µs P99:20µs P999:34.3µs} {P50:8.9µs P99:19µs P999:29.6µs} {P50:8.9µs P99:18.5µs P999:24.9µs} {P50:8.9µs P99:20µs P999:46.1µs} {P50:8.9µs P99:18.7µs P999:32.8µs} {P50:8.9µs P99:18.9µs P999:33.7µs} {P50:8.8µs P99:18.5µs P999:26.9µs} {P50:9µs P99:18.9µs P999:29.3µs} {P50:8.9µs P99:19µs P999:25.1µs} {P50:8.8µs P99:18.8µs P999:27.5µs} {P50:8.8µs P99:18µs P999:25.5µs} {P50:8.9µs P99:18.8µs P999:25.5µs} {P50:8.8µs P99:19.5µs P999:30.8µs} {P50:13.5µs P99:80.607ms P999:98.6905ms} {P50:10.3µs P99:6.1163ms P999:16.2401ms} {P50:11.1µs P99:6.2607ms P999:12.4612ms} {P50:16.6µs P99:50.5765ms P999:70.8258ms} {P50:27.7µs P99:7.0294ms P999:15.5875ms} {P50:9.2µs P99:62.7µs P999:270µs} {P50:12.2µs P99:258.8µs P999:617.9µs} {P50:9µs P99:51.6µs P999:261.4µs} {P50:8.6µs P99:59.7µs P999:462µs} {P50:10µs P99:5.105ms P999:8.4515ms} {P50:9.8µs P99:62.8207ms P999:104.0542ms} {P50:29.7µs P99:82.2552ms P999:115.3152ms} {P50:9.7µs P99:410.6µs P999:5.7898ms} {P50:9.2µs P99:162.6µs P999:8.1457ms} {P50:20.9µs P99:90.3661ms P999:90.505ms} {P50:8.9µs P99:55.9µs P999:115.2µs} {P50:11.8µs P99:10.8394ms P999:27.5494ms} {P50:9µs P99:1.283ms P999:2.4807ms} {P50:8.5µs P99:20.3µs P999:30.6µs} {P50:9.2µs P99:1.0272ms P999:1.1651ms} {P50:8.5µs P99:22.6µs P999:59.3µs} {P50:8.4µs P99:20µs P999:49.1µs} {P50:8.5µs P99:19.3µs P999:26.9µs} {P50:8.6µs P99:21µs P999:32.6µs} {P50:8.5µs P99:21.6µs P999:3.1201ms} {P50:8.7µs P99:20.5µs P999:39.1µs} {P50:8.6µs P99:24.2µs P999:185.1µs} {P50:8.7µs P99:21.8µs P999:34.6µs} {P50:8.6µs P99:19.6µs P999:34.2µs} {P50:8.5µs P99:18.5µs P999:29.4µs} {P50:8.5µs P99:20.3µs P999:37.9µs} {P50:8.6µs P99:19.7µs P999:28.8µs} {P50:8.6µs P99:20.2µs P999:31.4µs} {P50:8.6µs P99:18.8µs P999:27.9µs} {P50:8.6µs P99:20.4µs P999:40.2µs} {P50:8.7µs P99:20.5µs P999:37.8µs} {P50:8.6µs P99:22µs P999:60.9µs} {P50:8.5µs P99:20.3µs P999:31.3µs} {P50:8.6µs P99:20.3µs P999:47.1µs} {P50:8.6µs P99:19.6µs P999:35.5µs} {P50:8.4µs P99:20.2µs P999:42.8µs} {P50:8.4µs P99:19.6µs P999:33.4µs} {P50:8.4µs P99:19.9µs P999:36.3µs} {P50:8.1µs P99:19.8µs P999:38.5µs} {P50:8.1µs P99:22.9µs P999:59µs} {P50:8.4µs P99:19.8µs P999:40µs} {P50:8.4µs P99:21.4µs P999:42.3µs} {P50:8.5µs P99:19.3µs P999:32.3µs} {P50:8.4µs P99:22.6µs P999:41µs} {P50:8.4µs P99:22.1µs P999:45.3µs} {P50:8.5µs P99:19.9µs P999:36.9µs} {P50:8.3µs P99:22.6µs P999:49.2µs} {P50:8.5µs P99:21.5µs P999:38.8µs} {P50:8.5µs P99:20.6µs P999:30.5µs} {P50:9.4µs P99:11.0217ms P999:11.1917ms} {P50:10.9µs P99:52.0946ms P999:52.227ms} {P50:10.6µs P99:706.2µs P999:1.8058ms} {P50:17.6µs P99:119.2462ms P999:119.4029ms} {P50:10.3µs P99:4.5798ms P999:13.2358ms} {P50:9.8µs P99:429.4µs P999:4.7333ms} {P50:8.6µs P99:25.4µs P999:66.3µs} {P50:8.7µs P99:21.8µs P999:46.1µs}]}
+--- FAIL: TestMailboxPerformanceSample (264.05s)
+    --- FAIL: TestMailboxPerformanceSample/priority-w1-rwfalse-hottrue-steady (264.05s)
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	265.167s
+FAIL

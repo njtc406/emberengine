@@ -14,7 +14,6 @@ import (
 	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/v2/engine/pkg/log"
-	"github.com/njtc406/emberengine/v2/engine/pkg/utils/mpsc"
 )
 
 // PriorityQueueManager 多优先级队列管理器
@@ -38,6 +37,30 @@ type PriorityQueueManager struct {
 func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILoggerX) *PriorityQueueManager {
 	// 使用规范化副本，不修改调用方原始配置
 	conf = normalizeMultiLevelQueueConf(conf)
+	p := &normalizedPriorityQueueSpec{strategy: conf.Strategy, totalBatchLimit: conf.TotalBatchLimit, priorities: make(map[def.Priority]config.PriorityConfig, len(conf.PriorityBatches))}
+	for priority, pc := range conf.PriorityBatches {
+		p.priorities[priority] = *pc
+	}
+	return newPriorityQueueManager(normalizedQueueSpec{backend: "unbounded", priority: p}, logger)
+}
+
+func newPriorityQueueManager(spec normalizedQueueSpec, logger log.ILoggerX) *PriorityQueueManager {
+	p := spec.priority
+	if spec.backend == "bounded" {
+		for _, priority := range []def.Priority{def.PrioritySys, def.PriorityUrgent, def.PriorityHigh} {
+			if _, ok := p.priorities[priority]; !ok {
+				panic("mailbox: bounded priority requires system queues")
+			}
+		}
+		if p.fallbackPriority < def.PriorityNormal {
+			panic("mailbox: bounded priority requires user fallback")
+		}
+	}
+	conf := &config.MultiLevelQueueConf{Strategy: p.strategy, TotalBatchLimit: p.totalBatchLimit, PriorityBatches: make(map[def.Priority]*config.PriorityConfig, len(p.priorities))}
+	for priority, pc := range p.priorities {
+		copy := pc
+		conf.PriorityBatches[priority] = &copy
+	}
 
 	m := &PriorityQueueManager{
 		queues:           make(map[def.Priority]queue[inf.IMailboxJob]),
@@ -55,7 +78,7 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILogge
 	// 初始化各优先级队列
 	totalBatchSize := 0
 	for priority, pc := range conf.PriorityBatches {
-		m.queues[priority] = mpsc.New[inf.IMailboxJob]()
+		m.queues[priority] = newQueue[inf.IMailboxJob](normalizedPhysicalQueueSpec{backend: spec.backend, capacity: pc.Capacity})
 		m.batchSizes[priority] = pc.BatchSize
 		m.sortedPriorities = append(m.sortedPriorities, priority)
 		totalBatchSize += pc.BatchSize
@@ -94,7 +117,8 @@ func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILogge
 func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 	priority := e.GetPriority()
 	que, exists := m.queues[priority]
-	if !exists {
+	fallback := !exists
+	if fallback {
 		// fallback 到最低优先级队列，避免静默丢弃消息
 		que, exists = m.queues[m.fallbackPriority]
 		if !exists {
@@ -113,7 +137,12 @@ func (m *PriorityQueueManager) Submit(e inf.IMailboxJob) error {
 		}
 	}
 
-	que.Push(e)
+	if !que.Push(e) {
+		if fallback {
+			e.SetPriority(priority)
+		}
+		return def.ErrMailboxWorkerIsFull
+	}
 	return nil
 }
 

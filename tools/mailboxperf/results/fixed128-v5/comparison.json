@@ -1,0 +1,24 @@
+[
+  {
+    "Candidate": "unbounded",
+    "Valid": true,
+    "CPUPerSuccessRatio": 1.0721784776902887,
+    "Limit": 1.1,
+    "Pass": true,
+    "PairedRatios": [
+      1.1251664447403462,
+      0.9680094786729858,
+      0.9461325966850829,
+      0.9658792650918635,
+      1.060880829015544
+    ]
+  },
+  {
+    "Candidate": "bounded",
+    "Valid": false,
+    "CPUPerSuccessRatio": null,
+    "Limit": 1.1,
+    "Pass": false,
+    "PairedRatios": []
+  }
+]

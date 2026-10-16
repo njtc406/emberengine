@@ -1,0 +1,42 @@
+[
+  {
+    "Path": "mailbox_performance_fixture_test.go",
+    "SHA256": "1B4AB70932AAE8320B7607CBD296C9DFE6FA3D16965C264801F6AD9C367B03F0"
+  },
+  {
+    "Path": "mailbox_performance_gate_test.go",
+    "SHA256": "689CF0E1C8DA8D0BA2804921615C0999D8BDD01A4EBA6785F7960732051B0E01"
+  },
+  {
+    "Path": "mailbox_performance_memory_accounting_test.go",
+    "SHA256": "EC1322E93250377CB81F03E800D9F43514CC4E29F39558641620B22E44404A91"
+  },
+  {
+    "Path": "mailbox_performance_memory_test.go",
+    "SHA256": "B39B53DCA0688039E24FDB7065E169FF78CECE73301540EFDD59D4A29399A3D0"
+  },
+  {
+    "Path": "mailbox_performance_regression_test.go",
+    "SHA256": "8B3A4F9E072B21AD8E012F3A4CFF286D64170C31FDDBF55CD310314A4FEC1151"
+  },
+  {
+    "Path": "mailbox_performance_replication_test.go",
+    "SHA256": "FEE5873E86677C76D4446D195F7B496429B1B417B0807A181BA4B8BAC92B8B12"
+  },
+  {
+    "Path": "mailbox_performance_retention_test.go",
+    "SHA256": "1A4EE0D0454B53C67E857A609E3B826B7AAE4A1A8830BAAA7A4B31C43B2D317C"
+  },
+  {
+    "Path": "mailbox_performance_test.go",
+    "SHA256": "CFAC4EBC257F1B6B38E8E624D198E99D03E770469AD2101CD4E2D6F34C465C92"
+  },
+  {
+    "Path": "mailbox_performance_window_diagnostic_test.go",
+    "SHA256": "70C14EB437B48402DB8FC592BA6DA7F9EDDB1FAAFE3E74AB35AF01E01FFCD51D"
+  },
+  {
+    "Path": "mailbox_performance_window_test.go",
+    "SHA256": "21E90A4888BCDF6E1FA898B2C07653FF691A2BCEF2C9841469011AA2F3093E79"
+  }
+]

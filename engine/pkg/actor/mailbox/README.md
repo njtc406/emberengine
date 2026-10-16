@@ -181,3 +181,58 @@ mw := NewSentinelMiddlewareWithJobType("battle",
 - `config_example.go`：常见 Mailbox 配置示例。
 - `../../../../docs/ACTOR_REVIEW_2026_04_29.md`：2026-04-29 复审、修复记录与 Sentinel 细粒度 resource 问题说明。
 
+
+
+## 有界 Mailbox：配置、观测与回滚
+
+默认仍为 `unbounded`。`bounded` 即已实现的 MutexRing，可显式配置选择；不新增第二开关或别名。dual/priority 均支持。历史 Task 9 性能门槛未通过不代表后端未实现；本次批准可配置实现，不宣称生产性能验收通过。证据见 [报告](../../../../task-2-report.md)。配置位于服务的 `Mailbox`（Go 类型 `MailboxConf`）下；可运行的解析→工厂→Worker 行为测试见 `queue_config_integration_test.go`。
+
+```yaml
+Mailbox:
+  QueueBackend: "unbounded"
+  # MaxQueueStorageBytes: 67108864 # bounded 必填；布局预算，不是 RSS 上限
+  # DualQueueCapacity:
+  #   System: 64
+  #   User: 4096
+```
+
+显式选择 MutexRing 的 dual 示例（合并到服务配置，不修改本地环境文件）：
+
+```yaml
+Mailbox:
+  QueueMode: dual
+  QueueBackend: bounded
+  MaxQueueStorageBytes: 67108864
+  DualQueueCapacity: {System: 64, User: 4096}
+  SchedulePolicy:
+    InitialWorkerNum: 1
+```
+
+priority 使用相同 `QueueBackend: bounded`，将 `QueueMode` 改为 `priority`，并在 `SchedulePolicy.MultiLevelQueueConf.PriorityBatches` 的 `"-3"`、`"-2"`、`"-1"` 以及至少一个用户优先级（如 `"0"`）中分别设置 `Capacity`；完整解析样例见上述集成测试。
+
+- `QueueBackend` 仅支持 `unbounded` / `bounded`；省略时保持 unbounded。
+- bounded 容量按 **Worker、物理子队列** 独立计算：dual 配置 System/User；priority 在每个已配置的 `PriorityBatches` 项中设置 `Capacity`。容量必须是至少 2 的 2 次幂，非法容量、缺失容量、预算不足在启动时失败，不静默降级。`DefaultUserMailboxSize` / `DefaultSysMailboxSize` 不是 bounded 默认容量。
+- 自动扩容开启时按最大 Worker 数预估队列布局预算，关闭时按初始 Worker 数预估。`MaxQueueStorageBytes` 不覆盖 payload、RW readCh、pending、执行中 Job 等，不是 RSS 上限。
+- 物理主队列满立即返回 `ErrMailboxWorkerIsFull`，不阻塞等待容量。接收成功不保证执行：RW 二级 readCh 满可异步丢弃。hash ring 无可用 Worker 也可能返回同一错误，但不是物理队列满。
+- StopTimeout 不是整个 Stop 的硬期限；admission gate 和执行用户 Job 可延长停止。重试必须遵守业务幂等、原有期限和有界退避，禁止盲目即时重试。
+
+### 抓取指标
+
+只导出跨 Mailbox 全局聚合，无 worker ID、dispatcher key、service 或 priority 标签：
+
+| Prometheus 指标 | 类型 | 语义 |
+|---|---|---|
+| `ember_mailbox_queue_full_rejected_total` | counter | Worker 主队列提交满拒绝，是 DispatchFailedTotal 的子集；不含 hash ring 失败 |
+| `ember_mailbox_read_queue_full_discarded_total` | counter | RW readCh 满异步丢弃，不可与前项合并为 PostJob 同步拒绝率 |
+| `ember_mailbox_queue_length` | gauge | 每条物理主队列 max(0, Len) 后求和；并发近似、静止准确 |
+| `ember_mailbox_queue_capacity` | gauge | 非空且全部可观测 Mailbox 为 bounded 时才输出全局主队列容量 |
+| `ember_mailbox_queue_observed_high_watermark` | gauge | ServiceManager 对每次当前全局长度取历史最大值，不是精确生命周期峰值，不相加各 Mailbox 历史峰值 |
+| `ember_mailbox_queue_backend_info{backend="bounded\|unbounded\|mixed"}` | gauge | 实际标签值为三者之一，值 1；无可观测 Mailbox 时省略 |
+
+长度/容量不含 readCh、pending 或执行中 Job。单 Mailbox 的 `QueueBounded=false` 时容量为 0；mixed 时省略全局 capacity，不能把局部 bounded 容量当全局容量。无可观测 Mailbox 时长度为 0，backend_info/capacity 均省略。峰值仅在指标/调试抓取时更新，缩容不清除，可能高于缩容后容量。主队列和 RW 满载累计计数由 Pool 持有，扩缩容不丢失；跨 Service 聚合仍按存活服务求和，服务移除可能使累计值下降，不保证跨 Service 生命周期单调。
+
+### 灰度与回滚（当前禁止灰度）
+
+只有 Task 9 正确性及生产性能门槛全部通过后才允许：单实例测试服务 → 低流量服务 → 热点服务 → 全量。任何条件失败停止灰度；Task 2 当前性能失败仍未解除，不表示禁止安全的指标和文档实现。分别观察主队列拒绝、RW 二级丢弃、抓取峰值、RSS、GC pause、业务 p99/p999、重试率。默认值变更仍须单独任务。
+
+回滚不需要二进制回滚：将 `QueueBackend` 改回 `unbounded`，然后重启服务。配置不支持运行时热切换，避免迁移在途槽位。

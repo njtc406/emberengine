@@ -57,7 +57,8 @@ func clonePriorityBatches(src map[def.Priority]*config.PriorityConfig) map[def.P
 			dst[priority] = &config.PriorityConfig{}
 			continue
 		}
-		dst[priority] = &config.PriorityConfig{BatchSize: pc.BatchSize, Weight: pc.Weight}
+		copy := *pc
+		dst[priority] = &copy
 	}
 	return dst
 }

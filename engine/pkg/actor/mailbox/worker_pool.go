@@ -9,6 +9,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"unsafe"
+
+	"github.com/njtc406/emberengine/v2/engine/pkg/utils/boundedmpsc"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -110,17 +114,21 @@ type workersSnapshot struct {
 }
 
 type WorkerPool struct {
-	conf            *config.MailboxConf
-	mu              sync.Mutex // 仅作 resize/publish 串行化，dispatch 不持有
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
-	snap            atomic.Pointer[workersSnapshot] // 拓扑快照，COW 发布
-	invoker         inf.IMessageInvoker             // 消息处理器
-	middlewareChain *MiddlewareChain                // 中间件链
-	autoScaler      IScaler                         // 自动扩容器
-	logger          log.ILoggerX
-	workerCount     atomic.Int32 // 当前 worker 数量（用于扩缩容），atomic 以支持 RW 模式下无锁读取
+	queueFullRejectedTotal      atomic.Int64
+	readQueueFullDiscardedTotal atomic.Int64
+	observedQueueHighWatermark  atomic.Int64
+	conf                        *config.MailboxConf
+	queueSpec                   normalizedQueueSpec
+	mu                          sync.Mutex // 仅作 resize/publish 串行化，dispatch 不持有
+	wg                          sync.WaitGroup
+	ctx                         context.Context
+	cancel                      context.CancelFunc
+	snap                        atomic.Pointer[workersSnapshot] // 拓扑快照，COW 发布
+	invoker                     inf.IMessageInvoker             // 消息处理器
+	middlewareChain             *MiddlewareChain                // 中间件链
+	autoScaler                  IScaler                         // 自动扩容器
+	logger                      log.ILoggerX
+	workerCount                 atomic.Int32 // 当前 worker 数量（用于扩缩容），atomic 以支持 RW 模式下无锁读取
 
 	// 停机时队列处理策略（由 Mailbox 下发）
 	drainPolicy DrainPolicy
@@ -165,9 +173,14 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 		return nil, errors.New("invoker is nil")
 	}
 	conf = fixConf(conf)
+	queueSpec, err := normalizeQueueSpec(conf)
+	if err != nil {
+		return nil, fmt.Errorf("mailbox queue configuration: %w", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := &WorkerPool{
 		conf:              conf,
+		queueSpec:         queueSpec,
 		invoker:           invoker,
 		ctx:               ctx,
 		cancel:            cancel,
@@ -205,11 +218,13 @@ func NewWorkerPool(conf *config.MailboxConf, logger log.ILoggerX, invoker inf.IM
 // workerEnv 构建当前 WorkerPool 对应的 WorkerEnv（Worker 的运行时依赖）
 func (p *WorkerPool) workerEnv() *WorkerEnv {
 	return &WorkerEnv{
-		logger:            p.logger,
-		invoker:           p.invoker,
-		middlewareChain:   p.middlewareChain,
-		rw:                p.rw,
-		watchdogScheduler: p.watchdogAdapter,
+		queueFullRejectedTotal:      &p.queueFullRejectedTotal,
+		readQueueFullDiscardedTotal: &p.readQueueFullDiscardedTotal,
+		logger:                      p.logger,
+		invoker:                     p.invoker,
+		middlewareChain:             p.middlewareChain,
+		rw:                          p.rw,
+		watchdogScheduler:           p.watchdogAdapter,
 		// 预构 RWContextInfo，SourceService 在 Pool 生命周期内不变
 		rwReadCtxInfo: def.RWContextInfo{
 			Mode:          def.RWModeRead,
@@ -282,7 +297,7 @@ func (p *WorkerPool) Start() error {
 	ids := make([]int32, 0, initial)
 	for n := int32(0); n < initial; n++ {
 		id := p.nextWorkerID.Add(1) - 1
-		worker := newWorker(id, p.conf, p.workerEnv(), p.drainPolicy)
+		worker := newWorker(id, p.conf, p.queueSpec, p.workerEnv(), p.drainPolicy)
 		workers[id] = worker
 		worker.Start()
 		ids = append(ids, id)
@@ -508,7 +523,7 @@ func (p *WorkerPool) resizeWorkers(newSize int32) {
 		}
 		for n := newSize - currentCount; n > 0; n-- {
 			id := p.nextWorkerID.Add(1) - 1
-			worker := newWorker(id, p.conf, p.workerEnv(), p.drainPolicy)
+			worker := newWorker(id, p.conf, p.queueSpec, p.workerEnv(), p.drainPolicy)
 			newWorkers[id] = worker
 			worker.Start()
 			newIDs = append(newIDs, id)
@@ -1044,4 +1059,160 @@ func (p *WorkerPool) GetRWMetrics() RWMetrics {
 		m.AvgWriteWait = time.Duration(totalWriteWait / totalWriteCnt)
 	}
 	return m
+}
+
+// normalizedQueueSpec is owned by the pool and immutable after publication.
+// Worker-local scheduling state must never be stored here.
+type normalizedQueueSpec struct {
+	backend      string
+	mode         string
+	dual         *normalizedDualQueueSpec
+	priority     *normalizedPriorityQueueSpec
+	storageBytes uint64
+}
+
+type normalizedDualQueueSpec struct{ system, user int }
+type normalizedPriorityQueueSpec struct {
+	strategy         def.ScheduleStrategy
+	totalBatchLimit  int
+	priorities       map[def.Priority]config.PriorityConfig
+	fallbackPriority def.Priority
+}
+type normalizedPhysicalQueueSpec struct {
+	backend  string
+	capacity int
+}
+
+// normalizeQueueSpec consumes fixConf's effective configuration without mutating it.
+func normalizeQueueSpec(conf *config.MailboxConf) (normalizedQueueSpec, error) {
+	s := normalizedQueueSpec{backend: conf.QueueBackend, mode: conf.QueueMode}
+	if s.backend == "" {
+		s.backend = "unbounded"
+	}
+	if s.backend != "unbounded" && s.backend != "bounded" {
+		return s, fmt.Errorf("unknown QueueBackend %q", s.backend)
+	}
+	bounded := s.backend == "bounded"
+	switch s.mode {
+	case "", QueueModeDual:
+		s.mode = QueueModeDual
+	case QueueModePriority:
+	default:
+		if bounded {
+			return s, fmt.Errorf("unknown bounded QueueMode %q", s.mode)
+		}
+		s.mode = QueueModeDual
+	}
+	var capacities []int
+	if s.mode == QueueModeDual {
+		s.dual = &normalizedDualQueueSpec{}
+		if bounded {
+			if conf.DualQueueCapacity == nil {
+				return s, errors.New("bounded dual requires DualQueueCapacity")
+			}
+			s.dual.system = conf.DualQueueCapacity.System
+			s.dual.user = conf.DualQueueCapacity.User
+			capacities = []int{s.dual.system, s.dual.user}
+		}
+	} else {
+		q := conf.SchedulePolicy.MultiLevelQueueConf
+		if bounded && (q == nil || len(q.PriorityBatches) == 0) {
+			return s, errors.New("bounded priority requires explicit PriorityBatches")
+		}
+		q = normalizeMultiLevelQueueConf(q)
+		p := &normalizedPriorityQueueSpec{strategy: q.Strategy, totalBatchLimit: q.TotalBatchLimit, priorities: make(map[def.Priority]config.PriorityConfig, len(q.PriorityBatches))}
+		first := true
+		for priority, pc := range q.PriorityBatches {
+			p.priorities[priority] = *pc
+			if first || priority > p.fallbackPriority {
+				p.fallbackPriority = priority
+				first = false
+			}
+			if bounded {
+				capacities = append(capacities, pc.Capacity)
+			}
+		}
+		if bounded {
+			// event/category.go emits all three system priorities. None may use user fallback.
+			for _, priority := range []def.Priority{def.PrioritySys, def.PriorityUrgent, def.PriorityHigh} {
+				if _, ok := p.priorities[priority]; !ok {
+					return s, fmt.Errorf("bounded priority requires system priority %d", priority)
+				}
+			}
+			if p.fallbackPriority < def.PriorityNormal {
+				return s, errors.New("bounded priority requires a user fallback queue")
+			}
+		}
+		s.priority = p
+	}
+	if !bounded {
+		return s, nil
+	}
+	if conf.MaxQueueStorageBytes == 0 {
+		return s, errors.New("bounded requires positive MaxQueueStorageBytes")
+	}
+	workers := conf.SchedulePolicy.InitialWorkerNum
+	if conf.SchedulePolicy.EnableAutoScaling {
+		sc := conf.SchedulePolicy.ScalingStrategy
+		if sc == nil {
+			return s, errors.New("bounded auto scaling requires ScalingStrategy")
+		}
+		if sc.MaxWorkerNum < workers {
+			return s, errors.New("bounded MaxWorkerNum must be >= InitialWorkerNum")
+		}
+		if sc.ResizeCoolDown <= 0 {
+			return s, errors.New("bounded ResizeCoolDown must be positive")
+		}
+		workers = sc.MaxWorkerNum
+	}
+	fixed := uint64(unsafe.Sizeof(boundedmpsc.Queue[inf.IMailboxJob]{}))
+	slot := uint64(unsafe.Sizeof(*new(inf.IMailboxJob)))
+	var bytes, slots uint64
+	for i, capacity := range capacities {
+		if capacity < 2 || capacity&(capacity-1) != 0 {
+			return s, fmt.Errorf("physical queue %d capacity %d must be a power of two >= 2", i, capacity)
+		}
+		var err error
+		slots, err = checkedQueueAdd(slots, uint64(capacity))
+		if err != nil {
+			return s, err
+		}
+		array, err := checkedQueueMul(uint64(capacity), slot)
+		if err != nil {
+			return s, err
+		}
+		if array > uint64(^uint(0)>>1) {
+			return s, errors.New("queue slot array bytes exceed platform int")
+		}
+		layout, err := checkedQueueAdd(fixed, array)
+		if err != nil {
+			return s, err
+		}
+		bytes, err = checkedQueueAdd(bytes, layout)
+		if err != nil {
+			return s, err
+		}
+	}
+	total, err := checkedQueueMul(bytes, uint64(workers))
+	if err != nil {
+		return s, err
+	}
+	if total > conf.MaxQueueStorageBytes {
+		return s, fmt.Errorf("queue layout %d bytes exceeds MaxQueueStorageBytes %d", total, conf.MaxQueueStorageBytes)
+	}
+	s.storageBytes = total
+	return s, nil
+}
+
+func checkedQueueAdd(a, b uint64) (uint64, error) {
+	if b > math.MaxUint64-a {
+		return 0, errors.New("queue storage addition overflow")
+	}
+	return a + b, nil
+}
+func checkedQueueMul(a, b uint64) (uint64, error) {
+	if a != 0 && b > math.MaxUint64/a {
+		return 0, errors.New("queue storage multiplication overflow")
+	}
+	return a * b, nil
 }

@@ -1,0 +1,7 @@
+Development measurements only; NOT production approval. Overload ratios are descriptive, not steady-state gates.
+protocol rejected: Incompatible protocol
+commit rejected: Wrong explicit baseline commit: expected 73ecd28
+duplicate rejected: Duplicate round: baseline/dual-w1-rwfalse-hotfalse-steady/1
+missing rejected: Unexpected scenario/candidate
+metadata rejected: Incompatible machine metadata: CPU
+round rejected: Invalid round ID

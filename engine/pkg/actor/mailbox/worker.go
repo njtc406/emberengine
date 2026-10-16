@@ -44,11 +44,13 @@ type watchdogCanceler interface {
 // WorkerEnv 封装 Worker 运行所需的外部依赖。
 // 由 WorkerPool 在创建 Worker 时注入，Worker 不再直接引用 WorkerPool。
 type WorkerEnv struct {
-	logger            log.ILoggerX
-	invoker           inf.IMessageInvoker
-	middlewareChain   *MiddlewareChain
-	rw                *RWController
-	watchdogScheduler watchdogCanceler // 时间轮看门狗（nil = 使用 time.AfterFunc 降级）
+	queueFullRejectedTotal      *atomic.Int64
+	readQueueFullDiscardedTotal *atomic.Int64
+	logger                      log.ILoggerX
+	invoker                     inf.IMessageInvoker
+	middlewareChain             *MiddlewareChain
+	rw                          *RWController
+	watchdogScheduler           watchdogCanceler // 时间轮看门狗（nil = 使用 time.AfterFunc 降级）
 
 	// 预构的 RWContextInfo，SourceService 在 Pool 生命周期内是常量，
 	// 避免 execRead 路径上每条 Job 重建 struct + 字符串拷贝。
@@ -70,7 +72,7 @@ type WorkerEnv struct {
 type Worker struct {
 	workerId        int32
 	state           atomic.Int32 // workerStateRunning / workerStateClosing / workerStateClosed
-	submitters      atomic.Int64
+	admissionMu     sync.Mutex   // serializes final running check + publication with closing
 	env             *WorkerEnv
 	wg              sync.WaitGroup
 	inflightReads   sync.WaitGroup // per-Worker：仅跟踪本 Worker spawn 的读 goroutine
@@ -109,7 +111,7 @@ type Worker struct {
 }
 
 // newWorker 创建统一Worker
-func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPolicy DrainPolicy) inf.IMailboxWorker {
+func newWorker(workerId int32, conf *config.MailboxConf, spec normalizedQueueSpec, env *WorkerEnv, drainPolicy DrainPolicy) inf.IMailboxWorker {
 	w := &Worker{
 		workerId:    workerId,
 		env:         env,
@@ -117,7 +119,7 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 	}
 
 	// 根据配置创建队列管理器
-	w.queueManager = createQueueManager(conf, env.logger)
+	w.queueManager = createQueueManager(spec, env.logger)
 
 	// 创建空闲控制器
 	idlerConf := conf.SchedulePolicy.IdlerConf
@@ -151,24 +153,17 @@ func newWorker(workerId int32, conf *config.MailboxConf, env *WorkerEnv, drainPo
 }
 
 // createQueueManager 根据配置创建队列管理器
-func createQueueManager(conf *config.MailboxConf, logger log.ILoggerX) IQueueManager {
-	// 确定队列模式
-	queueMode := conf.QueueMode
-	if queueMode == "" {
-		queueMode = QueueModeDual // 默认双队列模式
-	}
-
-	switch queueMode {
+func createQueueManager(spec normalizedQueueSpec, logger log.ILoggerX) IQueueManager {
+	switch spec.mode {
 	case QueueModeDual:
-		// 双队列模式（系统队列 + 用户队列）
-		return NewDualQueueManager()
-
+		if spec.backend == "unbounded" {
+			return NewDualQueueManager()
+		}
+		return newDualQueueManager(spec)
 	case QueueModePriority:
-		// 多优先级队列模式
-		return NewPriorityQueueManager(conf.SchedulePolicy.MultiLevelQueueConf, logger)
-
+		return newPriorityQueueManager(spec, logger)
 	default:
-		return NewDualQueueManager()
+		panic("mailbox: invalid normalized queue mode")
 	}
 }
 
@@ -179,24 +174,38 @@ func (w *Worker) GetWorkerId() int32 {
 
 // SubmitJob 提交任务到队列
 func (w *Worker) SubmitJob(job inf.IMailboxJob) error {
-	// Lock-free stop gate: prevent "submit after drain" without introducing mutex on hot path.
 	if w.state.Load() != workerStateRunning {
 		return def.ErrMailboxWorkerClosed
 	}
-	w.submitters.Add(1)
-	// If Stop flipped state concurrently, back out and refuse.
+	// Log fallback before admission so the logger cannot block shutdown or
+	// reenter this gate. Submit owns mutation and rollback on rejection.
+	if m, ok := w.queueManager.(*PriorityQueueManager); ok {
+		priority := job.GetPriority()
+		if _, exists := m.queues[priority]; !exists {
+			if _, exists := m.queues[m.fallbackPriority]; exists {
+				if m.fallbackWarned.CompareAndSwap(false, true) && m.logger != nil {
+					m.logger.Warnf("PriorityQueueManager: unregistered priority fallback: requested=%d fallback=%d",
+						priority, m.fallbackPriority)
+				}
+			}
+		}
+	}
+	w.admissionMu.Lock()
 	if w.state.Load() != workerStateRunning {
-		w.submitters.Add(-1)
+		w.admissionMu.Unlock()
 		return def.ErrMailboxWorkerClosed
 	}
-	defer w.submitters.Add(-1)
-
 	if w.queueManager == nil {
+		w.admissionMu.Unlock()
 		return def.ErrMailboxWorkerChannelNotInit
 	}
 
-	// 提交到队列管理器
+	// Publication transfers ownership; never recheck state after it succeeds.
 	err := w.queueManager.Submit(job)
+	if err == def.ErrMailboxWorkerIsFull && w.env.queueFullRejectedTotal != nil {
+		w.env.queueFullRejectedTotal.Add(1)
+	}
+	w.admissionMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -369,42 +378,19 @@ func (w *Worker) run() {
 	}
 }
 
-// BeginStop 发起停止（非阻塞）。
+// BeginStop closes admission and requests shutdown without waiting for consumers.
+// It may wait for publication under admissionMu: StopTimeout bounds RW cleanup,
+// not admission, and is not a hard Stop deadline.
 func (w *Worker) BeginStop() {
-	// First, stop accepting new submissions.
+	w.admissionMu.Lock()
 	if !w.state.CompareAndSwap(workerStateRunning, workerStateClosing) {
+		w.admissionMu.Unlock()
 		return // already stopping/stopped
 	}
 	atomic.StoreInt64(&w.stopDeadlineNS, time.Now().Add(w.env.rw.stopTimeout).UnixNano())
-
-	// Wait for in-flight SubmitJob calls to finish.
-	// 阶梯退避：先 Gosched，超过阈值后改用 microsecond 级 Sleep，避免长时间 CPU 燃烧。
-	// 总体超时保护：避免上层死循环投递导致永久阻塞。
-	const spinBudget = 1024
-	deadline := time.Now().Add(w.env.rw.stopTimeout)
-	spins := 0
-	sleep := time.Duration(0)
-	for w.submitters.Load() != 0 {
-		if time.Now().After(deadline) {
-			w.env.logger.Errorf("Worker %d: BeginStop deadline exceeded, submitters=%d still in-flight, forcing stop",
-				w.workerId, w.submitters.Load())
-			break
-		}
-		if spins < spinBudget {
-			runtime.Gosched()
-			spins++
-			continue
-		}
-		if sleep == 0 {
-			sleep = time.Microsecond
-		} else if sleep < 100*time.Microsecond {
-			sleep *= 2
-		}
-		time.Sleep(sleep)
-	}
-
-	// Now stop the run loop.
+	// All admitted publications are complete before the run loop can drain.
 	w.state.Store(workerStateClosed)
+	w.admissionMu.Unlock()
 
 	// 唤醒可能在等待的Worker
 	if w.idler != nil {
@@ -634,6 +620,9 @@ func (w *Worker) dispatchRead(job inf.IMailboxJob) {
 	}
 	w.readsLaunched.Add(1)
 
+	if w.env.readQueueFullDiscardedTotal != nil {
+		w.env.readQueueFullDiscardedTotal.Add(1)
+	}
 	// readCh 满 = 入队侧回压：直接丢弃 + 通知业务（OnJobDiscarded 对称）
 	w.env.rw.drainDiscardTotal.Add(1)
 	w.env.logger.WithContext(job.GetContext()).Warnf(

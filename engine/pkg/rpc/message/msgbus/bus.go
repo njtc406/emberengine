@@ -109,7 +109,9 @@ func (mb *MessageBus) Reset() {
 
 // NewMessageBus 创建一个消息总线
 //
-// tips: 非常重要! 请勿跨协程传递,否则会导致pool错误,具体参考NewPerPPoolWrapper注释
+// 返回独立分配、未绑定工厂池的实例。MessageBus 不支持并发使用。
+// 工厂池化实例的终结调用会归还对象，调用后不得继续访问；
+// 跨 goroutine 使用必须同步转移独占所有权，而非依赖 goroutine 与 P 的固定绑定。
 func NewMessageBus(sender inf.IRpcDispatcher, receiver inf.IRpcDispatcher, err error) *MessageBus {
 	return &MessageBus{sender: sender, receiver: receiver, err: err}
 }

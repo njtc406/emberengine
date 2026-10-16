@@ -1,0 +1,12 @@
+--- FAIL: TestMailboxPerformanceSample (43.15s)
+    --- FAIL: TestMailboxPerformanceSample/dual-w4-rwtrue-hotfalse-steady (3.14s)
+        mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v2 Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor OS:windows Arch:amd64 Go:go1.24.9 Commit:4100678 Procs:4} Candidate:bounded Scenario:dual-w4-rwtrue-hotfalse-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:63140 MainRejected:2396 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.7936168s CPU:1.21875s Completion:{P50:230.1473ms P99:798.5885ms P999:802.8089ms} RejectionRatio:0.03656005859375 Drained:true}
+    --- FAIL: TestMailboxPerformanceSample/dual-w4-rwtrue-hottrue-steady (2.93s)
+        mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v2 Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor OS:windows Arch:amd64 Go:go1.24.9 Commit:4100678 Procs:4} Candidate:bounded Scenario:dual-w4-rwtrue-hottrue-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:44343 MainRejected:21193 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.5790529s CPU:1s Completion:{P50:202.5349ms P99:493.1065ms P999:526.9965ms} RejectionRatio:0.3233795166015625 Drained:true}
+    --- FAIL: TestMailboxPerformanceSample/priority-w4-rwtrue-hotfalse-steady (3.11s)
+        mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v2 Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor OS:windows Arch:amd64 Go:go1.24.9 Commit:4100678 Procs:4} Candidate:bounded Scenario:priority-w4-rwtrue-hotfalse-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:63593 MainRejected:1943 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.7224648s CPU:1.234375s Completion:{P50:145.5092ms P99:785.6994ms P999:793.9085ms} RejectionRatio:0.0296478271484375 Drained:true}
+    --- FAIL: TestMailboxPerformanceSample/priority-w4-rwtrue-hottrue-steady (2.92s)
+        mailbox_performance_test.go:241: non-overload loss: {Protocol:task2-v2 Machine:{CPU:AMD Ryzen 7 5700X 8-Core Processor OS:windows Arch:amd64 Go:go1.24.9 Commit:4100678 Procs:4} Candidate:bounded Scenario:priority-w4-rwtrue-hottrue-steady Round:0 Workers:4 EffectiveRW:true Samples:65536 Success:50962 MainRejected:14574 RWDropped:0 StopRejected:0 OtherRejected:0 Wall:2.5732216s CPU:1.4375s Completion:{P50:174.0128ms P99:485.1831ms P999:521.192ms} RejectionRatio:0.222381591796875 Drained:true}
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	44.807s
+FAIL

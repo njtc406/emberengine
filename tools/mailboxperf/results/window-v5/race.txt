@@ -1,0 +1,17 @@
+=== RUN   TestMailboxPerfReplicationProtocol
+--- PASS: TestMailboxPerfReplicationProtocol (0.00s)
+=== RUN   TestMailboxPerfWindowProtocol
+--- PASS: TestMailboxPerfWindowProtocol (0.00s)
+=== RUN   TestMailboxPerfWindowHeapDiagnostic
+    mailbox_performance_window_diagnostic_test.go:17: explicit heap diagnostic only
+--- SKIP: TestMailboxPerfWindowHeapDiagnostic (0.00s)
+=== RUN   TestMailboxPerfWindowMailboxOwnership
+=== RUN   TestMailboxPerfWindowMailboxOwnership/unbounded
+=== RUN   TestMailboxPerfWindowMailboxOwnership/bounded
+--- PASS: TestMailboxPerfWindowMailboxOwnership (0.06s)
+    --- PASS: TestMailboxPerfWindowMailboxOwnership/unbounded (0.03s)
+    --- PASS: TestMailboxPerfWindowMailboxOwnership/bounded (0.03s)
+=== RUN   TestMailboxPerfWindowOwnership
+--- PASS: TestMailboxPerfWindowOwnership (0.00s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	3.005s

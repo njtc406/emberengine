@@ -1,0 +1,118 @@
+M=42500 P=-1 G=-1 StateTransition Time=540322914522097 Resource=Proc(1) Reason="" ProcID=1 Idle->Running
+M=42500 P=1 G=-1 StateTransition Time=540322917404447 Resource=Goroutine(50) Reason="" GoID=50 Waiting->Runnable
+M=42500 P=1 G=-1 StateTransition Time=540322917437136 Resource=Goroutine(50) Reason="" GoID=50 Runnable->Running
+M=42500 P=1 G=50 StateTransition Time=540322917464780 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917468998 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917476907 Resource=Goroutine(51) Reason="" GoID=51 Waiting->Runnable
+M=42500 P=1 G=50 StateTransition Time=540322917479016 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917479241 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917480446 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917480671 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917481876 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917482026 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917484135 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917484285 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917485113 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917485263 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917486242 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917486317 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917486994 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917487144 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917487972 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917488047 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917488724 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917488874 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917489551 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917489701 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917490454 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917490604 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917491884 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917491959 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917492938 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917493013 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917493766 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917493841 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917494443 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917494593 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917495270 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917495420 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917496022 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917496172 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917496774 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917496924 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917497677 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917497827 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917498429 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917498579 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917500010 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917500160 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917500988 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917501138 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917501891 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917502041 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917502643 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917502793 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917503621 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917503696 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917504599 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917504674 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917506029 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917506179 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917507384 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917507534 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917508362 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917508512 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917509189 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917509339 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917510544 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917510619 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917512652 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917512802 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917513630 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917513705 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917538712 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917538862 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917539841 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917539991 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917540819 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917540969 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917541571 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917541721 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917542474 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917542624 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917543226 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917543301 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917543978 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917544053 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917544655 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917544805 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=42500 P=1 G=50 StateTransition Time=540322917545558 Resource=Goroutine(50) Reason="" GoID=50 Running->Syscall
+M=42500 P=1 G=50 StateTransition Time=540322917545633 Resource=Goroutine(50) Reason="" GoID=50 Syscall->Running
+M=33184 P=3 G=-1 StateTransition Time=540321803333520 Resource=Goroutine(51) Reason="" GoID=51 Runnable->Running
+M=33184 P=3 G=51 StateTransition Time=540321803339094 Resource=Goroutine(51) Reason="" GoID=51 Running->Syscall
+TransitionStack=
+	runtime.syscall_syscalln @ 0xa43fcd
+		C:/Program Files/Go/src/runtime/syscall_windows.go:521
+	syscall.Syscall @ 0xa5e7c8
+		C:/Program Files/Go/src/runtime/syscall_windows.go:457
+	golang.org/x/sys/windows.(*Proc).Call @ 0xc8285d
+		E:/pro/pkg/mod/golang.org/x/sys@v0.32.0/windows/dll_windows.go:170
+	golang.org/x/sys/windows.(*LazyProc).Call @ 0xc83489
+		E:/pro/pkg/mod/golang.org/x/sys@v0.32.0/windows/dll_windows.go:351
+	github.com/njtc406/emberengine/engine/internal/perftest.Now @ 0x123ff55
+		E:/pro/src/emberengine/.worktrees/bounded-mpsc-mailbox/engine/internal/perftest/clock_windows.go:25
+	github.com/njtc406/emberengine/engine/internal/perftest.Since @ 0x12677c4
+		E:/pro/src/emberengine/.worktrees/bounded-mpsc-mailbox/engine/internal/perftest/clock_windows.go:32
+	github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*perfInvoker).ExecuteJob @ 0x12677b6
+		E:/pro/src/emberengine/.worktrees/bounded-mpsc-mailbox/engine/pkg/actor/mailbox/mailbox_performance_test.go:46
+	github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*Worker).safeExecInternal @ 0x124f92c
+		E:/pro/src/emberengine/.worktrees/bounded-mpsc-mailbox/engine/pkg/actor/mailbox/worker.go:562
+	github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*Worker).safeExec @ 0x124e18b
+		E:/pro/src/emberengine/.worktrees/bounded-mpsc-mailbox/engine/pkg/actor/mailbox/worker.go:466
+	github.com/njtc406/emberengine/engine/pkg/actor/mailbox.(*Worker).run @ 0x124e17b
+		E:/pro/src/emberengine/.worktrees/bounded-mpsc-mailbox/engine/pkg/actor/mailbox/worker.go:371
+
+Stack=
+	runtime.syscall_syscalln @ 0xa43fcd
+		C:/Program Files/Go/src/runtime/syscall_windows.go:521
+	syscall.Syscall @ 0xa5e7c8

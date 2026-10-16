@@ -1,0 +1,78 @@
+=== RUN   TestMailboxPerformanceMemory
+    mailbox_performance_memory_test.go:180: candidate=baseline recovered=true executed=32769 rejected=0 points=[
+          {
+            "Offered": 1,
+            "Accepted": 1,
+            "Rejected": 0,
+            "Occupancy": 0,
+            "HeapAlloc": 2583672,
+            "HeapObjects": 6685
+          },
+          {
+            "Offered": 4097,
+            "Accepted": 4097,
+            "Rejected": 0,
+            "Occupancy": 4096,
+            "HeapAlloc": 3206136,
+            "HeapObjects": 18971
+          },
+          {
+            "Offered": 8193,
+            "Accepted": 8193,
+            "Rejected": 0,
+            "Occupancy": 8192,
+            "HeapAlloc": 3828776,
+            "HeapObjects": 31259
+          },
+          {
+            "Offered": 12289,
+            "Accepted": 12289,
+            "Rejected": 0,
+            "Occupancy": 12288,
+            "HeapAlloc": 4451464,
+            "HeapObjects": 43547
+          },
+          {
+            "Offered": 16385,
+            "Accepted": 16385,
+            "Rejected": 0,
+            "Occupancy": 16384,
+            "HeapAlloc": 5074056,
+            "HeapObjects": 55835
+          },
+          {
+            "Offered": 20481,
+            "Accepted": 20481,
+            "Rejected": 0,
+            "Occupancy": 20480,
+            "HeapAlloc": 5696840,
+            "HeapObjects": 68123
+          },
+          {
+            "Offered": 24577,
+            "Accepted": 24577,
+            "Rejected": 0,
+            "Occupancy": 24576,
+            "HeapAlloc": 6319432,
+            "HeapObjects": 80411
+          },
+          {
+            "Offered": 28673,
+            "Accepted": 28673,
+            "Rejected": 0,
+            "Occupancy": 28672,
+            "HeapAlloc": 6942120,
+            "HeapObjects": 92700
+          },
+          {
+            "Offered": 32769,
+            "Accepted": 32769,
+            "Rejected": 0,
+            "Occupancy": 32768,
+            "HeapAlloc": 7564712,
+            "HeapObjects": 104988
+          }
+        ]
+--- PASS: TestMailboxPerformanceMemory (0.03s)
+PASS
+ok  	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.150s

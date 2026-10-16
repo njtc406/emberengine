@@ -18,8 +18,8 @@ var msgInitOnce sync.Once
 
 func getMsgPool() pool.IPool[*actor.Message] {
 	msgInitOnce.Do(func() {
-		msgPool = pool.NewPerPPoolWrapper(
-			1024,
+		// This process-wide pool outlives changes to GOMAXPROCS.
+		msgPool = pool.NewSyncPoolWrapper(
 			func() *actor.Message {
 				return &actor.Message{}
 			},
@@ -30,7 +30,7 @@ func getMsgPool() pool.IPool[*actor.Message] {
 					return pool.NewNoStatsRecorder()
 				}
 			}(),
-			pool.WithPReset(func(msg *actor.Message) {
+			pool.WithReset(func(msg *actor.Message) {
 				msg.Reset()
 			}),
 		)

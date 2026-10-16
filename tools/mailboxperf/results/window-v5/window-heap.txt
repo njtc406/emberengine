@@ -1,0 +1,23 @@
+=== RUN   TestMailboxPerfWindowProtocol
+--- PASS: TestMailboxPerfWindowProtocol (0.00s)
+=== RUN   TestMailboxPerfWindowHeapDiagnostic
+    mailbox_performance_window_diagnostic_test.go:46: v5 windows=1 wrappers=65536 samples=65536 retainedBytes=28843136 allocatedBytes=29361416 objects=131118 GC=3 pauseTotal=0s forcedGCWall=2.0662ms
+    mailbox_performance_window_diagnostic_test.go:46: v5 windows=4 wrappers=65536 samples=262144 retainedBytes=28843424 allocatedBytes=33021200 objects=131119 GC=4 pauseTotal=0s forcedGCWall=2.0024ms
+    mailbox_performance_window_diagnostic_test.go:46: v5 windows=32 wrappers=65536 samples=2097152 retainedBytes=28839200 allocatedBytes=51737400 objects=131103 GC=5 pauseTotal=0s forcedGCWall=1.9972ms
+    mailbox_performance_window_diagnostic_test.go:61: /sched/pauses/total/gc:seconds [0,6.4e-08) count=15
+    mailbox_performance_window_diagnostic_test.go:61: /sched/pauses/total/gc:seconds [0.000458752,0.000524288) count=1
+    mailbox_performance_window_diagnostic_test.go:54: /cpu/classes/gc/total:cpu-seconds=0.0259428
+    mailbox_performance_window_diagnostic_test.go:56: /gc/scan/heap:bytes=12215680
+--- PASS: TestMailboxPerfWindowHeapDiagnostic (0.24s)
+=== RUN   TestMailboxPerfWindowMailboxOwnership
+=== RUN   TestMailboxPerfWindowMailboxOwnership/unbounded
+=== RUN   TestMailboxPerfWindowMailboxOwnership/bounded
+    mailbox_performance_window_diagnostic_test.go:80: mailbox queue configuration: bounded dual requires DualQueueCapacity
+--- FAIL: TestMailboxPerfWindowMailboxOwnership (0.00s)
+    --- PASS: TestMailboxPerfWindowMailboxOwnership/unbounded (0.00s)
+    --- FAIL: TestMailboxPerfWindowMailboxOwnership/bounded (0.00s)
+=== RUN   TestMailboxPerfWindowOwnership
+--- PASS: TestMailboxPerfWindowOwnership (0.00s)
+FAIL
+FAIL	github.com/njtc406/emberengine/engine/pkg/actor/mailbox	1.371s
+FAIL

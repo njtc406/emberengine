@@ -1,0 +1,74 @@
+[
+  {
+    "Offered": 1,
+    "Accepted": 1,
+    "Rejected": 0,
+    "Occupancy": 0,
+    "HeapAlloc": 1525744,
+    "HeapObjects": 6649
+  },
+  {
+    "Offered": 4097,
+    "Accepted": 4097,
+    "Rejected": 0,
+    "Occupancy": 4096,
+    "HeapAlloc": 2213896,
+    "HeapObjects": 18937
+  },
+  {
+    "Offered": 8193,
+    "Accepted": 8193,
+    "Rejected": 0,
+    "Occupancy": 8192,
+    "HeapAlloc": 2902072,
+    "HeapObjects": 31225
+  },
+  {
+    "Offered": 12289,
+    "Accepted": 12289,
+    "Rejected": 0,
+    "Occupancy": 12288,
+    "HeapAlloc": 3590296,
+    "HeapObjects": 43513
+  },
+  {
+    "Offered": 16385,
+    "Accepted": 16385,
+    "Rejected": 0,
+    "Occupancy": 16384,
+    "HeapAlloc": 4278424,
+    "HeapObjects": 55801
+  },
+  {
+    "Offered": 20481,
+    "Accepted": 20481,
+    "Rejected": 0,
+    "Occupancy": 20480,
+    "HeapAlloc": 4966744,
+    "HeapObjects": 68089
+  },
+  {
+    "Offered": 24577,
+    "Accepted": 24577,
+    "Rejected": 0,
+    "Occupancy": 24576,
+    "HeapAlloc": 5654872,
+    "HeapObjects": 80377
+  },
+  {
+    "Offered": 28673,
+    "Accepted": 28673,
+    "Rejected": 0,
+    "Occupancy": 28672,
+    "HeapAlloc": 6343000,
+    "HeapObjects": 92665
+  },
+  {
+    "Offered": 32769,
+    "Accepted": 32769,
+    "Rejected": 0,
+    "Occupancy": 32768,
+    "HeapAlloc": 7031128,
+    "HeapObjects": 104953
+  }
+]
