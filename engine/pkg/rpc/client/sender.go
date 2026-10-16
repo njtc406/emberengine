@@ -137,6 +137,7 @@ type Dispatcher struct {
 
 	inf.IMailboxChannel
 	localHandler inf.IRpcSender
+	localOnce    sync.Once
 }
 
 func (c *Dispatcher) GetPid() *actor.PID {
@@ -162,9 +163,9 @@ func (c *Dispatcher) getSender() inf.IRpcSender {
 	}
 	if c.IMailboxChannel != nil {
 		// 本地节点的sender
-		if c.localHandler == nil {
+		c.localOnce.Do(func() {
 			c.localHandler = newLClient("", sm.rpcMonitor)
-		}
+		})
 		return c.localHandler
 	}
 	return sm.getSenderHandler(c.pid.GetAddress(), c.pid.GetRpcType())

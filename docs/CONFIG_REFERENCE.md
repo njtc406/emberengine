@@ -2,7 +2,7 @@
 
 ## 有界 Mailbox：配置、观测与回滚
 
-当前默认仍为 `unbounded`。`bounded` 使用 MutexRing；Task 9 正确性验证已执行，但生产性能仍 **NOT ACCEPTED / NO CANARY**，MutexRing 尚未获选生产使用。完整证据与未完成的验收要求见 [最终报告](../task-2-report.md)。本次不引入 SequenceRing，不改变审批或性能门槛。配置位于服务的 `Mailbox`（Go 类型 `MailboxConf`）下：
+默认仍为 `unbounded`。`bounded` 即已实现的 MutexRing，可显式配置选择；不新增第二开关或别名。dual/priority 均支持。历史 Task 9 性能门槛未通过不代表后端未实现；本次批准可配置实现，不宣称生产性能验收通过。证据见 [报告](../task-2-report.md)。配置位于服务的 `Mailbox`（Go 类型 `MailboxConf`）下；可运行的解析→工厂→Worker 行为测试见 `queue_config_integration_test.go`。
 
 ```yaml
 Mailbox:
@@ -12,6 +12,20 @@ Mailbox:
   #   System: 64
   #   User: 4096
 ```
+
+显式选择 MutexRing 的 dual 示例（合并到服务配置，不修改本地环境文件）：
+
+```yaml
+Mailbox:
+  QueueMode: dual
+  QueueBackend: bounded
+  MaxQueueStorageBytes: 67108864
+  DualQueueCapacity: {System: 64, User: 4096}
+  SchedulePolicy:
+    InitialWorkerNum: 1
+```
+
+priority 使用相同 `QueueBackend: bounded`，将 `QueueMode` 改为 `priority`，并在 `SchedulePolicy.MultiLevelQueueConf.PriorityBatches` 的 `"-3"`、`"-2"`、`"-1"` 以及至少一个用户优先级（如 `"0"`）中分别设置 `Capacity`；完整解析样例见上述集成测试。
 
 - `QueueBackend` 仅支持 `unbounded` / `bounded`；省略时保持 unbounded。
 - bounded 容量按 **Worker、物理子队列** 独立计算：dual 配置 System/User；priority 在每个已配置的 `PriorityBatches` 项中设置 `Capacity`。容量必须是至少 2 的 2 次幂，非法容量、缺失容量、预算不足在启动时失败，不静默降级。`DefaultUserMailboxSize` / `DefaultSysMailboxSize` 不是 bounded 默认容量。
