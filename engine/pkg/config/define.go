@@ -181,7 +181,7 @@ type TimerConf struct {
 // MailboxConf 邮箱配置
 // 职责：配置消息队列的队列模式和调度策略
 type MailboxConf struct {
-	// QueueBackend defaults to unbounded; bounded requires explicit per-queue capacities.
+	// QueueBackend defaults to bounded; set unbounded explicitly to disable main queue limits.
 	QueueBackend      string                 `binding:""`
 	DualQueueCapacity *DualQueueCapacityConf `binding:""`
 	// MaxQueueStorageBytes limits main queue object/slot layout, not allocator overhead or RSS.

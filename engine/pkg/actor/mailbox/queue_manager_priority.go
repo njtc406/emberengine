@@ -35,13 +35,14 @@ type PriorityQueueManager struct {
 
 // NewPriorityQueueManager 创建多优先级队列管理器
 func NewPriorityQueueManager(conf *config.MultiLevelQueueConf, logger log.ILoggerX) *PriorityQueueManager {
-	// 使用规范化副本，不修改调用方原始配置
-	conf = normalizeMultiLevelQueueConf(conf)
-	p := &normalizedPriorityQueueSpec{strategy: conf.Strategy, totalBatchLimit: conf.TotalBatchLimit, priorities: make(map[def.Priority]config.PriorityConfig, len(conf.PriorityBatches))}
-	for priority, pc := range conf.PriorityBatches {
-		p.priorities[priority] = *pc
+	spec, err := normalizeQueueSpec(&config.MailboxConf{
+		QueueMode:      QueueModePriority,
+		SchedulePolicy: &config.WorkerSchedulePolicy{MultiLevelQueueConf: conf},
+	})
+	if err != nil {
+		panic(err)
 	}
-	return newPriorityQueueManager(normalizedQueueSpec{backend: "unbounded", priority: p}, logger)
+	return newPriorityQueueManager(spec, logger)
 }
 
 func newPriorityQueueManager(spec normalizedQueueSpec, logger log.ILoggerX) *PriorityQueueManager {

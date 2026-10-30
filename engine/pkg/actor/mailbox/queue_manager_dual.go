@@ -20,7 +20,11 @@ type DualQueueManager struct {
 
 // NewDualQueueManager 创建双队列管理器
 func NewDualQueueManager() *DualQueueManager {
-	return newDualQueueManager(normalizedQueueSpec{backend: "unbounded", dual: &normalizedDualQueueSpec{}})
+	spec, err := normalizeQueueSpec(nil)
+	if err != nil {
+		panic(err)
+	}
+	return newDualQueueManager(spec)
 }
 
 func newDualQueueManager(spec normalizedQueueSpec) *DualQueueManager {

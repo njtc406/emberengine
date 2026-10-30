@@ -36,12 +36,12 @@ func TestBoundedQueueConfig(t *testing.T) {
 		{"unknown backend", func(c *config.MailboxConf) { c.QueueBackend = "sequence" }, true},
 		{"unknown mode", func(c *config.MailboxConf) { c.QueueMode = "other" }, true},
 		{"default mode", func(c *config.MailboxConf) { c.QueueMode = "" }, false},
-		{"missing capacity", func(c *config.MailboxConf) { c.DualQueueCapacity = nil }, true},
-		{"zero", func(c *config.MailboxConf) { c.DualQueueCapacity.System = 0 }, true},
+		{"missing capacity", func(c *config.MailboxConf) { c.DualQueueCapacity = nil }, false},
+		{"zero", func(c *config.MailboxConf) { c.DualQueueCapacity.System = 0 }, false},
 		{"one", func(c *config.MailboxConf) { c.DualQueueCapacity.User = 1 }, true},
 		{"three", func(c *config.MailboxConf) { c.DualQueueCapacity.User = 3 }, true},
 		{"negative", func(c *config.MailboxConf) { c.DualQueueCapacity.System = -2 }, true},
-		{"missing budget", func(c *config.MailboxConf) { c.MaxQueueStorageBytes = 0 }, true},
+		{"missing budget", func(c *config.MailboxConf) { c.MaxQueueStorageBytes = 0 }, false},
 		{"small budget", func(c *config.MailboxConf) { c.MaxQueueStorageBytes = 1 }, true},
 		{"array bytes overflow", func(c *config.MailboxConf) {
 			c.DualQueueCapacity.User = int(^uint(0)>>2) + 1
@@ -108,10 +108,10 @@ func TestPriorityQueueConfig(t *testing.T) {
 				q.PriorityBatches[def.PriorityNormal].Capacity = 3
 			}
 			s, err := normalizeQueueSpec(fixConf(c))
-			if (err != nil) != (name != "valid") {
+			if (err != nil) != (name != "valid" && name != "nil conf" && name != "empty" && name != "nil entry") {
 				t.Fatalf("spec=%+v error=%v", s, err)
 			}
-			if err == nil && (s.priority.fallbackPriority != def.PriorityLow || s.priority.strategy != def.StrategyFairness || s.priority.totalBatchLimit != 17) {
+			if name == "valid" && (s.priority.fallbackPriority != def.PriorityLow || s.priority.strategy != def.StrategyFairness || s.priority.totalBatchLimit != 17) {
 				t.Fatalf("incomplete spec: %+v", s.priority)
 			}
 		})
@@ -119,7 +119,7 @@ func TestPriorityQueueConfig(t *testing.T) {
 }
 
 func TestUnboundedQueueConfig(t *testing.T) {
-	for _, backend := range []string{"", "unbounded"} {
+	for _, backend := range []string{"unbounded"} {
 		for _, mode := range []string{"", "dual", "priority", "unknown"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				c := &config.MailboxConf{QueueBackend: backend, QueueMode: mode, SchedulePolicy: &config.WorkerSchedulePolicy{EnableAutoScaling: true}}

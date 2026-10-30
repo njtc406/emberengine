@@ -168,14 +168,17 @@ func TestQueueFactoryBackends(t *testing.T) {
 	}
 }
 func TestDualQueueManagerUnboundedConstructor(t *testing.T) {
-	m := NewDualQueueManager()
+	m := newDualQueueManager(normalizedQueueSpec{backend: "unbounded", dual: &normalizedDualQueueSpec{}})
 	for i := 0; i < 100; i++ {
 		require.NoError(t, m.Submit(&boundedManagerJob{priority: def.PriorityNormal}))
 	}
 	require.Equal(t, 100, m.GetJobLen())
 }
 func TestPriorityQueueManagerUnboundedConstructor(t *testing.T) {
-	m := NewPriorityQueueManager(&config.MultiLevelQueueConf{PriorityBatches: map[def.Priority]*config.PriorityConfig{def.PriorityNormal: {Capacity: 2}}}, nil)
+	spec, err := normalizeQueueSpec(&config.MailboxConf{QueueBackend: "unbounded", QueueMode: QueueModePriority,
+		SchedulePolicy: &config.WorkerSchedulePolicy{MultiLevelQueueConf: &config.MultiLevelQueueConf{PriorityBatches: map[def.Priority]*config.PriorityConfig{def.PriorityNormal: {Capacity: 2}}}}})
+	require.NoError(t, err)
+	m := newPriorityQueueManager(spec, nil)
 	for i := 0; i < 100; i++ {
 		require.NoError(t, m.Submit(&boundedManagerJob{priority: def.PriorityNormal}))
 	}

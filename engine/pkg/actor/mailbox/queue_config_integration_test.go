@@ -46,7 +46,7 @@ func TestParsedMailboxBackendWorkerBehavior(t *testing.T) {
 				}
 				extra := trackedLifecycleJob()
 				err := mb.PostJob(extra)
-				if backend == "bounded" {
+				if backend != "unbounded" {
 					require.ErrorIs(t, err, def.ErrMailboxWorkerIsFull)
 					require.Equal(t, int64(1), extra.releases.Load())
 					require.Zero(t, extra.executes.Load())

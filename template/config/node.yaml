@@ -181,11 +181,11 @@ ServiceConf:
         TimerBucketSize: 100
       # 邮箱配置
       Mailbox:
-        # 保持兼容默认值；Task 9 正确性和生产性能门槛通过前禁止灰度
-        QueueBackend: "unbounded"
-        # MaxQueueStorageBytes: 67108864 # bounded 必填；布局预算，不是 RSS 上限
-        # DualQueueCapacity: # 每个 Worker 的物理子队列容量
-        #   System: 64
+        # 用户明确采用 bounded 默认值；历史性能门槛仍未通过，非性能验收声明
+        QueueBackend: "bounded"
+        # MaxQueueStorageBytes: 67108864 # 默认 64 MiB 布局预算，不是 RSS 上限
+        # DualQueueCapacity: # 每个 Worker 的每条物理子队列默认 4096
+        #   System: 4096
         #   User: 4096
         # 切回 unbounded 后重启；不支持运行时热切换
         # 队列模式选择

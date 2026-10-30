@@ -16,6 +16,8 @@ func TestNewPriorityQueueManager_DoesNotMutateCallerConf(t *testing.T) {
 		PriorityBatches: map[def.Priority]*config.PriorityConfig{
 			def.PriorityNormal: {BatchSize: 8, Weight: 3},
 			def.PriorityHigh:   {BatchSize: 16, Weight: 5},
+			def.PrioritySys:    {BatchSize: 64, Weight: 20},
+			def.PriorityUrgent: {BatchSize: 32, Weight: 10},
 		},
 	}
 
@@ -60,6 +62,9 @@ func TestNewPriorityQueueManager_ModifyCallerAfterConstruction(t *testing.T) {
 		TotalBatchLimit: 32,
 		PriorityBatches: map[def.Priority]*config.PriorityConfig{
 			def.PriorityNormal: {BatchSize: 8, Weight: 3},
+			def.PrioritySys:    {BatchSize: 64, Weight: 20},
+			def.PriorityUrgent: {BatchSize: 32, Weight: 10},
+			def.PriorityHigh:   {BatchSize: 16, Weight: 5},
 		},
 	}
 

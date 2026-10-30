@@ -897,6 +897,9 @@ func fixConf(conf *config.MailboxConf) *config.MailboxConf {
 	// EnableRWMode 改成 false，多 worker Service 再用就丢了 RW 配置）。
 	// 这里做一次按需 deep-copy，保证 fixConf 完全无副作用。
 	conf = cloneMailboxConfForFix(conf)
+	if conf.QueueBackend == "" {
+		conf.QueueBackend = "bounded"
+	}
 
 	// 设置默认队列模式
 	if conf.QueueMode == "" {
@@ -1085,10 +1088,8 @@ type normalizedPhysicalQueueSpec struct {
 
 // normalizeQueueSpec consumes fixConf's effective configuration without mutating it.
 func normalizeQueueSpec(conf *config.MailboxConf) (normalizedQueueSpec, error) {
+	conf = fixConf(conf)
 	s := normalizedQueueSpec{backend: conf.QueueBackend, mode: conf.QueueMode}
-	if s.backend == "" {
-		s.backend = "unbounded"
-	}
 	if s.backend != "unbounded" && s.backend != "bounded" {
 		return s, fmt.Errorf("unknown QueueBackend %q", s.backend)
 	}
@@ -1107,19 +1108,30 @@ func normalizeQueueSpec(conf *config.MailboxConf) (normalizedQueueSpec, error) {
 	if s.mode == QueueModeDual {
 		s.dual = &normalizedDualQueueSpec{}
 		if bounded {
-			if conf.DualQueueCapacity == nil {
-				return s, errors.New("bounded dual requires DualQueueCapacity")
+			capacity := conf.DualQueueCapacity
+			if capacity == nil {
+				capacity = &config.DualQueueCapacityConf{System: config.DefaultMailboxQueueCapacity, User: config.DefaultMailboxQueueCapacity}
 			}
-			s.dual.system = conf.DualQueueCapacity.System
-			s.dual.user = conf.DualQueueCapacity.User
+			s.dual.system = capacity.System
+			s.dual.user = capacity.User
+			if s.dual.system == 0 {
+				s.dual.system = config.DefaultMailboxQueueCapacity
+			}
+			if s.dual.user == 0 {
+				s.dual.user = config.DefaultMailboxQueueCapacity
+			}
 			capacities = []int{s.dual.system, s.dual.user}
 		}
 	} else {
 		q := conf.SchedulePolicy.MultiLevelQueueConf
-		if bounded && (q == nil || len(q.PriorityBatches) == 0) {
-			return s, errors.New("bounded priority requires explicit PriorityBatches")
-		}
 		q = normalizeMultiLevelQueueConf(q)
+		if bounded {
+			for _, pc := range q.PriorityBatches {
+				if pc.Capacity == 0 {
+					pc.Capacity = config.DefaultMailboxQueueCapacity
+				}
+			}
+		}
 		p := &normalizedPriorityQueueSpec{strategy: q.Strategy, totalBatchLimit: q.TotalBatchLimit, priorities: make(map[def.Priority]config.PriorityConfig, len(q.PriorityBatches))}
 		first := true
 		for priority, pc := range q.PriorityBatches {
@@ -1149,7 +1161,7 @@ func normalizeQueueSpec(conf *config.MailboxConf) (normalizedQueueSpec, error) {
 		return s, nil
 	}
 	if conf.MaxQueueStorageBytes == 0 {
-		return s, errors.New("bounded requires positive MaxQueueStorageBytes")
+		conf.MaxQueueStorageBytes = config.DefaultMailboxQueueStorageBytes
 	}
 	workers := conf.SchedulePolicy.InitialWorkerNum
 	if conf.SchedulePolicy.EnableAutoScaling {

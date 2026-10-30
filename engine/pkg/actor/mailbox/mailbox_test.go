@@ -52,7 +52,8 @@ func TestNewMailboxCustomPriorityConfig(t *testing.T) {
 		def.PriorityNormal: {BatchSize: 20, Weight: 5},
 	}
 	conf := &config.MailboxConf{
-		QueueMode: QueueModePriority,
+		QueueMode:    QueueModePriority,
+		QueueBackend: "unbounded", // This custom scheduler intentionally omits system queues.
 		SchedulePolicy: &config.WorkerSchedulePolicy{
 			InitialWorkerNum: 2,
 			MultiLevelQueueConf: &config.MultiLevelQueueConf{
@@ -94,7 +95,8 @@ func TestNewMailboxWorkerScheduleConfig(t *testing.T) {
 	for _, mode := range []string{QueueModeDual, QueueModePriority} {
 		t.Run(mode, func(t *testing.T) {
 			conf := &config.MailboxConf{
-				QueueMode: mode,
+				QueueMode:    mode,
+				QueueBackend: "unbounded", // Verify legacy partial-priority scheduler configuration.
 				SchedulePolicy: &config.WorkerSchedulePolicy{
 					InitialWorkerNum: 1,
 					MultiLevelQueueConf: &config.MultiLevelQueueConf{
