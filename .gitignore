@@ -22,3 +22,5 @@ tools/localetcd/example/data/
 /.gitnexus
 /.github
 /.claude
+.worktrees
+.superpowers
