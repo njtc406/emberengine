@@ -42,6 +42,30 @@ func NewConfig() *Config {
 	}
 }
 
+// Prepare 校验外部配置并创建运行目录，不读取文件、环境变量或远程配置。
+// 服务配置应由调用方通过 ServiceConf.ServicesConfMap 提供。
+func (c *Config) Prepare() error {
+	if c == nil {
+		return fmt.Errorf("config validation: Config is required")
+	}
+	if err := validate.Struct(c); err != nil {
+		return fmt.Errorf("config validation: %w", validate.TransError(err, validate.ZH))
+	}
+	if c.runtimeViper == nil {
+		c.runtimeViper = viper.New()
+	}
+	if c.clusterViper == nil {
+		c.clusterViper = viper.New()
+	}
+	if c.serviceConfMap == nil {
+		c.serviceConfMap = make(map[string]*ServiceConfig)
+	}
+	if c.discoveryConf == nil {
+		c.discoveryConf = make(map[string]interface{})
+	}
+	return c.initDir()
+}
+
 // Load 解析配置文件（替代原来的全局 Init 函数）。
 // 返回 error 而非 panic。
 func (c *Config) Load(confPath string) error {

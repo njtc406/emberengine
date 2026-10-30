@@ -305,9 +305,16 @@ func (n *Node) Start(opts ...StartOption) (retNode *Node, retErr error) {
 	// ==============================
 	// 1. 配置（最先初始化 — 其他一切依赖配置）
 	// ==============================
-	n.Config = config.NewConfig()
-	if err := n.Config.Load(n.confPath); err != nil {
-		return nil, fmt.Errorf("config load: %w", err)
+	n.Config = param.Conf
+	if n.Config != nil {
+		if err := n.Config.Prepare(); err != nil {
+			return nil, fmt.Errorf("config prepare: %w", err)
+		}
+	} else {
+		n.Config = config.NewConfig()
+		if err := n.Config.Load(n.confPath); err != nil {
+			return nil, fmt.Errorf("config load: %w", err)
+		}
 	}
 
 	// ==============================
