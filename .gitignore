@@ -24,3 +24,4 @@ tools/localetcd/example/data/
 /.claude
 .worktrees
 .superpowers
+.acceptance-evidence
