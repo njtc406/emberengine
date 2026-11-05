@@ -51,7 +51,6 @@ ServiceConf:
   StartServices:
       # 服务id
     - ClassName: MasterSlaverTest
-      ServiceId: 1
       # 服务名称
       ServiceName: MasterSlaverTest
       # 服务类型

@@ -158,31 +158,31 @@ func (s *Service1) OnInit() error {
 	//////rpc test demo
 	////
 	s.AfterFunc(time.Second*1, "rpc test demo", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCTest2", nil, nil); err != nil {
+		if err := s.Select(rpc.WithName(ServiceNameTest3)).Call(ctx, "RPCTest2", nil, nil); err != nil {
 			s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
 		}
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second*1000)
 		defer cancel()
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("2")).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
+		if err := s.Select(rpc.WithName(ServiceNameTest3)).Call(ctxWithTimeout, "RPCTest2", nil, nil); err != nil {
 			s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
 		}
 		s.WithContext(ctxWithTimeout).Debugf("==========================================11")
-		if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Send(ctx, "RPCTest2", nil); err != nil {
+		if err := s.Select(rpc.WithName(ServiceNameTest3)).Send(ctx, "RPCTest2", nil); err != nil {
 			s.GetLogger().Errorf("call Service3.RPCTest2 failed, err:%v", err)
 		}
 		return nil
 	})
 	//s.AfterFunc(time.Second*8, "rpc test demo1", func(ctx context.Context, timer *timingwheel.Timer, args ...interface{}) error {
 	//	out := &msg.Msg_Test_Resp{}
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, out); err != nil {
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3)).Call(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, out); err != nil {
 	//		s.GetLogger().Errorf("call Service3.RPCSum failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================12")
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("2")).Send(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 3}); err != nil {
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3)).Send(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 3}); err != nil {
 	//		s.GetLogger().Errorf("send Service3.RPCSum failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================13")
-	//	if _, err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).AsyncCall(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{
+	//	if _, err := s.Select(rpc.WithName(ServiceNameTest3)).AsyncCall(ctx, "RPCSum", &msg.Msg_Test_Req{A: 1, B: 2}, &dto.AsyncCallParams{
 	//		Params: []interface{}{1, 2, "a"},
 	//	}, func(ctx context.Context, data interface{}, err error, params ...interface{}) {
 	//		if err != nil {
@@ -200,7 +200,7 @@ func (s *Service1) OnInit() error {
 	//	s.GetLogger().Debugf("==========================================14")
 	//
 	//	// 测试调用对象返回错误
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctx, "RPCTestWithError", &msg.Msg_Test_Req{A: 1, B: 2}, nil); err != nil {
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3)).Call(ctx, "RPCTestWithError", &msg.Msg_Test_Req{A: 1, B: 2}, nil); err != nil {
 	//		s.GetLogger().Errorf("call Service3.RPCTestWithError failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================15")
@@ -208,7 +208,7 @@ func (s *Service1) OnInit() error {
 	//	// 测试调用对象有参数,但是使用nil的情形
 	//	ctxWithTimeout, cancel := context.WithTimeout(xcontext.New(nil), time.Second*3)
 	//	defer cancel()
-	//	if err := s.Select(rpc.WithName(ServiceNameTest3), rpc.WithSid("1")).Call(ctxWithTimeout, "RpcTestWithError", nil, nil); err != nil {
+	//	if err := s.Select(rpc.WithName(ServiceNameTest3)).Call(ctxWithTimeout, "RpcTestWithError", nil, nil); err != nil {
 	//		s.GetLogger().Errorf("call Service3.RpcTestWithError failed, err:%v", err)
 	//	}
 	//	s.GetLogger().Debugf("==========================================16")

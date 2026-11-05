@@ -82,7 +82,6 @@ func (r *Repository) SelectByServiceUid(serviceUid string) inf.IRpcDispatcher {
 //	return returnList
 //}
 //
-//func (r *Repository) SelectSlavers(sender *actor.PID, serverId int32, serviceName, serviceId string, options ...inf.SelectorOption) inf.IBus {
 //	return nil
 //}
 
@@ -151,7 +150,7 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 		}
 		cPid := c.GetPid()
 		if !actor.IsRetired(cPid) && (param.Partition == nil || cPid.GetPartition() == *param.Partition) &&
-			(param.ServiceId == nil || cPid.GetServiceId() == *param.ServiceId) && cPid.IsMasterNode() == !param.IsSlaver {
+			cPid.IsMasterNode() == !param.IsSlaver {
 			returnList = append(returnList, r.newMessageBus(s, c, nil))
 		}
 	}

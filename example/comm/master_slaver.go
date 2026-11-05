@@ -178,14 +178,12 @@ func (s *MasterSlaverTest) becomeMaster(ctx context.Context, stateData *actor.Ma
 func (s *MasterSlaverTest) selectSelfSlavers() inf.IBus {
 	return s.SelectSlavers(
 		rpc.WithName(s.GetName()),
-		rpc.WithSid(s.GetPid().GetServiceId()),
 		rpc.WithPartition(s.GetPartition()))
 }
 
 func (s *MasterSlaverTest) selectSelfMaster() inf.IBus {
 	return s.Select(
 		rpc.WithName(s.GetName()),
-		rpc.WithSid(s.GetPid().GetServiceId()),
 		rpc.WithPartition(s.GetPartition()))
 }
 

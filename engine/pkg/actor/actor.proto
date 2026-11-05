@@ -7,7 +7,8 @@ message PID {
   string Address = 1;         // 服务地址
   string Name = 2;            // 服务名称
   string ServiceType = 3;     // 服务类型
-  string ServiceId = 4;       // 同类型服务内唯一标识
+  reserved 4;
+  reserved "ServiceId";
   int32 State = 5;            // 服务状态(0: 正常, 1: 退休)
   int32 Partition = 6;        // 服务分区ID(用于服务路由隔离)
   int64 Version = 7;          // 服务版本号

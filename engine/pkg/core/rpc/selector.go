@@ -11,12 +11,6 @@ func WithPartition(partition int32) inf.SelectParamBuilder {
 	}
 }
 
-func WithSid(serviceId string) inf.SelectParamBuilder {
-	return func(param *inf.SelectParam) {
-		param.ServiceId = &serviceId
-	}
-}
-
 func WithName(serviceName string) inf.SelectParamBuilder {
 	return func(param *inf.SelectParam) {
 		param.ServiceName = &serviceName

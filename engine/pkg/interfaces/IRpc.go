@@ -60,7 +60,6 @@ type SelectParamBuilder func(param *SelectParam)
 
 type SelectParam struct {
 	Partition   *int32
-	ServiceId   *string
 	ServiceName *string
 	ServiceType *string
 	IsSlaver    bool

@@ -77,8 +77,8 @@ type benchRPCPair struct {
 func newBenchRPCPair() benchRPCPair {
 	benchInitRPC()
 
-	clientPid := actor.NewPID("", "bench", 1, "c1", "bench", "bench-client", 1, def.RpcTypeLocal)
-	serverPid := actor.NewPID("", "bench", 1, "s1", "bench", "bench-server", 1, def.RpcTypeLocal)
+	clientPid := actor.NewPID("", "bench", 1, "bench", "bench-client", 1, def.RpcTypeLocal)
+	serverPid := actor.NewPID("", "bench", 1, "bench", "bench-server", 1, def.RpcTypeLocal)
 
 	var callCount atomic.Uint64
 	var asyncCount atomic.Uint64

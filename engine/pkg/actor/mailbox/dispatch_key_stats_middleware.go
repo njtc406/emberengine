@@ -72,7 +72,7 @@ func NewDispatchKeyStatsMiddleware(logger log.ILoggerX, interval time.Duration, 
 
 // shardFor 根据 key 的 xxhash 哈希定位到分段。
 //
-// dispatcherKey 常见格式为 `serviceName.serviceId.partition`，前缀共享较多。
+// dispatcherKey 常见格式为 `serviceName.partition`，前缀共享较多。
 // 使用 xxhash 全长哈希可避免依赖 key 的局部熵分布，使分段锁保持均匀分布。
 // 本中间件仅在 debug 模式启用，开销可接受。
 func (m *DispatchKeyStatsMiddleware) shardFor(key string) *dispatchKeyShard {

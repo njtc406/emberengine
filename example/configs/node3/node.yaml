@@ -66,7 +66,6 @@ ServiceConf:
       ServiceName: Service3
       Type: test
       Partition: 1
-      ServiceId: 2
       Visibility: "cluster"
       StopPolicy:
         GraceTimeout: 0s

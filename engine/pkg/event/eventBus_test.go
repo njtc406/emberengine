@@ -66,8 +66,8 @@ type testService struct {
 //	service2.SetName("service2")
 //	service1.partition = 2
 //	service2.partition = 1
-//	service1.SetPid(actor.NewPID("", "test-node", service1.partition, "svc1", "test", service1.GetName(), 1, "local"))
-//	service2.SetPid(actor.NewPID("", "test-node", service2.partition, "svc2", "test", service2.GetName(), 1, "local"))
+//	service1.SetPid(actor.NewPID("", "test-node", service1.partition, "test", service1.GetName(), 1, "local"))
+//	service2.SetPid(actor.NewPID("", "test-node", service2.partition, "test", service2.GetName(), 1, "local"))
 //
 //	var wg sync.WaitGroup
 //	wg.Add(2)

@@ -111,7 +111,6 @@ type RPCServer struct {
 
 type ServiceInitConf struct {
 	ClassName   string     `binding:"required"` // 服务类名
-	ServiceId   string     `binding:""`         // 服务唯一id(如果是全局唯一的服务,且不会启动多个,那么可以为空)
 	ServiceName string     `binding:""`         // 服务名称(调用时使用这个名字)
 	Type        string     `binding:"required"` // 服务类型
 	Version     int64      `binding:""`         // 服务版本

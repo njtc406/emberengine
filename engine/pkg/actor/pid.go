@@ -14,23 +14,21 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func CreateInstanceId(partition int32, serviceName, serviceId, nodeUid string) string {
-	// partition.serviceName.serviceId.nodeUid  集群唯一标识,在服务创建的时候生成
-	return strconv.FormatInt(int64(partition), 10) + "." + serviceName + "." + serviceId + "." + nodeUid
+func CreateInstanceId(partition int32, serviceName, nodeUid string) string {
+	return strconv.FormatInt(int64(partition), 10) + "." + serviceName + "." + nodeUid
 }
 
-func NewPID(address, nodeUid string, partition int32, serviceID, serviceType, serviceName string, version int64, rpcType string) *PID {
+func NewPID(address, nodeUid string, partition int32, serviceType, serviceName string, version int64, rpcType string) *PID {
 	return &PID{
 		Address:     address,
 		Name:        serviceName,
 		ServiceType: serviceType,
-		ServiceId:   serviceID,
 		State:       0,
 		Partition:   partition,
 		Version:     version,
 		RpcType:     rpcType,
 		NodeUid:     nodeUid,
-		ServiceUid:  CreateInstanceId(partition, serviceName, serviceID, nodeUid),
+		ServiceUid:  CreateInstanceId(partition, serviceName, nodeUid),
 	}
 }
 
@@ -138,5 +136,5 @@ func SnapshotForWire(pid *PID) *PID {
 }
 
 func (pid *PID) GetPrimarySecondaryKey() string {
-	return pid.GetName() + "." + pid.GetServiceId() + "." + strconv.FormatInt(int64(pid.GetPartition()), 10)
+	return pid.GetName() + "." + strconv.FormatInt(int64(pid.GetPartition()), 10)
 }

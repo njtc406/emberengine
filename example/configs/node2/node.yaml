@@ -71,7 +71,6 @@ ServiceConf:
       Visibility: "cluster"
       Type: test
       Partition: 1
-      ServiceId: 1
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"

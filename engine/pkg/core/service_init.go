@@ -318,7 +318,7 @@ func (s *Service) initPID(conf *config.ServiceInitConf) error {
 	if em == nil {
 		return fmt.Errorf("service[%s] endpoint manager is nil", s.GetName())
 	}
-	s.pid = em.CreatePid(conf.Partition, conf.ServiceId, conf.Type, s.name, conf.Version, conf.RpcType)
+	s.pid = em.CreatePid(conf.Partition, conf.Type, s.name, conf.Version, conf.RpcType)
 	if s.pid == nil {
 		return fmt.Errorf("service[%s] create pid error", s.GetName())
 	}

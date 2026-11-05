@@ -100,6 +100,26 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 		builder  func() inf.IService
 	}
 
+	type serviceIdentity struct {
+		partition int32
+		name      string
+	}
+	seen := make(map[serviceIdentity]struct{})
+	for _, svc := range sm.runServices {
+		seen[serviceIdentity{svc.GetPartition(), svc.GetName()}] = struct{}{}
+	}
+	for _, conf := range serviceConf.StartServices {
+		name := conf.ServiceName
+		if name == "" {
+			name = conf.ClassName
+		}
+		key := serviceIdentity{conf.Partition, name}
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate service partition[%d] name[%s] on the same node", conf.Partition, name)
+		}
+		seen[key] = struct{}{}
+	}
+
 	entries := make([]initEntry, 0, len(serviceConf.StartServices))
 	lock.RLock()
 	for _, initConf := range serviceConf.StartServices {

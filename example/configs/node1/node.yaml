@@ -67,7 +67,6 @@ ServiceConf:
       Visibility: "node"
       Type: test
       Partition: 1
-      ServiceId: 1
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"
@@ -128,7 +127,6 @@ ServiceConf:
       IsPrimarySecondaryMode: false
     - ClassName: Service1
       ServiceName: Service1
-      ServiceId: 1
       Visibility: "node"
       # 服务类型
       Type: test

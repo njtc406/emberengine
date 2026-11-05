@@ -58,7 +58,7 @@ func TestUpdateServiceInfoNilKey(t *testing.T) {
 
 func TestUpdateServiceInfoIgnoreLocalNode(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", em.nodeUid, 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	b, err := protojson.Marshal(pid)
 	if err != nil {
 		t.Fatalf("marshal pid failed: %v", err)
@@ -76,7 +76,7 @@ func TestUpdateServiceInfoIgnoreLocalNode(t *testing.T) {
 
 func TestUpdateAndRemoveRemoteServiceInfo(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", "remote-node", 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", "remote-node", 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	b, err := protojson.Marshal(pid)
 	if err != nil {
 		t.Fatalf("marshal pid failed: %v", err)
@@ -101,7 +101,7 @@ func TestUpdateAndRemoveRemoteServiceInfo(t *testing.T) {
 
 func TestUpdateRemoteServiceInfoWithServiceEntryStatus(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", "remote-node", 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", "remote-node", 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	b, err := disc.MarshalServiceEntry(pid, def.SvcStatusRunning, def.ServiceVisibilityCluster)
 	if err != nil {
 		t.Fatalf("marshal service entry failed: %v", err)
@@ -131,7 +131,7 @@ func TestUpdateRemoteServiceInfoWithServiceEntryStatus(t *testing.T) {
 
 func TestGetDispatcherCreatesTmpWhenMissing(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", "remote-node", 1, "svc-tmp", "logic", "TmpSvc", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", "remote-node", 1, "logic", "TmpSvc", 1, def.RpcTypeLocal)
 
 	d := em.GetDispatcher(pid)
 	if d == nil {
@@ -144,8 +144,8 @@ func TestGetDispatcherCreatesTmpWhenMissing(t *testing.T) {
 
 func TestEndpointManagerRouteByPid_UsesTemporaryDispatcherForUnknownRemoteReceiver(t *testing.T) {
 	em := newTestEndpointManager(t)
-	sender := actor.NewPID("127.0.0.1:6670", em.nodeUid, 1, "sender", "system", "SenderService", 1, def.RpcTypeGrpc)
-	receiver := actor.NewPID("127.0.0.1:6671", "remote-node", 1, "scene-1", "scene", "SceneService", 1, def.RpcTypeGrpc)
+	sender := actor.NewPID("127.0.0.1:6670", em.nodeUid, 1, "system", "SenderService", 1, def.RpcTypeGrpc)
+	receiver := actor.NewPID("127.0.0.1:6671", "remote-node", 1, "scene", "SceneService", 1, def.RpcTypeGrpc)
 
 	em.repository.AddWithMeta("", client.NewDispatcher(nil, sender, nil), def.SvcStatusReady, def.ServiceVisibilityCluster)
 
@@ -165,7 +165,7 @@ func TestEndpointManagerRouteByPid_UsesTemporaryDispatcherForUnknownRemoteReceiv
 
 func TestToNodeServiceUpdatesLocalVisibility(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", em.nodeUid, 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	svc := &endpointTestService{
 		pid:        pid,
 		visibility: def.ServiceVisibilityCluster,
@@ -186,7 +186,7 @@ func TestToNodeServiceUpdatesLocalVisibility(t *testing.T) {
 func TestToNodeServicePrimarySecondaryKeepsElectionWatcher(t *testing.T) {
 	em := newTestEndpointManager(t)
 	em.isClusterMode = true
-	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", em.nodeUid, 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	svc := &endpointTestService{
 		pid:                    pid,
 		visibility:             def.ServiceVisibilityCluster,
@@ -209,7 +209,7 @@ func TestToNodeServicePrimarySecondaryKeepsElectionWatcher(t *testing.T) {
 
 func TestRemoveServiceWithoutEventProcessorDoesNotPanic(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", em.nodeUid, 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	svc := &endpointTestService{
 		pid:        pid,
 		visibility: def.ServiceVisibilityCluster,
@@ -227,7 +227,7 @@ func TestRemoveServiceWithoutEventProcessorDoesNotPanic(t *testing.T) {
 
 func TestGetDispatcherLocalMissingReturnsNilAndNodeReturnsDispatcher(t *testing.T) {
 	em := newTestEndpointManager(t)
-	pid := actor.NewPID("", em.nodeUid, 1, "svc1", "logic", "Gate", 1, def.RpcTypeLocal)
+	pid := actor.NewPID("", em.nodeUid, 1, "logic", "Gate", 1, def.RpcTypeLocal)
 	if got := em.GetDispatcher(pid); got != nil {
 		t.Fatalf("expected missing local service dispatcher to be nil")
 	}
@@ -242,7 +242,7 @@ func TestCreatePidFallbackWithoutRemote(t *testing.T) {
 	em := newTestEndpointManager(t)
 	em.remotes = map[string]*remote.Remote{}
 
-	pid := em.CreatePid(3, "svcX", "logic", "Gate", 1, "grpc")
+	pid := em.CreatePid(3, "logic", "Gate", 1, "grpc")
 	if pid.GetAddress() != "" {
 		t.Fatalf("expected empty address when rpcType remote not found, got %q", pid.GetAddress())
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func testPID(name string) *actor.PID {
-	return actor.NewPID("127.0.0.1:0", "node1", 1, "svc1", "GameService", name, 1, "grpc")
+	return actor.NewPID("127.0.0.1:0", "node1", 1, "GameService", name, 1, "grpc")
 }
 
 func TestRouter_NilEndpoints_SelectReturnsNil(t *testing.T) {
