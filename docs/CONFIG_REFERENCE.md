@@ -106,7 +106,7 @@ YAML 路径：`NodeConf.EventBusConf.*`
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `GlobalPrefix` | string | `event.global.%d` | 全局事件 NATS 主题前缀 |
-| `ServerPrefix` | string | `event.server.%d.%d` | 服务级事件 NATS 主题前缀 |
+| `ServerPrefix` | string | `event.server.%d.%s` | 服务级事件 NATS 主题前缀 |
 | `SpecificPrefix` | string | `event.specific.%d` | 指定目标事件前缀 |
 | `MasterPrefix` | string | `event.master.%s` | 主服务事件前缀（主从同步） |
 | `SlavePrefix` | string | `event.slave.%s` | 从服务事件前缀（主从同步） |
@@ -290,15 +290,18 @@ YAML 路径：`ServiceConf.StartServices[*]`
 | 字段 | 类型 | 默认值 | 必填 | 说明 |
 |------|------|--------|------|------|
 | `ClassName` | string | — | ✅ | 服务类名（对应 `services.SetService` 注册的 key） |
-| `ServiceId` | string | — | | 服务唯一 ID（全局唯一服务可为空） |
 | `ServiceName` | string | — | | 服务名称（RPC 调用时使用） |
 | `Type` | string | — | ✅ | 服务类型标识 |
 | `Version` | int64 | 0 | | 服务版本号 |
-| `Partition` | int32 | — | ✅ | 分区 ID（用于服务路由隔离） |
+| `Partition` | string | — | ✅ | 分区 ID（用于服务路由隔离） |
 | `RpcType` | string | `local` | | 远程调用方式：`local` / `grpc` / `rpcx` / `nats` |
 | `Visibility` | string | `node` | | 服务可见性：`node` / `cluster`。未配置时默认节点内可见 |
 | `IsPrimarySecondaryMode` | bool | false | | 是否启用主从模式 |
 | `EventChanSize` | int | 100 | | 事件通道大小 |
+
+同一节点内，`Partition` 与有效服务名的组合必须唯一；未配置 `ServiceName` 时使用 `ClassName`。重复配置会在创建服务前报错。不同节点可运行相同分区和名称的服务。
+
+服务 UID 格式为 `E(partition).E(serviceName).E(nodeUid)`，E 为无填充 Base64URL。选举键为 `E(serviceName).E(partition)`。精确寻址使用 ServiceUid 或 PID。公开分区参数统一接受 any，内部使用 fmt.Sprint 转换（nil 转空字符串，选择器保留 nil 通配）；Partition 在配置、PID、路由与事件内部统一为 string；这是不兼容变更，不支持旧协议/旧键混用。YAML 分区请加引号以保留前导零，"1" 与 "001" 是不同分区。ServerPrefix 的第二个占位符必须是 `%s`，接收 `p` + E(partition)。
 
 ---
 
@@ -510,7 +513,7 @@ ServiceConf:
     - ClassName: MyService
       ServiceName: my-svc
       Type: game
-      Partition: 1
+      Partition: "1"
       Visibility: node
 
 SystemLogger:
