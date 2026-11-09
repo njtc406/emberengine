@@ -56,7 +56,7 @@ type Bus struct {
 	// 服务器事件(只有相同服务器的订阅会收到)
 	serverPrefix      string // 服务器事件前缀
 	serverLock        *shardedlock.ShardedRWLock
-	serverSubscribers map[def.EventType]map[int32]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
+	serverSubscribers map[def.EventType]map[string]map[string]inf.IListener // map[事件类型]map[服务器id]map[服务唯一id]事件通道
 
 	// 特定事件(只有订阅者会收到)
 	specificPrefix      string // 特定事件前缀
@@ -125,7 +125,7 @@ func (eb *Bus) Init(conf *config.EventBusConf, logger log.ILoggerX) error {
 	eb.globalLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.globalSubscribers = make(map[def.EventType]map[string]inf.IListener)
 	eb.serverLock = shardedlock.NewShardedRWLock(shardCount)
-	eb.serverSubscribers = make(map[def.EventType]map[int32]map[string]inf.IListener)
+	eb.serverSubscribers = make(map[def.EventType]map[string]map[string]inf.IListener)
 	eb.specificLock = shardedlock.NewShardedRWLock(shardCount)
 	eb.specificSubscribers = make(map[def.EventType]map[string]map[string]inf.IListener)
 
@@ -162,7 +162,7 @@ func (eb *Bus) genKey(format string, args ...interface{}) string {
 }
 
 // marshalEvent 将数据封装为 actor.Event，返回 ctx 和 event 分离的形式
-func (eb *Bus) marshalEvent(ctx context.Context, eventType def.EventType, partition int32, serviceUid string, data proto.Message) (*busEvent, error) {
+func (eb *Bus) marshalEvent(ctx context.Context, eventType def.EventType, partition string, serviceUid string, data proto.Message) (*busEvent, error) {
 	// 组装数据
 	rawData, err := anypb.New(data)
 	if err != nil {

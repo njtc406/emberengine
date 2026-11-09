@@ -14,6 +14,7 @@ import (
 	"github.com/njtc406/emberengine/v2/engine/pkg/cluster"
 	"github.com/njtc406/emberengine/v2/engine/pkg/cluster/endpoints"
 	"github.com/njtc406/emberengine/v2/engine/pkg/config"
+	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 	"github.com/njtc406/emberengine/v2/engine/pkg/log"
 	"github.com/njtc406/emberengine/v2/engine/pkg/profiler"
@@ -101,7 +102,7 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 	}
 
 	type serviceIdentity struct {
-		partition int32
+		partition string
 		name      string
 	}
 	seen := make(map[serviceIdentity]struct{})
@@ -115,7 +116,7 @@ func (sm *ServiceManager) Init(serviceConf *config.ServiceConf) error {
 		}
 		key := serviceIdentity{conf.Partition, name}
 		if _, exists := seen[key]; exists {
-			return fmt.Errorf("duplicate service partition[%d] name[%s] on the same node", conf.Partition, name)
+			return fmt.Errorf("%w: partition[%s] name[%s] on the same node", def.ErrDuplicateServiceIdentity, conf.Partition, name)
 		}
 		seen[key] = struct{}{}
 	}

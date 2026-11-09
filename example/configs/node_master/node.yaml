@@ -56,7 +56,7 @@ ServiceConf:
       # 服务类型
       Type: test
       # 服务分区ID(用于服务路由隔离)
-      Partition: 2
+      Partition: "2"
       RpcType: "grpc"
       Visibility: "cluster"
       StopPolicy:

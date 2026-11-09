@@ -13,7 +13,7 @@ import (
 
 // PublishSpecific 发布指定服务的事件(只有订阅了该服务事件的服务会收到)
 func (eb *Bus) PublishSpecific(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
+	be, err := eb.marshalEvent(ctx, eventType, "", serviceUid, data)
 	if err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ func (eb *Bus) PublishSpecific(ctx context.Context, eventType def.EventType, ser
 
 // PublishSpecificLocal 发布本地指定服务事件
 func (eb *Bus) PublishSpecificLocal(ctx context.Context, eventType def.EventType, serviceUid string, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, 0, serviceUid, data)
+	be, err := eb.marshalEvent(ctx, eventType, "", serviceUid, data)
 	if err != nil {
 		return err
 	}

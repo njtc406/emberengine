@@ -458,7 +458,7 @@ func (t *Processor) PublishServer(ctx context.Context, eventType def.EventType, 
 		return fmt.Errorf("event bus is nil")
 	}
 	if listener == nil {
-		return bus.PublishServer(ctx, eventType, 0, data)
+		return bus.PublishServer(ctx, eventType, "0", data)
 	}
 	return bus.PublishServer(ctx, eventType, listener.GetPartition(), data)
 }

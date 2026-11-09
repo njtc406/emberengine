@@ -11,7 +11,7 @@ import (
 // ─── Principal ──────────────────────────────────────────
 
 func TestPrincipalFromPID(t *testing.T) {
-	pid := actor.NewPID("127.0.0.1:6670", "node-1", 1, "game", "GameService", 1, "grpc")
+	pid := actor.NewPID("127.0.0.1:6670", "node-1", "1", "game", "GameService", 1, "grpc")
 	p := PrincipalFromPID(pid)
 	assert.Equal(t, "game", p.ServiceType)
 	assert.Equal(t, "GameService", p.ServiceName)

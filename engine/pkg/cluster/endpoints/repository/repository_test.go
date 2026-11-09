@@ -35,7 +35,7 @@ func (m *mockRepoDispatcher) Close() { m.closed = true }
 
 func (m *mockRepoDispatcher) IsClosed() bool { return m.closed }
 
-func newRepoDispatcher(nodeUID string, partition int32, serviceType, serviceName string, isMaster bool) *mockRepoDispatcher {
+func newRepoDispatcher(nodeUID string, partition string, serviceType, serviceName string, isMaster bool) *mockRepoDispatcher {
 	pid := actor.NewPID("", nodeUID, partition, serviceType, serviceName, 1, def.RpcTypeLocal)
 	pid.SetMaster(isMaster)
 	return &mockRepoDispatcher{pid: pid}
@@ -43,7 +43,7 @@ func newRepoDispatcher(nodeUID string, partition int32, serviceType, serviceName
 
 func TestRepositoryAddSelectRemove(t *testing.T) {
 	r := NewRepository(nil)
-	d := newRepoDispatcher("n1", 1, "logic", "Gate", true)
+	d := newRepoDispatcher("n1", "1", "logic", "Gate", true)
 	uid := d.GetPid().GetServiceUid()
 
 	r.Add("", d)
@@ -70,10 +70,10 @@ func TestRepositoryAddSelectRemove(t *testing.T) {
 
 func TestRepositorySelectByNameAndPartition(t *testing.T) {
 	r := NewRepository(nil)
-	sender := newRepoDispatcher("n0", 1, "logic", "SenderService", true)
-	targetP1 := newRepoDispatcher("n1", 1, "logic", "Gate", true)
-	targetP2 := newRepoDispatcher("n2", 2, "logic", "Gate", true)
-	notMaster := newRepoDispatcher("n3", 1, "logic", "Gate", false)
+	sender := newRepoDispatcher("n0", "1", "logic", "SenderService", true)
+	targetP1 := newRepoDispatcher("n1", "1", "logic", "Gate", true)
+	targetP2 := newRepoDispatcher("n2", "2", "logic", "Gate", true)
+	notMaster := newRepoDispatcher("n3", "1", "logic", "Gate", false)
 
 	r.Add("", sender)
 	r.Add("", targetP1)
@@ -81,7 +81,7 @@ func TestRepositorySelectByNameAndPartition(t *testing.T) {
 	r.Add("", notMaster)
 
 	name := "Gate"
-	partition := int32(1)
+	partition := "1"
 	bus := r.Select(sender.GetPid(), func(p *inf.SelectParam) {
 		p.ServiceName = &name
 		p.Partition = &partition
@@ -98,17 +98,17 @@ func TestRepositorySelectByNameAndPartition(t *testing.T) {
 
 func TestRepositorySelectByServiceType(t *testing.T) {
 	r := NewRepository(nil)
-	sender := newRepoDispatcher("n0", 1, "system", "SenderService", true)
-	target1 := newRepoDispatcher("n1", 1, "logic", "Gate", true)
-	target2 := newRepoDispatcher("n2", 2, "logic", "Match", true)
-	otherType := newRepoDispatcher("n3", 1, "chat", "Chat", true)
+	sender := newRepoDispatcher("n0", "1", "system", "SenderService", true)
+	target1 := newRepoDispatcher("n1", "1", "logic", "Gate", true)
+	target2 := newRepoDispatcher("n2", "2", "logic", "Match", true)
+	otherType := newRepoDispatcher("n3", "1", "chat", "Chat", true)
 
 	r.Add("", sender)
 	r.Add("", target1)
 	r.Add("", target2)
 	r.Add("", otherType)
 
-	bus := r.SelectByServiceType(sender.GetPid(), 0, "logic", "")
+	bus := r.SelectByServiceType(sender.GetPid(), "", "logic", "")
 	multi, ok := bus.(msgbus.MultiBus)
 	if !ok {
 		t.Fatalf("expected MultiBus result, got %T", bus)
@@ -120,8 +120,8 @@ func TestRepositorySelectByServiceType(t *testing.T) {
 
 func TestRepositoryRunningServiceNotSelectableUntilReady(t *testing.T) {
 	r := NewRepository(nil)
-	sender := newRepoDispatcher("n0", 1, "system", "SenderService", true)
-	target := newRepoDispatcher("n1", 1, "logic", "Gate", true)
+	sender := newRepoDispatcher("n0", "1", "system", "SenderService", true)
+	target := newRepoDispatcher("n1", "1", "logic", "Gate", true)
 
 	r.Add("", sender)
 	r.AddWithMeta("", target, def.SvcStatusRunning, def.ServiceVisibilityCluster)
@@ -130,7 +130,7 @@ func TestRepositoryRunningServiceNotSelectableUntilReady(t *testing.T) {
 		t.Fatalf("expected running service to be available by exact uid")
 	}
 
-	bus := r.SelectByServiceType(sender.GetPid(), 0, "logic", "")
+	bus := r.SelectByServiceType(sender.GetPid(), "", "logic", "")
 	multi, ok := bus.(msgbus.MultiBus)
 	if !ok {
 		t.Fatalf("expected MultiBus result, got %T", bus)
@@ -140,7 +140,7 @@ func TestRepositoryRunningServiceNotSelectableUntilReady(t *testing.T) {
 	}
 
 	r.UpdateStatus(target.GetPid().GetServiceUid(), def.SvcStatusReady)
-	bus = r.SelectByServiceType(sender.GetPid(), 0, "logic", "")
+	bus = r.SelectByServiceType(sender.GetPid(), "", "logic", "")
 	multi, ok = bus.(msgbus.MultiBus)
 	if !ok {
 		t.Fatalf("expected MultiBus result after ready, got %T", bus)
@@ -152,8 +152,8 @@ func TestRepositoryRunningServiceNotSelectableUntilReady(t *testing.T) {
 
 func TestRepositoryAddWithMetaUpdateKeepsExistingDispatcher(t *testing.T) {
 	r := NewRepository(nil)
-	oldDispatcher := newRepoDispatcher("n1", 1, "logic", "Gate", false)
-	newDispatcher := newRepoDispatcher("n1", 1, "logic", "Gate", true)
+	oldDispatcher := newRepoDispatcher("n1", "1", "logic", "Gate", false)
+	newDispatcher := newRepoDispatcher("n1", "1", "logic", "Gate", true)
 	uid := oldDispatcher.GetPid().GetServiceUid()
 
 	r.AddWithMeta("", oldDispatcher, def.SvcStatusRunning, def.ServiceVisibilityCluster)
@@ -179,8 +179,8 @@ func TestRepositoryAddWithMetaUpdateKeepsExistingDispatcher(t *testing.T) {
 
 func TestRepositoryAddTmpReusesExistingDispatcher(t *testing.T) {
 	r := NewRepository(nil)
-	oldDispatcher := newRepoDispatcher("n1", 1, "logic", "Gate", true)
-	newDispatcher := newRepoDispatcher("n1", 1, "logic", "Gate", true)
+	oldDispatcher := newRepoDispatcher("n1", "1", "logic", "Gate", true)
+	newDispatcher := newRepoDispatcher("n1", "1", "logic", "Gate", true)
 	uid := oldDispatcher.GetPid().GetServiceUid()
 
 	if got := r.AddTmp(oldDispatcher); got != oldDispatcher {
@@ -209,7 +209,7 @@ func TestRepositoryAddTmpReusesExistingDispatcher(t *testing.T) {
 
 func TestRepositorySelectTmpTouchesLastActive(t *testing.T) {
 	r := NewRepository(nil)
-	dispatcher := newRepoDispatcher("n1", 1, "logic", "Gate", true)
+	dispatcher := newRepoDispatcher("n1", "1", "logic", "Gate", true)
 	uid := dispatcher.GetPid().GetServiceUid()
 	r.AddTmp(dispatcher)
 
@@ -233,7 +233,7 @@ func TestRepositorySelectTmpTouchesLastActive(t *testing.T) {
 
 func TestRepositoryStopClosesTmpDispatchers(t *testing.T) {
 	r := NewRepository(nil)
-	dispatcher := newRepoDispatcher("n1", 1, "logic", "Gate", true)
+	dispatcher := newRepoDispatcher("n1", "1", "logic", "Gate", true)
 	uid := dispatcher.GetPid().GetServiceUid()
 	r.AddTmp(dispatcher)
 

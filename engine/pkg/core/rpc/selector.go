@@ -5,9 +5,15 @@ import (
 	inf "github.com/njtc406/emberengine/v2/engine/pkg/interfaces"
 )
 
-func WithPartition(partition int32) inf.SelectParamBuilder {
+// WithPartition accepts any value; nil removes the partition filter.
+func WithPartition(partition any) inf.SelectParamBuilder {
+	var value *string
+	if !actor.IsNilPartition(partition) {
+		normalized := actor.PartitionString(partition)
+		value = &normalized
+	}
 	return func(param *inf.SelectParam) {
-		param.Partition = &partition
+		param.Partition = value
 	}
 }
 

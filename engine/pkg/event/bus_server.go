@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"encoding/base64"
 
 	"github.com/nats-io/nats.go"
 	"github.com/njtc406/emberengine/v2/engine/pkg/actor"
@@ -11,8 +12,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (eb *Bus) PublishServer(ctx context.Context, eventType def.EventType, partition int32, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, partition, "", data)
+// serverKey encodes the partition as one nonempty NATS subject token.
+func (eb *Bus) serverKey(eventType def.EventType, partition string) string {
+	return eb.genKey(eb.serverPrefix, eventType, "p"+base64.RawURLEncoding.EncodeToString([]byte(partition)))
+}
+
+func (eb *Bus) PublishServer(ctx context.Context, eventType def.EventType, partition any, data proto.Message) error {
+	value := actor.PartitionString(partition)
+	be, err := eb.marshalEvent(ctx, eventType, value, "", data)
 	if err != nil {
 		return err
 	}
@@ -23,7 +30,7 @@ func (eb *Bus) PublishServer(ctx context.Context, eventType def.EventType, parti
 			return err
 		}
 
-		return eb.nc.Publish(eb.genKey(eb.serverPrefix, eventType, partition), eventData)
+		return eb.nc.Publish(eb.serverKey(eventType, value), eventData)
 	} else {
 		// 没有使用nats,那么直接触发本地事件
 		eb.publishServer(be.ctx, be.event)
@@ -33,7 +40,7 @@ func (eb *Bus) PublishServer(ctx context.Context, eventType def.EventType, parti
 
 // publishServer 发布服务器事件到本地订阅者
 func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
-	key := eb.genKey(eb.serverPrefix, e.GetEventType(), e.GetPartition())
+	key := eb.serverKey(e.GetEventType(), e.GetPartition())
 	eb.serverLock.RLock(key)
 	defer eb.serverLock.RUnlock(key)
 	if serverMap, ok := eb.serverSubscribers[e.GetEventType()]; ok {
@@ -54,8 +61,8 @@ func (eb *Bus) publishServer(ctx context.Context, e *actor.Event) {
 	}
 }
 
-func (eb *Bus) PublishServerLocal(ctx context.Context, eventType def.EventType, partition int32, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, partition, "", data)
+func (eb *Bus) PublishServerLocal(ctx context.Context, eventType def.EventType, partition any, data proto.Message) error {
+	be, err := eb.marshalEvent(ctx, eventType, actor.PartitionString(partition), "", data)
 	if err != nil {
 		return err
 	}
@@ -64,12 +71,12 @@ func (eb *Bus) PublishServerLocal(ctx context.Context, eventType def.EventType, 
 }
 
 func (eb *Bus) SubscribeServer(eventType def.EventType, svc inf.IListener) {
-	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPartition())
+	key := eb.serverKey(eventType, svc.GetPartition())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needListen bool
 	if _, ok := eb.serverSubscribers[eventType]; !ok {
-		eb.serverSubscribers[eventType] = make(map[int32]map[string]inf.IListener)
+		eb.serverSubscribers[eventType] = make(map[string]map[string]inf.IListener)
 	}
 	if _, ok := eb.serverSubscribers[eventType][svc.GetPartition()]; !ok {
 		eb.serverSubscribers[eventType][svc.GetPartition()] = make(map[string]inf.IListener)
@@ -83,7 +90,7 @@ func (eb *Bus) SubscribeServer(eventType def.EventType, svc inf.IListener) {
 				// 解析数据
 				be, err := eb.unmarshalEvent(msg.Data)
 				if err != nil {
-					eb.Errorf("unmarshal partition[%d] event error: %v", svc.GetPartition(), err)
+					eb.Errorf("unmarshal partition[%s] event error: %v", svc.GetPartition(), err)
 					return
 				}
 				eb.publishServer(be.ctx, be.event)
@@ -91,14 +98,14 @@ func (eb *Bus) SubscribeServer(eventType def.EventType, svc inf.IListener) {
 				eb.applySubPendingLimits(subscription)
 				eb.addSub(key, subscription)
 			} else {
-				eb.Errorf("subscribe partition[%d] event error: %v", svc.GetPartition(), err)
+				eb.Errorf("subscribe partition[%s] event error: %v", svc.GetPartition(), err)
 			}
 		}
 	}
 }
 
 func (eb *Bus) UnSubscribeServer(eventType def.EventType, svc inf.IListener) {
-	key := eb.genKey(eb.serverPrefix, eventType, svc.GetPartition())
+	key := eb.serverKey(eventType, svc.GetPartition())
 	eb.serverLock.Lock(key)
 	defer eb.serverLock.Unlock(key)
 	var needUnListen bool

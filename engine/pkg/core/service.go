@@ -404,7 +404,7 @@ func (s *Service) SetPid(pid *actor.PID) {
 	s.pid = pid
 }
 
-func (s *Service) GetPartition() int32 {
+func (s *Service) GetPartition() string {
 	return s.pid.GetPartition()
 }
 

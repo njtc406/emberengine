@@ -158,7 +158,8 @@ func (r *Repository) Select(sender *actor.PID, options ...inf.SelectParamBuilder
 	return returnList
 }
 
-func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) inf.IBus {
+func (r *Repository) SelectByServiceType(sender *actor.PID, partition any, serviceType, serviceName string) inf.IBus {
+	value := actor.PartitionString(partition)
 	if serviceType == "" && serviceName == "" {
 		return msgbus.MultiBus{}
 	}
@@ -208,7 +209,7 @@ func (r *Repository) SelectByServiceType(sender *actor.PID, partition int32, ser
 			continue
 		}
 		cPid := c.GetPid()
-		if c != nil && !actor.IsRetired(cPid) && (partition == 0 || cPid.GetPartition() == partition) && cPid.IsMasterNode() {
+		if c != nil && !actor.IsRetired(cPid) && (value == "" || cPid.GetPartition() == value) && cPid.IsMasterNode() {
 			list = append(list, r.newMessageBus(s, c, nil))
 		}
 	}

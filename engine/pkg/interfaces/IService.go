@@ -66,7 +66,7 @@ type INamed interface {
 
 type IServer interface {
 	IActor
-	GetPartition() int32
+	GetPartition() string
 }
 
 // IActor 表示一个可寻址的 Actor 实体

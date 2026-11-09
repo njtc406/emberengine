@@ -46,7 +46,7 @@ func newTestMonitor(t *testing.T) (*monitor.RpcMonitor, func()) {
 }
 
 func testPID(name string) *actor.PID {
-	return actor.NewPID("127.0.0.1:0", "node1", 1, "GameService", name, 1, "grpc")
+	return actor.NewPID("127.0.0.1:0", "node1", "1", "GameService", name, 1, "grpc")
 }
 
 // mockDedup implements IDeDuplicator for testing.

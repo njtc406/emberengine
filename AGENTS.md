@@ -1,3 +1,21 @@
+---
+name: ember-skills
+description: "Use when looking for an EmberEngine skill for a specific development or maintenance task."
+---
+
+| Skill | 用途 | 路径 |
+|---|---|---|
+| ember-skill-builder | 根据详细需求创建、更新或重组 Ember skill，并同步维护此主索引。 | [skills/ember-skill-builder/SKILL.md](./skills/ember-skill-builder/SKILL.md) |
+
+
+## 框架变更后的 Skill 与文档同步（强制）
+
+- 修改框架层代码时，必须检查本次变更是否会使相关 skill 或文档中的 API、配置项、默认值、行为约束、生命周期、使用步骤或示例滞后；不能仅以编译或测试通过作为完成标准。
+- 若存在影响，必须在代码修改完成后、任务交付前，主动更新对应 skill 及其引用资料，以及受影响的说明文档、配置参考和示例，无需用户再次要求。以实际代码和验证结果为准，删除或修正过时说明，不得只追加新说明而保留冲突内容。
+- 更新 EmberEngine skill 时，必须使用 `ember-skill-builder`；若新增、重命名、移动或删除 skill，必须同步维护本文件中的 skill 索引及相关引用。
+- 同步范围限于本次变更影响的内容，不得顺带改写无关文档，也不得将历史设计记录误写成当前实现。若无相关 skill 或文档需要更新，必须在交付说明中简述判断依据。
+- 交付前必须核对代码与 skill、文档的一致性，检查受影响的路径、符号、链接、配置和示例，并执行适用的现有验证。交付说明必须列出已同步的 skill 和文档；存在未同步项或无法验证的内容时，必须明确说明原因，不得宣称全部完成。
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

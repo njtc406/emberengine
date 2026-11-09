@@ -37,6 +37,7 @@ import (
 // ============================================================================
 
 var (
+	ErrDuplicateServiceIdentity    = errors.New("duplicate service identity")
 	ErrModuleNotInitialized        = errors.New("module not initialized")                                  // 模块未初始化
 	ErrModuleHadRegistered         = errors.New("module had registered")                                   // 已经注册过该模块
 	ErrMailboxWorkerChannelNotInit = errors.New("mailbox worker user channel not init")                    // 邮箱工作通道未初始化

@@ -44,7 +44,7 @@ ServiceConf:
     - ClassName: Service3
       ServiceName: Service3
       Type: test
-      Partition: 1
+      Partition: "1"
       Visibility: "node"
       StopPolicy:
         GraceTimeout: 0s
@@ -66,7 +66,7 @@ ServiceConf:
     - ClassName: Service2
       ServiceName: Service2
       Type: test
-      Partition: 1
+      Partition: "1"
       Visibility: "node"
       StopPolicy:
         GraceTimeout: 0s
@@ -90,7 +90,7 @@ ServiceConf:
       # 服务类型
       Type: test
       # 服务分区ID(用于服务路由隔离)
-      Partition: 1
+      Partition: "1"
       Visibility: "node"
       StopPolicy:
         GraceTimeout: 0s
@@ -116,7 +116,7 @@ ServiceConf:
     - ClassName: PprofService
       ServiceName: PprofService
       Type: test
-      Partition: 1
+      Partition: "1"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"

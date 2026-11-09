@@ -112,8 +112,8 @@ func TestLocalRPCBoundedOverloadCompletion(t *testing.T) {
 			defer svc.mailbox.Stop()
 			defer unblock()
 			observed := &boundedRPCChannel{IMailboxChannel: svc, admissions: make(chan boundedRPCAdmission, 8)}
-			sender := client.NewDispatcher(sm, actor.NewPID("", "local", 1, "test", "caller", 1, def.RpcTypeLocal), svc)
-			receiver := client.NewDispatcher(sm, actor.NewPID("", "local", 1, "test", "receiver", 1, def.RpcTypeLocal), observed)
+			sender := client.NewDispatcher(sm, actor.NewPID("", "local", "1", "test", "caller", 1, def.RpcTypeLocal), svc)
+			receiver := client.NewDispatcher(sm, actor.NewPID("", "local", "1", "test", "receiver", 1, def.RpcTypeLocal), observed)
 			type result struct {
 				value int
 				err   error

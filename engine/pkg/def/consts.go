@@ -125,7 +125,7 @@ const (
 
 const (
 	NatsDefaultGlobalPrefix = "event.global.%d"    // global.eventType
-	NatsDefaultServerPrefix = "event.server.%d.%d" // server.eventType.partition
+	NatsDefaultServerPrefix = "event.server.%d.%s" // server.eventType.partition
 	NatsDefaultMasterPrefix = "event.master.%s"    // master.serviceUid
 	NatsDefaultSlavePrefix  = "event.slave.%s"     // slave.serviceUid
 	DefaultSpecificPrefix   = "event.specific.%d"  // specific.eventType

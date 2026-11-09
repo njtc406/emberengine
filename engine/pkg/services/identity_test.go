@@ -11,12 +11,12 @@ func TestServiceManagerPartitionNameUniqueness(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		secondName string
-		partition  int32
+		partition  string
 		duplicate  bool
 	}{
-		{"duplicate", "Gate", 1, true},
-		{"different partition", "Gate", 2, false},
-		{"different name", "Chat", 1, false},
+		{"duplicate", "Gate", "1", true},
+		{"different partition", "Gate", "2", false},
+		{"different name", "Chat", "1", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sm := newTestServiceManager(t)
@@ -25,7 +25,7 @@ func TestServiceManagerPartitionNameUniqueness(t *testing.T) {
 				registerTestService(t, class, func() inf.IService { built++; return &testManagedService{} })
 			}
 			err := sm.Init(&config.ServiceConf{StartServices: []*config.ServiceInitConf{
-				{ClassName: "identity-a", ServiceName: "Gate", Partition: 1},
+				{ClassName: "identity-a", ServiceName: "Gate", Partition: "1"},
 				{ClassName: "identity-b", ServiceName: tc.secondName, Partition: tc.partition},
 			}})
 			if (err != nil) != tc.duplicate {

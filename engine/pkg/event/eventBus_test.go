@@ -6,7 +6,7 @@ import (
 
 type testService struct {
 	name      string
-	partition int32
+	partition string
 	pid       *actor.PID
 }
 
@@ -18,7 +18,7 @@ type testService struct {
 //	return s.name
 //}
 //
-//func (s *testService) GetPartition() int32 {
+//func (s *testService) GetPartition() string {
 //	return s.partition
 //}
 //
@@ -66,8 +66,8 @@ type testService struct {
 //	service2.SetName("service2")
 //	service1.partition = 2
 //	service2.partition = 1
-//	service1.SetPid(actor.NewPID("", "test-node", service1.partition, "test", service1.GetName(), 1, "local"))
-//	service2.SetPid(actor.NewPID("", "test-node", service2.partition, "test", service2.GetName(), 1, "local"))
+//	service1.SetPid(actor.NewPID("", "test-node", service1.partition, "test", service1.GetName(), "1", "local"))
+//	service2.SetPid(actor.NewPID("", "test-node", service2.partition, "test", service2.GetName(), "1", "local"))
 //
 //	var wg sync.WaitGroup
 //	wg.Add(2)
@@ -124,7 +124,7 @@ type testService struct {
 //	// 创建测试服务
 //	targetService := &testService{
 //		name:      "target-service",
-//		partition: 1,
+//		partition: "1",
 //		pid: &actor.PID{
 //			ServiceUid: "target-service-uid-001",
 //		},
@@ -132,7 +132,7 @@ type testService struct {
 //
 //	subscriber1 := &testService{
 //		name:      "subscriber1",
-//		partition: 2,
+//		partition: "2",
 //		pid: &actor.PID{
 //			ServiceUid: "subscriber1-uid-001",
 //		},
@@ -140,7 +140,7 @@ type testService struct {
 //
 //	subscriber2 := &testService{
 //		name:      "subscriber2",
-//		partition: 3,
+//		partition: "3",
 //		pid: &actor.PID{
 //			ServiceUid: "subscriber2-uid-001",
 //		},

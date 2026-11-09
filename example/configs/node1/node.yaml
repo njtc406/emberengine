@@ -66,7 +66,7 @@ ServiceConf:
       RpcType: "nats"
       Visibility: "node"
       Type: test
-      Partition: 1
+      Partition: "1"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"
@@ -131,7 +131,7 @@ ServiceConf:
       # 服务类型
       Type: test
       # 服务分区ID(用于服务路由隔离)
-      Partition: 1
+      Partition: "1"
       RpcType: "rpcx"
       StopPolicy:
         GraceTimeout: 0s

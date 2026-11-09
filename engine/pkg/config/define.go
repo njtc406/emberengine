@@ -114,7 +114,7 @@ type ServiceInitConf struct {
 	ServiceName string     `binding:""`         // 服务名称(调用时使用这个名字)
 	Type        string     `binding:"required"` // 服务类型
 	Version     int64      `binding:""`         // 服务版本
-	Partition   int32      `binding:"required"` // 服务分区ID(用于服务路由隔离)
+	Partition   string     `binding:"required"` // 服务分区ID(用于服务路由隔离)
 	TimerConf   *TimerConf `binding:""`         // 定时器配置
 	// StopGraceTimeout 已废弃：请使用 StopPolicy.GraceTimeout。
 	// 保留该字段是为了兼容旧配置。

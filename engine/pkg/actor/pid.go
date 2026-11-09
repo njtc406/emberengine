@@ -6,7 +6,7 @@
 package actor
 
 import (
-	"strconv"
+	"encoding/base64"
 	"sync/atomic"
 
 	"github.com/njtc406/emberengine/v2/engine/pkg/def"
@@ -14,21 +14,24 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func CreateInstanceId(partition int32, serviceName, nodeUid string) string {
-	return strconv.FormatInt(int64(partition), 10) + "." + serviceName + "." + nodeUid
+func CreateInstanceId(partition any, serviceName, nodeUid string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(PartitionString(partition))) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(serviceName)) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(nodeUid))
 }
 
-func NewPID(address, nodeUid string, partition int32, serviceType, serviceName string, version int64, rpcType string) *PID {
+func NewPID(address, nodeUid string, partition any, serviceType, serviceName string, version int64, rpcType string) *PID {
+	value := PartitionString(partition)
 	return &PID{
 		Address:     address,
 		Name:        serviceName,
 		ServiceType: serviceType,
 		State:       0,
-		Partition:   partition,
+		Partition:   value,
 		Version:     version,
 		RpcType:     rpcType,
 		NodeUid:     nodeUid,
-		ServiceUid:  CreateInstanceId(partition, serviceName, nodeUid),
+		ServiceUid:  CreateInstanceId(value, serviceName, nodeUid),
 	}
 }
 
@@ -136,5 +139,6 @@ func SnapshotForWire(pid *PID) *PID {
 }
 
 func (pid *PID) GetPrimarySecondaryKey() string {
-	return pid.GetName() + "." + strconv.FormatInt(int64(pid.GetPartition()), 10)
+	return base64.RawURLEncoding.EncodeToString([]byte(pid.GetName())) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(pid.GetPartition()))
 }

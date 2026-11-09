@@ -67,7 +67,7 @@ func (r *Router) SelectByRule(sender *actor.PID, rule func(pid *actor.PID) bool)
 	return em.GetRepository().SelectByRule(sender, rule)
 }
 
-func (r *Router) SelectByServiceType(sender *actor.PID, partition int32, serviceType, serviceName string) inf.IBus {
+func (r *Router) SelectByServiceType(sender *actor.PID, partition any, serviceType, serviceName string) inf.IBus {
 	em := r.endpointManager()
 	if em == nil {
 		return nil

@@ -66,7 +66,7 @@ ServiceConf:
       # 服务类型
       Type: test
       # 服务分区ID(用于服务路由隔离)
-      Partition: 10001
+      Partition: "10001"
       RpcType: "nats"
       Visibility: "cluster"
       # 停机策略配置
@@ -178,14 +178,14 @@ ServiceConf:
     - ClassName: PprofService
       ServiceName: PprofService
       Type: test
-      Partition: 10001
+      Partition: "10001"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"
 #    - ClassName: PprofService
 #      ServiceName: PprofService
 #      Type: test
-#      Partition: 1
+#      Partition: "1"
 #      TimerConf:
 #        TimerSize: 100000
 #        TimerBucketSize: 10

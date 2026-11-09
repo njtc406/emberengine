@@ -7,16 +7,14 @@ message PID {
   string Address = 1;         // 服务地址
   string Name = 2;            // 服务名称
   string ServiceType = 3;     // 服务类型
-  reserved 4;
-  reserved "ServiceId";
-  int32 State = 5;            // 服务状态(0: 正常, 1: 退休)
-  int32 Partition = 6;        // 服务分区ID(用于服务路由隔离)
-  int64 Version = 7;          // 服务版本号
-  string RpcType = 8;         // rpc类型(默认使用nats)
-  string NodeUid = 9;         // 节点唯一标识(这个主要是用来区分本地服务用的)
-  bool IsMaster = 10;         // 是否是主服务(主从) -- 仅用于序列化传输
-  string ServiceUid = 11;     // 服务实例唯一id
-  int32 MasterFlag = 12;      // 运行时原子化主从标志 (0=从, 1=主, 使用 atomic 访问)
+  int32 State = 4;            // 服务状态(0: 正常, 1: 退休)
+  string Partition = 5;        // 服务分区ID(用于服务路由隔离)
+  int64 Version = 6;          // 服务版本号
+  string RpcType = 7;         // rpc类型(默认使用nats)
+  string NodeUid = 8;         // 节点唯一标识(这个主要是用来区分本地服务用的)
+  bool IsMaster = 9;          // 是否是主服务(主从) -- 仅用于序列化传输
+  string ServiceUid = 10;     // 服务实例唯一id
+  int32 MasterFlag = 11;      // 运行时原子化主从标志 (0=从, 1=主, 使用 atomic 访问)
 }
 
 message Message {
@@ -61,7 +59,7 @@ message Event {
   int64 Deadline                      = 4;  // 事件处理截止时间(单位: 纳秒)
   
   // === 路由信息 ===
-  int32 Partition                     = 5;  // 目标分区ID
+  string Partition                     = 5;  // 目标分区ID
   string ServiceUid                   = 6;  // 目标服务实例唯一id
   
   // === 数据 ===

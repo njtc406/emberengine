@@ -8,7 +8,7 @@ import (
 )
 
 func testPID(name string) *actor.PID {
-	return actor.NewPID("127.0.0.1:0", "node1", 1, "GameService", name, 1, "grpc")
+	return actor.NewPID("127.0.0.1:0", "node1", "1", "GameService", name, 1, "grpc")
 }
 
 func TestRouter_NilEndpoints_SelectReturnsNil(t *testing.T) {
@@ -38,7 +38,7 @@ func TestRouter_NilEndpoints_SelectByRuleReturnsNil(t *testing.T) {
 
 func TestRouter_NilEndpoints_SelectByServiceTypeReturnsNil(t *testing.T) {
 	r := NewRouter(nil)
-	assert.Nil(t, r.SelectByServiceType(testPID("S"), 1, "GameService", "Game"))
+	assert.Nil(t, r.SelectByServiceType(testPID("S"), "1", "GameService", "Game"))
 }
 
 func TestRouter_NilEndpoints_SelectByFilterAndChoiceReturnsNil(t *testing.T) {

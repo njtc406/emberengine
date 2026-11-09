@@ -24,7 +24,7 @@ func (eb *Bus) PublishGlobal(ctx context.Context, eventType def.EventType, data 
 	}
 
 	// 2. 封装事件
-	be, err := eb.marshalEvent(ctx, eventType, 0, "", data)
+	be, err := eb.marshalEvent(ctx, eventType, "", "", data)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (eb *Bus) publishGlobal(ctx context.Context, e *actor.Event) {
 
 // PublishGlobalLocal 发布本地全局事件
 func (eb *Bus) PublishGlobalLocal(ctx context.Context, eventType def.EventType, data proto.Message) error {
-	be, err := eb.marshalEvent(ctx, eventType, 0, "", data)
+	be, err := eb.marshalEvent(ctx, eventType, "", "", data)
 	if err != nil {
 		return err
 	}

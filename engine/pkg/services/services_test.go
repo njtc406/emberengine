@@ -76,7 +76,7 @@ func registerTestService(t *testing.T, className string, builder func() inf.ISer
 func TestServiceManagerInitMissingRegistration(t *testing.T) {
 	sm := newTestServiceManager(t)
 	conf := &config.ServiceConf{
-		StartServices: []*config.ServiceInitConf{{ClassName: "svc-missing", Type: "logic", Partition: 1}},
+		StartServices: []*config.ServiceInitConf{{ClassName: "svc-missing", Type: "logic", Partition: "1"}},
 	}
 
 	err := sm.Init(conf)
@@ -102,8 +102,8 @@ func TestServiceManagerInitStartRollback(t *testing.T) {
 
 	conf := &config.ServiceConf{
 		StartServices: []*config.ServiceInitConf{
-			{ClassName: class1, ServiceName: "svc-1", Type: "logic", Partition: 1},
-			{ClassName: class2, ServiceName: "svc-2", Type: "logic", Partition: 1},
+			{ClassName: class1, ServiceName: "svc-1", Type: "logic", Partition: "1"},
+			{ClassName: class2, ServiceName: "svc-2", Type: "logic", Partition: "1"},
 		},
 		ServicesConfMap: map[string]*config.ServiceConfig{
 			"svc-1": {Cfg: "cfg-1"},

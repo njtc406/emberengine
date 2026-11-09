@@ -46,7 +46,7 @@ type INodeTimingWheel interface {
 
 // INodeEndpointManager 端点管理器窄接口，由 *endpoints.EndpointManager 隐式满足
 type INodeEndpointManager interface {
-	CreatePid(partition int32, serviceType, serviceName string, version int64, rpcType string) *actor.PID
+	CreatePid(partition any, serviceType, serviceName string, version int64, rpcType string) *actor.PID
 	AddService(svc IService)
 	ServiceReady(svc IService)
 	RemoveService(svc IService)

@@ -70,7 +70,7 @@ ServiceConf:
       RpcType: "nats"
       Visibility: "cluster"
       Type: test
-      Partition: 1
+      Partition: "1"
       StopPolicy:
         GraceTimeout: 0s
         DrainPolicy: "execute"
