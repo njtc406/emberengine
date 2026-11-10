@@ -100,6 +100,9 @@ func (client *KCPClient) dial() net.Conn {
 	for {
 		conn, err := kcp.DialWithOptions(client.Addr, nil, 10, 3)
 		if client.closeFlag {
+			if conn == nil {
+				return nil
+			}
 			return conn
 		} else if err == nil && conn != nil {
 			conn.SetNoDelay(1, 10, 2, 1)

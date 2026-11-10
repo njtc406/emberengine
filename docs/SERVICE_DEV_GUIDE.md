@@ -27,6 +27,8 @@ Init → OnInit → Start → OnStart → 注册服务 → OnStarted → Ready �
 
 `OnInit`、`OnStart`、`OnStarted` 均返回 `error`；初始化或启动失败会中止相应流程。服务在 `OnStarted` 成功后才进入可被常规路由选择的 Ready 状态，不代表此时所有其他服务都已就绪。
 
+组件是否存在可直接通过接口返回值与 `nil` 比较：`Node.GetConfig/GetLogger/GetAntsPool/GetTimingWheel/GetEndpointManager`、`Module.GetEventHandler/GetEventHandlerRegistry/GetEventProcessor` 和 `Service.GetMailbox` 在底层组件缺失时返回真正的 `nil` 接口。组件存在不代表已进入 Ready 状态。具体边界及事件、RPC 返回值约定见[接口返回值的 nil 语义](NIL_INTERFACE_RETURNS.md)。
+
 | 阶段 | 回调方法 | 用途 |
 |------|----------|------|
 | 初始化 | `OnInit() error` | 注册 RPC Handler、定时器、Module、事件订阅 |
@@ -499,7 +501,7 @@ func init() {
 MaxUsers: 1000
 ```
 
-本地文件从节点加载配置时传入的配置目录查找，当前实现未使用每项 `ServiceConfig.ConfPath` 选择目录。成功解析的对象保存在该节点 `*config.Config` 的 `ServiceConf.ServicesConfMap["MyService"].Cfg` 中，使用时应检查条目是否存在并做类型断言；不要把 `GetServiceConf` 当作已解析对象的获取接口，当前它返回的是工厂函数。
+本地文件从节点加载配置时传入的配置目录查找，当前实现未使用每项 `ServiceConfig.ConfPath` 选择目录。成功解析的对象保存在该节点 `*config.Config` 的 `ServiceConf.ServicesConfMap["MyService"].Cfg` 中，使用时应检查条目是否存在并做类型断言；不要把 `GetServiceConf` 当作已解析对象的获取接口，当前它返回的是工厂函数。服务配置条目或 `CfgCreator` 缺失时，`GetServiceConf` 返回真正的 `nil` 接口，可直接判空后再断言为 `func() interface{}`。
 
 当前业务配置加载流程没有接入文件监听或调用 `OnChangeFun`，**不支持自动热更新**。配置文件读取失败会记录警告并跳过，业务应在启动时校验必需配置。
 

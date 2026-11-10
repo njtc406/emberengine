@@ -42,7 +42,13 @@ var jobFactory = map[def.MailboxJobType]jobEntry{
 	},
 	def.MailboxJobTypeEvent: {
 		creator: func() inf.IMailboxJob { return NewEventBusJob() },
-		getter:  func(j inf.IMailboxJob) any { return j.(*EventBusJob).GetPayload() },
+		getter: func(j inf.IMailboxJob) any {
+			payload := j.(*EventBusJob).GetPayload()
+			if payload == nil {
+				return nil
+			}
+			return payload
+		},
 	},
 	def.MailboxJobTypeTimer: {
 		creator: func() inf.IMailboxJob { return NewTimerJob() },
@@ -97,7 +103,7 @@ func CreateJob(jobType def.MailboxJobType) (inf.IMailboxJob, bool) {
 	return entry.creator(), true
 }
 
-// GetJobPayload 根据 job 类型获取其负载（any 形式）。未注册返回 nil。
+// GetJobPayload 根据 job 类型获取其负载（any 形式）。未注册或 EventBusJob 无负载时返回 nil。
 func GetJobPayload(job inf.IMailboxJob) any {
 	freezeIfNeeded()
 	entry, ok := jobFactory[job.GetType()]

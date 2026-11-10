@@ -390,10 +390,10 @@ func (c *Config) RegisterServiceConf(cfgs ...*ServiceConfig) {
 	}
 }
 
-// GetServiceConf 获取服务配置
+// GetServiceConf 获取服务配置工厂；配置或工厂不存在时返回 nil。
 func (c *Config) GetServiceConf(serviceName string) interface{} {
 	cfg, ok := c.serviceConfMap[serviceName]
-	if !ok {
+	if !ok || cfg == nil || cfg.CfgCreator == nil {
 		return nil
 	}
 	return cfg.CfgCreator

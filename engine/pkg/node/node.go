@@ -182,13 +182,37 @@ func New() *Node {
 
 // ── INodeContext 接口实现 ──
 
-func (n *Node) GetConfig() inf.INodeConfig           { return n.Config }
-func (n *Node) GetLogger() log.ILoggerX              { return n.Logger }
-func (n *Node) GetAntsPool() inf.INodePool           { return n.AntsPool }
-func (n *Node) GetTimingWheel() inf.INodeTimingWheel { return n.TimingWheel }
-func (n *Node) GetDeDuplicator() inf.IDeDuplicator   { return n.DeDuplicator }
-func (n *Node) GetNodeId() string                    { return n.Config.NodeConf.NodeId }
-func (n *Node) GetNodeType() string                  { return n.Config.NodeConf.NodeType }
+func (n *Node) GetConfig() inf.INodeConfig {
+	if n.Config == nil {
+		return nil
+	}
+	return n.Config
+}
+
+func (n *Node) GetLogger() log.ILoggerX {
+	if n.Logger == nil {
+		return nil
+	}
+	return n.Logger
+}
+
+func (n *Node) GetAntsPool() inf.INodePool {
+	if n.AntsPool == nil {
+		return nil
+	}
+	return n.AntsPool
+}
+
+func (n *Node) GetTimingWheel() inf.INodeTimingWheel {
+	if n.TimingWheel == nil {
+		return nil
+	}
+	return n.TimingWheel
+}
+
+func (n *Node) GetDeDuplicator() inf.IDeDuplicator { return n.DeDuplicator }
+func (n *Node) GetNodeId() string                  { return n.Config.NodeConf.NodeId }
+func (n *Node) GetNodeType() string                { return n.Config.NodeConf.NodeType }
 func (n *Node) GetNodeUid() string {
 	if n.Cluster != nil {
 		em := n.Cluster.GetEndpointManager()
@@ -215,7 +239,11 @@ func (n *Node) GetEndpointManager() inf.INodeEndpointManager {
 	if n.Cluster == nil {
 		return nil
 	}
-	return n.Cluster.GetEndpointManager()
+	manager := n.Cluster.GetEndpointManager()
+	if manager == nil {
+		return nil
+	}
+	return manager
 }
 
 func (n *Node) GetEventBus() inf.INodeEventBus {

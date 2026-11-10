@@ -367,22 +367,42 @@ func compileCallFunc(owner reflect.Value, name string, methodFunc reflect.Value,
 
 		var output []interface{}
 		for i, t := range outs {
-			result := results[i]
+			result := resultInterface(results[i])
 			if t.Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-				if !result.IsNil() {
-					return nil, result.Interface().(error)
+				if result != nil {
+					return nil, result.(error)
 				}
 			} else {
 				if multiOut {
-					output = append(output, result.Interface())
+					output = append(output, result)
 				} else {
-					return result.Interface(), nil
+					return result, nil
 				}
 			}
 		}
 
+		if output == nil {
+			return nil, nil
+		}
 		return output, nil
 	}
+}
+
+// resultInterface 在反射结果装箱前处理 nil，包括接口内部的带类型 nil。
+func resultInterface(value reflect.Value) any {
+	if value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return nil
+		}
+		return resultInterface(value.Elem())
+	}
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice:
+		if value.IsNil() {
+			return nil
+		}
+	}
+	return value.Interface()
 }
 
 func (h *Handler) HandleRequest(ctx context.Context, envelope inf.IEnvelope) error {

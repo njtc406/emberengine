@@ -94,7 +94,9 @@ func protoToError(d *actor.ErrorDetail, depth int) *Error {
 		}
 	}
 	if d.Cause != nil {
-		e.cause = protoToError(d.Cause, depth+1)
+		if cause := protoToError(d.Cause, depth+1); cause != nil {
+			e.cause = cause
+		}
 	}
 	return e
 }

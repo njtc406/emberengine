@@ -77,5 +77,8 @@ func (h *Handler) SetMsgRouter(router MsgRouter) {
 }
 
 func (h *Handler) GetProcessor() inf.IMessageProcessor {
+	if h.processor == nil {
+		return nil
+	}
 	return h.processor
 }

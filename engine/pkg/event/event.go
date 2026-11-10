@@ -7,6 +7,7 @@ package event
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/njtc406/emberengine/v2/engine/pkg/def"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -25,8 +26,20 @@ func (e *Event[T]) GetEventType() def.EventType {
 	return e.EventType
 }
 
+// GetData 返回事件数据；nil 指针、map、slice、func、chan 等空值统一返回 nil 接口。
 func (e *Event[T]) GetData() any {
-	return e.Data
+	data := any(e.Data)
+	if data == nil {
+		return nil
+	}
+	value := reflect.ValueOf(data)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if value.IsNil() {
+			return nil
+		}
+	}
+	return data
 }
 
 type DiscoveryEvent struct {

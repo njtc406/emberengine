@@ -413,6 +413,9 @@ func (s *Service) GetPid() *actor.PID {
 }
 
 func (s *Service) GetMailbox() inf.IMailbox {
+	if s.mailbox == nil {
+		return nil
+	}
 	return s.mailbox
 }
 

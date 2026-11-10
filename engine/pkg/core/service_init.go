@@ -222,15 +222,14 @@ func (s *Service) initLogger(conf *config.ServiceInitConf) error {
 			return fmt.Errorf("service[%s] create logger error: %w", s.GetName(), loggerErr)
 		}
 		s.logger = l
-	} else {
+	} else if baseConcreteLogger != nil {
 		s.logger = baseConcreteLogger
-		if s.logger == nil {
-			l, loggerErr := log.NewDefaultLogger(nil)
-			if loggerErr != nil {
-				return fmt.Errorf("service[%s] create fallback logger error: %w", s.GetName(), loggerErr)
-			}
-			s.logger = l
+	} else {
+		l, loggerErr := log.NewDefaultLogger(nil)
+		if loggerErr != nil {
+			return fmt.Errorf("service[%s] create fallback logger error: %w", s.GetName(), loggerErr)
 		}
+		s.logger = l
 	}
 	s.ILoggerX = s.logger.WithFields(log.Fields{
 		"sName":     s.GetName(),

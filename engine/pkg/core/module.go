@@ -242,6 +242,9 @@ func (m *Module) GetParent() inf.IModule {
 }
 
 func (m *Module) GetBaseModule() inf.IModule {
+	if m == nil {
+		return nil
+	}
 	return m
 }
 
@@ -254,14 +257,23 @@ func (m *Module) GetService() inf.IService {
 }
 
 func (m *Module) GetEventProcessor() inf.IEventProcessor {
+	if m.eventHandler == nil {
+		return nil
+	}
 	return m.eventHandler.GetProcessor()
 }
 
 func (m *Module) GetEventHandler() inf.IEventHandler {
+	if m.eventHandler == nil {
+		return nil
+	}
 	return m.eventHandler
 }
 
 func (m *Module) GetEventHandlerRegistry() inf.IEventHandlerRegistrar {
+	if m.eventHandler == nil {
+		return nil
+	}
 	return m.eventHandler
 }
 
